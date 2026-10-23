@@ -2,6 +2,13 @@
 
 # Skott — Design
 
+## Shared registry realization (ADR 0015)
+
+Configuration loading materializes shared native profiles into presentation
+entries once. The registry source remains authoritative; no generated TOML copy
+is written. CLI registry override precedes config-relative registry path, then
+project and user defaults. Setup dispatch precedes normal config discovery.
+
 ## Responsive lifecycle
 
 Enter the terminal with only local configuration/override validation complete.
@@ -42,6 +49,23 @@ steering as "interrupting" during delivery and "added to model context" after
 successful delivery. Per-prompt budgets (wall time, tokens) are preserved across
 steering deliveries; steering cannot reset retry accounting or repeated-action
 protection.
+
+### Shared runtime steering delivery (ADR 0015)
+
+`session`, `context`, and `retry` are thin Sav adapters/reexports. Skott keeps
+its existing application errors and tool/recorder traits through static bridges;
+only generic mechanism failures cross Sav's runtime boundary. Workspace-native
+observation repeatability and tool descriptions are supplied by the Skott host,
+not inferred by Sav. `sandbox::ToolOutcome` reexports generic outcome data.
+
+The worker owns one `ControlMailbox`; the real TUI Submit path calls its bounded
+`PromptSender`. Task claim and final completion share the mailbox lock, avoiding
+the former FIFO queue/replacement race. A weak sender-lifetime marker retains
+prompt-channel disconnection behavior without requiring an unbounded channel.
+Worker shutdown closes controls before cancellation and join. Selecting a model
+while active does not redirect guidance or broaden authority. Explicit new
+session remains the replacement operation. Startup holds are independently
+bounded; queue rejection restores the submitted text to the editor.
 
 ## October run remediation
 
@@ -178,6 +202,13 @@ and loop policy;
 fake transport and a recording executor.
 
 ## Internal structure
+
+`inspection` is a presentation-only journal follower. It loads neither model
+configuration nor tools, parses bounded batches using Sav, escapes terminal
+controls, and retains a bounded tail of rendered records. Terminal teardown is
+owned by an RAII guard. Snapshot output marks incompletion; follow output waits
+cooperatively for records or operator detachment. Explicit one-shot control
+requests go through Sav before viewing and report only the returned status.
 
 `config`/`toolchain`/`tools`/`sandbox` build trusted structures from untrusted
 inputs; `session` owns the model-agnostic conversation and loop policy; `run`

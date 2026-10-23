@@ -2,6 +2,18 @@
 
 # Skott — Contract
 
+## Shared registry configuration (ADR 0015)
+
+`--setup [--registry PATH]` runs shared Sav setup before loading any Skott
+configuration. `--registry PATH` explicitly overrides the registry used during
+normal configuration loading. `[registry] path = "..."` is resolved relative to
+the Skott configuration file; `profiles = ["NAME"]` restricts available named
+profiles (otherwise enabled native profiles are listed). Shared profiles are
+referenced, not copied. Local `[[models]]` remain explicit overrides, parsed and
+validated using Sav's native model representation; duplicate shared/local IDs
+are rejected. External-agent profiles are not native transports.
+`--import-kvist` and `--kvist-config` are retired, without migration.
+
 ## Interactive startup and shutdown
 
 The prompt is editable while model, toolchain and serving-capacity discovery
@@ -23,11 +35,31 @@ produce a diagnostic and retain raw-manifest advisory detection.
 When a user submits a prompt while an autonomous task is running, the submission
 is treated as steering guidance for the active task rather than a replacement
 task. The original task objective, conversation context, completed filesystem
-effects, and observed tool results are preserved. Steering is delivered by
-appending a user message via `push_user()` at a safe interruption point (turn
-boundary), where it appears in the next model request. The session is not
-replaced. Per-prompt budget exhaustion ends the active task; steering submitted
-after that point starts a new task instead.
+effects, and observed tool results are preserved. The worker's shared Sav
+mailbox, not a potentially stale UI `running` flag, atomically classifies
+submission against task completion. Guidance interrupts provider generation or
+bounded backoff, never an executing tool. Remaining stale tool calls receive
+paired not-executed results before ordered guidance enters the next request.
+The session is not replaced and prompt time/token/attempt/repeat accounting
+does not reset. Undelivered guidance is dropped on task termination, never
+converted into another task. A submission after the completion boundary is a
+new task.
+
+The UI shows correlated accepted, interrupting, and added-to-model-context
+states. Pending startup and runtime submissions are bounded to 32 messages and
+1 MiB; guidance messages are at most 64 KiB. A rejected interactive submission
+is retained in the editor. Pending guidance can be edited/withdrawn through the
+library control capability before claim; there are no TUI edit/withdraw
+shortcuts in this delivery. Cancel ends the prompt, while new session and quit
+shut down its worker and discard queued work. A model/effort selection during
+active work applies to the next idle task; submitting guidance cannot silently
+replace that worker.
+
+`skott::Skott::run_controlled` and `start_session_with_controls` accept the same
+cloneable `ControlMailbox`. `start_session` creates a private default mailbox;
+`SessionHandle::controls` exposes its in-process capability and `PromptSender`
+returns a typed task/guidance receipt. Tools, sandbox authority, session
+recording and application error adaptation remain Skott-owned.
 
 ## Run reliability extension
 
@@ -198,6 +230,30 @@ data. The phase adds no persistent state beyond the journal; reruns review the
 current workspace and are never resumed or cached.
 
 ## Boundary and ownership
+
+### Independent diagnostic inspection
+
+Native Skott prompt runs also produce a shared version-one
+`session-<identity>-<ordinal>.events.jsonl` journal beside existing private
+transcripts. The operator is told its actual path. Each prompt has a separate
+terminal disposition; starting another prompt does not append after a terminal
+record. Tool dispatch is synchronized before execution. An interrupted process
+without a terminal record remains incomplete. Existing detailed transcript
+formats are not misrepresented as shared journal envelopes.
+
+`skott --attach JOURNAL` opens the shared version-one live diagnostic journal
+without loading Skott/provider configuration or initializing tools. At a
+terminal it opens a read-only scrolling viewer and follows until detached;
+without a terminal it prints a bounded snapshot. `--follow` explicitly waits
+for further records in plain output mode. An incomplete snapshot is labeled
+incomplete, never successful execution. Malformed input is an error.
+
+`--control SOCKET` supplies a separate private local capability for the attached
+run. `--cancel-run` sends a cancellation request; `--guide TEXT` queues bounded
+supplemental guidance. These options require both attachment and explicit
+control; acknowledgements distinguish queue acceptance from actual delivery.
+Interactive inspection accepts `q`/Esc to detach, arrow/Page/Home/End scrolling,
+and Ctrl+C to detach without cancelling. It starts no workspace executor.
 
 Under ADR 0015, Skott is a client of Sav's shared registry and native runtime.
 It retains workspace tools and terminal presentation, not maerg task authority.
