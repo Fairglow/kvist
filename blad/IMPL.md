@@ -4,6 +4,108 @@
 
 Date: 2026-10-12
 
+## File-input reliability observation - 2026-10-23
+
+This supplement maps observed file-input behavior to R-056 through R-058.
+A clean-slate documenter inspected only relevant source, assertions, manifests
+and parent-run execution logs, excluding intent, queue, this record, user/project
+documents, earlier reviews, chat, Git history/diffs and peer implementations.
+It did not execute tests or decide compliance.
+
+### Independent observed behavior
+
+Both `lib.rs` and `main.rs` declare private `file_input` modules using the same
+source. The display library uses its instance; the binary's theme parser uses
+the binary instance. `read_regular_file` opens read-only with
+`O_NONBLOCK | O_NOFOLLOW`, obtains that descriptor's metadata and rejects
+nonregular inputs before reading. A reported size over the caller's limit fails
+early. Otherwise `Read::take(limit + 1)` bounds actual bytes before returning
+`FileTooLarge` or a complete accepted buffer. Errors name the allowed byte
+count; read errors retain their kinds rather than returning successful prefixes.
+
+Standalone document admission is inclusive at 16,777,216 bytes and precedes
+whole-buffer UTF-8 conversion. Theme admission remains inclusive at 65,536
+bytes and precedes JSON/schema/palette validation. Input is byte-counted,
+not character-counted.
+
+Initial files canonicalize/deduplicate in argument order and all load before
+terminal entry or dump output. Newly followed files canonicalize and load before
+tab/history mutation; already-open canonical targets reuse cached content.
+Explicit theme paths canonicalize before loading, including in dump/session
+routes. Authored symlinks therefore remain usable. Reload/editor rereads use
+the stored opening canonical path without recanonicalizing a substituted final
+symlink. Caller-supplied rendering strings and session artifact loading bypass
+these standalone document reads.
+
+Reload retains its read/render candidate transaction: failure preserves the
+old document, viewport and search, changing only status; success rebuilds
+navigation/search and clamps offsets. Failed new file reads do not append or
+switch tabs/history. Editor failures intentionally propagate after terminal
+restoration to CLI exit 1, not interactive recovery. Successful editing reenters
+with retained options; subsequent rendering is not reload's transaction.
+Initial source validation likewise does not roll back later rendering/output
+failures. CLI errors retain escaped stderr and viewer errors the inert footer.
+
+Observed assertions cover real document minus/exact/plus-one boundaries,
+exact theme JSON boundaries, multibyte bytes, zero limits, probe consumption,
+an endless reader stopped after exactly 32 bytes at limit 31, chained-prefix
+read errors, missing/nonregular inputs and final-symlink rejection. CLI/PTY
+assertions cover initial empty output on failure, FIFO/directory rejection,
+authored symlinks, retained link/reload usability and recovery, and restored
+canonical/echo flags on post-editor input failure.
+
+### Independent comparison and retained findings
+
+A separate source-blind reviewer read local requirements, contract, design,
+user documentation, the independent observation and execution logs, excluding
+source, tests, manifests, queue, this record, earlier reviews and Git material.
+It supported the scoped obligations without establishing a needed code change.
+It retained two directly related findings:
+
+- **D-01, historical streaming claim:** The older design said "Memory usage
+  proportional to document size (streaming for large files)", contradicting
+  whole-file buffering and the new non-streaming boundary. After comparison,
+  the parent marked that wording historical/unimplemented rather than an
+  active capability claim. The original proposal and finding remain visible;
+  no human decision to accept whole-file versus streaming policy is implied.
+  The comparison preceded that documentation clarification.
+- **D-02, input-policy disposition:** The fixed 16 MiB ceiling is explicitly
+  a conservative assumption for this increment, not a human-accepted product
+  baseline. Explicit human disposition remains required before claiming
+  acceptance. The advisory exception is not a receipt or approval.
+
+Earlier A-01/A-02 findings remain untouched for human arbitration. No blanket
+compliance, acceptance or independent security certification is claimed.
+
+The final parent-run logs report 247 passed, 2 ignored with all features and
+235 passed, 2 ignored standalone. These are 482 successful executions, not
+unique tests; the five helper tests compile into both library and binary.
+Both modes include 93 library, five binary and 38 PTY viewer tests. The red
+log records seven failures across the earlier library/CLI/viewer runs, including
+oversized reload acceptance and FIFO waits. These are historical regression
+executions, not current failures or independent test execution.
+
+The observer matched all seven preexecution SHA-256 header entries in each
+fresh log to current permitted files. This supports byte identity, not
+authenticated provenance, full build-input identity or unchanged files throughout
+execution. Theme-boundary assertions in `tests/polish.rs` lack a logged hash.
+The red log lacks command/timestamp/hash headers, so it alone does not prove
+tests-before-code chronology. Parent tool execution supplies that chronology,
+not an independent certification.
+
+Remaining limits include Linux-only operation, ancestor/path races, nonsnapshot
+concurrent writes, device-open effects before descriptor rejection, kernel/FUSE
+stalls, allocator capacity, aggregate tab memory and rendered expansion.
+Rendering/search/editor duration remains synchronous and unbounded by this
+per-file source policy. Synthetic endless-reader assertions are not exhaustive
+concurrent-growth or environment tests.
+
+Parent verification also passed strict all-target/all-feature Blad Clippy,
+formatter/whitespace checks, all-feature workspace checking and structural local
+intent validation. No dependency or lockfile change was needed. Scoped
+implementer inspection and explicit resource/authority limits are in `DESIGN.md`;
+the queue records completed engineering stages, not human acceptance revisions.
+
 ## Viewer reliability observation - 2026-10-23
 
 This supplement covers R-053 through R-055. A clean-slate observer inspected

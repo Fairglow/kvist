@@ -216,6 +216,65 @@ rendered-geometry integration regressions and large prepared-text cases.
 The increments below define recovery at the owning viewer boundary, including
 the limits of terminal, subprocess and filesystem ownership.
 
+### Bounded file-input increment (2026-10-23)
+
+The next local reliability gap is inconsistent source reading: initial files,
+new linked files and editor rereads use unbounded pathname reads, reload only
+checks regularity, and theme input is byte-bounded but can wait on a FIFO.
+Use one private `file_input.rs` implementation compiled into both library and
+binary targets. This keeps the shared reader private while allowing the binary's
+theme parser and library's display module to use identical descriptor rules.
+No new public API, dependency, worker or shell invocation is needed.
+
+Conservative scope assumption for this user-directed increment: admit standalone
+source files up to a fixed inclusive 16 MiB until a separately designed streaming
+viewer exists. This is a deliberate new input policy, not an accepted product
+baseline or a universal responsiveness claim. Do not add an unbounded override.
+Theme input retains its existing inclusive 64 KiB policy.
+
+Open read-only with `O_NONBLOCK | O_NOFOLLOW`, then inspect descriptor metadata.
+Reject nonregular objects before reading and reject reported sizes above the
+chosen limit before allocating content. Read through `Read::take(limit + 1)`;
+check actual byte count before UTF-8 or JSON decoding. Preserve read-error kinds
+and report overflow as `FileTooLarge` with the allowed byte count. The extra byte
+distinguishes exact-size success from understated/growing input without trusting
+metadata as a snapshot. Never render a silently truncated prefix.
+
+Canonicalize explicitly authored initial/link/theme paths before the shared
+open to preserve selected symlinks. Reload and editor rereads operate directly
+on the already stored canonical path, rejecting a final symlink substituted
+since opening. Initial validation precedes output; failed links do not append
+tabs/history; reload remains a candidate transaction. Keep the existing editor
+failure exit/restoration policy rather than silently changing mode semantics.
+
+Verify exact real document/theme boundaries, a bounded synthetic endless reader,
+read-error propagation, nonregular inputs, authored/final-replacement symlinks,
+initial no-partial output and usable viewer recovery. Use deadlines/owned-child
+cleanup in hang regressions so a defect cannot strand the test suite. Record
+scoped implementer inspection, then source-only observation and a separate
+source-blind comparison. This bundle uses a deliberate advisory exception while
+the planned receipt mechanism is unavailable; no acceptance/receipt is claimed.
+
+The reader is not an ancestor sandbox, snapshot, total-memory bound or hard
+I/O deadline. Nonregular objects are opened before validation; device-open
+effects and path/open/kernel/FUSE delays remain possible. Per-file bounds do
+not bound total tabs or rendered expansion, nor make synchronous rendering,
+search or editing cancellable. Session readers and embedded source strings
+remain separate boundaries. Preserve the earlier A-01/A-02 arbitration findings.
+
+Scoped implementer inspection: both library and binary use the same private
+reader source. Metadata and reads share one descriptor; actual-byte overflow
+cannot become a successful prefix, and read errors retain their kinds. Limits
+precede UTF-8/JSON parsing. CLI errors keep the existing escaped-stderr boundary;
+viewer errors keep the inert footer boundary. Input rejection does not create
+tabs/history or commit reload candidates. Editor reread failure occurs after
+terminal release, preserving the established failure/exit behavior. No new
+dependency, unsafe block, process, thread, network work or write authority is
+introduced. Tests reproduce initial/theme FIFO waits and oversized-reload
+acceptance before the fix, then cover exact byte/probe counts and recovery.
+This scoped inspection is not an independent security certification; kernel,
+device, ancestor, aggregate-memory and rendering-latency limits above remain.
+
 ### Viewer reliability follow-up (2026-10-23)
 
 Prioritize the observed unbounded launcher wait, explicit reload and the
@@ -427,7 +486,14 @@ remain in `IMPL.md`; no automated acceptance is implied.
 - Read-only access to session files (no writes without explicit edit mode)
 - No network access required
 - Paths validated; symlinks not followed when reading session artifacts
-- Memory usage proportional to document size (streaming for large files)
+- Historical proposal, not an implemented guarantee: "Memory usage proportional
+  to document size (streaming for large files)"
+
+The file-input comparison D-01 identified that streaming proposal as inconsistent
+with whole-file buffering and the current bounded-input design. It is retained
+here as historical, unimplemented intent rather than a capability claim.
+Human disposition of the conservative input policy and future streaming
+direction remains open; this clarification does not claim acceptance.
 
 ## Verification strategy
 

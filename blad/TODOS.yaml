@@ -11,6 +11,50 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-file-input-tests
+    title: "write_tests: bounded regular-file inputs"
+    description: "Pin source/theme limits, descriptor rules and recoverable loading failures."
+    purpose: "Prevent inconsistent file-read behavior before further viewer features"
+    expected_outcome: "Input regressions fail before the corresponding reader changes"
+    context: "Oversized reload acceptance and initial/theme/link/editor FIFO regressions reproduced before code; exact document/theme bounds, probe counts and failure recovery now pass."
+    timestamps: {created_at: "2026-10-23T16:01:34Z", updated_at: "2026-10-23T16:09:07Z", completed_at: "2026-10-23T16:09:07Z"}
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-056", "REQUIREMENTS.md#R-057", "REQUIREMENTS.md#R-058"]
+  - id: blad-file-input-code
+    title: "implement_code: shared bounded file reader"
+    description: "Apply one private descriptor reader to initial/link/reload/editor/theme file reads."
+    purpose: "Keep all relevant file inputs bounded and explicit without changing editor failure semantics"
+    expected_outcome: "Approved input-boundary and existing behavior tests pass"
+    context: "Shared bounded descriptor reads wired to all standalone document and theme paths; both feature configurations and strict lint/workspace checks pass. No streaming guarantee."
+    timestamps: {created_at: "2026-10-23T16:01:34Z", updated_at: "2026-10-23T16:09:07Z", completed_at: "2026-10-23T16:09:07Z"}
+    kind: implementation
+    status: completed
+    depends_on: [blad-file-input-tests]
+    requirements: ["REQUIREMENTS.md#R-056", "REQUIREMENTS.md#R-057", "REQUIREMENTS.md#R-058"]
+  - id: blad-file-input-audit
+    title: "security_audit: bounded input ownership"
+    description: "Inspect byte caps, same-descriptor reads, canonicalization, diagnostics and failure cleanup."
+    purpose: "Keep input authority and resource claims narrower than the actual boundary"
+    expected_outcome: "Scoped findings and unresolved limits recorded"
+    context: "Scoped implementer inspection and explicit device/kernel/ancestor/memory/latency limitations retained in DESIGN.md; not an independent security or whole-component certification."
+    timestamps: {created_at: "2026-10-23T16:01:34Z", updated_at: "2026-10-23T16:09:07Z", completed_at: "2026-10-23T16:09:07Z"}
+    kind: security-audit
+    status: completed
+    depends_on: [blad-file-input-code]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-056", "REQUIREMENTS.md#R-057"]
+  - id: blad-file-input-review
+    title: "compliance_review: independent file-input evidence"
+    description: "Derive source-only observations and compare source-blind against the exact local intent."
+    purpose: "Separate observed behavior from implementation intent and retain arbitration"
+    expected_outcome: "Independent observations, discrepancies and evidence limits persisted"
+    context: "Source-only observation and separate source-blind comparison retained in IMPL.md. D-01 streaming language marked historical/unimplemented; D-02 conservative 16 MiB policy and earlier A-01/A-02 remain for human disposition. No acceptance."
+    timestamps: {created_at: "2026-10-23T16:01:34Z", updated_at: "2026-10-23T16:14:03Z", completed_at: "2026-10-23T16:14:03Z"}
+    kind: compliance-review
+    status: completed
+    depends_on: [blad-file-input-audit]
+    requirements: ["REQUIREMENTS.md#R-056", "REQUIREMENTS.md#R-057", "REQUIREMENTS.md#R-058"]
   - id: blad-reliability-tests
     title: "write_tests: viewer reliability follow-up"
     description: "Pin launcher deadlines/cleanup, transactional reload and Unicode display-cell PTY behavior."

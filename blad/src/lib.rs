@@ -18,6 +18,7 @@ pub use theme::{
 
 mod browser;
 mod diagram;
+mod file_input;
 mod inline;
 mod math;
 mod mermaid;

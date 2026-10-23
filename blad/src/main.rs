@@ -7,6 +7,7 @@ use clap::{Parser, ValueEnum};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
+mod file_input;
 mod theme_file;
 
 #[derive(Parser)]

@@ -561,6 +561,149 @@ impl Drop for Viewer {
 }
 
 #[test]
+fn file_links_reject_special_and_oversized_inputs_without_adding_tabs() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.md");
+    let target = temp.path().join("target.md");
+    let recovered = temp.path().join("recovered.md");
+    std::fs::write(&source, "# Source\n\n[open](target.md)").unwrap();
+    std::fs::write(&recovered, "# Recovered").unwrap();
+    for kind in ["fifo", "directory", "oversized"] {
+        match kind {
+            "fifo" => nix::unistd::mkfifo(&target, nix::sys::stat::Mode::S_IRUSR).unwrap(),
+            "directory" => std::fs::create_dir(&target).unwrap(),
+            _ => {
+                std::fs::write(&target, [0xff]).unwrap();
+                File::options()
+                    .write(true)
+                    .open(&target)
+                    .unwrap()
+                    .set_len(16 * 1024 * 1024 + 1)
+                    .unwrap();
+            }
+        }
+        let mut viewer = Viewer::start(&source, 100, 12, false);
+        viewer.keys(b"\t");
+        viewer.master.write_all(b"\r").unwrap();
+        viewer.read_frame();
+        let footer = viewer.screen.line(11);
+        assert!(footer.contains("Error opening file"), "{footer}");
+        assert!(
+            footer.contains(if kind == "oversized" {
+                "16777216"
+            } else {
+                "requires a regular file"
+            }),
+            "{footer}"
+        );
+        assert_eq!(viewer.screen.content_line(1), "# Source");
+        viewer.keys(b"\x1b[1;3Cb");
+        assert_eq!(viewer.screen.content_line(1), "# Source");
+        assert!(viewer.screen.line(0).contains("[source.md]"));
+        if kind == "directory" {
+            std::fs::remove_dir(&target).unwrap();
+        } else {
+            std::fs::remove_file(&target).unwrap();
+        }
+        std::os::unix::fs::symlink(&recovered, &target).unwrap();
+        viewer.keys(b"\t\r");
+        assert_eq!(viewer.screen.content_line(1), "# Recovered");
+        viewer.keys(b"b");
+        assert_eq!(viewer.screen.content_line(1), "# Source");
+        viewer.quit();
+        std::fs::remove_file(&target).unwrap();
+    }
+}
+
+#[test]
+fn oversized_reload_retains_search_position_and_recovers() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("bounded.md");
+    std::fs::write(
+        &path,
+        format!(
+            "# Original\n\n{}needle needle",
+            "retained content\n\n".repeat(30)
+        ),
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 100, 12, false);
+    viewer.keys(b"/needle\r");
+    assert!(viewer.screen.line(11).contains("1/2"));
+    let before: Vec<_> = (1..11).map(|row| viewer.screen.content_line(row)).collect();
+    std::fs::write(&path, [0xff]).unwrap();
+    File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(16 * 1024 * 1024 + 1)
+        .unwrap();
+    viewer.raw.clear();
+    viewer.keys(b"r");
+    assert!(viewer.screen.line(11).contains("16777216"));
+    assert_eq!(
+        (1..11)
+            .map(|row| viewer.screen.content_line(row))
+            .collect::<Vec<_>>(),
+        before
+    );
+    assert!(!String::from_utf8_lossy(&viewer.raw).contains("\x1b[?1049"));
+    viewer.keys(b"n");
+    assert!(viewer.screen.line(11).contains("2/2"));
+    std::fs::write(&path, "# Recovered needle").unwrap();
+    viewer.keys(b"r");
+    assert_eq!(viewer.screen.content_line(1), "# Recovered needle");
+    viewer.keys(b"n");
+    assert!(viewer.screen.line(11).contains("1/1"));
+    viewer.quit();
+}
+
+#[test]
+fn editor_rereads_reject_special_oversized_and_substituted_symlink_inputs() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("edited.md");
+    let replacement = temp.path().join("edited.md.replacement");
+    let other = temp.path().join("other.md");
+    let editor = temp.path().join("replace-editor");
+    std::fs::write(&other, "# Not the edited file").unwrap();
+    std::fs::write(&editor, "#!/bin/sh\nmv -- \"$1.replacement\" \"$1\"\n").unwrap();
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for kind in ["fifo", "oversized", "symlink"] {
+        std::fs::write(&path, "# Original").unwrap();
+        match kind {
+            "fifo" => nix::unistd::mkfifo(&replacement, nix::sys::stat::Mode::S_IRUSR).unwrap(),
+            "symlink" => std::os::unix::fs::symlink(&other, &replacement).unwrap(),
+            _ => {
+                std::fs::write(&replacement, [0xff]).unwrap();
+                File::options()
+                    .write(true)
+                    .open(&replacement)
+                    .unwrap()
+                    .set_len(16 * 1024 * 1024 + 1)
+                    .unwrap();
+            }
+        }
+        let mut viewer = Viewer::start_with(
+            &path,
+            100,
+            12,
+            false,
+            &[],
+            &[("EDITOR", editor.to_str().unwrap())],
+        );
+        viewer.keys(b"e");
+        viewer.wait_failure();
+        let output = String::from_utf8_lossy(&viewer.raw);
+        assert!(output.contains("Failed to display markdown"), "{output:?}");
+        if kind == "oversized" {
+            assert!(output.contains("16777216"), "{output:?}");
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+}
+
+#[test]
 fn reload_preserves_position_policy_tabs_and_recomputes_search_and_links() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("reload.md");

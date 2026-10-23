@@ -83,6 +83,32 @@ blad -- session  # A filename matching an enabled command
 
 Session IDs are never autodetected from positional filenames.
 
+#### File input limits
+
+Standalone files must be regular UTF-8 files of at most **16 MiB (16,777,216
+bytes) each**, inclusively. The same fixed ceiling applies to initial files,
+newly followed file links, reload and editor rereads. There is no silent
+truncation or size-limit override: split oversized documents into smaller files.
+Reported file size is checked before decoding/rendering, and actual reading
+stops after at most the limit plus one probe byte if metadata understates content.
+
+Initial validation fails before terminal entry or any dump output. Failed
+links/reloads leave the previous document usable without adding tabs/history.
+Post-editor reread errors retain the existing failure policy: report an error
+and exit after restoring the terminal.
+
+Files open nonblockingly and the opened descriptor must be regular before
+reading, so ordinary FIFOs are rejected without waiting for a writer. Explicit
+initial file/link/theme paths still resolve authored symlinks normally.
+Reload/editor rereads refuse a final symlink substituted at the opening
+canonical path. Ancestor traversal, device-open effects and concurrent writes
+are not isolated; file contents are not snapshots.
+
+These are per-file source limits, not bounds on total tab memory, rendered
+expansion, search/rendering time or kernel/FUSE I/O latency. This is not a
+streaming pager. Session artifact loading and strings supplied directly to
+the rendering library are outside these standalone-file limits.
+
 ### `blad export <session-id> [--output OUTPUT.md]`
 
 Export a session to a combined Markdown document suitable for sharing or
@@ -144,6 +170,9 @@ Palette roles: `heading`, `link`, `muted`, `list_marker`, `math`, `chrome`,
 index 0–255 or `"#RRGGBB"`. Backgrounds also accept `null` for no fixed fill.
 Unknown keys, invalid values/JSON, files above 65,536 bytes and read errors
 are reported as failures, never silently ignored.
+Theme inputs use the same nonblocking regular-descriptor checks as document
+files, after resolving explicitly selected symlinks. Their separate 64 KiB
+limit is inclusive and is also enforced against actual bytes read.
 
 Library callers use `MarkdownRenderer::with_options(RenderOptions { .. })`.
 The options contain a host-provided semantic `Palette`, `ColorDepth`, appearance,
@@ -416,7 +445,8 @@ positions are rebuilt, and obsolete link selection is cleared. It does not
 try to recover the same source paragraph after arbitrary edits.
 
 Read/UTF-8/render failures leave the previous document usable and show a footer
-error. A shorter replacement erases stale rows and clamps scroll offsets.
+error, including oversized replacements above the 16 MiB source limit.
+A shorter replacement erases stale rows and clamps scroll offsets.
 Reload opens nonblockingly, refuses final symlinks and validates the opened
 descriptor before reading; FIFO/symlink replacement therefore fails safely.
 This is not ancestor-path isolation or a snapshot of concurrent writes. Embedded

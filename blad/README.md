@@ -89,6 +89,12 @@ without session support. Only session commands and `--log-dir` are gated.
 There is no `view`, `show`, or `stream` command, nor session autodetection.
 Active sessions are snapshots; re-run `session` for newer events.
 
+Standalone files must be regular UTF-8 files of at most **16 MiB each**,
+including new link targets, reloads and editor rereads. Oversized files fail
+explicitly rather than being truncated. Selected file/theme symlinks still
+resolve normally; substituted final symlinks are rejected on reload/reread.
+This bounds source input, not total tab memory or rendering time.
+
 ## Keyboard Shortcuts
 
 ### Navigation

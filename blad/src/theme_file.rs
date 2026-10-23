@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::io::{self, Read};
+use std::io;
 use std::path::Path;
 
 use blad::{Color, Palette, Theme};
@@ -14,16 +14,8 @@ pub(super) struct ThemeFile {
 
 impl ThemeFile {
     pub fn load(path: &Path) -> io::Result<Self> {
-        let mut bytes = Vec::new();
-        std::fs::File::open(path)?
-            .take(65_537)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() > 65_536 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "theme file exceeds 64 KiB",
-            ));
-        }
+        let path = std::fs::canonicalize(path)?;
+        let bytes = crate::file_input::read_regular_file(&path, 65_536)?;
         serde_json::from_slice(&bytes)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }

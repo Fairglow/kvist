@@ -33,8 +33,8 @@ Blad must provide the following capabilities:
 
 ### File Viewing
 
-6. **R-006 View file:** Users can view any Markdown file with interactive
-   navigation (up/down arrows, page up/down, scroll wheel).
+6. **R-006 View file:** Users can view Markdown files within the R-056 source
+   limits with interactive navigation (up/down arrows, page up/down, scroll wheel).
 7. **R-007 Dump mode:** Users can output rendered content as plain text
    (no interactive viewer) using `--dump`.
 8. **R-008 Edit mode:** Users can press `e` in the viewer to open the file
@@ -279,6 +279,33 @@ feature toggle now.
     mouse-link hit positions, resize and horizontal clipping with Unicode and
     a number gutter. State emulator limits rather than claiming every real
     terminal/font combination is certified.
+
+### File-input reliability increment
+
+56. **R-056 Bounded document reads:** Standalone file reads must accept at
+    most 16 MiB (16,777,216 bytes) per file, inclusively, across initial
+    interactive/dump inputs, newly followed file links, explicit reload and
+    post-editor rereads. Reject oversized input explicitly, never truncate it
+    into a successful document. Check both opened-file size and actual bytes
+    read, consuming at most the limit plus one probe byte if size information
+    understates the stream. Apply the limit before UTF-8 decoding and rendering.
+    All initial inputs must validate before terminal entry or dump output;
+    link/reload failure retains the previous usable document and tab/history
+    structure. Existing editor-error propagation/restoration remains unchanged.
+57. **R-057 Regular-file inputs:** All standalone document and explicit theme
+    reads must open nonblockingly, reject final symlinks at the opened path,
+    validate the opened descriptor as regular and read that same descriptor.
+    Preserve canonical resolution of explicitly selected initial files,
+    file-link destinations and theme paths, including authored symlinks.
+    Reload/editor rereads use the opening canonical path without resolving
+    a subsequently substituted final symlink. Keep the inclusive 64 KiB theme
+    limit. Report nonregular, size, UTF-8/JSON and I/O failures explicitly.
+58. **R-058 Input-boundary evidence:** Cover inclusive limits and one byte
+    over, understated/growing or endless streams, read-error propagation,
+    nonregular/FIFO input, symlink policy, initial no-partial-output behavior,
+    retained link/reload usability and post-editor terminal restoration.
+    Document that per-file byte bounds do not establish render/search latency,
+    aggregate tab memory, ancestor isolation or hard kernel-I/O deadlines.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).

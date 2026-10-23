@@ -4,8 +4,7 @@
 //! code blocks. Unsupported languages (e.g. hemlock) fall back to plain text
 //! without crashing.
 
-use std::io::{self, IsTerminal, Read, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::io::{self, IsTerminal, Write};
 
 use crate::RenderOptions;
 use crate::links::{Link, extract_links};
@@ -84,7 +83,7 @@ pub fn view_markdown_files_with_options(
         {
             continue;
         }
-        let content = std::fs::read_to_string(&canonical).map_err(|error| {
+        let content = read_document_source(&canonical).map_err(|error| {
             io::Error::new(
                 error.kind(),
                 format!("cannot read {}: {error}", path.display()),
@@ -282,7 +281,7 @@ fn run_open_files(
                     let target = if let Some(index) = existing {
                         Ok(index)
                     } else {
-                        std::fs::read_to_string(&path).map(|content| {
+                        read_document_source(&path).map(|content| {
                             files.push(OpenFile {
                                 path: Some(path),
                                 content,
@@ -945,7 +944,12 @@ fn edit_file(path: &std::path::Path) -> io::Result<String> {
             "editor exited with status: {status}"
         )));
     }
-    std::fs::read_to_string(path)
+    read_document_source(path)
+}
+
+fn read_document_source(path: &std::path::Path) -> io::Result<String> {
+    let bytes = crate::file_input::read_regular_file(path, 16 * 1024 * 1024)?;
+    String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 fn read_reload_source(path: Option<&std::path::Path>) -> io::Result<String> {
@@ -955,23 +959,43 @@ fn read_reload_source(path: Option<&std::path::Path>) -> io::Result<String> {
             "reload unavailable: this document has no file path",
         )
     })?;
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
-        .open(path)?;
-    if !file.metadata()?.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "reload requires a regular file",
-        ));
-    }
-    let mut content = String::new();
-    file.read_to_string(&mut content)?;
-    Ok(content)
+    read_document_source(path)
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reload_source_has_an_inclusive_16_mib_byte_limit() {
+        const LIMIT: u64 = 16 * 1024 * 1024;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("boundary.md");
+        let file = std::fs::File::create(&path).unwrap();
+        for size in [LIMIT - 1, LIMIT, LIMIT + 1] {
+            file.set_len(size).unwrap();
+            let result = super::read_reload_source(Some(&path));
+            if size <= LIMIT {
+                assert_eq!(result.unwrap().len() as u64, size);
+            } else {
+                let Err(error) = result else {
+                    panic!("oversized reload must fail");
+                };
+                assert_eq!(error.kind(), std::io::ErrorKind::FileTooLarge);
+                assert!(error.to_string().contains("16777216"));
+            }
+        }
+    }
+
+    #[test]
+    fn reload_invalid_utf8_does_not_return_a_valid_prefix() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("invalid.md");
+        std::fs::write(&path, [b'x', 0xff]).unwrap();
+        assert_eq!(
+            super::read_reload_source(Some(&path)).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+
     #[test]
     fn reload_without_a_file_path_is_an_explicit_error() {
         let error = super::read_reload_source(None).unwrap_err();

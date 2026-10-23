@@ -42,6 +42,33 @@ All initial files are loaded before viewer entry; read errors fail explicitly.
 Noninteractive/dump output renders each distinct canonical file once, in
 first-argument order.
 
+### File input bounds
+
+Standalone Markdown files MUST be regular UTF-8 files of at most **16 MiB
+(16,777,216 bytes)** each. This inclusive bound applies to initial files,
+new file-link targets, reload and successful-editor rereads, in interactive
+and dump routes. Size is checked before decoding/rendering; actual reading
+is limited to the bound plus one probe byte even if metadata understates
+content. Oversized input produces a distinct `FileTooLarge` I/O error naming
+the byte limit, never successful truncation. Initial input errors precede
+all output/terminal entry. Link/reload failures leave the previous document
+and tab/history structure usable; post-editor reread errors propagate after
+terminal restoration, as other editor errors do.
+
+Document and explicit theme reads open nonblockingly without following a
+final symlink, require an opened regular-file descriptor and read that same
+descriptor. Initial file arguments, new file-link targets and theme paths
+are canonicalized first, preserving explicitly selected symlinks and canonical
+deduplication. Reload/editor rereads do not recanonicalize a substituted final
+symlink. Themes retain their separate inclusive 64 KiB (65,536-byte) limit.
+
+These are per-file source bounds, not a total retained-tab-memory limit or
+a latency guarantee for rendering/search, path resolution, open, filesystem
+reads or editor execution. Ancestor symlinks, concurrent content snapshots,
+device-open effects and kernel/FUSE stalls are not isolated. Session artifact
+loading and caller-supplied rendering strings are outside these file-read
+limits; this is not a streaming or giant-file pager.
+
 ### Options
 
 | Option | Description |

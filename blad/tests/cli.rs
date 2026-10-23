@@ -4,6 +4,131 @@ fn blad() -> Command {
     Command::new(env!("CARGO_BIN_EXE_blad"))
 }
 
+fn output_before_deadline(command: &mut Command) -> std::process::Output {
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            return child.wait_with_output().unwrap();
+        }
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            let output = child.wait_with_output().unwrap();
+            panic!("file input did not finish before the deadline: {output:?}");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn oversized_initial_files_fail_before_output_and_before_utf8_decoding() {
+    let temp = tempfile::tempdir().unwrap();
+    let first = temp.path().join("first.md");
+    let oversized = temp.path().join("oversized.md");
+    std::fs::write(&first, "# First").unwrap();
+    std::fs::write(&oversized, [0xff]).unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&oversized)
+        .unwrap()
+        .set_len(16 * 1024 * 1024 + 1)
+        .unwrap();
+    let output = output_before_deadline(blad().arg("--dump").arg(&first).arg(&oversized));
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("16777216") && error.contains("oversized.md"),
+        "{error}"
+    );
+}
+
+#[test]
+fn special_initial_files_fail_without_waiting_for_a_fifo_writer() {
+    let temp = tempfile::tempdir().unwrap();
+    let first = temp.path().join("first.md");
+    let fifo = temp.path().join("fifo-\x1b[2J");
+    std::fs::write(&first, "# First").unwrap();
+    nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    for input in [&fifo, &temp.path().to_path_buf()] {
+        let output = output_before_deadline(blad().arg("--dump").arg(&first).arg(input));
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("requires a regular file"));
+        assert!(!output.stderr.contains(&0x1b));
+    }
+}
+
+#[test]
+fn special_theme_files_fail_without_waiting_for_a_fifo_writer() {
+    let temp = tempfile::tempdir().unwrap();
+    let doc = temp.path().join("doc.md");
+    let fifo = temp.path().join("theme-\x1b[2J");
+    std::fs::write(&doc, "# Document").unwrap();
+    nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    for theme in [&fifo, &temp.path().to_path_buf()] {
+        let output = output_before_deadline(
+            blad()
+                .arg("--theme-file")
+                .arg(theme)
+                .arg("--dump")
+                .arg(&doc),
+        );
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("requires a regular file"));
+        assert!(!output.stderr.contains(&0x1b));
+    }
+}
+
+#[test]
+fn authored_symlinks_remain_supported_for_documents_and_themes() {
+    let temp = tempfile::tempdir().unwrap();
+    let doc = temp.path().join("doc.md");
+    let theme = temp.path().join("theme.json");
+    let doc_link = temp.path().join("doc-link.md");
+    let theme_link = temp.path().join("theme-link.json");
+    std::fs::write(&doc, "# Authored symlinks").unwrap();
+    std::fs::write(&theme, "{}").unwrap();
+    std::os::unix::fs::symlink(&doc, &doc_link).unwrap();
+    std::os::unix::fs::symlink(&theme, &theme_link).unwrap();
+    let output = output_before_deadline(
+        blad()
+            .arg("--theme-file")
+            .arg(&theme_link)
+            .arg("--dump")
+            .arg(&doc_link)
+            .arg(&doc),
+    );
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b"# Authored symlinks\n");
+}
+
+#[test]
+fn invalid_utf8_input_fails_without_partial_dump_output() {
+    let temp = tempfile::tempdir().unwrap();
+    let first = temp.path().join("first.md");
+    let invalid = temp.path().join("invalid.md");
+    std::fs::write(&first, "# First").unwrap();
+    std::fs::write(&invalid, [b'x', 0xff]).unwrap();
+    let output = output_before_deadline(blad().arg("--dump").arg(&first).arg(&invalid));
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .to_ascii_lowercase()
+            .contains("utf-8")
+    );
+}
+
 #[test]
 fn help_and_version_work_without_opening_files_or_themes() {
     for flag in ["--version", "-V"] {
