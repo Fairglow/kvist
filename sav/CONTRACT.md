@@ -226,13 +226,20 @@ The standalone `sav-run` CLI provides:
 execution. Multiple case-sensitive profiles from different providers and
 models MAY coexist in one configuration and are selected per `run` invocation.
 
+Typed external-agent profiles always use zero process retries; an explicit
+positive `--max-retries` is rejected before spawning. Raw `--command` retains
+its separately selected supervision policy (default three retries).
+Native `model --profile` applies the stricter CLI timeout/output caps as well
+as the pinned profile settings. Explicit profile-mode slot/first-token watchdog
+overrides are unsupported and rejected rather than ignored.
+
 ## Required interfaces
 
 The library requires caller-supplied working directory, context paths,
 supervision policy, cancellation, profile storage location or I/O streams, and
 provider configuration appropriate to the operation.
 
-The planned native runtime requires embedding-host authority interfaces that
+The native runtime requires embedding-host authority interfaces that
 decide over canonical tool, arguments, resources, credentials, policy
 revision, and budget. Another application may implement those traits without
 depending on Kvist.

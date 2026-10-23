@@ -68,6 +68,7 @@ pub(super) struct LiveProgress<'a> {
     pub(super) context: &'a ContextManager,
     pub(super) tool_defs: usize,
     pub(super) started_at: Instant,
+    pub(super) cumulative_input: u64,
     pub(super) cumulative_total: u64,
     pub(super) cumulative_output: u64,
     pub(super) decode_seconds: f64,
@@ -79,16 +80,14 @@ pub(super) struct LiveProgress<'a> {
 /// UI is gone. The running output is estimated from streamed characters because
 /// the provider reports usage only when the turn ends.
 ///
-/// The output speed is the estimated tokens divided by the wall time spent
-/// generating this turn (prompt processing excluded), which is what the user
-/// expects `tok/s` to mean and what `llama-server` measures. The running
-/// session average over the same decode time is reported separately as the
-/// average, so it stays comparable to the live speed.
+/// Output speed uses the observed decode interval, excluding first-token wait
+/// and event handling. Provider-internal generation timing is not available.
 pub(super) fn emit_live_progress<S: EventSink>(
     sink: &S,
     progress: &LiveProgress,
     output_chars: u64,
-    attempt_started: Instant,
+    generation_secs: f64,
+    prior_attempt_secs: f64,
     at: Instant,
 ) -> Result<()> {
     let output_tokens = output_chars.div_ceil(4);
@@ -97,19 +96,15 @@ pub(super) fn emit_live_progress<S: EventSink>(
         .as_secs_f64()
         .max(1e-9);
     let total_tokens = progress.cumulative_total.saturating_add(output_tokens);
-    let generation_secs = at
-        .saturating_duration_since(attempt_started)
-        .as_secs_f64()
-        .max(1e-9);
     // Whole-session average over decode time: output tokens from earlier
     // turns plus this turn's estimate, over the decode seconds from earlier
     // turns plus this turn's, on the same basis as the post-turn average.
     let cumulative_output = progress.cumulative_output.saturating_add(output_tokens);
-    let cumulative_decode = progress.decode_seconds + generation_secs;
+    let cumulative_decode = progress.decode_seconds + prior_attempt_secs + generation_secs;
     sink.send(Event::Progress {
         token_accounting: TokenAccounting::Estimated,
-        input_tokens: progress.cumulative_total,
-        output_tokens,
+        input_tokens: progress.cumulative_input,
+        output_tokens: cumulative_output,
         context_tokens: progress.session.estimate_context_tokens(progress.tool_defs),
         context_limit: progress.context.limit_tokens(),
         context_utilization: progress
@@ -118,11 +113,46 @@ pub(super) fn emit_live_progress<S: EventSink>(
         compaction_progress: progress
             .session
             .compaction_progress(progress.context, progress.tool_defs),
-        generation_tokens_per_sec: output_tokens as f64 / generation_secs,
-        average_tokens_per_sec: cumulative_output as f64 / cumulative_decode.max(1e-9),
+        generation_tokens_per_sec: token_rate(output_tokens, generation_secs),
+        average_tokens_per_sec: token_rate(cumulative_output, cumulative_decode),
         total_tokens,
         elapsed_secs: elapsed,
     })
+}
+
+pub(super) fn token_rate(tokens: u64, seconds: f64) -> f64 {
+    if seconds > 0.0 {
+        tokens as f64 / seconds
+    } else {
+        0.0
+    }
+}
+
+/// Measures only intervals between decoded events, not request/terminal waits
+/// or host work inside callbacks. A single buffered event has no measured rate.
+#[derive(Default)]
+pub(super) struct DecodeClock {
+    first_event: Option<Instant>,
+    handling: Duration,
+    seconds: f64,
+}
+
+impl DecodeClock {
+    pub(super) fn observe(&mut self, at: Instant) {
+        let start = self.first_event.get_or_insert(at);
+        self.seconds = at
+            .saturating_duration_since(*start)
+            .saturating_sub(self.handling)
+            .as_secs_f64();
+    }
+
+    pub(super) fn exclude_handling(&mut self, duration: Duration) {
+        self.handling = self.handling.saturating_add(duration);
+    }
+
+    pub(super) fn seconds(&self) -> f64 {
+        self.seconds
+    }
 }
 
 /// Provenance of reported token counts, separate from context estimates.
@@ -193,11 +223,11 @@ pub enum Event {
         context_utilization: f64,
         /// How close compaction is to the hard limit (`0.0..=1.0`).
         compaction_progress: f64,
-        /// Output tokens per second of wall time spent generating (prompt
-        /// processing and tool execution excluded): the speed the user expects
-        /// `tok/s` to mean, comparable to what `llama-server` reports. While a
+        /// Output tokens per observed decode second (first-token wait,
+        /// event handling, and tool execution excluded). While a
         /// turn streams this is derived from the streamed output estimate;
-        /// afterwards it is the provider's turn output over its generation time.
+        /// afterwards it is cumulative accepted output over observed decode
+        /// time, including discarded attempts.
         generation_tokens_per_sec: f64,
         /// Average tokens per second over decode time: cumulative output
         /// tokens divided by the same generation seconds that drive `t/s`, so
@@ -283,7 +313,11 @@ impl AgentSession {
             model: self.model.model.clone(),
             messages,
             tools: self.tool_defs.clone(),
-            tool_choice: ToolChoice::Auto,
+            tool_choice: if self.tool_defs.is_empty() {
+                ToolChoice::None
+            } else {
+                ToolChoice::Auto
+            },
             reasoning_effort: Some(self.thinking_effort),
             output_schema: None,
             max_output_tokens: None,
@@ -663,6 +697,7 @@ pub(super) fn fold_outcome<S: EventSink, E: ToolExecutor>(
 }
 
 pub(super) struct PromptBudget {
+    pub(super) started_at: Instant,
     pub(super) deadline: Instant,
     pub(super) expired: Arc<AtomicBool>,
     stop: Option<mpsc::Sender<()>>,
@@ -671,7 +706,8 @@ pub(super) struct PromptBudget {
 
 impl PromptBudget {
     pub(super) fn start(wall_time: Duration, cancellation: &CancellationToken) -> Result<Self> {
-        let deadline = Instant::now() + wall_time;
+        let started_at = Instant::now();
+        let deadline = started_at + wall_time;
         let expired = Arc::new(AtomicBool::new(false));
         let thread_expired = Arc::clone(&expired);
         let token = cancellation.clone();
@@ -697,6 +733,7 @@ impl PromptBudget {
                 }
             })?;
         Ok(Self {
+            started_at,
             deadline,
             expired,
             stop: Some(stop),

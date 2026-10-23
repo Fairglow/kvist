@@ -10,6 +10,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+#[path = "accounting_tests.rs"]
+mod accounting_tests;
+
 fn control_notice<S: EventSink>(
     sink: &S,
     recorder: &mut Option<&mut dyn Recorder>,
@@ -359,7 +363,7 @@ impl NativeRuntime {
         summary: &mut RunSummary,
         controls: &ControlMailbox,
     ) -> Result<()> {
-        let started_at = Instant::now();
+        let started_at = budget.started_at;
         let mut input = 0_u64;
         let mut output = 0_u64;
         let mut total = 0_u64;
@@ -418,13 +422,15 @@ impl NativeRuntime {
                     context,
                     tool_defs: session.tool_defs.len(),
                     started_at,
-                    cumulative_total: input.saturating_add(output),
+                    cumulative_input: input,
+                    cumulative_total: total,
                     // Prior turns' cumulative output and decode seconds, so
                     // the live path's average is the whole-session average over
                     // decode time (this turn's streamed estimate is added on).
                     cumulative_output: output,
                     decode_seconds: generation_seconds,
                 },
+                &mut generation_seconds,
                 budget,
                 &mut tokens_remaining,
                 recorder,
@@ -432,10 +438,7 @@ impl NativeRuntime {
                 next_attempt,
                 &|intent| executor.describe(intent),
             ) {
-                Ok((value, seconds)) => {
-                    generation_seconds += seconds;
-                    value
-                }
+                Ok((value, _)) => value,
                 Err(Error::Steering { attempt, reserve }) => {
                     next_attempt = attempt;
                     next_reserve = reserve;
@@ -649,6 +652,7 @@ impl NativeRuntime {
         sink: &S,
         cancellation: &CancellationToken,
         progress: &LiveProgress,
+        total_generation_seconds: &mut f64,
         budget: &PromptBudget,
         tokens_remaining: &mut u64,
         recorder: &mut Option<&mut dyn Recorder>,
@@ -669,6 +673,7 @@ impl NativeRuntime {
         let base = transport.deadline();
         let mut attempt = first_attempt;
         let mut attempt_request = request.clone();
+        let mut generation_secs = 0.0_f64;
         loop {
             if controls.is_shutdown() {
                 cancellation.cancel();
@@ -714,11 +719,7 @@ impl NativeRuntime {
             if cancellation.is_cancelled() {
                 return Err(crate::Error::ModelTransportCancelled.into());
             }
-            // Wall time the model spends generating, accumulated across this
-            // turn's attempts: the generation speed is output tokens over this,
-            // which excludes prompt processing and any backoff between attempts.
-            let attempt_started = Instant::now();
-            let mut generation_secs = 0.0_f64;
+            let mut decode_clock = DecodeClock::default();
             // Running output estimate and last live-update time for this attempt,
             // so the stats bar refreshes at a bounded rate while the model streams
             // rather than only after the turn completes.
@@ -731,67 +732,79 @@ impl NativeRuntime {
                 &attempt_request,
                 &operation.token,
                 &mut |event| {
-                    event_interrupted |= controls.has_pending();
-                    if cancellation.is_cancelled() || event_interrupted || controls.is_shutdown() {
-                        return Err(crate::Error::ModelTransportCancelled);
-                    }
-                    if sink_error.is_some() {
-                        return Err(crate::Error::ModelTransportCancelled);
-                    }
-                    if let Some(recorder) = recorder.as_mut()
-                        && let Err(error) = recorder.model_event(&event)
-                    {
-                        sink_error = Some(error);
-                        return Err(crate::Error::ModelTransportCancelled);
-                    }
-                    let emitted = match event {
-                        ModelStreamEvent::TextDelta(delta) => {
-                            attempt_output_chars =
-                                attempt_output_chars.saturating_add(delta.chars().count() as u64);
-                            sink.send(Event::Text(delta))
+                    let observed_at = Instant::now();
+                    let result = (|| {
+                        event_interrupted |= controls.has_pending();
+                        if cancellation.is_cancelled()
+                            || event_interrupted
+                            || controls.is_shutdown()
+                        {
+                            return Err(crate::Error::ModelTransportCancelled);
                         }
-                        ModelStreamEvent::ReasoningDelta(delta) => {
-                            attempt_output_chars =
-                                attempt_output_chars.saturating_add(delta.chars().count() as u64);
-                            sink.send(Event::Reasoning(delta))
+                        if sink_error.is_some() {
+                            return Err(crate::Error::ModelTransportCancelled);
                         }
-                        ModelStreamEvent::ToolIntent(intent) => {
-                            let description = describe(&intent);
-                            sink.send(Event::ToolCall {
-                                description,
-                                name: intent.name.clone(),
-                            })
+                        decode_clock.observe(observed_at);
+                        if let Some(recorder) = recorder.as_mut()
+                            && let Err(error) = recorder.model_event(&event)
+                        {
+                            sink_error = Some(error);
+                            return Err(crate::Error::ModelTransportCancelled);
                         }
-                    };
-                    if let Err(error) = emitted {
-                        sink_error = Some(error);
-                        cancellation.cancel();
-                        return Err(crate::Error::ModelTransportCancelled);
-                    }
-                    // Refresh the live stats bar at a bounded rate so the user
-                    // sees the turn making progress while the model streams.
-                    let now = Instant::now();
-                    if now.saturating_duration_since(last_emit) >= LIVE_PROGRESS_INTERVAL {
-                        last_emit = now;
-                        if let Err(error) = emit_live_progress(
-                            sink,
-                            progress,
-                            attempt_output_chars,
-                            attempt_started,
-                            now,
-                        ) {
+                        let emitted = match event {
+                            ModelStreamEvent::TextDelta(delta) => {
+                                attempt_output_chars = attempt_output_chars
+                                    .saturating_add(delta.chars().count() as u64);
+                                sink.send(Event::Text(delta))
+                            }
+                            ModelStreamEvent::ReasoningDelta(delta) => {
+                                attempt_output_chars = attempt_output_chars
+                                    .saturating_add(delta.chars().count() as u64);
+                                sink.send(Event::Reasoning(delta))
+                            }
+                            ModelStreamEvent::ToolIntent(intent) => {
+                                let description = describe(&intent);
+                                sink.send(Event::ToolCall {
+                                    description,
+                                    name: intent.name.clone(),
+                                })
+                            }
+                        };
+                        if let Err(error) = emitted {
                             sink_error = Some(error);
                             cancellation.cancel();
                             return Err(crate::Error::ModelTransportCancelled);
                         }
-                    }
-                    Ok(())
+                        // Refresh the live stats bar at a bounded rate so the user
+                        // sees the turn making progress while the model streams.
+                        let now = observed_at;
+                        if now.saturating_duration_since(last_emit) >= LIVE_PROGRESS_INTERVAL {
+                            last_emit = now;
+                            if let Err(error) = emit_live_progress(
+                                sink,
+                                progress,
+                                attempt_output_chars,
+                                decode_clock.seconds(),
+                                generation_secs,
+                                now,
+                            ) {
+                                sink_error = Some(error);
+                                cancellation.cancel();
+                                return Err(crate::Error::ModelTransportCancelled);
+                            }
+                        }
+                        Ok(())
+                    })();
+                    decode_clock.exclude_handling(observed_at.elapsed());
+                    result
                 },
                 attempt_deadline,
             );
+            let seconds = decode_clock.seconds();
+            generation_secs += seconds;
+            *total_generation_seconds += seconds;
             let interrupted = event_interrupted || operation.was_steered();
             drop(operation);
-            generation_secs += attempt_started.elapsed().as_secs_f64();
             if let Some(error) = sink_error {
                 return Err(error);
             }
@@ -906,7 +919,7 @@ impl NativeRuntime {
         // turn so far over their combined decode seconds, on the same basis as
         // the live `t/s`, so the two are comparable (prompt tokens and
         // inter-turn gaps excluded).
-        let average = output_tokens as f64 / generation_seconds.max(1e-9);
+        let average = token_rate(output_tokens, generation_seconds);
         let context_tokens = session.estimate_context_tokens(session.tool_definitions().len());
         sink.send(Event::Progress {
             token_accounting,
@@ -917,11 +930,7 @@ impl NativeRuntime {
             context_utilization: session.utilization(context, session.tool_definitions().len()),
             compaction_progress: session
                 .compaction_progress(context, session.tool_definitions().len()),
-            // Output-only decode speed: the provider's output tokens for the
-            // turns so far over the wall time spent generating them. Prompt
-            // tokens and the gaps between turns are excluded, so this is
-            // comparable to `llama-server`'s tokens/sec.
-            generation_tokens_per_sec: output_tokens as f64 / generation_seconds.max(1e-9),
+            generation_tokens_per_sec: average,
             average_tokens_per_sec: average,
             total_tokens,
             elapsed_secs: started_at.elapsed().as_secs_f64().max(1e-9),

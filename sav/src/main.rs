@@ -159,14 +159,16 @@ struct ModelArguments {
     /// Seconds to wait for the endpoint to begin serving before failing.
     /// Local servers spawn a requested model on a routed port, which can take
     /// longer on cold start than any single request; raise this when swapping
-    /// to a model that is not already loaded.
-    #[arg(long, default_value_t = 60)]
-    slot_timeout: u64,
+    /// to a model that is not already loaded. Direct-provider mode only
+    /// (default: 60).
+    #[arg(long, conflicts_with = "profile")]
+    slot_timeout: Option<u64>,
 
     /// Seconds to wait for the first token before failing. Must be greater
     /// than `--slot-timeout` and less than `--timeout`.
-    #[arg(long, default_value_t = 120)]
-    ttft_timeout: u64,
+    /// Direct-provider mode only (default: 120).
+    #[arg(long, conflicts_with = "profile")]
+    ttft_timeout: Option<u64>,
 
     #[arg(
         long,
@@ -181,7 +183,7 @@ struct ModelArguments {
     #[arg(long)]
     stream: bool,
 
-    #[arg(long, default_value_t = 300)]
+    #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=86_400))]
     timeout: u64,
 
     #[arg(long, default_value_t = 1_048_576)]
@@ -286,8 +288,9 @@ struct RunArguments {
     #[arg(long)]
     detect_loops: bool,
 
-    #[arg(long, default_value_t = 3)]
-    max_retries: u32,
+    /// Automatic command retries (default: 3); external profiles permit only 0.
+    #[arg(long)]
+    max_retries: Option<u32>,
 
     #[arg(long, default_value_t = 1_048_576)]
     max_output_bytes: usize,
@@ -565,20 +568,23 @@ fn model(arguments: ModelArguments) -> sav::Result<()> {
         })
         .transpose()?;
     let timeout = Duration::from_secs(arguments.timeout);
-    let slot_timeout = Duration::from_secs(arguments.slot_timeout);
-    let ttft_timeout = Duration::from_secs(arguments.ttft_timeout);
-    if slot_timeout >= ttft_timeout || ttft_timeout >= timeout {
-        return Err(Error::InvalidModelTransport {
-            reason: format!(
-                "--slot-timeout ({}) must be less than --ttft-timeout ({}) which must be less than --timeout ({})",
-                arguments.slot_timeout, arguments.ttft_timeout, arguments.timeout
-            ),
-        });
-    }
     let (transport, model): (Box<dyn ModelTransport>, String) = if let Some(profile) = selected {
         let native = profile.native()?;
-        (Box::new(native.transport()?), native.model.clone())
+        (
+            Box::new(native.transport_bounded(timeout, arguments.max_response_bytes)?),
+            native.model.clone(),
+        )
     } else {
+        let slot_timeout = arguments.slot_timeout.unwrap_or(60);
+        let ttft_timeout = arguments.ttft_timeout.unwrap_or(120);
+        if slot_timeout >= ttft_timeout || ttft_timeout >= arguments.timeout {
+            return Err(Error::InvalidModelTransport {
+                reason: format!(
+                    "--slot-timeout ({slot_timeout}) must be less than --ttft-timeout ({ttft_timeout}) which must be less than --timeout ({})",
+                    arguments.timeout
+                ),
+            });
+        }
         let missing = || Error::ProfileSetup {
             reason: "provider, endpoint and model are required without --profile".into(),
         };
@@ -588,8 +594,8 @@ fn model(arguments: ModelArguments) -> sav::Result<()> {
                 &arguments.endpoint.ok_or_else(missing)?,
                 timeout,
                 arguments.max_response_bytes,
-                slot_timeout,
-                ttft_timeout,
+                Duration::from_secs(slot_timeout),
+                Duration::from_secs(ttft_timeout),
             )?),
             arguments.model.ok_or_else(missing)?,
         )
@@ -662,13 +668,6 @@ fn run(arguments: RunArguments) -> sav::Result<()> {
         arguments.file.as_deref(),
         arguments.editor,
     )?;
-    let policy = SupervisionPolicy {
-        idle_timeout: Duration::from_secs(arguments.idle_timeout),
-        attempt_timeout: None,
-        detect_loops: arguments.detect_loops,
-        max_retries: arguments.max_retries,
-        max_output_bytes: arguments.max_output_bytes,
-    };
     let (command_template, external) = match (arguments.command, arguments.profile) {
         (Some(command), None) => (Some(command), None),
         (None, Some(profile)) => {
@@ -689,6 +688,23 @@ fn run(arguments: RunArguments) -> sav::Result<()> {
                 reason: "exactly one of --command or --profile is required".to_owned(),
             });
         }
+    };
+    let max_retries = if external.is_some() {
+        if arguments.max_retries.is_some_and(|retries| retries > 0) {
+            return Err(Error::InvalidPolicy {
+                reason: "--max-retries must be 0 for external-agent profiles; uncertain effects cannot be automatically replayed".into(),
+            });
+        }
+        0
+    } else {
+        arguments.max_retries.unwrap_or(3)
+    };
+    let policy = SupervisionPolicy {
+        idle_timeout: Duration::from_secs(arguments.idle_timeout),
+        attempt_timeout: None,
+        detect_loops: arguments.detect_loops,
+        max_retries,
+        max_output_bytes: arguments.max_output_bytes,
     };
 
     let reasoning_effort = arguments.reasoning_effort.map(Into::into);
