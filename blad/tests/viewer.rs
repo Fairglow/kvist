@@ -9,10 +9,12 @@ use nix::poll::{PollFd, PollFlags, poll};
 use nix::pty::{Winsize, openpty};
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 use vte::{Params, Parser, Perform};
 
 struct Screen {
-    cells: Vec<Vec<char>>,
+    cells: Vec<Vec<String>>,
     reversed: Vec<Vec<bool>>,
     reverse: bool,
     underlined: Vec<Vec<bool>>,
@@ -21,12 +23,13 @@ struct Screen {
     y: usize,
     wrap: bool,
     scrolls: usize,
+    last_grapheme: Option<(usize, usize)>,
 }
 
 impl Screen {
     fn new(columns: usize, rows: usize) -> Self {
         Self {
-            cells: vec![vec![' '; columns]; rows],
+            cells: vec![vec![" ".to_owned(); columns]; rows],
             reversed: vec![vec![false; columns]; rows],
             reverse: false,
             underlined: vec![vec![false; columns]; rows],
@@ -35,13 +38,15 @@ impl Screen {
             y: 0,
             wrap: false,
             scrolls: 0,
+            last_grapheme: None,
         }
     }
 
     fn down(&mut self) {
+        self.last_grapheme = None;
         if self.y + 1 == self.cells.len() {
             self.cells.rotate_left(1);
-            self.cells.last_mut().unwrap().fill(' ');
+            self.cells.last_mut().unwrap().fill(" ".to_owned());
             self.reversed.rotate_left(1);
             self.reversed.last_mut().unwrap().fill(false);
             self.underlined.rotate_left(1);
@@ -53,38 +58,58 @@ impl Screen {
     }
 
     fn line(&self, row: usize) -> String {
-        self.cells[row]
-            .iter()
-            .collect::<String>()
-            .trim_end()
-            .to_string()
+        self.cells[row].concat().trim_end().to_string()
     }
 
     fn content_line(&self, row: usize) -> String {
         self.line(row).trim_end_matches([' ', '░', '█']).to_string()
     }
+
+    fn put_grapheme(&mut self, row: usize, column: usize, text: String) {
+        let width = text.width();
+        let end = column + width;
+        assert!(
+            end <= self.cells[row].len(),
+            "grapheme exceeds the terminal edge"
+        );
+        self.cells[row][column] = text;
+        for continuation in column + 1..end {
+            self.cells[row][continuation].clear();
+        }
+        for cell in column..end {
+            self.reversed[row][cell] = self.reverse;
+            self.underlined[row][cell] = self.underline;
+        }
+        self.wrap = end == self.cells[row].len();
+        self.x = end.min(self.cells[row].len() - 1);
+        self.y = row;
+        self.last_grapheme = Some((row, column));
+    }
 }
 
 impl Perform for Screen {
     fn print(&mut self, c: char) {
-        if self.wrap {
+        if let Some((row, column)) = self.last_grapheme {
+            let mut joined = self.cells[row][column].clone();
+            joined.push(c);
+            if joined.graphemes(true).count() == 1 {
+                self.put_grapheme(row, column, joined);
+                return;
+            }
+        }
+        let text = c.to_string();
+        if self.wrap || self.x + text.width() > self.cells[0].len() {
             self.x = 0;
             self.down();
             self.wrap = false;
         }
-        self.cells[self.y][self.x] = c;
-        self.reversed[self.y][self.x] = self.reverse;
-        self.underlined[self.y][self.x] = self.underline;
-        if self.x + 1 == self.cells[0].len() {
-            self.wrap = true;
-        } else {
-            self.x += 1;
-        }
+        self.put_grapheme(self.y, self.x, text);
     }
 
     fn execute(&mut self, byte: u8) {
         match byte {
             b'\r' => {
+                self.last_grapheme = None;
                 self.x = 0;
                 self.wrap = false;
             }
@@ -100,6 +125,7 @@ impl Perform for Screen {
         let values: Vec<usize> = params.iter().map(|param| usize::from(param[0])).collect();
         match action {
             'H' | 'f' => {
+                self.last_grapheme = None;
                 self.y = values
                     .first()
                     .copied()
@@ -115,8 +141,9 @@ impl Perform for Screen {
                 self.wrap = false;
             }
             'J' if values.first() == Some(&2) => {
+                self.last_grapheme = None;
                 for row in &mut self.cells {
-                    row.fill(' ');
+                    row.fill(" ".to_owned());
                 }
                 for row in &mut self.reversed {
                     row.fill(false);
@@ -217,7 +244,11 @@ impl Viewer {
     }
 
     fn read_update(&mut self, required: bool) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        self.read_with_timeout(required, Duration::from_secs(5));
+    }
+
+    fn read_with_timeout(&mut self, required: bool, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
         let mut received = false;
         while Instant::now() < deadline {
             let mut descriptors = [PollFd::new(self.master.as_fd(), PollFlags::POLLIN)];
@@ -527,6 +558,239 @@ impl Drop for Viewer {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+#[test]
+fn reload_preserves_position_policy_tabs_and_recomputes_search_and_links() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("reload.md");
+    let other = temp.path().join("other.md");
+    let body = "filler\n\n".repeat(40);
+    std::fs::write(&path, format!("# Original\n\n{body}needle\n\n[old](#old)")).unwrap();
+    std::fs::write(&other, "# Other").unwrap();
+    let mut viewer = Viewer::start_with(
+        &path,
+        60,
+        12,
+        false,
+        &["--math", "source", other.to_str().unwrap()],
+        &[],
+    );
+    viewer.keys(b"ddd");
+    let before = viewer.screen.content_line(1);
+    std::fs::write(
+        &path,
+        format!("# Updated\n\n{body}needle needle\n\n[new](#updated)\n\n$x^2$"),
+    )
+    .unwrap();
+    viewer.raw.clear();
+    viewer.keys(b"r");
+    assert_eq!(viewer.screen.content_line(1), before);
+    assert!(viewer.screen.line(11).contains("Reloaded"));
+    let raw = String::from_utf8_lossy(&viewer.raw);
+    assert!(!raw.contains("\x1b[?1049"));
+    assert!(!raw.contains("\x1b[2J"));
+    viewer.keys(b"/needle\r");
+    assert!(viewer.screen.line(11).contains("1/2"));
+    std::fs::write(
+        &path,
+        format!("# Updated\n\n{body}needle\n\n[new](#updated)\n\n$x^2$"),
+    )
+    .unwrap();
+    viewer.keys(b"r");
+    viewer.keys(b"n");
+    assert!(viewer.screen.line(11).contains("1/1"));
+    viewer.keys(b"\t\r");
+    assert_eq!(viewer.screen.content_line(1), "# Updated");
+    viewer.keys(b"\x1b[1;3C");
+    assert_eq!(viewer.screen.content_line(1), "# Other");
+    viewer.keys(b"b");
+    assert_eq!(viewer.screen.content_line(1), "# Updated");
+    viewer.keys(b"G");
+    assert!((1..11).any(|row| viewer.screen.line(row).contains("$x^2$")));
+    viewer.quit();
+}
+
+#[test]
+fn reload_failure_retains_the_old_document_and_shrink_clamps_both_offsets() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("shrink.md");
+    std::fs::write(
+        &path,
+        format!(
+            "```text\n{}\n```",
+            format!("{}\n", "x".repeat(150)).repeat(40)
+        ),
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 50, 12, false);
+    viewer.keys(&b"\x1b[C".repeat(70));
+    viewer.keys(b"G");
+    let before: Vec<_> = (1..11).map(|row| viewer.screen.content_line(row)).collect();
+    std::fs::write(&path, [0xff, 0xfe]).unwrap();
+    viewer.keys(b"r");
+    assert!(viewer.screen.line(11).contains("Error reloading"));
+    assert_eq!(
+        (1..11)
+            .map(|row| viewer.screen.content_line(row))
+            .collect::<Vec<_>>(),
+        before
+    );
+    std::fs::remove_file(&path).unwrap();
+    viewer.keys(b"r");
+    assert!(viewer.screen.line(11).contains("Error reloading"));
+    assert_eq!(
+        (1..11)
+            .map(|row| viewer.screen.content_line(row))
+            .collect::<Vec<_>>(),
+        before
+    );
+    std::fs::write(&path, "# Short").unwrap();
+    viewer.keys(b"r");
+    assert_eq!(viewer.screen.content_line(1), "# Short");
+    assert!((2..11).all(|row| viewer.screen.line(row).is_empty()));
+    viewer.resize(40, 10);
+    assert_eq!(viewer.screen.content_line(1), "# Short");
+    viewer.quit();
+}
+
+#[test]
+fn unicode_search_link_clicks_and_clipping_use_display_columns() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("unicode.md");
+    std::fs::write(
+        &path,
+        format!(
+            "界e\u{301}👩‍💻 [go](#target) tail\n\n# Target\n\n{}",
+            "end\n\n".repeat(10)
+        ),
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 40, 12, true);
+    assert_eq!(viewer.screen.cells[1][3].to_string(), "界");
+    assert_eq!(viewer.screen.cells[1][4].to_string(), "");
+    viewer.keys("/e\u{301}👩‍💻\r".as_bytes());
+    for column in 2..18 {
+        assert_eq!(
+            viewer.screen.underlined[1][column],
+            (5..8).contains(&column),
+            "column {column}"
+        );
+    }
+    viewer.resize(30, 12);
+    assert!(viewer.screen.line(11).contains("1/1"));
+    viewer.keys(b"\x1b[<0;10;2M");
+    assert!(viewer.screen.line(1).contains("# Target"));
+    viewer.quit();
+}
+
+#[test]
+fn terminal_model_joins_graphemes_and_keeps_wide_continuations() {
+    let mut screen = Screen::new(20, 3);
+    let mut parser = Parser::new();
+    for part in ["界", "e", "\x1b[7m", "\u{301}", "👩", "\u{200d}", "💻", "z"] {
+        parser.advance(&mut screen, part.as_bytes());
+    }
+    assert_eq!(screen.x, 6);
+    assert_eq!(screen.cells[0][0].to_string(), "界");
+    assert_eq!(screen.cells[0][1].to_string(), "");
+    assert_eq!(screen.cells[0][2].to_string(), "e\u{301}");
+    assert_eq!(screen.cells[0][3].to_string(), "👩‍💻");
+    assert_eq!(screen.cells[0][4].to_string(), "");
+    assert_eq!(screen.cells[0][5].to_string(), "z");
+    let mut edge = Screen::new(2, 2);
+    parser.advance(&mut edge, "界\u{301}".as_bytes());
+    assert_eq!(edge.y, 0);
+    assert_eq!(edge.scrolls, 0);
+    parser.advance(&mut edge, b"x");
+    assert_eq!(edge.y, 1);
+}
+
+#[test]
+fn browser_timeout_retains_the_document_diagnostics_and_live_input() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("browser.md");
+    let launcher = temp.path().join("xdg-open");
+    std::fs::write(&path, "# Document\n\n[web](https://example.test)").unwrap();
+    std::fs::write(
+        &launcher,
+        "#!/bin/sh\nprintf 'launch hint\\n' >&2\nexec sleep 60\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let tools_path = format!(
+        "{}:{}",
+        temp.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut viewer = Viewer::start_with(&path, 160, 12, false, &[], &[("PATH", &tools_path)]);
+    viewer.raw.clear();
+    let started = Instant::now();
+    viewer.master.write_all(b"\r").unwrap();
+    viewer.read_with_timeout(true, Duration::from_secs(8));
+    assert!(started.elapsed() >= Duration::from_secs(5));
+    assert!(started.elapsed() < Duration::from_secs(8));
+    assert!(viewer.screen.line(11).contains("timed out after 5 seconds"));
+    assert!(viewer.screen.line(11).contains("launch hint"));
+    assert_eq!(viewer.screen.content_line(1), "# Document");
+    let raw = String::from_utf8_lossy(&viewer.raw);
+    assert!(!raw.contains("\x1b[?1049") && !raw.contains("\x1b[2J"));
+    viewer.keys(b"j");
+    assert!(viewer.screen.line(11).contains("L1-"));
+    viewer.quit();
+}
+
+#[test]
+fn reload_rejects_fifo_replacements_without_blocking() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("file.md");
+    std::fs::write(&path, "# Retained").unwrap();
+    let mut viewer = Viewer::start(&path, 80, 12, false);
+    std::fs::remove_file(&path).unwrap();
+    nix::unistd::mkfifo(
+        &path,
+        nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+    )
+    .unwrap();
+    viewer.keys(b"r");
+    assert!(viewer.screen.line(11).contains("requires a regular file"));
+    assert_eq!(viewer.screen.content_line(1), "# Retained");
+    viewer.quit();
+}
+
+#[test]
+fn unicode_horizontal_clipping_keeps_graphemes_and_reflows_after_resize() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("wide-unicode.md");
+    std::fs::write(&path, "```text\n界e\u{301}👩‍💻abcdefghijklmnopqrstuv\n```").unwrap();
+    let mut viewer = Viewer::start(&path, 20, 10, false);
+    viewer.keys(b"\x1b[C");
+    assert!(viewer.screen.content_line(2).starts_with(" e\u{301}👩‍💻"));
+    assert_eq!(viewer.screen.cells[2][2], "👩‍💻");
+    assert_eq!(viewer.screen.cells[2][3], "");
+    viewer.keys(b"\x1b[C");
+    assert!(viewer.screen.content_line(2).starts_with("e\u{301}👩‍💻"));
+    viewer.resize(50, 12);
+    assert!(viewer.screen.content_line(2).starts_with("界e\u{301}👩‍💻"));
+    assert_eq!(viewer.screen.scrolls, 0);
+    viewer.quit();
+}
+
+#[test]
+fn reload_does_not_follow_a_replaced_final_symlink() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("file.md");
+    let replacement = temp.path().join("replacement.md");
+    std::fs::write(&path, "# Retained").unwrap();
+    std::fs::write(&replacement, "# Not loaded").unwrap();
+    let mut viewer = Viewer::start(&path, 80, 12, false);
+    std::fs::remove_file(&path).unwrap();
+    std::os::unix::fs::symlink(&replacement, &path).unwrap();
+    viewer.keys(b"r");
+    assert!(viewer.screen.line(11).contains("Error reloading"));
+    assert_eq!(viewer.screen.content_line(1), "# Retained");
+    viewer.quit();
 }
 
 #[test]

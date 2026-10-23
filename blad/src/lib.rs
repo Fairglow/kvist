@@ -31,4 +31,5 @@ mod table;
 mod table_navigation;
 mod terminal_text;
 mod viewer_navigation;
+mod viewer_terminal;
 mod viewport;

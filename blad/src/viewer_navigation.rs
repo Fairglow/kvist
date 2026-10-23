@@ -14,7 +14,7 @@ Ctrl+Arrows: spatial links; [ / ]: previous / next heading
 j/k or arrows: line; Space / PageDown / Ctrl+F: page down
 PageUp / Ctrl+B: page up; d/u or Ctrl+D/U: half page
 g/G or Home/End: top/bottom; Left/Right: horizontal
-Alt+Left/Right: tabs; b: back; e: external editor
+Alt+Left/Right: tabs; b: back; e: editor; r: reload
 q/Esc: close tab; Q/Ctrl+C: quit all; Ctrl+L: redraw
 
 Any key returns to the document. No live follow or less shell commands.

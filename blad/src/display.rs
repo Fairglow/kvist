@@ -4,7 +4,8 @@
 //! code blocks. Unsupported languages (e.g. hemlock) fall back to plain text
 //! without crashing.
 
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal, Read, Write};
+use std::os::unix::fs::OpenOptionsExt;
 
 use crate::RenderOptions;
 use crate::links::{Link, extract_links};
@@ -15,6 +16,7 @@ pub use crate::session_display::{
     dump_session, export_session, list_sessions, show_session, show_session_with_options,
 };
 use crate::viewer_navigation::{HELP, link_spans, reveal, spatial_link};
+use crate::viewer_terminal::TerminalGuard;
 use crate::viewport::{Document, Frame, Painter};
 
 /// Check if stdout is a TTY (interactive terminal).
@@ -143,78 +145,6 @@ pub fn dump_markdown(content: &str) -> io::Result<()> {
         .render_markdown(content, &mut io::stdout().lock())
 }
 
-struct TerminalGuard {
-    raw: bool,
-    alternate: bool,
-    hidden: bool,
-    mouse: bool,
-}
-
-impl TerminalGuard {
-    fn enter() -> io::Result<Self> {
-        let mut guard = Self {
-            raw: false,
-            alternate: false,
-            hidden: false,
-            mouse: false,
-        };
-        crossterm::terminal::enable_raw_mode()?;
-        guard.raw = true;
-        guard.alternate = true;
-        crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-        guard.hidden = true;
-        crossterm::execute!(io::stdout(), crossterm::cursor::Hide)?;
-        guard.mouse = true;
-        crossterm::execute!(io::stdout(), crossterm::event::EnableMouseCapture)?;
-        Ok(guard)
-    }
-
-    fn restore(&mut self) -> io::Result<()> {
-        let mut error = None;
-        if self.mouse {
-            match crossterm::execute!(io::stdout(), crossterm::event::DisableMouseCapture) {
-                Ok(()) => self.mouse = false,
-                Err(failure) => {
-                    error.get_or_insert(failure);
-                }
-            }
-        }
-        if self.hidden {
-            match crossterm::execute!(io::stdout(), crossterm::cursor::Show) {
-                Ok(()) => self.hidden = false,
-                Err(failure) => {
-                    error.get_or_insert(failure);
-                }
-            }
-        }
-        if self.alternate {
-            match crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen) {
-                Ok(()) => self.alternate = false,
-                Err(failure) => {
-                    error.get_or_insert(failure);
-                }
-            }
-        }
-        if self.raw {
-            match crossterm::terminal::disable_raw_mode() {
-                Ok(()) => self.raw = false,
-                Err(failure) => {
-                    error.get_or_insert(failure);
-                }
-            }
-        }
-        error.map_or(Ok(()), Err)
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        if let Err(error) = self.restore() {
-            eprintln!("Failed to restore terminal: {error}");
-        }
-    }
-}
-
 /// Follow a link in the viewer context.
 ///
 /// URL links are handed to the default browser and the viewer stays put.
@@ -305,7 +235,7 @@ fn run_open_files(
         let file = &mut files[active];
         let action = viewer_session(
             file.path.as_deref(),
-            &file.content,
+            &mut file.content,
             line_numbers,
             width_limit,
             options,
@@ -418,7 +348,7 @@ fn tab_title(files: &[OpenFile], active: usize) -> String {
 #[allow(clippy::too_many_arguments)]
 fn viewer_session(
     path: Option<&std::path::Path>,
-    content: &str,
+    content: &mut String,
     line_numbers: bool,
     width_limit: Option<usize>,
     options: &RenderOptions,
@@ -454,8 +384,7 @@ fn viewer_session(
     let mut help_document = Document::render_with_options(HELP, cols, false, width_limit, options)?;
 
     // Source offsets identify actual rendered link spans, including duplicates.
-    let safe_content = inert_source(content);
-    let links = extract_links(&safe_content);
+    let mut links = extract_links(&inert_source(content));
     let mut spans: Vec<_> = links
         .iter()
         .map(|link| link_spans(&document, link))
@@ -817,6 +746,37 @@ fn viewer_session(
                                 return Ok(ViewerAction::Edit(path.to_path_buf()));
                             }
                         }
+                        KeyCode::Char('r') => {
+                            let candidate = read_reload_source(path).and_then(|source| {
+                                let document = Document::render_with_options(
+                                    &source,
+                                    cols,
+                                    line_numbers,
+                                    width_limit,
+                                    options,
+                                )?;
+                                Ok((source, document))
+                            });
+                            match candidate {
+                                Ok((source, updated)) => {
+                                    *content = source;
+                                    document = updated;
+                                    scroll_offset = scroll_offset
+                                        .min(document.lines.len().saturating_sub(visible_lines));
+                                    scroll_x = scroll_x.min(document.max_x());
+                                    links = extract_links(&inert_source(content));
+                                    spans = links
+                                        .iter()
+                                        .map(|link| link_spans(&document, link))
+                                        .collect();
+                                    selected_link = None;
+                                    selected_part = 0;
+                                    search.update(&document.lines, scroll_offset);
+                                    *status = "Reloaded file".into();
+                                }
+                                Err(error) => *status = format!("Error reloading file: {error}"),
+                            }
+                        }
                         KeyCode::Char('b') => {
                             return Ok(ViewerAction::Back);
                         }
@@ -986,4 +946,36 @@ fn edit_file(path: &std::path::Path) -> io::Result<String> {
         )));
     }
     std::fs::read_to_string(path)
+}
+
+fn read_reload_source(path: Option<&std::path::Path>) -> io::Result<String> {
+    let path = path.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "reload unavailable: this document has no file path",
+        )
+    })?;
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "reload requires a regular file",
+        ));
+    }
+    let mut content = String::new();
+    file.read_to_string(&mut content)?;
+    Ok(content)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reload_without_a_file_path_is_an_explicit_error() {
+        let error = super::read_reload_source(None).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("reload unavailable"));
+    }
 }

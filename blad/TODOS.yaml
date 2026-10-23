@@ -11,6 +11,50 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-reliability-tests
+    title: "write_tests: viewer reliability follow-up"
+    description: "Pin launcher deadlines/cleanup, transactional reload and Unicode display-cell PTY behavior."
+    purpose: "Address observed reliability and evidence gaps before more navigation features"
+    expected_outcome: "New regressions fail before the corresponding code changes"
+    context: "Reload/Unicode and final-symlink regressions failed before fixes; deadline/cleanup and final feature-matrix evidence retained in IMPL.md."
+    timestamps: {created_at: "2026-10-23T15:25:00Z", updated_at: "2026-10-23T15:43:54Z", completed_at: "2026-10-23T15:43:54Z"}
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-053", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-055"]
+  - id: blad-reliability-code
+    title: "implement_code: bounded launch and explicit reload"
+    description: "Bound launcher waiting, retain safe reload state and upgrade the Unicode test screen."
+    purpose: "Keep the viewer recoverable and make terminal geometry evidence meaningful"
+    expected_outcome: "New and existing viewer coverage passes"
+    context: "Five-second launcher deadline, transactional descriptor-validated reload and Unicode-aware PTY cells; no async worker or automatic following."
+    timestamps: {created_at: "2026-10-23T15:25:00Z", updated_at: "2026-10-23T15:43:54Z", completed_at: "2026-10-23T15:43:54Z"}
+    kind: implementation
+    status: completed
+    depends_on: [blad-reliability-tests]
+    requirements: ["REQUIREMENTS.md#R-053", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-055"]
+  - id: blad-reliability-audit
+    title: "security_audit: reload and launcher ownership"
+    description: "Inspect child cleanup, bounded capture, reload failure state and inert diagnostics."
+    purpose: "Preserve explicit subprocess authority and document usability"
+    expected_outcome: "Scoped findings and limitations retained"
+    context: "Scoped implementer inspection and corrected reload pathname race retained in DESIGN.md/IMPL.md; direct-child, filesystem and terminal-model limits remain explicit. Not a whole-component certification."
+    timestamps: {created_at: "2026-10-23T15:25:00Z", updated_at: "2026-10-23T15:43:54Z", completed_at: "2026-10-23T15:43:54Z"}
+    kind: security-audit
+    status: completed
+    depends_on: [blad-reliability-code]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-053", "REQUIREMENTS.md#R-054"]
+  - id: blad-reliability-review
+    title: "compliance_review: reliability evidence"
+    description: "Derive independent source observations and compare source-blind against the follow-up intent."
+    purpose: "Keep evidence separate from implementation intent"
+    expected_outcome: "Observations, limitations and discrepancies retained for human arbitration"
+    context: "Independent source-only observations and source-blind comparison retained in IMPL.md; initial reload race corrected, no new concrete contradiction identified, finite-evidence reservations and earlier A-01/A-02 remain unresolved."
+    timestamps: {created_at: "2026-10-23T15:25:00Z", updated_at: "2026-10-23T15:45:36Z", completed_at: "2026-10-23T15:45:36Z"}
+    kind: compliance-review
+    status: completed
+    depends_on: [blad-reliability-audit]
+    requirements: ["REQUIREMENTS.md#R-053", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-055"]
   - id: blad-production-tests
     title: "write_tests: production viewer interactions"
     description: "Pin precise spans, search direction/regex, spatial links, tab closure and stable frames."

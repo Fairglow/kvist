@@ -4,6 +4,97 @@
 
 Date: 2026-10-12
 
+## Viewer reliability observation - 2026-10-23
+
+This supplement covers R-053 through R-055. A clean-slate observer inspected
+source, tests, manifests and parent-run execution logs without intent, queue,
+this record, project documents, previous reviews, chat or Git history/diffs.
+Its intermediate reload observation identified a pathname metadata/read race.
+A separate clean-slate observer inspected the final reload boundary and
+execution evidence after hardening, with the same exclusions. Neither ran
+tests or made a compliance determination.
+
+### Independent observed behavior
+
+For R-053, `browser::open` invokes `xdg-open` directly with null stdin and
+shared captured stdout/stderr. Capture retains at most 4,096 bytes; each drain
+performs at most sixteen 4,096-byte reads. The synchronous wait polls completion
+and a monotonic five-second deadline after spawn, with sleeps capped at ten
+milliseconds or the remaining interval. Timeout explicitly kills/reaps only
+the owned child and returns `TimedOut` with available bounded diagnostics.
+Completion performs a final bounded drain rather than awaiting descendant-held
+EOF. Drop attempts cleanup on other unfinished paths. Viewer notices cross
+the existing inert footer boundary; browser errors retain the document.
+
+For R-054, normal-mode `r` reads and renders a candidate before replacing live
+content/document. Success retains rendering options and tab/history structure,
+clamps both offsets, rebuilds links/spans, clears link selection and recomputes
+the retained search near the viewport. Failure changes the footer without
+replacing the previous usable state; missing paths explicitly report reload
+unavailable. No watcher or terminal teardown is added.
+
+The first reload used separate pathname metadata and read operations. After
+the independent race finding, final code opens with Linux
+`O_NONBLOCK | O_NOFOLLOW`, requires the opened descriptor's metadata to identify
+a regular file, and reads UTF-8 through that same descriptor. Final FIFO and
+symlink replacements therefore fail before content reading. The final observer
+confirmed the named flags and direct `libc` dependency. Its test-name criticism
+was subsequently corrected to `reload_rejects_fifo_replacements_without_blocking`:
+the FIFO is opened nonblockingly, not avoided entirely.
+
+For R-055, the PTY screen stores grapheme strings in leading cells and empty
+wide-cell continuations. Combining/ZWJ extensions join the preceding grapheme,
+including across SGR; display width determines cursor movement and delayed
+wrap. Observed assertions cover CJK, combining accents, joined emoji, exact
+emphasis cells, gutter-adjusted mouse links, clipping and resize. The extracted
+private terminal guard retains raw/alternate/cursor/mouse ownership and cleanup
+across reloads/tabs, with release/re-entry for editing.
+
+### Independent comparison and evidence limits
+
+A separate source-blind reviewer compared current requirements, contract,
+design and user documentation with both observations and refreshed execution
+logs. It excluded source, tests, manifests, queue, this record, earlier reviews
+and Git data. It distinguished the intermediate race/counts from final
+descriptor-based behavior and the test-only naming correction. It supported
+the scoped R-053/R-054/R-055 obligations without identifying a new concrete
+contradiction requiring implementation changes or human arbitration.
+
+The supplied all-feature run reports 227 passed, 2 ignored; standalone reports
+215 passed, 2 ignored, including 86 library and 35 PTY viewer tests in each.
+These are parent-run results read by the reviewers, not independent execution.
+The ignored cases remain optional characterization tests. Reload/Unicode and
+final-symlink regressions failed before their corresponding corrections.
+Timeout assertions include typing, reaping, flood resistance and usable input
+after the production five-second deadline.
+
+Reservations remain explicit: no candidate-render-failure injection or
+exhaustive retained-state assertion; replacement tests precede reload rather
+than stress concurrent races; no ancestor isolation, inode authentication or
+concurrent-write snapshot. Nonregular objects are opened before validation,
+so device-open effects are not isolated. Spawn, kill/wait, regular-file reads
+and rendering have no hard real-time bound. Browser input remains synchronous,
+independent descendants are not managed, and later descendant diagnostics may
+be missed. The PTY model implements selected controls and shares production
+Unicode libraries; it does not certify every terminal/font or fully emulate
+alternate-screen/synchronized-update behavior. Logs alone do not bind results
+cryptographically to a source revision.
+
+Earlier A-01/A-02 interpretation findings remain for explicit human arbitration.
+Historical unbounded-launcher and scalar-cell descriptions below are superseded
+only by this increment. No human acceptance, advisory receipt, blanket
+compliance or whole-component security certification is claimed.
+
+Parent verification used both complete Blad feature configurations, strict
+all-target/all-feature Blad Clippy, formatting/whitespace checks, an all-feature
+workspace check and the root language-vendoring integration test. The direct
+edge to already locked/vendored `libc` adds no registry package; local vendoring
+metadata was refreshed. Separately appearing lockfile version updates were
+preserved, not included as part of this increment's dependency decision.
+Scoped implementer inspection and resource/authority limits are retained in
+`DESIGN.md`; the queue records the four completed stages without changing
+historical acceptance revisions.
+
 ## Production viewer observation - 2026-10-23
 
 A separate clean-slate documenter inspected only Blad source, tests, manifests

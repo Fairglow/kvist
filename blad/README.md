@@ -128,6 +128,10 @@ mouse click. `#heading` and `other.md#heading` jump to their headings.
 - `q`/`Esc` - Close current tab (exit on the last tab)
 - `Q`/`Ctrl+C` - Quit all tabs
 - `h` - Keyboard help, `Ctrl+L` - Repaint
+- `r` - Reload the active file, retaining position and options
+
+Browser launches time out after five seconds without closing the document;
+only the directly owned launcher is stopped, not an independent browser.
 
 ## Documentation
 

@@ -255,6 +255,31 @@ feature toggle now.
     half-page, backward-search and refresh keys. Document deliberate
     differences from `less`, regex syntax/limits, and deferred capabilities.
 
+### Viewer reliability follow-up
+
+53. **R-053 Bounded browser launch:** An explicitly requested browser launch
+    must stop waiting for its launcher after a five-second deadline following
+    spawn. Terminate and reap the owned launcher on timeout, report a distinct
+    timeout with bounded diagnostics, and retain the document and terminal.
+    Do not wait for descendant-held output EOF or kill an independent browser.
+    Test ordinary completion, failure, timeout, diagnostic floods and cleanup.
+54. **R-054 Explicit reload:** Normal-mode `r` reloads the active file without
+    terminal teardown, retaining rendering policy, tab order/history and
+    numeric vertical/horizontal offsets, clamped to the new layout. Recompute
+    search results and navigation metadata; clear obsolete link selection.
+    Commit the new contents only after successful read and render. Read/render
+    failure retains the previous usable document and exposes a footer error.
+    Reload without a file path must produce an explicit unavailable notice.
+    Open candidates nonblockingly without following final symlinks, then
+    validate the opened descriptor as a regular file before reading, avoiding
+    a metadata/open race with a FIFO replacement.
+55. **R-055 Unicode terminal evidence:** PTY screen assertions must model
+    display columns for wide graphemes, combining text and joined emoji,
+    including continuation cells and delayed wrap. Cover exact highlights,
+    mouse-link hit positions, resize and horizontal clipping with Unicode and
+    a number gutter. State emulator limits rather than claiming every real
+    terminal/font combination is certified.
+
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).
 - **C-002 No new state format:** Blad reads skott's structured session

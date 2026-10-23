@@ -196,6 +196,7 @@ version = "0.3.0"
 dependencies = [
  "clap",
  "crossterm",
+ "libc",
  "merman",
  "nix 0.31.3",
  "pulldown-cmark",

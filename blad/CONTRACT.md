@@ -106,6 +106,19 @@ Other: `e` hands the whole file to `$EDITOR`, `b` returns to the previous tab,
 the current tab, selecting the next tab (or previous if last); closing the sole
 tab exits. `Q`/`Ctrl+C` quits all tabs. Modal Esc cancels only that mode.
 `h` opens keyboard help (any key dismisses); `Ctrl+L` forces a repaint.
+Normal-mode `r` explicitly reloads the active file from its opening canonical
+path. It retains options, tab order/history and numeric viewport offsets,
+clamping offsets to the new layout. Search query/mode/direction persist and
+results are recalculated near the retained viewport; link selection is cleared.
+Reload opens the candidate nonblockingly without following a final symlink,
+then requires the opened descriptor to be a regular file before reading.
+Replacing the final path with a FIFO or symlink therefore fails visibly.
+This is not ancestor-path isolation or an atomic snapshot of concurrent writes.
+New contents replace the current document only after successful UTF-8 read and
+render. Errors retain the previous document and appear in the footer. An
+embedded document without a file path reports that reload is unavailable.
+Reload is not automatic following, conflict detection, or a source-anchor-based
+position guarantee across arbitrary file edits.
 The top row lists files in stable opening order with the active tab bracketed.
 Label columns remain fixed when the active marker changes. Opening an existing
 file reuses its tab; switching tabs preserves vertical/horizontal position.
@@ -115,7 +128,13 @@ inheriting the viewer terminal. At most 4,096 diagnostic bytes are retained;
 truncation is explicit. Successful launcher diagnostics are labelled as such,
 not reported as failure. Nonzero exit and spawn failures remain visible errors.
 The latest result survives redraw/focus events until the next user action.
-The synchronous launcher has no new timeout or background process ownership.
+The synchronous launcher has a five-second deadline measured after spawn.
+On timeout Blad terminates and reaps the directly owned launcher, reports a
+timeout with retained diagnostics, and keeps the document open. It does not
+wait for descendant-held output EOF or terminate independently launched
+browsers. Input waits while launch is pending; no worker or daemon is added.
+The deadline bounds normal launcher waiting, not kernel scheduling or process
+creation/termination system calls.
 
 Theme files are JSON objects (serde_json's JSON dialect) with optional `theme`
 (`dark`, `light`, `terminal`) and `palette` objects. Palette keys are `heading`,

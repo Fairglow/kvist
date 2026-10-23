@@ -295,6 +295,7 @@ breaks and empty lines. Without a configured width, tables stay unwrapped.
 | `Q` / `Ctrl+C` | Quit all tabs |
 | `h` | Keyboard help; any key returns |
 | `Ctrl+L` | Force repaint |
+| `r` | Reload the active file, retaining viewport position |
 
 Closing a tab selects the next surviving tab, or the previous one if closing
 the rightmost tab. Surviving tabs keep their order and scroll positions;
@@ -340,6 +341,12 @@ Browser-launch output is captured rather than written over the viewer.
 Success warnings or launch errors remain in the footer across redraws and
 resize until another user action replaces them. Captured diagnostics retain
 at most 4,096 bytes and identify truncation; control characters stay inert.
+The launcher has a five-second deadline after spawn. On timeout Blad stops
+and reaps the directly owned launcher, keeps the document open, and reports
+the timeout with captured diagnostics. A browser that already started may
+still open: Blad does not terminate independent browsers. Launch remains
+synchronous, so input waits during those five seconds; process creation,
+kernel scheduling and termination calls are not hard real-time bounded.
 
 You do not need link mode to follow a link: pressing `Enter` in normal mode
 opens the first link at or below the top of the viewport. Bare URLs
@@ -393,11 +400,34 @@ regex is explicit, preventing punctuation from unexpectedly becoming syntax.
 Normal `q`/Esc closes one tab rather than always quitting.
 
 Useful next increments are a heading outline, numeric movement and line/percent
-jumps, marks/jump history within a document, reload with position retention,
+jumps, marks/jump history within a document,
 per-tab retained searches and visible tab overflow. Real live follow needs
 explicit file-replacement/truncation semantics. Giant-file responsiveness needs
 measured search/reflow budgets before claiming bounded latency. Shell escapes
 and document-triggered external commands are intentionally not pager goals.
+
+### Reloading changed files
+
+Press `r` in normal mode to reread the active file from its opening canonical
+path. A successful reload preserves render/theme options, tab history and
+numeric vertical/horizontal positions, clamped to the new document.
+Search query, direction and literal/regex mode persist; results and link
+positions are rebuilt, and obsolete link selection is cleared. It does not
+try to recover the same source paragraph after arbitrary edits.
+
+Read/UTF-8/render failures leave the previous document usable and show a footer
+error. A shorter replacement erases stale rows and clamps scroll offsets.
+Reload opens nonblockingly, refuses final symlinks and validates the opened
+descriptor before reading; FIFO/symlink replacement therefore fails safely.
+This is not ancestor-path isolation or a snapshot of concurrent writes. Embedded
+documents without a file path report that reload is unavailable.
+Reload is explicit, not automatic live following. While entering a search,
+`r` remains ordinary query text.
+
+The PTY regression model now accounts for display-width continuation cells,
+combining text and joined emoji, including across SGR transitions. This
+strengthens Unicode positioning evidence but does not certify every terminal,
+Unicode version, ambiguous-width setting or font.
 
 ### Edit Mode
 

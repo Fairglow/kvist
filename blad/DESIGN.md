@@ -213,6 +213,71 @@ rendered-geometry integration regressions and large prepared-text cases.
 
 ## Failure and recovery
 
+The increments below define recovery at the owning viewer boundary, including
+the limits of terminal, subprocess and filesystem ownership.
+
+### Viewer reliability follow-up (2026-10-23)
+
+Prioritize the observed unbounded launcher wait, explicit reload and the
+character-counting PTY evidence gap before larger navigation surfaces.
+The five-second timeout is a conservative fixed default: normal launch remains
+synchronous, but an owned launcher cannot intentionally keep the viewer waiting
+forever. Use monotonic elapsed time after spawn, bounded drain batches and
+short sleeps capped by remaining time. Check process completion before the
+deadline. On expiry explicitly kill/wait the directly owned child; include
+bounded captured output in a typed timeout error. Drop cleanup remains a
+fallback for other failures. Do not terminate process groups: a successfully
+started browser can legitimately outlive its launcher. No new dependency,
+worker, shell invocation or environment-based timeout override is needed.
+
+For reload, read and render a candidate before replacing any live content.
+Keep the active content mutable within the document event loop so successful
+reload does not release terminal ownership or change tab history. Recompute
+owned links/spans and search against the new layout; clear link selection and
+clamp x/y at the normal frame boundary. Retain all host rendering options.
+Missing paths, invalid UTF-8 and render failures become inert footer errors
+while old content/layout/navigation remain usable. `r` in search is literal
+input and does not reload; existing modal key precedence is unchanged.
+Use Linux `O_NONBLOCK | O_NOFOLLOW` on candidate open and validate the opened
+descriptor's metadata before reading. This replaces the first metadata/read
+precheck, whose FIFO-replacement race was independently observed. A direct
+edge to already locked/vendored `libc` supplies the named flags without unsafe
+code or a new registry package; its MIT/Apache-2.0 licensing is unchanged.
+Final-component FIFO/symlink replacement cannot redirect the read after
+validation. Ancestor-path isolation, concurrent content snapshots, FUSE/device
+behavior and giant-file latency remain outside this local viewer guarantee.
+
+Extract the existing terminal guard into a private module without changing its
+ownership/restoration semantics to keep the event-loop file below its size
+budget. The PTY test screen stores a grapheme at its first display cell and
+empty continuation cells. Join subsequent scalars using Unicode segmentation,
+including across source SGR transitions, and adjust cursor width using the
+same declared Unicode width model. Cursor movement breaks join adjacency;
+delayed wrap occurs only for a new grapheme, not a combining extension.
+Keep explicit foreground-independent emphasis assertions. This is a bounded
+terminal test model, not terminal probing or a claim about all font metrics.
+
+Write regression tests first for timeout and cleanup, retained diagnostics,
+reload success/failure/shrink/tab isolation, and wide/combining/joined Unicode
+under selection, clicks, clipping and resize. Perform scoped resource/terminal
+inspection and separate source-only observation/source-blind comparison.
+This user-directed follow-up uses the existing deliberate advisory exception
+while review receipts are unavailable; no acceptance or receipt is implied.
+Retain the earlier Esc/help interpretation findings for human arbitration.
+
+Scoped implementer inspection: launcher capture and drain batches are bounded,
+deadline checks use monotonic time, and explicit timeout cleanup owns only the
+direct child. Diagnostics retain the existing inert footer boundary. Reload
+validates and reads the same opened descriptor; the initial pathname-check/read
+race was corrected after independent observation. No unsafe code, shell,
+worker, process-group termination or new registry package is introduced.
+Nonregular objects are opened before validation, so this is not isolation
+against device-open effects or ancestor-path replacement. Spawn, kill/wait,
+regular-file reads and rendering have no hard real-time bound; concurrent
+writes are not snapshots. The Unicode harness shares production segmentation
+and width libraries and implements only selected terminal controls. This
+scoped inspection is not an independent security certification.
+
 ### Production viewer increment (2026-10-23)
 
 Keep terminal ownership in the open-file loop rather than each document event
@@ -292,7 +357,7 @@ nonblocking. Drain in bounded per-iteration batches while waiting for the
 launcher, retaining at most 4,096 bytes with explicit truncation. Once the
 launcher exits, drain only immediately available output; inherited browser
 descriptors must not keep the viewer waiting for EOF. No shell or new daemon
-is introduced. Preserve synchronous launcher semantics (no new timeout).
+is introduced. The later reliability follow-up bounds the synchronous wait.
 Successful diagnostics become a retained notice; nonzero status includes the
 bounded diagnostics in an error. The viewport inert-text boundary owns display.
 
