@@ -13,27 +13,27 @@ tasks:
   - id: shared-runtime-write-tests
     title: "Pin shared profiles and independent run inspection"
     description: "Test shared configuration consumption, headless parity, read-only journal attachment and explicitly authorized controls before code."
-    context: "Human approved ADR 0015; steering lifecycle tasks remain separately traceable."
+    context: "Human approved ADR 0015. shared_registry, inspection_cli, live_journal, external_agent, runtime_ipc, startup_lifecycle and existing native loop/context tests cover profiles, inspection, actual interactive/headless controls, private capability lifetime, backend distinctions and preserved authority. The refreshed offline locked full workspace suite passed."
     purpose: "Prevent presentation from owning execution or broadening authority."
     expected_outcome: "Deterministic regressions pin observer independence and profile consistency."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-implement-code
     title: "Consume shared mechanisms and inspect live runs"
     description: "Use Sav registry/native mechanisms, retain workspace executors, expose setup and independent observation/control clients."
-    context: "Do not route protected tasks through the workspace shell."
+    context: "Shared registry/setup and Sav native mechanisms now support deterministic headless selection, actual TUI/IPC steering and private per-prompt live journals. Attach/follow is executor-free; control access is explicit. Terminal-only opaque external agents require acknowledged host authority, retain their own loop, and have no invented live steering. Full workspace tests and strict Clippy passed; independent reviews remain separate. Protected tasks never use the workspace executor."
     purpose: "Keep interactive and headless clients consistent."
     expected_outcome: "Shared behavior and attachment tests pass."
     kind: implementation
-    status: pending
+    status: completed
     depends_on: [shared-runtime-write-tests]
     requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-security-audit
@@ -136,36 +136,36 @@ tasks:
   - id: "steering-write-tests"
     title: "Write failing steering and continuity tests"
     description: "Tests for steering during generation, backoff, tool execution, between tools; repeated steering; edit/withdraw vs claim; concurrent final answer; late events; stop; shutdown; recording failure; budget exhaustion. Assert preservation of original goal/context and completed changes, valid tool-call/result pairing, no stale next-tool dispatch, no automatic effect replay, no new session. Verify guidance reaches subsequent model request."
-    context: "Steering a running task is newly planned behavior that the current FIFO-only runtime does not implement; these tests pin its semantics from approved intent before any control path exists."
+    context: "Initial sav/tests/runtime_controls.rs regressions failed with missing sav::runtime before implementation. Expanded deterministic controls cover quiet generation, retry backoff, completed effects and skipped-result pairing, ordered edit/withdraw, final-answer races, recording failure, shutdown, and wall/token/attempt preservation. skott::run worker tests exercise the actual submission path; existing loop, context and lifecycle suites retain cancellation and cleanup evidence."
     purpose: "Pin steering semantics and interruption bound with deterministic fake transports."
     expected_outcome: "Tests fail for current FIFO-only behavior and pin exact approved semantics."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"
     timestamps:
       created_at: "2026-10-17T17:30:00Z"
-      updated_at: "2026-10-17T17:30:00Z"
-      completed_at: null
+      updated_at: "2026-10-23T22:08:00Z"
+      completed_at: "2026-10-23T22:08:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "steering-implement-code"
     title: "Implement coordinated immediate steering"
     description: "Add typed correlated control messages and worker-owned delivery handoff. Use operation-scoped interruption without ending session. Reconcile observed and skipped tool results, append claimed guidance in order, preserve task accounting, resume through context preflight. Expose pending edit/withdraw controls and truthful statuses."
-    context: "The steering tests define behavior the current runtime lacks, so the control path must be implemented to satisfy the approved prompt-steering requirement without resetting an in-flight task."
+    context: "Shared Sav runtime and bounded mailbox now drive the real TUI worker and Skott in-process controlled run API. Guidance uses operation-only cancellation, preserves prompt accounting, pairs stale calls, persists delivery before provider requests, and never becomes queued replacement work. Edit/withdraw are library controls before claim, not TUI shortcuts. Targeted Sav and Skott tests and offline locked Clippy pass; independent audit and compliance tasks remain pending."
     purpose: "Enable immediate complementary guidance without resetting the task."
     expected_outcome: "Steering tests pass, existing lifecycle/context tests remain valid, help explains new default."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "steering-write-tests"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"
     timestamps:
       created_at: "2026-10-17T17:30:00Z"
-      updated_at: "2026-10-17T17:30:00Z"
-      completed_at: null
+      updated_at: "2026-10-23T22:08:00Z"
+      completed_at: "2026-10-23T22:08:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "steering-security-audit"

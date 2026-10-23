@@ -14,6 +14,26 @@ use clap::Parser;
     long_about = None,
 )]
 pub struct Cli {
+    /// Inspect a shared live run journal without initializing models or tools.
+    #[arg(long, value_name = "JOURNAL", conflicts_with_all = ["prompt", "headless", "list_models"])]
+    pub attach: Option<PathBuf>,
+
+    /// Follow appended diagnostic records when inspection output is not a terminal.
+    #[arg(long, requires = "attach")]
+    pub follow: bool,
+
+    /// Explicit private control capability for the attached run.
+    #[arg(long, requires = "attach", value_name = "SOCKET")]
+    pub control: Option<PathBuf>,
+
+    /// Request cancellation; does not undo already observed or unknown effects.
+    #[arg(long, requires = "control", conflicts_with = "guide")]
+    pub cancel_run: bool,
+
+    /// Queue supplemental guidance; acknowledgement does not imply delivery.
+    #[arg(long, requires = "control", value_name = "TEXT")]
+    pub guide: Option<String>,
+
     /// Path to the TOML configuration file. Without this flag the
     /// configuration is resolved in order: `./skott.toml` in the
     /// current directory, then `$XDG_CONFIG_HOME/skott/config.toml`
@@ -22,15 +42,17 @@ pub struct Cli {
     #[arg(short, long, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
-    /// Print `[[models]]` entries derived from the agent profiles declared in
-    /// a Kvist `kvist.toml` and exit (non-interactive).
-    #[arg(long)]
-    pub import_kvist: bool,
+    /// Discover, qualify and save a shared provider profile without a Skott config.
+    #[arg(long, conflicts_with_all = ["headless", "list_models"])]
+    pub setup: bool,
 
-    /// Path to the Kvist project configuration to import agent profiles from
-    /// (default: `./kvist.toml`).
+    /// Explicit shared provider registry (also used by --setup).
     #[arg(long, value_name = "PATH")]
-    pub kvist_config: Option<PathBuf>,
+    pub registry: Option<PathBuf>,
+
+    /// Save a setup profile even if live qualification fails.
+    #[arg(long, requires = "setup")]
+    pub force: bool,
 
     /// Select a configured model id for this session.
     #[arg(short, long, value_name = "ID")]
@@ -70,8 +92,13 @@ pub struct Cli {
     #[arg(long)]
     pub no_logs: bool,
 
+    /// Expose a private local cancellation/guidance socket; requires sandboxed
+    /// execution and private durable logs. The operator receives its capability.
+    #[arg(long, conflicts_with_all = ["no_logs", "allow_host_execution", "setup", "attach", "list_models"])]
+    pub allow_control: bool,
+
     /// Run one sandboxed prompt without a terminal; requires durable logging.
-    #[arg(long, requires = "prompt", conflicts_with_all = ["allow_host_execution", "host_turns", "no_logs", "list_models", "import_kvist"])]
+    #[arg(long, requires = "prompt", conflicts_with_all = ["allow_host_execution", "host_turns", "no_logs", "list_models", "setup"])]
     pub headless: bool,
 
     /// Emit version-one NDJSON events rather than only the final answer.
@@ -336,22 +363,25 @@ mod tests {
         assert!(cli.profile.is_none());
         assert!(cli.prompt.is_none());
         assert!(!cli.list_models);
-        assert!(!cli.import_kvist);
-        assert!(cli.kvist_config.is_none());
+        assert!(!cli.setup);
+        assert!(cli.registry.is_none());
         assert!(!cli.allow_host_execution);
         assert!(cli.host_turns.is_none());
     }
 
     #[test]
-    fn parses_import_kvist_with_explicit_kvist_config() {
+    fn parses_setup_with_explicit_registry() {
         let cli = Cli::parse_from([
             "skott",
-            "--import-kvist",
-            "--kvist-config",
-            "/tmp/kvist.toml",
+            "--setup",
+            "--registry",
+            "/workspace/providers.toml",
         ]);
-        assert!(cli.import_kvist);
-        assert_eq!(cli.kvist_config, Some(PathBuf::from("/tmp/kvist.toml")));
+        assert!(cli.setup);
+        assert_eq!(
+            cli.registry,
+            Some(PathBuf::from("/workspace/providers.toml"))
+        );
     }
 
     /// A fixed fake environment for the resolver tests (owned, so no lifetime

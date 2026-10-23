@@ -144,6 +144,28 @@ impl SessionTranscript {
 }
 
 impl Recorder for SessionTranscript {
+    fn model_event(&mut self, event: &sav::ModelStreamEvent) -> Result<()> {
+        match event {
+            sav::ModelStreamEvent::TextDelta(text) | sav::ModelStreamEvent::ReasoningDelta(text) => {
+                self.live_record(json!({
+                    "type":if matches!(event,sav::ModelStreamEvent::TextDelta(_)) {"text"} else {"reasoning"},
+                    "data":bounded_text(text),"provisional":true,"truncated":text.len()>8192
+                }), false)
+            }
+            sav::ModelStreamEvent::ToolIntent(intent) => self.live_record(
+                json!({"type":"tool_proposed","data":{"call_id":intent.id,"name":intent.name}}),false),
+        }
+    }
+
+    fn control(&mut self, notice: &crate::session::GuidanceNotice) -> Result<()> {
+        self.live_record(json!({"type":"control","data":notice}), true)?;
+        self.log.control(notice)?;
+        self.transcript
+            .record_notice(&format!("guidance #{}: {:?}", notice.id.0, notice.state))
+            .map_err(|error| crate::error::io_error("record transcript control", None, error))?;
+        Ok(())
+    }
+
     fn notice(&mut self, message: &str) -> Result<()> {
         self.log.notice(message)?;
         self.live_record(json!({"type":"note","data":bounded_text(message)}), false)?;

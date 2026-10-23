@@ -124,6 +124,10 @@ fn headless_returns_ordered_versioned_events_without_a_terminal() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("private control socket:"),
+        "controls must remain disabled by default"
+    );
     let lines: Vec<Value> = String::from_utf8(output.stdout)
         .unwrap()
         .lines()

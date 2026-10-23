@@ -25,12 +25,38 @@ fn main() -> ExitCode {
 
 fn run() -> skott::Result<ExitCode> {
     let cli = Cli::parse();
+    if let Some(path) = cli.attach.as_deref() {
+        skott::inspection::inspect(
+            path,
+            cli.follow,
+            cli.control.as_deref(),
+            cli.cancel_run,
+            cli.guide.as_deref(),
+        )?;
+        return Ok(ExitCode::SUCCESS);
+    }
 
-    // Importing Kvist agent profiles is a read-only, non-interactive command
-    // that does not need an skott configuration.
-    if cli.import_kvist {
-        return import_kvist(cli.kvist_config.clone())
-            .map_err(|reason| Error::Config { path: None, reason });
+    if cli.setup {
+        let registry = cli
+            .registry
+            .clone()
+            .or_else(sav::registry::default_registry_path)
+            .ok_or_else(|| Error::Config {
+                path: None,
+                reason: "cannot resolve registry; set HOME or --registry".into(),
+            })?;
+        let cwd = cli.cwd.clone().unwrap_or(std::env::current_dir()?);
+        sav::run_registry_setup(
+            &mut std::io::BufReader::new(std::io::stdin().lock()),
+            &mut std::io::stdout().lock(),
+            &cwd,
+            &registry,
+            sav::SetupOptions {
+                force: cli.force,
+                ..Default::default()
+            },
+        )?;
+        return Ok(ExitCode::SUCCESS);
     }
 
     // Resolve the configuration once so both `--config` and `--list-models`
@@ -40,10 +66,11 @@ fn run() -> skott::Result<ExitCode> {
 
     // Listing configured models is a read-only, non-interactive command.
     if cli.list_models {
-        return list_models(&config_path).map_err(|reason| Error::Config { path: None, reason });
+        return list_models(&config_path, cli.registry.as_deref())
+            .map_err(|reason| Error::Config { path: None, reason });
     }
 
-    let config = Config::load(&config_path)?;
+    let config = Config::load_with_registry(&config_path, cli.registry.as_deref())?;
 
     let effort = match &cli.effort {
         Some(value) => Some(
@@ -96,8 +123,28 @@ fn run() -> skott::Result<ExitCode> {
         },
         theme,
     };
+    if let Some(profile) = cli
+        .model
+        .as_deref()
+        .and_then(|id| config.shared_profile(id))
+        && matches!(
+            profile.profile.backend,
+            sav::registry::Backend::ExternalAgent(_)
+        )
+    {
+        return skott::external::run_profile(
+            profile,
+            &overrides,
+            &config.working_directory,
+            cli.headless,
+        );
+    }
+    if config.models.is_empty() {
+        return Err(Error::Config{path:None,reason:"only external-agent profiles are configured; use --model NAME --allow-host-execution \"PROMPT\" in a terminal".into()});
+    }
     if cli.headless {
-        let summary = skott::headless::run(config, overrides, cli.json)?;
+        let summary =
+            skott::headless::run_with_controls(config, overrides, cli.json, cli.allow_control)?;
         if let Some(failure) = &summary.failure {
             eprintln!("{}", skott::error::terminal_text(failure));
         }
@@ -109,25 +156,16 @@ fn run() -> skott::Result<ExitCode> {
             1
         }))
     } else {
-        Ok(tui::run(config, overrides))
+        Ok(tui::run_with_controls(config, overrides, cli.allow_control))
     }
 }
 
-/// Prints `[[models]]` entries derived from a Kvist project configuration so
-/// the project's agents can be reused in the skott configuration.
-fn import_kvist(kvist_config: Option<std::path::PathBuf>) -> std::result::Result<ExitCode, String> {
-    let path = skott::resolve_kvist_config_path(kvist_config)?;
-    let snippet = skott::import_models(&path).map_err(|error| error.describe())?;
-    println!(
-        "# imported from {}",
-        skott::error::terminal_text(&path.display().to_string())
-    );
-    print!("{snippet}");
-    Ok(ExitCode::SUCCESS)
-}
-
-fn list_models(config_path: &Path) -> std::result::Result<ExitCode, String> {
-    let config = Config::load(config_path).map_err(|error| error.describe())?;
+fn list_models(
+    config_path: &Path,
+    registry: Option<&Path>,
+) -> std::result::Result<ExitCode, String> {
+    let config =
+        Config::load_with_registry(config_path, registry).map_err(|error| error.describe())?;
 
     println!("configured models:");
     if config.models.is_empty() {
@@ -146,6 +184,27 @@ fn list_models(config_path: &Path) -> std::result::Result<ExitCode, String> {
                 skott::error::terminal_text(&model.base_url),
                 skott::error::terminal_text(&model.model),
                 model.deadline_secs
+            );
+        }
+    }
+    for profile in config.shared_profiles.values() {
+        if let sav::registry::Backend::ExternalAgent(backend) = &profile.profile.backend {
+            println!(
+                "  {}  external-agent {}  {} (explicit host execution only)",
+                skott::error::terminal_text(&profile.name),
+                backend.provider.as_str(),
+                skott::error::terminal_text(backend.model.as_deref().unwrap_or("provider default"))
+            );
+        }
+    }
+    for profile in config.shared_profiles.values() {
+        if let sav::registry::Backend::ExternalAgent(agent) = &profile.profile.backend {
+            println!(
+                "  {:<12} external-agent {}  {}  {}",
+                skott::error::terminal_text(&profile.name),
+                agent.provider.as_str(),
+                skott::error::terminal_text(&agent.executable),
+                skott::error::terminal_text(agent.model.as_deref().unwrap_or("(provider default)")),
             );
         }
     }

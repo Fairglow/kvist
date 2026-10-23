@@ -2,6 +2,13 @@
 
 # Skott — Requirements
 
+## Shared registry configuration acceptance (ADR 0015)
+
+Skott MUST consume shared named profiles without importing provider facts.
+Shared setup MUST work without an existing Skott config. Loaded-model discovery
+MAY only influence implicit interactive defaults, never an explicit selection
+or a headless task profile. Native overrides MUST use Sav's shared validation.
+
 ## RUN-REQ-SHARED-RUNTIME
 
 Skott MUST consume Sav's shared registry/resolver and native mechanisms rather
@@ -19,6 +26,13 @@ workspace executor as a fallback. Private logs are not canonical evidence.
 
 ## RUN-REQ-PROMPT-STEERING
 
+Optional private IPC controls MUST be explicitly enabled and MUST NOT expose
+the capability to model context or durable run records. They MUST reject idle
+guidance/cancellation, disabled recording and unconfined host execution, remove
+owned endpoints during teardown, and use the same active-task mailbox as local
+submission. Tests MUST cover both actual interactive and headless entrypoints,
+including a quiet provider and a later prompt after rejected idle cancellation.
+
 When a user submits a prompt while an autonomous task is running, the submission
 MUST be treated as steering guidance for the active task, not a replacement
 task. The original task objective, conversation context, completed filesystem
@@ -30,6 +44,12 @@ interruption, and model-context-delivery states. Steering during shutdown is
 not delivered. Steering must never create a new session or use the new-session
 replacement path. Rapid consecutive steering submissions MUST be delivered in
 submission order.
+
+The real interactive submission path and in-process headless/library controls
+MUST use the same bounded mailbox. Tests MUST demonstrate running submissions
+do not become a second task after completion, and post-completion submissions
+are separately classified. Guidance queue rejection MUST remain actionable
+without losing the interactive draft.
 
 ## RUN-REQ-RESPONSIVE-LIFECYCLE
 
@@ -229,7 +249,7 @@ remain required after implementation.
 
 ## RUN-REQ-MODEL-SELECTION
 
-Model selection and activation MUST prefer a model the default provider already
+Interactive model selection MUST prefer a model the default provider already
 has loaded over a statically configured one, when the user has not explicitly
 selected a model, so an already-active model starts with no load/switch cost.
 The active model MUST be discovered by a bounded, read-only, loopback-only
@@ -241,7 +261,9 @@ widen endpoint authority, and a probe failure (provider down, malformed, or no
 model loaded) MUST NOT fail startup and MUST fall through to the next rule.
 Ollama's implicit `:latest` name MUST match its untagged configured equivalent.
 
-The selection precedence MUST be:
+Headless selection MUST skip loaded-model discovery and use explicit selection,
+a sole configured default-provider model, or its configured default, otherwise
+fail before inference. Interactive selection precedence MUST be:
 
 - An explicit selection wins and is never overridden by provider state: the
   `--model` flag (which `kvist prompt` passes for the role's profile) and the
@@ -263,20 +285,19 @@ The selection precedence MUST be:
   `is_default` model), the session MUST not silently guess: the interactive TUI
   MUST start with no model selected and defer loading until the user selects and
   submits, and headless execution MUST fail fast before provider inference with
-  an actionable diagnostic that lists the configured default-provider ids, names
-  any active provider model found, and suggests `--model` and marking one entry
-  `is_default`.
+  an actionable diagnostic that lists the configured default-provider ids
+  and suggests `--model` and marking one entry `is_default`.
 
 `default_provider` is a required configuration field naming the provider the
-session falls back to; it MUST name at least one configured model. At most one
-`[[models]]` entry per provider MAY be marked `is_default`. The per-provider
-default model MUST be used only when the default provider reports no active
-model, and MUST NOT override an active model, an explicit selection, or a single
-default-provider model. When the provider
+native session falls back to; when native models are present, it MUST name at
+least one configured native model. At most one `[[models]]` entry per provider
+MAY be marked `is_default`. The per-provider
+default model MUST NOT override an interactively discovered active model,
+an explicit selection, or a single default-provider model. When the provider
 has an active model not present in `[[models]]`, the tool SHOULD offer to
 configure it by printing a ready-to-paste `[[models]]` entry (provider,
-base_url, provider model name, and sane defaults), derived as with
-`--import-kvist`, and MUST NOT modify the configuration file automatically.
+base_url, provider model name, and sane defaults), using the shared native-model
+fields, and MUST NOT modify the configuration file automatically.
 
 ## RUN-REQ-REVIEW
 
@@ -377,7 +398,7 @@ Successful use produces:
   current directory;
 - the ability to choose an configured model and a thinking effort before or
   during the session, with the current choice always visible;
-- a model that the provider already has loaded is preferred over a statically
+- in interactive mode, a model that the provider already has loaded is preferred over a statically
   configured one when the user has not explicitly selected a model, so an
   already-active model starts with no load/switch cost;
 - a live transcript that shows the agent's reasoning, every tool call it makes,
@@ -412,7 +433,7 @@ Successful use produces:
 - Loading and validating a TOML configuration that declares models, a
   last-resort default model, a default thinking effort, the tool policy, the
   working directory, and the sandbox runner and backend paths.
-- Model selection and activation: resolving the session's model by preferring an
+- Interactive model selection and activation: resolving the session's model by preferring an
   explicit selection, then the default provider's already-loaded model
   (discovered by a bounded, read-only, loopback-only probe), then a single
   default-provider model, then the default provider's default model as a
@@ -535,7 +556,7 @@ Successful use produces:
 - Given a long prompt, the terminal UI accepts it without the previous
   16,384-character bound, and the session record is named by date, time, and
   the first words of the first prompt.
-- Given no explicit model selection and a provider that already has a configured
+- Given interactive execution, no explicit model selection and a provider that already has a configured
   model loaded, `skott` selects that model without a load/switch and
   announces it; the probe is read-only and a down provider falls through rather
   than failing startup.

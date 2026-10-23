@@ -14,10 +14,6 @@ use crate::toolchain::{ProfileSetting, ToolProfile};
 pub const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 /// The only accepted configuration schema version.
 pub const SCHEMA_VERSION: u32 = 1;
-/// Minimum per-turn model deadline in seconds.
-const MIN_DEADLINE_SECS: u64 = 1;
-/// Maximum per-turn model deadline in seconds.
-const MAX_DEADLINE_SECS: u64 = 600;
 
 pub(crate) fn resolve_working_directory(path: &Path) -> Result<PathBuf> {
     let resolved = path.canonicalize().map_err(|source| {
@@ -36,61 +32,8 @@ pub(crate) fn resolve_working_directory(path: &Path) -> Result<PathBuf> {
     Ok(resolved)
 }
 
-/// The local model provider a model talks to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ModelProvider {
-    /// llama-server's OpenAI-compatible HTTP protocol.
-    LlamaServer,
-    /// Ollama's native HTTP protocol.
-    Ollama,
-}
-
-impl ModelProvider {
-    /// Maps the configuration provider to the sav transport provider.
-    pub const fn to_agent_provider(self) -> sav::LocalModelProvider {
-        match self {
-            ModelProvider::LlamaServer => sav::LocalModelProvider::LlamaServer,
-            ModelProvider::Ollama => sav::LocalModelProvider::Ollama,
-        }
-    }
-
-    /// The base URL the provider listens on when no override is configured.
-    pub const fn default_endpoint(self) -> &'static str {
-        match self {
-            ModelProvider::LlamaServer => "http://127.0.0.1:9931",
-            ModelProvider::Ollama => "http://127.0.0.1:11434",
-        }
-    }
-
-    /// Parses the kebab-case provider spelling used in configuration files.
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "llama-server" => Some(Self::LlamaServer),
-            "ollama" => Some(Self::Ollama),
-            _ => None,
-        }
-    }
-}
-
-impl FromStr for ModelProvider {
-    type Err = String;
-
-    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
-        Self::parse(value)
-            .ok_or_else(|| format!("invalid provider `{value}`; expected llama-server or ollama"))
-    }
-}
-
-impl std::fmt::Display for ModelProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            ModelProvider::LlamaServer => "llama-server",
-            ModelProvider::Ollama => "ollama",
-        };
-        f.write_str(name)
-    }
-}
+/// The canonical Sav local-provider identifier, not a frontend-specific enum.
+pub use sav::LocalModelProvider as ModelProvider;
 
 /// One selectable model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,24 +170,28 @@ impl Model {
     /// still bounded by the per-attempt deadline, and a stall after the first
     /// token is still caught by the inter-token cadence watchdog.
     pub fn transport(&self) -> Result<sav::DirectModelTransport> {
-        let deadline = std::time::Duration::from_secs(self.deadline_secs);
-        let mut transport = sav::DirectModelTransport::with_watchdogs(
-            self.provider.to_agent_provider(),
-            &self.base_url,
-            deadline,
-            8 * 1024 * 1024,
-            deadline,
-            deadline,
-        )
-        .map_err(|error| Error::ModelTransport {
-            model: Some(self.id.clone()),
-            reason: error.to_string(),
-        })?;
-        if self.cadence_timeout_secs > 0 {
-            transport = transport
-                .with_cadence_timeout(std::time::Duration::from_secs(self.cadence_timeout_secs));
+        self.native()
+            .transport()
+            .map_err(|error| Error::ModelTransport {
+                model: Some(self.id.clone()),
+                reason: error.to_string(),
+            })
+    }
+
+    /// Shared model/options representation, also used to parse explicit entries.
+    pub fn native(&self) -> sav::registry::NativeModel {
+        sav::registry::NativeModel {
+            provider: self.provider,
+            base_url: self.base_url.clone(),
+            model: self.model.clone(),
+            context_limit: self.context_limit,
+            response_reserve: self.response_reserve,
+            deadline_secs: self.deadline_secs,
+            max_attempts: self.max_attempts,
+            retry_base_delay_secs: self.retry_base_delay_secs,
+            retry_max_delay_secs: self.retry_max_delay_secs,
+            cadence_timeout_secs: self.cadence_timeout_secs,
         }
-        Ok(transport)
     }
 
     /// Retry limits shared by both terminal and headless session construction.
@@ -427,6 +374,8 @@ impl Default for ToolPolicy {
 /// The validated, in-memory configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
+    /// Pinned shared backends, including external agents kept out of `models`.
+    pub shared_profiles: BTreeMap<String, sav::registry::ResolvedProfile>,
     /// The configuration schema version.
     pub schema_version: u32,
     /// The working directory the agent operates in.
@@ -456,6 +405,8 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
+    #[serde(skip)]
+    shared_profiles: BTreeMap<String, sav::registry::ResolvedProfile>,
     schema_version: u32,
     #[serde(default)]
     working_directory: Option<String>,
@@ -469,6 +420,8 @@ struct RawConfig {
     #[serde(default)]
     models: Vec<RawModel>,
     #[serde(default)]
+    registry: Option<RegistryConfig>,
+    #[serde(default)]
     sandbox: RawSandbox,
     #[serde(default)]
     tool_policy: RawToolPolicy,
@@ -481,30 +434,28 @@ struct RawConfig {
     theme: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RegistryConfig {
+    path: Option<PathBuf>,
+    #[serde(default)]
+    profiles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct RawModel {
     id: String,
-    provider: ModelProvider,
-    #[serde(default)]
-    base_url: String,
-    model: String,
     #[serde(default)]
     is_default: bool,
-    #[serde(default)]
-    context_limit: Option<usize>,
-    #[serde(default)]
-    response_reserve: Option<u32>,
-    #[serde(default = "default_deadline")]
-    deadline_secs: u64,
-    #[serde(default = "default_max_attempts")]
-    max_attempts: u32,
-    #[serde(default = "default_retry_base_delay_secs")]
-    retry_base_delay_secs: u64,
-    #[serde(default = "default_retry_max_delay_secs")]
-    retry_max_delay_secs: u64,
-    #[serde(default = "default_cadence_timeout_secs")]
-    cadence_timeout_secs: u64,
+    #[serde(flatten)]
+    native: sav::registry::NativeModel,
+}
+
+impl std::ops::Deref for RawModel {
+    type Target = sav::registry::NativeModel;
+    fn deref(&self) -> &Self::Target {
+        &self.native
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -530,10 +481,63 @@ struct RawToolPolicy {
 impl Config {
     /// Loads and validates the configuration at `path`.
     pub fn load(path: &Path) -> Result<Config> {
+        Self::load_with_registry(path, None)
+    }
+
+    /// Loads config with a CLI-level explicit registry override.
+    pub fn load_with_registry(path: &Path, registry_path: Option<&Path>) -> Result<Config> {
         let contents = read_configuration(path)?;
-        let raw: RawConfig = toml::from_str(&contents).map_err(|error: toml::de::Error| {
+        let mut raw: RawConfig = toml::from_str(&contents).map_err(|error: toml::de::Error| {
             configuration_parse_error(path, &contents, error.span())
         })?;
+        if raw.registry.is_some() || registry_path.is_some() || raw.models.is_empty() {
+            let registry = raw.registry.take().unwrap_or_default();
+            let base = path.parent().unwrap_or(Path::new("."));
+            let cwd = std::env::current_dir()
+                .map_err(|source| io_error("resolve registry project directory", None, source))?;
+            let mut paths = sav::registry::RegistryPaths::for_project(&cwd);
+            paths.explicit = registry_path.map(Path::to_path_buf).or_else(|| {
+                registry
+                    .path
+                    .map(|p| if p.is_absolute() { p } else { base.join(p) })
+            });
+            let resolved = paths.load()?;
+            let names = if registry.profiles.is_empty() {
+                resolved
+                    .profiles()
+                    .filter(|p| p.profile.enabled)
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                registry.profiles
+            };
+            for name in names {
+                if raw.models.iter().any(|model| model.id == name)
+                    || raw.shared_profiles.contains_key(&name)
+                {
+                    return Err(Error::Config {
+                        path: Some(path.display().to_string()),
+                        reason: format!("duplicate local/shared model id `{name}`"),
+                    });
+                }
+                let profile = resolved.resolve(&name)?;
+                if let sav::registry::Backend::Native(native) = &profile.profile.backend {
+                    raw.models.push(RawModel {
+                        id: name.clone(),
+                        is_default: false,
+                        native: native.clone(),
+                    });
+                }
+                raw.shared_profiles.insert(name, profile);
+            }
+        }
+        for model in &mut raw.models {
+            sav::registry::validate_profile_name(&model.id)?;
+            model.native.validate().map_err(|error| Error::Config {
+                path: Some(path.display().to_string()),
+                reason: error.to_string(),
+            })?;
+        }
         Config::validate(raw, path)
     }
 
@@ -574,7 +578,7 @@ impl Config {
             });
         }
 
-        if raw.models.is_empty() {
+        if raw.models.is_empty() && raw.shared_profiles.is_empty() {
             return Err(Error::Config {
                 path: Some(path.to_string_lossy().into_owned()),
                 reason: "at least one `[[models]]` entry is required".to_owned(),
@@ -590,80 +594,10 @@ impl Config {
                     reason: format!("duplicate model id `{}` at models[{index}]", model.id),
                 });
             }
-            let base_url = if model.base_url.is_empty() {
-                model.provider.default_endpoint().to_owned()
-            } else {
-                model.base_url.clone()
-            };
-            if model.model.trim().is_empty() {
-                return Err(Error::Config {
-                    path: Some(path.to_string_lossy().into_owned()),
-                    reason: format!("models[{index}].model must not be empty"),
-                });
-            }
-            if !(MIN_DEADLINE_SECS..=MAX_DEADLINE_SECS).contains(&model.deadline_secs) {
-                return Err(Error::Config {
-                    path: Some(path.to_string_lossy().into_owned()),
-                    reason: format!(
-                        "models[{index}].deadline_secs must be between {MIN_DEADLINE_SECS} and {MAX_DEADLINE_SECS}"
-                    ),
-                });
-            }
-            if model
-                .context_limit
-                .is_some_and(|limit| !(2..=1_048_576).contains(&limit))
-                || model
-                    .response_reserve
-                    .is_some_and(|reserve| !(1..=1_048_576).contains(&reserve))
-                || model
-                    .context_limit
-                    .zip(model.response_reserve)
-                    .is_some_and(|(limit, reserve)| limit <= reserve as usize)
-            {
-                return Err(Error::Config {
-                    path: Some(path.to_string_lossy().into_owned()),
-                    reason: format!(
-                        "models[{index}] needs bounded context_limit greater than response_reserve"
-                    ),
-                });
-            }
-            if model.retry_base_delay_secs > model.retry_max_delay_secs {
-                return Err(Error::Config {
-                    path: Some(path.to_string_lossy().into_owned()),
-                    reason: format!(
-                        "models[{index}].retry_base_delay_secs must not exceed retry_max_delay_secs"
-                    ),
-                });
-            }
-            if model.max_attempts < 1 {
-                return Err(Error::Config {
-                    path: Some(path.to_string_lossy().into_owned()),
-                    reason: format!("models[{index}].max_attempts must be at least 1"),
-                });
-            }
-            if !(0..=MAX_DEADLINE_SECS).contains(&model.cadence_timeout_secs) {
-                return Err(Error::Config {
-                    path: Some(path.to_string_lossy().into_owned()),
-                    reason: format!(
-                        "models[{index}].cadence_timeout_secs must be between 0 and {MAX_DEADLINE_SECS}"
-                    ),
-                });
-            }
-            const MAX_RETRY_DELAY_SECS: u64 = 3600;
-            if model.retry_base_delay_secs > MAX_RETRY_DELAY_SECS
-                || model.retry_max_delay_secs > MAX_RETRY_DELAY_SECS
-            {
-                return Err(Error::Config {
-                    path: Some(path.to_string_lossy().into_owned()),
-                    reason: format!(
-                        "models[{index}].retry_*_delay_secs must be between 0 and {MAX_RETRY_DELAY_SECS}"
-                    ),
-                });
-            }
             models.push(Model {
                 id: model.id.clone(),
                 provider: model.provider,
-                base_url,
+                base_url: model.base_url.clone(),
                 model: model.model.clone(),
                 is_default: model.is_default,
                 context_limit: model.context_limit,
@@ -709,6 +643,7 @@ impl Config {
         if !models
             .iter()
             .any(|model| model.provider == raw.default_provider)
+            && !models.is_empty()
         {
             return Err(Error::Config {
                 path: Some(path.to_string_lossy().into_owned()),
@@ -754,6 +689,7 @@ impl Config {
             };
 
         Ok(Config {
+            shared_profiles: raw.shared_profiles,
             schema_version: SCHEMA_VERSION,
             working_directory,
             default_provider: raw.default_provider,
@@ -781,9 +717,15 @@ impl Config {
     pub fn from_parts(
         working_directory: PathBuf,
         default_provider: ModelProvider,
-        models: Vec<Model>,
+        mut models: Vec<Model>,
         tool_policy: crate::tools::ToolPolicy,
     ) -> Result<Config> {
+        for model in &mut models {
+            sav::registry::validate_profile_name(&model.id)?;
+            let mut native = model.native();
+            native.validate()?;
+            model.base_url = native.base_url;
+        }
         if !models
             .iter()
             .any(|model| model.provider == default_provider)
@@ -799,6 +741,7 @@ impl Config {
             .map(|profile| (profile, ProfileSetting::Auto))
             .collect();
         Ok(Config {
+            shared_profiles: BTreeMap::new(),
             schema_version: SCHEMA_VERSION,
             working_directory,
             default_provider,
@@ -814,6 +757,11 @@ impl Config {
     /// The model matching a selector, when present.
     pub fn model(&self, id: &str) -> Option<&Model> {
         self.models.iter().find(|model| model.id == id)
+    }
+
+    /// Pinned shared native/external identity for explicit frontend dispatch.
+    pub fn shared_profile(&self, id: &str) -> Option<&sav::registry::ResolvedProfile> {
+        self.shared_profiles.get(id)
     }
 
     /// The configured models for the default provider, in configuration order.

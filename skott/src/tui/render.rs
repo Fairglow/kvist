@@ -292,7 +292,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let lines = vec![
         Line::from(Span::styled("skott help", theme.title)),
         Line::from(""),
-        Line::from("  Ctrl+Enter       submit the prompt"),
+        Line::from("  Ctrl+Enter       send / steer"),
         Line::from("  Enter            submit on a blank line, else a newline"),
         Line::from("  Shift+Enter      always insert a blank line"),
         Line::from("  Tab / Shift+Tab  next model / next thinking effort (per prompt)"),
@@ -340,6 +340,9 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
             }
             _ => "  Do not assume sandbox network confinement.",
         }),
+        Line::from("  While running, submissions guide the active task."),
+        Line::from("  Guidance keeps the objective, effects and prompt budgets."),
+        Line::from("  Model/effort changes apply after completion; new session cancels."),
         Line::from(match app.execution_scope {
             crate::session_log::ExecutionScope::HostUnconfined => {
                 "  WARNING: HOST UNCONFINED. Shell tools have real host privileges; writes and network are not sandbox constrained."

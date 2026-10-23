@@ -37,10 +37,13 @@ skott                       # open the UI in the current directory
 skott --config ./cfg.toml   # use a specific configuration
 skott -m ollama "explain this repo"   # pick a model and submit a prompt
 skott --list-models         # print configured models and exit
+skott --setup               # shared discover/test/configure wizard; no config needed
+skott --setup --registry ./providers.toml
+skott --registry ./providers.toml -m local-coder
 ```
 
-Run it from an interactive terminal. It refuses non-interactive input with an
-actionable message.
+Interactive execution requires a terminal; use `--headless` for unattended
+native workspace execution.
 
 The prompt is editable immediately while model/toolchain discovery and context
 setup run in the background. You can submit before startup finishes; prompts
@@ -60,10 +63,12 @@ When you submit a prompt while an autonomous task is already running, the
 submission is treated as steering guidance for the active task rather than a
 replacement task. The original objective, conversation context, completed
 filesystem effects, and observed tool results are preserved. Steering is
-delivered by appending a user message at a safe interruption point (a turn
-boundary), where it appears in the next model request; the session is not
-replaced. Per-prompt budget exhaustion ends the active task, and steering
-submitted after that point starts a new task instead.
+delivered by appending a user message at the next safe interruption point:
+quiet generation and retry waits are interrupted, but executing tools finish.
+Provisional generations are discarded and stale tool calls receive explicit
+not-executed results. Acceptance, claim and model-context delivery have distinct
+statuses. Wall/token/attempt budgets are not reset. A locally submitted prompt
+after completion is a new task; late remote guidance is rejected.
 
 ## Headless mode
 
@@ -74,13 +79,71 @@ sandbox-only: it requires durable logging and rejects `--allow-host-execution`,
 `--host-turns`, and `--no-logs`. `kvist prompt` uses this same headless path
 when no terminal is attached.
 
+Headless model selection is deterministic: use `--model`, a sole configured
+default-provider model, or that provider's configured default. It never changes
+selection to whichever model happens to be loaded.
+
+## Live inspection and optional controls
+
+Native prompts print their private `*.events.jsonl` path. Protected
+`kvist task run` attempts publish the same journal protocol:
+
+```bash
+skott --attach /path/to/run.events.jsonl
+skott --attach /path/to/run.events.jsonl --follow  # plain-output follow
+```
+
+Attachment loads no providers or tools. At a terminal it opens a scrolling
+viewer; otherwise it prints a bounded snapshot. EOF without `run_end` is
+incomplete. `q`, Esc or Ctrl+C detaches the viewer without cancelling its owner.
+These diagnostic records are not canonical Kvist evidence.
+
+Start native execution with `--allow-control` to enable a private local socket.
+For protected tasks use `kvist task run . TASK_ID --allow-control`. Its path is
+reported only to the operator, never the model or durable journal:
+
+```bash
+skott --attach /path/to/run.events.jsonl --control /private/path/control.sock
+skott --attach /path/to/run.events.jsonl --control /private/path/control.sock --guide "Preserve the public API"
+skott --attach /path/to/run.events.jsonl --control /private/path/control.sock --cancel-run
+```
+
+With a capability, viewer `c` requests cancellation and `g` opens a guidance
+composer (Enter queues, Esc discards). Queued does not mean delivered.
+Cancellation does not undo effects; controls never grant new tools or
+permissions. Skott IPC controls require private logs outside the workspace and
+are incompatible with unconfined host execution.
+
+## External coding agents
+
+Shared external profiles, including Copilot, are listed by `--list-models`.
+Select one explicitly:
+
+```bash
+skott --model copilot-coder --allow-host-execution "Review this workspace"
+```
+
+This terminal-only path requires an explicit **HOST UNCONFINED**
+acknowledgement. The provider owns its loop; Sav supervises its literal command
+once, without native tool interpretation or automatic retry. Private journals
+retain bounded output. Viewer `c` cancels; `q` detaches while the owner keeps
+waiting (Ctrl+C then requests cancellation). Native-only tool/context/token
+overrides, headless external execution and protected task authoring are
+refused. External live steering is unsupported rather than simulated.
+
 ## Configuration
 
 Configuration is TOML. See [config.example.toml](./config.example.toml) for a
 complete, commented example. Key points:
 
 - `schema_version` must be `1`.
-- `models` declares the selectable models and their provider (`llama-server` or
+- Prefer `[registry] profiles = ["NAME"]` to reference Sav profiles without
+  copying facts. Optional `path = "providers.toml"` is relative to this config;
+  `--registry PATH` takes precedence. With no explicit path, project
+  `.kvist/providers.toml` overrides the user Sav registry. Registry loading is
+  filesystem-only; discovery/qualification happens only during explicit setup
+  or execution startup. Native and external-agent backends remain distinct.
+- Explicit `models` overrides declare a local provider (`llama-server` or
   `ollama`), base URL, provider model name, and a per-turn deadline. Serving
   context is discovered for the selected model, not assumed to be 8192 tokens.
   Set per-model `context_limit` when the server cannot report its actual window

@@ -8,10 +8,12 @@
 configuration. `--registry PATH` explicitly overrides the registry used during
 normal configuration loading. `[registry] path = "..."` is resolved relative to
 the Skott configuration file; `profiles = ["NAME"]` restricts available named
-profiles (otherwise enabled native profiles are listed). Shared profiles are
+profiles (otherwise all enabled profiles are retained). Shared profiles are
 referenced, not copied. Local `[[models]]` remain explicit overrides, parsed and
 validated using Sav's native model representation; duplicate shared/local IDs
-are rejected. External-agent profiles are not native transports.
+are rejected. `Config.shared_profiles`/`shared_profile` expose pinned native
+and external definitions; only native profiles enter `Config.models`.
+External-agent profiles are not native transports.
 `--import-kvist` and `--kvist-config` are retired, without migration.
 
 ## Interactive startup and shutdown
@@ -31,6 +33,32 @@ detection uses bounded root-manifest/ignore inspection; invalid ignore files
 produce a diagnostic and retain raw-manifest advisory detection.
 
 ## Prompt steering
+
+### Optional private execution controls
+
+`--allow-control` explicitly enables a private local control socket for
+interactive or headless native execution. It conflicts with `--no-logs`,
+`--allow-host-execution`, setup, attachment and model listing. The endpoint
+allows only guidance to an active task and cancellation of that active task;
+idle or late requests are rejected and cannot enqueue a replacement task.
+Acknowledgements correlate IPC request IDs and identify accepted runtime
+guidance IDs without claiming delivery.
+
+The capability path appears only on operator stderr (headless) or in the live
+operator UI (interactive), never model context, runtime event output or durable
+journals/transcripts. The socket must be outside the writable workspace.
+Controls require private durable logs outside that workspace, including through
+existing ancestor aliases. Interactive opt-in without `--log-dir` uses the
+private state-directory default used by headless mode; ordinary interactive
+logging behavior is unchanged.
+
+`tui::run_with_controls(config, overrides, allow_control)` and
+`headless::run_with_controls(config, overrides, json_output, allow_control)`
+provide explicit library opt-in; existing `run` entrypoints default to disabled.
+`SessionHandle::enable_controls()` owns one idempotently created endpoint and
+requires a recorder; custom embedding hosts must additionally enforce their
+execution and private-log boundaries. Worker exit, shutdown or handle drop
+removes its endpoint. Headless completion removes its endpoint before returning.
 
 When a user submits a prompt while an autonomous task is running, the submission
 is treated as steering guidance for the active task rather than a replacement
@@ -231,7 +259,31 @@ current workspace and are never resumed or cached.
 
 ## Boundary and ownership
 
+This document defines Skott's public API, configuration, command-line interface
+and sandbox request. Skott owns presentation and workspace tools, not protected
+maerg task authority. Private algorithms live in `DESIGN.md`.
+
 ### Independent diagnostic inspection
+
+With an explicit `--control SOCKET`, terminal inspection enables `c` to request
+cancellation and `g` to compose guidance (Enter queues, Escape discards).
+Acknowledgements remain queued/rejected, not a claim of model delivery.
+Without that capability the same keys confer no control. Closing the viewer
+never implicitly cancels execution.
+
+An explicitly selected shared external-agent profile is a different backend,
+not a native model. `--model NAME --allow-host-execution "PROMPT"`
+supports a terminal-owned, acknowledged **HOST UNCONFINED** opaque CLI run.
+Sav supervises its complete command once without a shell or automatic retry;
+the provider owns its internal loop. Mandatory private bounded journals support
+inspection and owner cancellation. Skott does not claim native tool, context,
+token or turn control over that CLI. Native-only overrides and headless external
+execution are refused. Protected Kvist tasks still refuse this backend.
+An external profile is never auto-selected from a model catalog.
+
+External-agent live steering is not implemented: agents that cannot accept a
+correlated in-run message are not given invented stdin protocols. Native
+guidance and separately authorized protected-task controls remain supported.
 
 Native Skott prompt runs also produce a shared version-one
 `session-<identity>-<ordinal>.events.jsonl` journal beside existing private
@@ -262,13 +314,9 @@ tool initialization; detachment does not terminate the owner. Control access
 is separate and explicit, and guidance cannot replace approved task intent.
 Exact command grammar is documented when each interface is delivered.
 
-This document defines what `skott` exposes to consumers: the library
-public API, the configuration schema, the command-line interface, and the exact
-sandbox request it produces. Private algorithm choices live in `DESIGN.md`.
-
 ## Model selection and activation
 
-`skott` MUST prefer a model that the default provider already has loaded
+Interactive `skott` MUST prefer a model that the default provider already has loaded
 over a statically configured one, so an already-active model is used without
 paying a model load/switch. The active model is discovered by a bounded,
 read-only, loopback-only probe of each distinct default-provider endpoint (llama-server
@@ -305,18 +353,21 @@ MUST fall through to the next rule. The selection precedence MUST be:
      while a prompt is held, the prompt is replayed to a fresh bootstrap (a
      bounded number of attempts) and is never lost.
    - Headless: fail fast before provider inference with an actionable diagnostic
-     that lists the configured default-provider ids, names any active provider
-     model found, and suggests `--model` and marking one entry `is_default`.
+     that lists the configured default-provider ids and suggests `--model` and
+     marking one entry `is_default`. Headless selection performs no loaded-model
+     probe: it applies rules 1, 3, 4 and this failure rule deterministically.
 
 `default_provider` is a required configuration field naming the provider the
-session falls back to; it MUST name at least one configured model. At most one
+native session falls back to; when native models are present, it MUST name at
+least one configured native model. At most one
 `[[models]]` entry per provider may be marked `is_default`. The per-provider
-default model is used only when the default provider reports no active model, and
+default model is used only when interactive discovery reports no active model
+or headless execution has no explicit selection, and
 MUST NOT override an active model, an explicit selection, or a single
 default-provider model. When the provider has an active model that is not present
 in `[[models]]`, the tool SHOULD offer to configure it: it MAY print a
 ready-to-paste `[[models]]` entry (provider, base_url, provider model name, and
-sane defaults) derived the same way as `--import-kvist`, and MUST NOT modify the
+sane defaults) using the shared native-model fields, and MUST NOT modify the
 configuration file automatically.
 
 ## Provided interfaces
@@ -1002,8 +1053,9 @@ Options:
   --json                     Version-one ordered NDJSON (headless only)
   --no-logs                   Skip the durable session journal and transcript
   --list-models               Print the configured models and exit
-  --import-kvist              Print model entries imported from kvist.toml
-  --kvist-config <PATH>       Explicit import source (default ./kvist.toml)
+  --setup                    Run shared provider discovery/qualification/setup
+  --registry <PATH>          Explicit shared provider registry
+  --force                    Persist failed setup qualification explicitly
       --allow-host-execution  Bypass the Bubblewrap sandbox and run the agent's
                               commands directly on the host. Never the default;
                               without it the agent is confined to the sandbox and

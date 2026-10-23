@@ -130,6 +130,16 @@ pub enum Error {
     },
     /// The bounded event channel between the worker and the UI closed early.
     ChannelClosed,
+    /// A bounded in-process control was rejected without changing the task.
+    Control {
+        /// Actionable queue/state validation diagnostic.
+        reason: String,
+    },
+    /// A supervised opaque coding-agent command failed.
+    ExternalAgent {
+        /// The process/recording failure, not a native model error.
+        source: sav::Error,
+    },
 }
 
 /// The convenience `Result` alias for this crate.
@@ -149,6 +159,9 @@ impl Error {
     /// The process exit code to use for this error.
     pub fn exit_code(&self) -> u8 {
         match self {
+            Error::ExternalAgent {
+                source: sav::Error::Cancelled,
+            } => 130,
             Error::NotInteractive { .. } => 2,
             Error::ModelNotFound { .. } => 2,
             Error::InvalidEffort { .. } => 2,
@@ -241,6 +254,8 @@ impl Error {
             Error::ChannelClosed => {
                 "the worker connection closed before the turn finished".to_owned()
             }
+            Error::Control { reason } => format!("runtime control rejected: {reason}"),
+            Error::ExternalAgent { source } => format!("external agent failed: {source}"),
         }
     }
 }
@@ -255,6 +270,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io { source, .. } => Some(source),
+            Self::ExternalAgent { source } => Some(source),
             _ => None,
         }
     }
@@ -301,6 +317,64 @@ impl From<sav::Error> for Error {
         Error::ModelTransport {
             model: None,
             reason: source.to_string(),
+        }
+    }
+}
+impl From<sav::runtime::Error> for Error {
+    fn from(error: sav::runtime::Error) -> Self {
+        use sav::runtime::Error as Runtime;
+        match error {
+            Runtime::Config { path, reason } => Self::Config { path, reason },
+            Runtime::ModelTransport { model, reason } => Self::ModelTransport { model, reason },
+            Runtime::ContextBudget {
+                used,
+                limit,
+                reserve,
+            } => Self::ContextBudget {
+                used,
+                limit,
+                reserve,
+            },
+            Runtime::InvalidModelTurn { reason } => Self::InvalidModelTurn { reason },
+            Runtime::RunBudget { reason } => Self::RunBudget { reason },
+            Runtime::Recording { reason } => Self::Recording { reason },
+            Runtime::ToolPolicy { tool, reason } => Self::ToolPolicy { tool, reason },
+            Runtime::ToolRender { tool, reason } => Self::ToolRender { tool, reason },
+            Runtime::ChannelClosed => Self::ChannelClosed,
+            Runtime::Control { reason } => Self::Control { reason },
+            Runtime::Io(source) => source.into(),
+            other => Self::ModelTransport {
+                model: None,
+                reason: other.describe(),
+            },
+        }
+    }
+}
+
+impl From<Error> for sav::runtime::Error {
+    fn from(error: Error) -> Self {
+        match error {
+            Error::Config { path, reason } => Self::Config { path, reason },
+            Error::ModelTransport { model, reason } => Self::ModelTransport { model, reason },
+            Error::ContextBudget {
+                used,
+                limit,
+                reserve,
+            } => Self::ContextBudget {
+                used,
+                limit,
+                reserve,
+            },
+            Error::InvalidModelTurn { reason } => Self::InvalidModelTurn { reason },
+            Error::RunBudget { reason } => Self::RunBudget { reason },
+            Error::Recording { reason } => Self::Recording { reason },
+            Error::ToolPolicy { tool, reason } => Self::ToolPolicy { tool, reason },
+            Error::ToolRender { tool, reason } => Self::ToolRender { tool, reason },
+            Error::ChannelClosed => Self::ChannelClosed,
+            Error::Control { reason } => Self::Control { reason },
+            other => Self::Host {
+                reason: other.describe(),
+            },
         }
     }
 }

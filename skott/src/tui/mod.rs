@@ -105,6 +105,21 @@ fn resolve_max_turns(allow_host_execution: bool, host_turns: Option<u32>) -> Res
 
 /// Runs the interactive UI to completion and returns the process exit code.
 pub fn run(config: Config, overrides: Overrides) -> ExitCode {
+    run_with_controls(config, overrides, false)
+}
+
+/// Runs interactively with optional private operator-only IPC controls.
+pub fn run_with_controls(
+    config: Config,
+    mut overrides: Overrides,
+    allow_control: bool,
+) -> ExitCode {
+    if allow_control
+        && (overrides.no_logs || overrides.allow_host_execution || overrides.host_turns.is_some())
+    {
+        eprintln!("private controls require sandboxed execution and durable private logging");
+        return ExitCode::from(2);
+    }
     if !std::io::stdin().is_terminal() {
         eprintln!(
             "{}",
@@ -132,7 +147,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     }
     if let Err(error) = overrides.limits.validate() {
         eprintln!("{}", error.describe());
-        return ExitCode::from(error.exit_code());
+        return ExitCode::from(Error::from(error).exit_code());
     }
 
     let effort = overrides.effort.unwrap_or(config.default_thinking_effort);
@@ -148,6 +163,18 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
             return ExitCode::from(error.exit_code());
         }
     };
+    if allow_control {
+        match crate::headless::control_log_directory(
+            overrides.log_dir.as_deref(),
+            &working_directory,
+        ) {
+            Ok(path) => overrides.log_dir = Some(path),
+            Err(error) => {
+                eprintln!("{}", error.describe());
+                return ExitCode::from(error.exit_code());
+            }
+        }
+    }
 
     // Resolve the session-transcript directory once so both the worker and the
     // history overlay read and write the same location.
@@ -208,8 +235,13 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
             "HOST UNCONFINED: tools run with host privileges".into(),
         ));
     }
-    let discovery = match Discovery::start(config.clone(), overrides, working_directory, max_turns)
-    {
+    let discovery = match Discovery::start(
+        config.clone(),
+        overrides,
+        working_directory,
+        max_turns,
+        allow_control,
+    ) {
         Ok(discovery) => discovery,
         Err(error) => {
             eprintln!("{}", error.describe());
@@ -262,6 +294,7 @@ impl Discovery {
         overrides: Overrides,
         working_directory: PathBuf,
         max_turns: u32,
+        allow_control: bool,
     ) -> Result<Self> {
         let model_config = config.clone();
         let explicit = overrides.model.clone();
@@ -331,6 +364,7 @@ impl Discovery {
                 max_turns,
                 limits: overrides.limits,
                 allow_host_execution: overrides.allow_host_execution,
+                allow_control,
             })
         })?;
         Ok(Self {
@@ -387,6 +421,7 @@ struct SessionBuilder {
     max_turns: u32,
     limits: crate::session::RunLimits,
     allow_host_execution: bool,
+    allow_control: bool,
 }
 
 impl Clone for SessionBuilder {
@@ -405,6 +440,7 @@ impl Clone for SessionBuilder {
             max_turns: self.max_turns,
             limits: self.limits,
             allow_host_execution: self.allow_host_execution,
+            allow_control: self.allow_control,
         }
     }
 }
@@ -412,12 +448,13 @@ impl Clone for SessionBuilder {
 /// One live session worker: the model loop thread plus its channels.
 struct Worker {
     // Close both channels before the joining handle is dropped.
-    prompt_tx: mpsc::Sender<String>,
+    prompt_tx: crate::run::PromptSender,
     rx: mpsc::Receiver<crate::session::Event>,
     handle: run::SessionHandle,
     model_id: String,
     effort: ReasoningEffort,
     budget_note: String,
+    control_path: Option<PathBuf>,
 }
 
 impl SessionBuilder {
@@ -504,6 +541,13 @@ impl SessionBuilder {
             self.max_turns,
             budgets.limits,
         )?;
+        let control_path = if self.allow_control {
+            let path = handle.enable_controls()?;
+            run::validate_control_path(&path, &self.working_directory)?;
+            Some(path)
+        } else {
+            None
+        };
         Ok(Worker {
             handle,
             rx,
@@ -517,6 +561,7 @@ impl SessionBuilder {
                 budgets.limits.response_reserve,
                 budgets.response_source,
             ),
+            control_path,
         })
     }
 }
@@ -687,13 +732,21 @@ fn run_ui<M: std::io::Write>(
                         continue;
                     }
                     app.push_event(crate::session::Event::Note(new_worker.budget_note.clone()));
+                    if let Some(path) = &new_worker.control_path {
+                        // Operator presentation only: never pass this capability
+                        // through the runtime event sink or durable recorder.
+                        app.push_event(crate::session::Event::Note(format!(
+                            "private control socket: {}",
+                            path.display(),
+                        )));
+                    }
                     *worker = Some(new_worker);
                     if let Some(current) = worker.as_ref() {
                         for text in pending_submit.drain(..) {
-                            current
-                                .prompt_tx
-                                .send(text)
-                                .map_err(|_| Error::ChannelClosed)?;
+                            if let Err(error) = current.prompt_tx.send(text.clone()) {
+                                app.editor.insert_str(text);
+                                app.push_event(crate::session::Event::Note(error.describe()));
+                            }
                         }
                     }
                     replay_attempts = 0;
@@ -749,15 +802,37 @@ fn run_ui<M: std::io::Write>(
                             let text = app.take_pending_prompt();
                             if let Some(text) = text {
                                 replay_attempts = 0;
-                                if let Some(current) = worker.as_ref()
-                                    && app.model.as_deref() == Some(&current.model_id)
-                                    && app.effort == current.effort
-                                {
-                                    current
-                                        .prompt_tx
-                                        .send(text)
-                                        .map_err(|_| Error::ChannelClosed)?;
-                                    continue;
+                                if let Some(current) = worker.as_ref() {
+                                    let same_selection = app.model.as_deref()
+                                        == Some(&current.model_id)
+                                        && app.effort == current.effort;
+                                    let receipt = if same_selection {
+                                        current.prompt_tx.send(text.clone())
+                                    } else {
+                                        current.prompt_tx.steer(text.clone())
+                                    };
+                                    match receipt {
+                                        Ok(receipt) => {
+                                            if receipt.kind == crate::SubmissionKind::Guidance {
+                                                app.status =
+                                                    format!("guidance #{} accepted", receipt.id.0);
+                                            }
+                                            continue;
+                                        }
+                                        Err(error)
+                                            if same_selection
+                                                || current.handle.controls().is_active() =>
+                                        {
+                                            app.editor.insert_str(text);
+                                            app.push_event(crate::session::Event::Note(
+                                                error.describe(),
+                                            ));
+                                            continue;
+                                        }
+                                        // Idle work with an explicit changed selection
+                                        // starts on the selected model, not the former one.
+                                        Err(_) => {}
+                                    }
                                 }
                                 if let Some(old) = worker.take() {
                                     old.handle.shutdown();
@@ -767,6 +842,17 @@ fn run_ui<M: std::io::Write>(
                                         || app.effort != current.effort
                                 }) {
                                     *bootstrap = None;
+                                }
+                                let pending_bytes: usize =
+                                    pending_submit.iter().map(String::len).sum();
+                                if pending_submit.len() >= 32
+                                    || pending_bytes.saturating_add(text.len()) > 1024 * 1024
+                                {
+                                    app.editor.insert_str(text);
+                                    app.push_event(crate::session::Event::Note(
+                                        "pending startup queue is full; submission retained in the editor".into(),
+                                    ));
+                                    continue;
                                 }
                                 pending_submit.push_back(text);
                                 start_requested = true;
