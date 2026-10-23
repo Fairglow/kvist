@@ -77,3 +77,15 @@ live provider qualification remains an explicit operator action.
 
 Clean-slate source observations and a separate source-blind intent comparison
 remain necessary. No generated receipt or acceptance is implied by this ADR.
+
+## Conservative delivery boundary discovered during review
+
+Independent source observation exposed an existing model-triggered provisioning
+path that could leave the approved acquisition boundary for host package
+managers. The acquisition contract permits fetch but not vendor repacking, and
+does not bind the requested dependency identity to the resulting lock.
+Protected requests now fail explicitly before provisioning effects rather than
+invent authority or treat unrelated cache readiness as fulfillment. Explicit
+human provisioning remains separate. Maerg's automatic dependency-fulfillment
+requirement is retained as an unmet target for human arbitration; neither this
+safety repair nor a review report declares that target fulfilled or waived.

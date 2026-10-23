@@ -38,27 +38,27 @@ tasks:
   - id: shared-runtime-implement-code
     title: "Consolidate reusable agent mechanisms"
     description: "Implement the shared registry/resolver, native mechanisms, external-agent adapter and live diagnostic/control interfaces without terminal or maerg dependencies."
-    context: "Shared registry/setup, native conversation/context/retry/loop/control, bounded observation and zero-retry opaque process supervision are implemented. Hosts retain authorization and effects. The offline locked full workspace suite and strict all-target Clippy passed. Independent observation/audit and source-blind comparison remain separate tasks."
+    context: "Independent source-only findings drove tests-first CLI retry/resource, empty-tool and cumulative timing/accounting repairs, committed as 9372168. The final workspace passed 1743 tests with 14 existing ignores; strict all-target Clippy, formatting, release binaries and documentation gates passed. No receipt or certification is implied."
     purpose: "Remove divergent provider and runtime facts."
     expected_outcome: "Consumers use shared mechanisms and deterministic regression tests pass."
     kind: implementation
     status: completed
     depends_on: [shared-runtime-write-tests]
     requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T23:39:56Z", completed_at: "2026-10-23T23:39:56Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-security-audit
     title: "Inspect shared runtime authority and bounds"
     description: "Independently inspect registry, control authorization, recording, process cleanup, budgets and absence of effect replay."
-    context: "Findings remain explicit and are repaired before completion."
+    context: "An independent source-only observer derived and refreshed IMPL.md after tested repairs. The process-global signal-group concurrency limitation remains explicit; per-run controls and supervision are separately observed. This completes scoped audit activity, not blanket certification."
     purpose: "Retain independent boundary observations."
     expected_outcome: "Concrete findings and limitations are recorded."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on: [shared-runtime-implement-code]
     requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T23:39:56Z", completed_at: "2026-10-23T23:39:56Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-compliance-review

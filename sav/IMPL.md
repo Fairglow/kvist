@@ -1,726 +1,536 @@
 <!-- kvist-implementation-record-version: 1 -->
-
 # Component Implementation Record
 
-## Scoped loaded-model discovery observation - 2026-10-17
-
-Separate source-blind `lifecycle-comparator` established no concrete unresolved
-scoped discrepancy against this new observation and attributed runtime evidence.
-It executed no tests, made no acceptance claim, and excluded older records
-inadvertently displayed during extraction. Aggregate reported tests do not
-independently establish every malformed-metadata or authority branch.
-
-Independent clean-slate `lifecycle-observer` inspected current direct-transport
-source and loaded-model test assertions, excluding intent, queues, prior
-records/reviews, chat and Git history. It executed no builds or tests.
-
-`loaded_model` reads unqualified llama-server `/props`; router role triggers
-read-only `/models`, selecting the first entry with status `loaded`, not the
-router alias or an unloaded default. Standalone identity fallback tries model,
-alias, then path; Ollama uses `/api/ps` (`src/direct_transport.rs:289-363`).
-Both router requests share a deadline; each response is bounded to 1 MiB,
-catalogs to 128 entries and returned identifiers to 256 bytes without controls
-(`src/direct_transport.rs:289-380`). Requests reuse numeric-loopback HTTP
-authority; endpoint parsing excludes userinfo, queries, fragments and provider
-paths, with no DNS/redirect authority expansion. Socket waits use approximately
-100-ms polling and cancellation/deadline checks
-(`src/direct_transport.rs:468-549,632-668,1611-1655`).
-
-Inspected assertions cover loaded-status filtering, standalone alias/path
-fallback, no loaded model, malformed/oversized metadata and stalled-probe
-cancellation (`tests/loaded_model.rs:61-130`). These are source assertions, not
-independently observed passing results. The API still returns only one loaded
-identity per endpoint; catalog order can affect which identity a consumer
-matches when several are loaded. No blanket correctness or acceptance claim
-is made.
-
-## Scoped CI repair observation - 2026-10-14
-
-Independent clean-slate `repair-observer` read only enumerated source/test
-files and build manifests, excluding intent, queues, prior records/reviews and
-history. It executed no tests and made no compliance or acceptance claim.
-
-`src/offline_rust.rs` provides shared initialization and selection-aware
-executable wrappers. Initialization copies settings into `/tmp/rustup-home`
-while linking registrations to read-only `/rust/rustup-home/toolchains`.
-Wrappers select an explicit `+toolchain` or the active selection, then `exec`
-rustup. Cargo receives offline/locked flags and `/rust/vendor` source
-configuration; optional component-build variables redirect Cargo's working
-directory and compiler/formatter source arguments. Unit assertions verify
-script properties, not executed sandbox behavior; grants and resource
-lifetime remain caller-owned.
-
-## Observed implementation: sav
-
-## Scoped offline Rust runtime observation - 2026-10-10
-
-Clean-slate `offline-rust-final-observer` derived this supplement from source
-and consumer tests only, excluding intent, queues, prior records/reviews and
-history. It supersedes older observations only for this runtime mechanism,
-not unrelated behavior.
-
-The publicly exported `offline_rust` module supplies initialization text and
-eight enum-bounded wrappers: cargo, rustc, rustdoc, rustfmt, cargo-fmt,
-cargo-clippy, clippy-driver and rust-analyzer. Initialization copies generated
-settings into private sandbox scratch and symlinks read-only registrations.
-Wrappers consume a leading +selection or query rustup's active selection, then
-execute `rustup run --` without requesting installation. Cargo adds
-offline/locked flags and `/rust/vendor` source configuration. Optional Cargo
-working-directory and compiler/doc/formatter/Clippy source-path remapping
-support maerg's build context. This module supplies scripts, not validation
-or sandbox enforcement.
-
-The observer independently ran ordinary Skott/maerg native tests: 4 passed,
-0 failed, 4 older verification trials ignored, exit 0. The module's unit test
-was inspected, not separately executed by that observer. These are scoped
-observations, not compliance certification.
-
-## Observation basis and package
-
-This replacement record was independently derived on 2026-10-02 from
-`sav/src/**/*.rs`, `sav/tests/**/*.rs`, this package's
-Cargo manifest, and executed tests. Intent documents, previous implementation
-records, reviews, Git history, and maerg/galla implementation were
-excluded. This is an observation, not intent review or compliance certification.
-Paths are repository-relative; source-derived limitations are distinguished
-from executed behavioral trials.
-
-`sav/Cargo.toml` defines sav 0.2.0, Rust edition 2024,
-minimum Rust 1.95, library `sav`, and binary `sav-run`.
-Default features are empty; Tokio is optional. `sav/src/lib.rs` and
-the binary explicitly reject non-Linux targets. The active direct transport is
-blocking standard-library TCP, not an asynchronous framework client. This crate
-supervises host processes; it does not provide a sandbox.
-
-The public exports in `sav/src/lib.rs` include:
-
-- Prompt acquisition: `resolve_prompt`, `MAX_PROMPT_BYTES`.
-- Shell-free parsing/rendering: `split_raw_command`, `render_command`,
-  `render_command_with_reasoning_effort`.
-- Profiles: `ModelProfile`, default path, load/load-all/upsert, config byte
-  maximum; setup collection/wizard variants, `SetupOptions`, `verify_profile`,
-  `SETUP_TEST_PROMPT`.
-- Canonical model messages/requests/turns/usage/stream events, reasoning effort,
-  local provider, tool definitions/choice/intents, finish reason,
-  `CancellationToken`, `ModelTransport`, `DirectModelTransport`.
-- Catalog provider, validated provider model/catalog, discovery options and
-  `discover_models`.
-- Host supervision: `CommandSpec`, policy, attempt/retry context, forwarding
-  and captured execution reports and functions.
-- Shared signal install/register/clear/take-interrupted operations.
-- Public `gbnf`, `loop_detection`, `trajectory` modules, their compiler/hash/
-  detector APIs/constants, trajectory event/recorder/replay/report exports.
-- Non-exhaustive `Error` and `Result`.
-
-## Prompt and command mechanics
-
-`sav/src/prompt.rs` resolves explicit prompt first, then file, then
-editor, then stdin. File `-` means stdin. Without an explicit source, piped
-stdin is read directly; terminal stdin asks about opening an editor, or reads
-until EOF. Every returned prompt must be nonblank UTF-8 and at most 1 MiB.
-Bounded reads take maximum+1 to catch growth. Prompt files use lstat plus
-`O_NOFOLLOW | O_NONBLOCK`, and opened descriptors must remain regular files;
-links/sockets/special files fail.
-
-Editor selection uses VISUAL, then EDITOR, then `vi`. A whole value identifying
-an existing file is used as program; otherwise the raw quoted command parser
-splits it. One generated `prompt.md` in a tempfile-owned directory is appended,
-the editor is executed without shell interpolation, successful exit is required,
-and edited contents are revalidated. Editor execution itself is not governed by
-SupervisionPolicy or a timeout; terminal choice reads are not byte-bounded.
-
-`sav/src/command.rs` tokenizes whitespace outside single/double
-quotes, preserves empty quoted arguments, and permits escaping active quote/
-backslash within quotes. Unterminated quotes fail. This is not a shell:
-operators, variables, globbing, command substitution and outside-quote
-backslashes are not evaluated.
-
-Rendering parses before replacement. The first token selects the executable
-and is not prompt/path substituted; `{reasoning_effort}` cannot select it.
-Arguments support `{prompt_json}` (complete escaped JSON string), `{prompt}`,
-`{target_directory}`, `{context_files}`, `{reasoning_effort}`. Context
-placeholder yields one argument per path; with no contexts, an exact placeholder
-can remove the preceding option-looking argument. Effort behaves similarly
-when absent; explicitly requested effort requires a declared argument
-placeholder. Relevant paths must be UTF-8 when substituted. Substitution can
-repeat within an argument and does not re-tokenize generated text. It is literal
-replacement, not a general template language.
-
-Executed `sav/tests/command.rs` includes
-`renders_prompt_context_and_target_without_a_shell`,
-`renders_a_prompt_as_a_complete_json_string`,
-`removes_option_before_an_empty_context_placeholder`,
-`reasoning_effort_requires_and_renders_an_explicit_placeholder`.
-CLI file/stdin behavior is covered by
-`sav/tests/cli.rs::standalone_cli_runs_a_prompt_from_a_file` and
-`supervised_provider_cannot_consume_caller_stdin`.
-
-## Profile persistence and setup
-
-`sav/src/profile.rs` stores schema_version integer 1 and
-`[[profiles]]` entries with `name`, `provider`, `command`. Unrelated values,
-tables, fields, comments and other profiles are preserved with toml_edit;
-unknown surrounding fields are not rejected.
-
-Bounds: 64 KiB configuration, 128 profiles, 128-byte names/providers, and
-16 KiB commands. Names use ASCII alphanumerics plus `._-:`; providers use
-alphanumerics plus `._-`; neither may be empty. Commands must be nonblank and
-parse successfully without a shell. Names are case-sensitive and unique.
-The provider field is descriptive, not an enumeration that dispatches
-execution. Load validates all profiles before selecting one.
-
-Default location uses absolute XDG_CONFIG_HOME, or absolute HOME/.config,
-then `sav/config.toml`. Actual implementation falls back to
-`supervised-agent/config.toml` if the canonical file is absent and that legacy
-path exists; canonical takes priority.
-
-Reads reject a linked/nonregular final file, bound metadata and stream growth,
-and require UTF-8. Upsert validates the candidate and all existing data before
-modification; creates parents, rejects a linked immediate parent, writes/syncs a
-same-directory NamedTempFile, persists by replacement for existing stores or
-no-clobber for new ones, and syncs the parent. It is atomic replacement, not a
-transactional multiwriter update; all ancestor components are not traversed
-with pinned no-follow descriptors.
-
-`sav/tests/profiles.rs::update_preserves_comments_unrelated_values_and_profiles`,
-`invalid_existing_configuration_remains_unchanged`, and
-`rejects_invalid_profile_names_before_writing` were executed.
-Legacy/canonical path behavior was executed in
-`sav/tests/cli.rs::default_profile_path_reads_legacy_store_when_canonical_store_is_absent`
-and `canonical_profile_store_takes_precedence_over_legacy_store`.
-
-`sav/src/setup.rs` offers llama-cli, llama-server, Ollama, Copilot,
-Gemini CLI, and custom wrapper. Setup collects model/provider executable/profile
-name/template, validates it, runs mandatory live qualification using the fixed
-prompt `Reply with exactly: OK`, then persists. Qualification checks successful
-bounded process execution, not that the answer literally equals OK. Failure
-prevents saving unless force=true; cancellation is never overridden by force.
-`verify_profile` requires its host-execution acknowledgement argument before
-spawning.
-
-Conventional CLI executables receive a bounded `--version` probe (10-second
-idle/attempt, 64 KiB output, no retry). Failed probe offers a direct executable
-or compatible wrapper, verified as regular/executable and probed again.
-Custom wrappers and GGUF selections require regular files; `~/` is expanded.
-Setup input supports EOF, Esc, `cancel`, or `q` cancellation, but individual
-interactive input lines are read without an explicit byte bound.
-
-HTTP and ACP catalog discovery provides numbered models, defaulting to valid
-provider current model or first item, plus a custom-model choice. Invalid
-endpoint/cancellation stops selection; other discovery failure offers the
-specific provider fallback. Selected IDs are printable ASCII, 1–256 bytes,
-without braces. Profile name can differ from model ID.
-
-Generated defaults actually include:
-
-- llama-cli: model/prompt, `--single-turn --simple-io --no-display-prompt
-  --predict 4096`; setup explains that bare inference is not a file/tool agent.
-- llama-server: curl with `--disable --silent --show-error --fail-with-body`,
-  POST JSON containing `{prompt_json}`, explicit chat-completions URL after `--`.
-- Ollama: `env OLLAMA_HOST=<selected URL> ollama run <model> '{prompt}'`.
-- Copilot: prompt, silent, allow-all-tools/no-ask-user, optional effort
-  placeholder and model; Gemini: text output, yolo approval, skip-trust, model.
-- Custom wrapper: prompt and repeatable context-files placeholder.
-
-These setup wrappers run with host authority and can differ from the direct
-transport's capabilities. Qualification uses 30-second idle, 300-second attempt,
-loop detection, no retries, and 64 KiB output. Executed examples include
-`sav/tests/cli.rs::setup_uses_fixed_prompt_and_refuses_failed_qualification`,
-`setup_force_persists_profile_after_failed_qualification`,
-`installed_gemini_and_copilot_use_noninteractive_templates`,
-and `sav/tests/setup.rs::llama_server_default_json_encodes_the_rendered_prompt`.
-These tests use local fixtures, not real accounts/provider services.
-
-## Canonical model boundary
-
-`sav/src/model.rs` defines:
-
-- `ReasoningEffort`: none/minimal/low/medium/high/xhigh/max, lower-case wire
-  values; parser trims and is case-insensitive.
-- `LocalModelProvider`: ollama/llama-server.
-- `ModelMessage`: System(String), User(String), Assistant{text, tool_intents},
-  ToolResult{call_id, name, content}; externally tagged kebab-case serde.
-- `ToolDefinition`: name, description, JSON parameters; `ToolChoice`:
-  none/auto/required.
-- `ModelRequest`: model, messages, tools, tool_choice; optional
-  reasoning_effort/output_schema/max_output_tokens, omitted when absent.
-- `ToolIntent`: canonical id, optional provider_id, name, object arguments.
-- `FinishReason`: stop/length/tool-calls/content-filter/Other(String).
-- `ModelUsage`: input_tokens, output_tokens, total_tokens.
-- `ModelTurn`: text, optional omitted reasoning, tool_intents, finish_reason,
-  provider, model, defaultable response_id, provider_request_id, optional usage.
-- `ModelStreamEvent`: tagged `{type, value}`, kebab-case text-delta,
-  reasoning-delta, tool-intent.
-
-Tool definitions contain no execution implementation and tool intents are
-untrusted proposals. There is no tool executor or autonomous agent loop in this
-boundary.
-
-`CancellationToken` clones an Arc<AtomicBool>, exposes cancel/query/reset with
-release/acquire ordering. `ModelTransport` has blocking complete, stream,
-stream_with_deadline, and deadline. The default deadline-override method ignores
-the override and delegates to stream; callers cannot assume arbitrary injected
-transports honor an extended/reduced deadline.
-
-## Direct HTTP transport and request validation
-
-`sav/src/direct_transport.rs` supports only numeric-loopback HTTP
-with explicit nonzero port: IPv4 loopback or bracketed IPv6 loopback. DNS names,
-remote addresses, HTTPS, credentials, queries/fragments, whitespace/control
-bytes, and nontrivial base paths fail. Provider paths are fixed. There is no
-ambient proxy, credential, TLS or framework fallback.
-
-Constructor bounds deadline to positive ≤24 hours and response bytes to
-1–16 MiB; with_watchdogs also validates positive ≤24-hour slot/TTFT timeouts.
-Defaults are 15-second response-header/slot wait and 45-second streaming TTFT.
-Builder setters for slot/TTFT/cadence merely assign durations without repeating
-constructor validation. Cadence is absent by default. Stream deadline override
-is capped to 24 hours and checked before/after decoding callbacks.
-
-Before connecting, canonical validation requires:
-
-- Nonblank ASCII model ≤256 bytes; 1–1024 messages, ≤128 definitions,
-  combined message text ≤8 MiB.
-- Optional max output tokens 1–1,048,576.
-- Tool names 1–128 ASCII alphanumerics or `_.-`, unique definition names,
-  descriptions ≤16 KiB, object parameters.
-- Assistant IDs nonblank/control-free ≤256 bytes and unique within each
-  assistant message; object arguments; valid tool-result identities/names.
-  The transport does not enforce complete history/result pairing.
-- Tools required for auto/required; output schema cannot coexist with callable
-  tool choice. Retained definitions with choice none are not sent as tools.
-- Encoded provider request ≤8 MiB.
-
-The subsequently added
-`sav/tests/model_transport.rs::reliability_large_context_requests_are_not_limited_by_the_old_two_mib_ceiling`
-was separately executed against frozen production source. Its loopback fixture
-accepts a 3-MiB user message and captures the request; an 8-MiB user message
-whose provider encoding exceeds 8 MiB returns `InvalidModelRequest` before
-connection. This checks the encoded request ceiling, not an 8-MiB allowance
-for content plus additional uncharged framing.
-
-Output-schema validation allows object nodes with type, title, description,
-properties, required, additionalProperties, items, enum, const, anyOf, allOf,
-minimum/maximum, min/max length and item count. It bounds encoding to 256 KiB,
-depth to 32 and nodes to 4096; validates keyword value shapes, unique required
-names that exist, supported types, nonempty enums/composition arrays, and
-recursive schemas. Unknown keywords/references fail. This is a supported
-provider-generation subset, not full JSON Schema validation or post-generation
-conformance checking.
-
-Requests POST to Ollama `/api/chat` or llama-server
-`/v1/chat/completions`. Both use canonical system/user/assistant/tool history.
-OpenAI-compatible call arguments are JSON text; Ollama arguments objects.
-Assistant provider_id takes precedence over canonical id. Tool-result mapping
-preserves call ID/name/content in provider-specific fields.
-
-Llama-server sends tool_choice and stream_options.include_usage=true when
-streaming; optional bound becomes max_tokens, effort becomes reasoning_effort.
-Ollama omits callable tools for none, rejects Required before I/O, encodes bound
-as options.num_predict and effort as think=false for none, otherwise the string.
-Ollama output schema becomes format; llama-server receives strict json_schema
-response_format named kvist_output and, when compilation succeeds, a grammar.
-
-Executed request evidence in `sav/tests/model_transport.rs` includes
-`direct_transports_encode_output_bounds_and_preserve_absent_defaults`,
-`invalid_output_bounds_fail_before_connect_for_both_providers`,
-`direct_transports_map_every_reasoning_effort_value`,
-`direct_transports_encode_provider_native_output_schemas`,
-`output_schema_rejects_non_objects_and_callable_tools_before_io`, and
-`rejects_non_loopback_and_non_http_endpoints`.
-
-## Framing, watchdogs, terminal state, and errors
-
-The direct transport writes a bounded HTTP/1.1 JSON request, uses connection:
-close, and polls read/write timeout conditions at 100-ms intervals with
-cancellation/deadline checks. HTTP/1.0 and HTTP/1.1 responses support
-Content-Length, chunked, or close-delimited bodies. Duplicate Content-Length,
-conflicting framing, unsupported transfer encodings, short/excess bodies,
-invalid chunk sizes/endings, and malformed records fail. Headers/trailers are
-bounded around 64 KiB; stream records at 1 MiB; configured response bound
-applies before delivering oversized body chunks. Non-2xx returns typed status
-without retaining provider body.
-
-Slot timeout measures response-header arrival after sending the request.
-Streaming TTFT measures first body data after headers, not necessarily a decoded
-token. First body bytes disable the first-body stage even when they are partial
-records or heartbeat/control metadata. Cadence only arms/resets after decoded
-nonempty text, reasoning, native tool fragments/calls; heartbeats, empty
-deltas, role/usage/control frames and terminal markers do not reset it.
-Slow initial record fragments do not arm cadence. A stream with no semantic
-progress remains bounded by overall caller deadline, not a perpetually renewed
-cadence timer. Unary calls have no streaming TTFT/cadence stage.
-
-Llama SSE accepts blank lines/comments or `data:` lines, not arbitrary SSE
-fields. Text is concatenated in order, reasoning kept separate using
-reasoning_content/reasoning/thinking. Tool fragments merge by index in a
-BTreeMap, indices <128; ID cannot change, names ≤128, argument text ≤1 MiB,
-final IDs unique and arguments valid JSON objects. `[DONE]` is required.
-Text/reasoning can be delivered before completion; complete tool intents are
-delivered only when final assembly validates. Explicit finish remains explicit:
-Stop with tools is not rewritten to ToolCalls; absent/null reason is
-Other("unknown"), even with `[DONE]` or tools.
-
-Ollama uses NDJSON, accumulates thinking/reasoning separately, requires
-done=true, rejects records after terminal, caps total calls to 128, rejects
-duplicate provider IDs, and synthesizes missing call IDs as ollama-call-N.
-Missing/native Stop ending normalizes to ToolCalls when calls exist, otherwise
-Stop; explicit Length/filter/other endings remain unchanged.
-
-Provider model/response identity strings are bounded/control-free; llama
-response ID is preserved, provider_request_id is not populated from headers.
-Usage is optional. Llama reads prompt/completion counts and provided total,
-otherwise saturating sum; it does not verify a supplied total matches parts.
-Ollama reads prompt_eval_count/eval_count with checked sum, returning absent
-usage when the input count is unavailable. Finish reason parsing preserves
-provider-specific bounded text.
-
-Failed/cancelled streams return no accepted terminal ModelTurn but may already
-have emitted provisional text. This crate does not enforce that a Stop answer
-is nonblank or that ending/call consistency permits tools; consumers must make
-that decision. No tools are executed here.
-
-`sav/src/error.rs` supplies typed configuration/schema/capability,
-transport cancellation/deadline/slot/TTFT/cadence, status/limit/malformed,
-duplicate-call, socket, process and filesystem errors. `is_retryable` is true
-for transport watchdog/deadline errors; reset/abort/broken-pipe/timeout/refused/
-unexpected-EOF socket kinds; HTTP 429, 500, 502, 503, 504, 507. Cancellation,
-malformed/oversized responses, invalid configuration and other status/kinds are
-not retryable. Direct transport itself does not retry; the embedding caller
-decides. Diagnostics intentionally avoid provider response bodies, but raw
-model output and arbitrary filesystem/command errors are not globally redacted
-or terminal-control sanitized.
-
-Executed stream evidence in `sav/tests/model_transport.rs` includes
-`llama_server_stream_assembles_text_and_fragmented_tool_arguments`,
-`llama_server_stream_terminal_marker_alone_does_not_infer_stop`,
-`ollama_native_terminal_stop_or_absence_keeps_tool_call_convention`,
-`streams_reject_duplicate_call_ids_before_delivering_tool_intents`,
-`direct_stream_checks_deadline_after_finish_callback_returns`,
-`decodes_chunked_stream_records_split_across_http_chunks`,
-`slot_allocation_timeout_aborts_stalled_connection`,
-`ttft_watchdog_aborts_stalled_stream`,
-`cadence_ignores_heartbeats_empty_control_and_usage_frames_in_every_framing`,
-`reasoning_and_native_tool_progress_start_cadence_before_intent_delivery`,
-`cadence_does_not_start_on_slow_fragmented_initial_records`.
-
-## Serving capacity and model catalogs
-
-`DirectModelTransport::context_limit` is selected-model runtime-capacity
-discovery, not training-window inference: bounded to min(configured deadline,
-60 seconds) and 1 MiB. Llama GETs percent-encoded `/props?model=<id>` and reads
-default_generation_settings.n_ctx. Ollama GETs `/api/ps` and selects matching
-name/model, permitting implicit :latest for an untagged selector, then reads
-context_length. Missing/null capacity is None; advertised values must be integer
-1–1,048,576. Ollama loaded-model array is at most 128. No inference/tool action
-is sent. A subsequent read of the frozen `context_limit` function observed that
-non-object capacity metadata is classified as `MalformedModelResponse`, not
-`InvalidModelRequest`; invalid caller model selectors still use
-`InvalidModelRequest`. This classification refinement is a source observation,
-not claimed as covered by the earlier package execution.
-Executed `sav/tests/model_capacity.rs` covers
-`selected_llama_context_uses_model_qualified_runtime_properties`,
-`ollama_capacity_is_for_the_matching_loaded_model_only`, and
-`capacity_discovery_rejects_cancelled_requests_and_unsafe_endpoints`.
-
-`sav/src/catalog.rs` exposes separate bounded catalog discovery:
-Ollama `/api/tags`, llama `/v1/models`, or Copilot/Gemini ACP subprocess.
-Options hold endpoint, executable, working_directory, timeout, response bound,
-host-discovery acknowledgement. Defaults: `.`, 5 seconds, 64 KiB, no host
-acknowledgement; maxima 30 seconds/1 MiB.
-
-Canonical ModelCatalog JSON uses format_version=1, provider, nullable
-current_model_id, models with id/name/optional description. It retains first
-duplicate ID in provider order, permits at most 128 unique models and requires
-at least one; unknown current ID is dropped. IDs are 1–256 printable ASCII
-bytes without braces; names ≤1024 bytes and descriptions ≤4096 UTF-8 bytes,
-control-free (description may be empty). Ollama derives descriptions from
-family/parameters/quantization/format; llama uses ID as display name.
-
-ACP requires acknowledgement before spawning. It canonicalizes cwd, executes
-one `--acp` process with inherited host environment/authority, own group, piped
-stdin/stdout, discarded stderr. It sends JSON-RPC 2.0 initialize id 0 with
-protocolVersion 1/clientCapabilities {}, requires confirmation, then session/new
-id 1 with absolute cwd and mcpServers=[]. It extracts models.availableModels
-and currentModelId. No inference prompt, tool bridge, or persistent session is
-created by this client path.
-
-Records are bounded to 64 KiB, total stdout to the option bound, polling 50 ms
-with cancellation/deadline. Notifications without IDs are ignored; wrong IDs,
-provider-to-client requests, protocol errors, malformed records and premature
-EOF fail. Owned process group is SIGKILLed/reaped, with one-second stdout drain;
-retained/escaped pipe holders fail explicitly. ETXTBSY spawn receives up to ten
-10-ms retries. ACP stdin writes and direct child wait use blocking operations:
-the nominal deadline is not a comprehensive hard guarantee for every kernel/
-write/reap condition. A substantive discovery error takes precedence over
-cleanup error. Signal installation occurs, but ACP does not register the
-process group in the shared active-group registry.
-
-Executed `sav/tests/catalog.rs` includes
-`canonical_catalog_is_bounded_deduplicated_and_serializes_as_version_one`,
-`acp_discovery_correlates_responses_and_uses_absolute_no_bridge_session`,
-`acp_discovery_requires_acknowledgement_and_rejects_wrong_ids_and_requests`,
-`acp_cleanup_deadline_applies_while_a_descendant_keeps_writing`,
-`acp_timeout_terminates_and_reaps_the_process_group`,
-`acp_cancellation_terminates_and_reaps_the_process_group`.
-
-## Host supervision and interrupts
-
-`sav/src/supervisor.rs` takes `SupervisionPolicy` with positive idle
-timeout ≤3600 seconds, optional positive attempt timeout ≤24 hours, loop flag,
-max retries ≤10, combined output 1–16 MiB. `CommandSpec` has program, exact
-arguments and optional cwd. Commands run directly with inherited environment
-and host privileges; stdin is null. No filesystem/network/credential isolation
-or host-acknowledgement gate exists at this low-level API.
-
-For each attempt a caller closure receives number and prior RetryCause and
-returns a command. Empty program fails. `run_supervised` forwards stdout/stderr
-as bytes; `run_supervised_capture` retains only successful-attempt output,
-resetting prior captures. Reports contain attempt count; capture reports also
-contain stdout/stderr. Forwarding can expose provisional output from failed
-attempts and retries.
-
-Two owned reader threads read nonblocking pipes in 4096-byte chunks with
-50-ms polling, a 16-slot bounded channel, shared atomic combined-output budget,
-and backpressure stop flags. The main monitor checks cancellation, optional
-absolute attempt timeout, status, and output activity. Idle watches bytes from
-either stream; continuing output does not extend absolute attempt timeout.
-Only idle/repetition produce automatic retry; nonzero exit, overflow, absolute
-timeout, cancellation, spawn/read/forwarding and retained-stream failures are
-terminal. Retry count means retries after the initial attempt.
-
-Deterministic stdout repetition checks a UTF-8-safe lossy 4096-byte suffix for
-three repeated 10–512-byte blocks, four identical nonempty trimmed lines, or
-three repeats of a two-line pattern. This is not semantic progress detection.
-Retry notices explicitly warn that prior attempts may have changed state and
-must be reconciled; retries do not roll effects back. Extra RetryCause variants
-are exposed but not generated by this monitor.
-
-Child gets its own process group. On completion/error, group is SIGKILLed,
-direct child waited, readers drained and joined; a one-second drain timeout
-stops readers and reports retained streams. Forwarding polls output readiness
-for one second, then writes/flushes; this is not a guarantee against every
-partial/blocking write. Group cleanup/direct wait itself is not bounded by the
-pipe-drain timeout. This supervisor differs from skott's private
-single-threaded child pump: it polls/reaps via try_wait and has no universal
-escaped-process/kernel-work termination guarantee.
-
-`sav/src/interrupt.rs` installs SIGINT/SIGTERM handlers once with
-SA_RESTART using unsafe sigaction calls; handler only sets an atomic flag and
-sends SIGINT to the currently registered positive group. Both incoming signals
-forward SIGINT. Supervision registers/clears one process-global group and
-consumes the interrupt flag. The registry is not a per-session concurrent
-multi-child registry; callers must coordinate. `clear_active_process_group_if`
-provides compare-and-clear protection for a matching registration. Failed
-handler installation warns rather than aborting.
-
-Executed `sav/tests/supervisor.rs` includes
-`retry_context_warns_about_prior_side_effects`,
-`nonzero_exit_is_not_retried`,
-`attempt_timeout_is_independent_of_continuing_output`,
-`output_limit_is_terminal_and_not_retried`,
-`escaped_descendant_retaining_output_fails_without_hanging`.
-`sav/tests/cli.rs::interrupt_terminates_the_supervised_process_group`
-and both interrupt module unit tests were executed.
-
-## Loop detector, grammar, and trajectory utilities
-
-`sav/src/loop_detection.rs` recursively normalizes JSON with sorted
-object keys; action hash is SHA256(tool name concatenated with canonical JSON),
-observation hash SHA256(stdout, NUL, stderr). `ActionHashRing` retains eight
-actions/reasoning traces by default (capacity floor one); exposes history,
-record action/observation, checks, reset/clear and base temperature.
-
-Second consecutive identical action or third occurrence in the window is
-blocked based on action hashes, not proof of filesystem invariance. Three
-identical recent observation hashes trigger a stall. Reasoning compares last
-accepted trace using lowercase tokenized 8-gram Jaccard similarity ≥0.88
-(word sets for shorter texts). Decisions are Proceed, first-stall
-SoftCorrection, subsequent TemperatureJitter (base default 0.2, +0.5 capped
-2.0), and four-stall CircuitBreaker. Decisions contain messages, not actual
-inference changes or authorization. Recording a non-invariant observation
-resets stalls; callers can reset independently. Neither host supervisor nor
-direct transport automatically wires this detector into model/tool execution.
-Tests in `sav/tests/loop_detection.rs` exercise canonical hashes,
-window/action/observation/reasoning paths and escalation.
-
-`sav/src/gbnf.rs` compiles primitive types, primitive enums, arrays,
-and sorted object properties to grammar text. Tool compilation produces one
-`{"name":..., "arguments":...}` dispatch alternative and rejects an empty tool
-list. All-required object path enforces fixed key sequence; optional-property
-path permits a repeated arbitrary selection of known keys and does not ensure
-required membership/uniqueness. Bounds, numeric/string/item constraints,
-const/composition/additionalProperties are not fully enforced by this compiler.
-Public compilation itself has no general node/depth/resource guard; the direct
-transport's output-schema validator supplies separate bounds. It can omit
-grammar if compilation fails while still sending native response_format.
-Grammar is a generation aid, not a complete validator or authority boundary.
-All nine `sav/tests/gbnf.rs` cases ran, including
-`compile_strict_object_schema_with_required_properties` and
-`compile_object_with_optional_properties`; these do not prove full schema
-equivalence or execution inside a real llama grammar engine.
-
-`sav/src/trajectory.rs` defines `{event: snake_case, ...}` events:
-session_start/session_finish IDs/task/timestamps/totals/success; turn_start;
-prompt_eval optional cached/new tokens and duration; model_reasoning;
-tool_dispatch call/tool/raw args/action hash; tool_result raw stdout/stderr,
-exit_code/bytes/state_mutated bool; turn_finish output tokens/reason.
-Values are caller assertions, not independently approved effects or evidence.
-
-`TrajectoryRecorder` stores a path, creates parent directories best-effort,
-opens append/create per event, and writes one JSON line. It does not enforce
-private modes, no-link traversal, schema-version envelopes, sequence numbers,
-byte/session bounds, cross-process serialization or sync durability.
-`replay_trajectory` opens a journal, parses nonblank lines into a retained
-event vector, and reports IDs, highest retained turn, counts, recorded final
-success. Optional max-turn stops when a TurnStart advances beyond limit;
-it is not an executable checkpoint or a validator of sequence/call pairing.
-Input lines/total retained events are not size-bounded. Replay never executes
-recorded tools. All three trajectory tests ran, including
-`record_and_replay_full_trajectory`, malformed and missing-file cases.
-
-## Standalone CLI and operational limitations
-
-`sav/src/main.rs` implements:
-
-- `sav-run model`: explicit local provider, endpoint, model and prompt/file/
-  editor/stdin; stream/unary, reasoning hint, output-schema JSON string,
-  show-reasoning stderr or canonical turn JSON. Defaults: 300-second overall,
-  60-second slot, 120-second TTFT, 1 MiB response. Requires slot < TTFT < overall.
-  Tools are absent/choice none. Plain response bytes are written exactly; no
-  terminal-control sanitization, autonomous tool execution, context compaction,
-  retry policy or native max-output-tokens CLI flag. JSON streaming suppresses
-  intermediate event presentation. Direct model CLI does not install the host
-  supervisor's signal handler or link a signal watcher to its cancellation token.
-- `sav-run models`: bounded provider discovery with optional endpoint or ACP
-  executable, host-discovery acknowledgement, timeout/response bound, plain
-  ID lines or catalog JSON. Endpoint/executable restrictions depend on provider.
-  llama-cli/custom-script catalogs are rejected without spawning.
-- `sav-run run`: exactly command template or named profile, optional config,
-  prompt source, repeated context paths, cwd (default `.`), effort hint,
-  idle timeout (default 900), loop flag, retries (default 3), output bound
-  (default 1 MiB), mandatory allow-host-execution. Acknowledgement is checked
-  before prompt acquisition. No overall attempt timeout is configured by this
-  CLI; continuing output can continue until another terminal bound is reached.
-  Retry notice is appended to prompt before re-rendering. Plain mode forwards
-  streams; JSON captures and emits only `{"content": <lossy stdout>}` from the
-  successful attempt, excluding stderr/attempt count.
-- `sav-run setup`: selected/default profile config and force switch;
-  interactive provider discovery/qualification/persistence as above.
-- `sav-run replay`: diagnostic event display or replay-report JSON, optional
-  max-turn filter; no process execution.
-
-Plain prompt preamble appears on terminal stderr only, not piped stdout.
-Runtime CLI errors print `error: ...` and exit 1; successful operations exit 0,
-apart from clap's own argument handling. There is no terminal UI, durable
-mandatory journal, project task approval interface, or sandbox selection in
-this binary. Trajectory logging is opt-in library use and is not automatically
-created by these run/model commands.
-
-Executed CLI evidence includes
-`sav/tests/model_cli.rs::streaming_model_command_preserves_provider_content_exactly`,
-`sav/tests/cli.rs::host_execution_requires_explicit_acknowledgement`,
-`standalone_json_run_emits_only_captured_content`,
-`standalone_json_run_replaces_invalid_utf8_content`,
-`models_reports_manual_providers_as_unsupported_without_spawning`,
-`standalone_cli_replays_trajectory_json`.
-
-## Executed verification
-
-Executed `cargo test -p sav --offline --locked` independently using
-project-local TMPDIR fixture storage; it completed successfully:
-
-| Test target | Passed |
-| --- | ---: |
-| Library unit tests | 9 |
-| catalog | 11 |
-| cli | 25 |
-| command | 6 |
-| gbnf | 9 |
-| loop_detection | 11 |
-| model_capacity | 3 |
-| model_cli | 2 |
-| model_transport | 44 |
-| profiles | 4 |
-| setup | 9 |
-| supervisor | 9 |
-| trajectory | 3 |
-
-Total 145 passed, zero failed, zero ignored. Binary unit target and doctests
-ran zero tests. This full-suite execution preceded the final capacity-error
-classification refinement and new large-request fixture.
-After production source was reported frozen,
-`cargo test -p sav --offline --locked --test model_transport
-reliability_large_context_requests_are_not_limited_by_the_old_two_mib_ceiling`
-passed one test, with 44 filtered out. This separate targeted result is not
-reported as a rerun of the entire package.
-An initial combined two-package invocation stopped on an
-skott integration assertion before reaching runtime; it is not counted
-as successful runtime verification. Captured outputs and fixture storage were
-removed before writing this record.
-
-Transport/catalog/setup trials use loopback fixture servers and subprocess
-fixtures, not live Ollama/llama-server or real Copilot/Gemini account discovery.
-No real editor interaction, non-Linux build, optional-feature build, formatter/
-linter, adversarial full JSON Schema equivalence assessment, or maerg/sandbox
-implementation assessment was performed. Source observations explain the
-bounded mechanisms and gaps; passing tests are not certification of arbitrary
-host isolation, side-effect rollback, provider correctness, or full recovery.
-
-## Subsequent observation: signal-installation unsafe boundary
-
-This refresh adds the current signal-installation behavior and supplied
-native unit-test evidence. Unaffected observations and earlier independently
-executed results remain unchanged.
-
-### Source-observed behavior
-
-`sav/src/lib.rs:1–11` documents the unsafe boundary and points to
-`interrupt::install_handler`. A search of current `sav/src/**/*.rs`
-found exactly two `unsafe` expressions: the SIGINT and SIGTERM `sigaction`
-calls in `sav/src/interrupt.rs:66,73`.
-
-`sav/src/interrupt.rs::install_handler` uses process-global `Once`
-to attempt both installations once, with a static handler, an empty signal
-mask and `SA_RESTART`. Each failed installation emits its own `tracing::warn!`
-with the error and leaves that signal's existing disposition unchanged.
-The two calls are attempted independently: one failure does not skip the
-other. The public function returns no installation result, and `Once`
-prevents a subsequent call from retrying a failed installation.
-
-The source safety explanation confines handler work to atomics and `killpg`,
-with no allocation, locks, or formatting, and describes bounded supervision
-polling as the path for observing the flag. The actual handler sets the
-interrupt flag with sequential consistency, loads the single registered
-process group, and signals it only when positive and convertible to `i32`.
-It forwards **SIGINT**, including when invoked for SIGTERM; its input signal
-number is ignored. `take_interrupted` atomically returns and clears the flag.
-This remains one global active-group slot, not independent registrations for
-concurrent groups. These are implementation observations, not a general
-proof of async-signal safety.
-
-### Native test coverage and supplied execution evidence
-
-Both tests are in `sav/src/interrupt.rs`:
-
-- `interrupt::tests::install_handler_is_idempotent_and_flag_round_trips`
-  calls installation twice, then checks false/true/false flag consumption.
-  It does not assert the operating system's installed signal disposition or
-  exercise installation-failure warnings.
-- `interrupt::tests::handler_forwards_to_the_active_process_group` launches
-  `sleep 60` in its own process group, registers it, directly calls the
-  handler with `2`, observes the interrupt flag, waits for an unsuccessful
-  child exit, and clears registration. It exercises real group signaling,
-  but does not deliver an OS signal to the parent handler, verify a specific
-  child termination signal, or test SIGTERM/failure/concurrent-group cases.
-
-The explicitly supplied source/test execution file
-`/home/stefan/.copilot/session-state/b6381b27-3338-4699-8a06-e12c43d5ce0e/files/runtime-unsafe-signal-tests.txt`
-shows both named tests passed: two passed, zero failed/ignored, seven filtered
-out. This refresh inspected that evidence without rerunning its command; it
-is a selected native library-test result, not a new full-package execution or
-signal-safety certification. No result is claimed for the further full
-affected suite, strict lint, or release rebuild reported as in progress.
-<!-- kvist-implementation-record-version: 1 -->
-
-# Component Implementation Record
+## Evidence scope
+
+This record was derived afresh from `sav/src/**`, `sav/tests/**`, and
+`sav/Cargo.toml`, with the subsequently supplied workspace test-run log used only
+as execution evidence. No intent documents, previous implementation record, peer
+implementation, review history, or Git information were used.
+
+**The observer did not run tests, builds, or executable probes.** Test-source
+references below describe assertions separately from the execution
+evidence summarized below. Findings are source-based engineering observations,
+not acceptance, compliance, or security certification; passing existing tests
+does not establish that the identified gaps are covered.
+
+The current bounded refresh directly re-inspected `src/main.rs`,
+`src/runtime/session.rs`, `src/runtime/driver.rs`, the new
+`tests/registry_cli_policy.rs` and `src/runtime/accounting_tests.rs`, and relevant
+direct-validation, registry-transport, signal, supervision, and existing runtime
+test sections. Other component descriptions retain the original direct-source
+observation; this was not an exhaustive second audit. The inspected workspace
+execution log predates these repairs and is not post-repair validation.
+
+## Observed public contract
+
+### Package, CLI, and authority
+
+Sav is a Rust edition-2024 library and `sav-run` binary, version 0.3.0, with
+Rust 1.95 declared in its package manifest. The crate rejects non-Linux builds.
+Its exported interfaces include prompt acquisition, shell-free command rendering,
+provider catalogs, direct local HTTP model transports, provider/profile setup,
+process supervision, native conversation/runtime controls, diagnostic journals,
+trajectory recording/replay, loop detection, and fixed Rust runtime script
+generation (`src/lib.rs`, `src/main.rs`, `Cargo.toml`).
+
+The CLI exposes `model`, `models`, `run`, `replay`, `setup`, and `registry`.
+Process execution through `run` requires `--allow-host-execution`. ACP catalog
+discovery requires a separate `--allow-host-discovery`. Neither acknowledgment is
+a sandbox or a filesystem/network/credential restriction. Library supervision
+accepts caller-supplied execution authority rather than requiring those CLI flags.
+Native HTTP inference does not require the process-execution acknowledgment.
+
+`model` supports direct Ollama/llama-server selection or a named native registry
+profile, prompt/file/editor input, streaming, canonical JSON output, optional
+reasoning presentation, reasoning effort, and provider-native output schemas.
+`models` emits provider-order IDs or a version-one catalog. `registry` emits
+configured resolved profiles without discovery or qualification; listing includes
+disabled profiles, whereas selecting a disabled profile fails. `run --profile`
+accepts external profiles and refuses native profiles. The profile-selected model
+path applies the stricter of the profile deadline and CLI `--timeout`, together
+with CLI `--max-response-bytes`. Explicit slot/first-token watchdog flags conflict
+with `--profile`; direct-provider mode retains their 60/120-second defaults and
+ordering checks. External profiles default to zero retries and reject an explicit
+positive retry count before spawn. Explicit `--command` retains a default of three
+retries and an optional caller-selected count (`src/main.rs:547-605`,
+`src/main.rs:662-710`).
+
+### Shared registry, setup, and pinned resolution
+
+`registry::Backend` distinguishes native HTTP models from external agents.
+Native fields include provider, base URL, model, optional context/reserve values,
+deadline, retry settings, and cadence timeout. External fields include an explicit
+provider enum, executable, literal argument vector, and optional model.
+Capabilities are separate `advertised`, `tested`, and `policy_enabled` identifier
+lists; their contents do not themselves grant tool authority
+(`src/registry.rs:30-239`, `src/registry.rs:301-377`).
+
+The shared TOML document requires integer `schema_version = 1` and named profiles.
+Unknown document/profile/backend-struct fields or invalid types fail parsing.
+The decoder rejects TOML floats and datetimes. Limits include 64 KiB per file,
+128 profiles per file and merged registry, and 1–128-byte ASCII selector names.
+Each capability list permits at most 32 unique identifiers.
+
+Native validation supplies an empty endpoint's provider default
+(`127.0.0.1:11434` for Ollama; `127.0.0.1:9931` for llama-server).
+It checks deadline 1–600 seconds, attempts 1–32, cadence at most 600 seconds
+(zero disables it), ordered retry delays capped at 3600 seconds, and optional
+context/reserve bounds up to 1,048,576 with context greater than reserve when
+both are supplied. This validates a transport without contacting it. Native model
+text validation here is broader than the direct request validator.
+
+External definitions bound executable text to 4096 bytes, arguments to 128
+entries of at most 16,384 bytes, and optional model text to 1024 bytes.
+Argument validation rejects NUL and a heuristic list of credential-like
+substrings. This is not comprehensive secret detection.
+
+`RegistryPaths` loads user, project, then explicit sources. A complete higher
+precedence profile replaces a lower precedence profile by name; fields are not
+merged. The project source is `<project>/.kvist/providers.toml`. The user source
+is absolute `XDG_CONFIG_HOME/sav/registry.toml`, otherwise absolute
+`HOME/.config/sav/registry.toml`. Missing optional sources are skipped; an explicit
+missing source or any malformed present source fails closed. Lower precedence
+sources are validated even when subsequently overridden
+(`src/registry.rs:447-562`).
+
+Resolution returns a cloned name, normalized profile, source pathname, and SHA-256
+digest of the **entire original source text**. Subsequent filesystem changes do
+not alter the loaded selection. This is an in-memory snapshot, not authentication
+of its producer, executable-content pinning, or automatic revalidation at use.
+`ResolvedProfile` fields are public and mutable by the embedding caller.
+
+Upsert validates the existing document and replacement before serializing,
+then uses the profile filesystem helpers to write, synchronize, atomically
+persist, and synchronize the parent directory. First creation is no-clobber.
+Configuration reads use bounded UTF-8 reads, leaf `O_NOFOLLOW`/`O_NONBLOCK`,
+and opened-file regularity/size checks. Persistence rejects a symlink final
+parent, but does not descriptor-walk every ancestor or serialize concurrent
+read-modify-write operations (`src/profile.rs:229-345`,
+`src/registry.rs:565-604`).
+
+`run_registry_setup` offers llama-cli, llama-server, Ollama, Copilot, Gemini, or a
+custom executable; Claude is representable in the external provider enum but is
+not a wizard choice. Setup performs explicit discovery, permits a numbered or
+custom model choice, validates direct executable/model paths where applicable,
+and qualifies using `Reply with exactly: OK`. Native qualification disables tools
+and reserves 32 output tokens; external qualification uses no retries, a
+30-second idle limit, 300-second attempt limit, and 64-KiB output bound.
+Qualification success means the transport/process call succeeded; it does not
+verify that the returned answer equals `OK`, populate capability-test lists, or
+authorize later work. `--force` permits saving after qualification failure, not
+after cancellation (`src/setup.rs:24-270`).
+
+Separate exported `ModelProfile`, `load_profiles`, `upsert_profile`, and
+`run_setup_wizard*` APIs still operate a command-template TOML array-of-tables
+store, with a default `sav/config.toml` path. The CLI's shared registry resolution
+does not fall back to that store. These are distinct observed library interfaces,
+not interchangeable shared-registry schemas.
+
+### Native model/runtime interfaces
+
+The model boundary provides typed messages, tool definitions/proposals, requests,
+finish classifications, optional provider usage/identities, ordered text/reasoning
+deltas, and cloneable cooperative cancellation. A model tool descriptor contains
+no executor. `ModelTransport::stream_with_deadline` defaults to ignoring the
+override; direct HTTP transport overrides it (`src/model.rs`).
+
+`AgentSession::next_request` selects `ToolChoice::None` when no tools were supplied
+and `ToolChoice::Auto` otherwise. Host instructions remain the leading system
+message; reasoning effort, tool definitions, and the selected model identity are
+carried into the request (`src/runtime/session.rs:301-325`).
+
+`runtime::NativeRuntime` consumes an `AgentSession`, transport, injected
+`ToolExecutor`, fallible `EventSink`, cancellation token, context manager, optional
+`Recorder`, and optionally a private `ControlMailbox`. The executor owns effects
+and policy. There is no implicit process fallback or registry reload inside the
+loop. Recording is optional; recorder defaults for some observation hooks are
+no-ops, so durability depends on the supplied implementation.
+
+`RunSummary` separates final answer, turns, executed tools, cancellation,
+turn exhaustion, budget exhaustion, and failure. Success requires an answer
+without an interrupted/failed disposition. Streamed text is provisional;
+only a complete validated normal-stop answer becomes a final answer.
+Operational events distinguish provider, estimated, and unavailable token
+accounting. Live input and prior provider total are separate counters, while live
+output adds the current attempt's character-derived estimate to accepted prior
+output. Provider totals are retained independently rather than reconstructed as
+input plus output (`src/runtime/session.rs:85-120`,
+`src/runtime/driver.rs:419-432`).
+
+### Observation and control interfaces
+
+`RunJournal` writes version-one JSONL records with run ID, sequence, and an event
+object containing a bounded type identifier. Owner-controlled `run_start` and
+`run_end` delimit the diagnostic lifecycle. It is not a canonical checkpoint,
+tool grant, or executable replay format. `JournalFollower` reads the original
+held descriptor and reports explicit terminal completion, not completion at EOF
+(`src/observation/journal.rs`).
+
+`ControlServer` exposes only schema-one, nonzero-ID `Cancel` and `Guide` requests.
+The private socket pathname is an explicit process-control capability, separate
+from a journal path. Replies correlate request IDs and distinguish queueing,
+cancellation requested, and rejection; queueing is not model delivery.
+`bind_runtime_controls` rejects guidance/cancellation when no run is active and
+never turns guidance into a new idle task (`src/observation/mod.rs:15-39`).
+
+### Representative existing helpers
+
+Prompt acquisition accepts direct text, regular non-link UTF-8 files, stdin, or
+an explicitly invoked editor, with a 1-MiB nonblank prompt bound. Editor selection
+uses `VISUAL`, then `EDITOR`, then `vi` and executes argv without a shell
+(`src/prompt.rs`).
+
+Command-template rendering tokenizes quotes without shell evaluation and expands
+prompt, JSON prompt, context paths, target directory, and explicit reasoning
+effort placeholders. Structured external argv instead substitutes recognized
+placeholders in one pass, expands standalone `{context_files}`, retains unknown
+placeholders literally, and bounds the rendered result to 256 arguments/2 MiB.
+The two rendering APIs have different substitution/default semantics
+(`src/command.rs`, `src/registry.rs:243-299`).
+
+Catalogs preserve first occurrence/order of duplicate IDs, cap unique entries at
+128, and discard a current-model ID absent from the catalog. HTTP discovery uses
+Ollama `/api/tags` or llama-server `/v1/models`. Copilot/Gemini ACP discovery
+starts one acknowledged host process, exchanges correlated `initialize` and
+`session/new` requests with no MCP servers, and sends no inference prompt.
+Unsupported provider-to-client requests, wrong IDs, malformed records, excess
+output, and timeout fail discovery (`src/catalog.rs`).
+
+The separate trajectory API appends/replays `TrajectoryEvent` JSONL and the
+CLI `replay` summarizes those events; it does not execute recorded tools.
+Unlike `RunJournal`, that recorder reopens a pathname, follows normal filesystem
+resolution, and has no comparable record/total size, private-file, sequence, or
+durability enforcement (`src/trajectory.rs`).
+
+GBNF helpers generate grammars for primitive/object/array/enum schemas and tool
+selection, not a full JSON Schema validator. The mixed optional-property branch
+uses a repeatable property alternative rather than enforcing all required names
+or uniqueness. No explicit depth/node/output cap is implemented in this helper;
+it is distinct from direct transport's bounded output-schema validator
+(`src/gbnf.rs`).
+
+`offline_rust` returns fixed initialization/wrapper script text for a closed
+`RustTool` set. Wrappers select an existing toolchain and inject offline,
+locked, vendored Cargo resolution, including the delegated Clippy companion;
+the module does not itself install, run, or sandbox tools (`src/offline_rust.rs`).
+
+## Observed requirements and constraints
+
+These are implementation-enforced conditions and caller obligations, not a
+comparison with external intent.
+
+- Native HTTP accepts only ASCII `http://` numeric-loopback endpoints with an
+  explicit nonzero port, no user information/query/fragment, and no provider path
+  other than an optional trailing slash. There is no hostname resolution,
+  authentication configuration, proxy, redirect, remote HTTPS, or cloud SDK
+  integration in this transport.
+- Direct model requests bound messages to 1024, tools to 128, aggregate message
+  text and encoded request to 8 MiB, tool descriptions to 16 KiB, and response
+  bytes to a configured maximum at most 16 MiB. Output tokens, when present,
+  must be 1–1,048,576. Model selectors must be nonblank ASCII and at most 256
+  bytes. Output schemas require object nodes, a supported keyword subset,
+  at most 256 KiB, depth 32, and 4096 nodes; callable tool choice cannot be
+  combined with an output schema (`src/direct_transport.rs`).
+- Requests/streaming have overall deadlines, slot/first-token watchdogs, and
+  optional semantic-progress cadence checks. Heartbeats and empty metadata do
+  not count as token progress. Cancellation and socket deadlines are polled;
+  callbacks and custom transports remain trusted, synchronous collaborators.
+- Runtime limits validate positive wall time at most 24 hours, estimated
+  token budget at most one billion, reserve at most 1,048,576, and turns 1–500.
+  Defaults are 24 hours, 100 million estimated tokens, 1024 reserve, and 500
+  turns. These are whole-prompt limits; guidance does not refresh them.
+- Context accounting counts serialized canonical request bytes, escaping,
+  tools, and framing plus response reserve using a four-bytes-per-token
+  heuristic. It is neither an exact tokenizer nor a universal upper bound.
+  Provider usage is separate from the precharged attempt budget.
+- A complete turn must be a nonblank tool-free `Stop`, or nonempty `ToolCalls`.
+  At most 32 calls with unique bounded non-NUL IDs, bounded names, object
+  arguments, and at most 1 MiB encoded arguments per call are accepted.
+  Invalid, length-limited, filtered, unknown, or inconsistent completions cannot
+  directly dispatch tools (`src/runtime/session.rs:621-665`).
+- Mailbox pending tasks/guidance share 32 messages and 1 MiB of text. Active
+  guidance is at most 64 KiB; idle task text may use the full text bound.
+  Editing/withdrawal is permitted only before claim. IPC narrows guidance to
+  16 KiB and rejects blank text and terminal controls except newline/tab.
+- Live journals cap a newline-inclusive record at 64 KiB, total bytes at
+  64 MiB, and each follower poll at 256 records. IPC frames cap at 20 KiB;
+  the server gives an accepted client a 250-ms exchange deadline, and client
+  calls require a positive timeout at most five seconds.
+- Process supervision validates idle time at most 3600 seconds, optional
+  per-attempt time at most 24 hours, retries at most ten, and combined output
+  at most 16 MiB. An absent attempt timeout is allowed. The observed opaque
+  execution API explicitly forbids retries.
+
+## Observed internal design and failure paths
+
+### Native execution, accounting, and controls
+
+The runtime starts a prompt-deadline watcher, owns the mailbox for the run,
+attempts a session-start record, then prepares each request through
+`ContextManager::prepare`. Preparation validates complete tool-call/result
+groups, preserves system messages and outstanding user goals, retains the newest
+safe unit, and compacts eligible older groups transactionally. Summaries are
+bounded lossy user-role history explicitly labeled non-authoritative. Failure
+leaves the supplied request and rolling summary unchanged. Legacy `compact` and
+`maybe_compact` interfaces lack this full-request/reserve guarantee.
+
+Before each provider attempt, estimated request cost plus output reserve is
+deducted from the shared budget without refunds on interruption/failure.
+Transient transport failures use deterministic capped exponential backoff;
+attempt deadlines grow with attempt number but are clamped by remaining prompt
+time. A length finish may regenerate with doubled reserve only if it still
+fits context; no tools from the length-limited response run. Guidance preserves
+the current attempt number/reserve rather than resetting the allowance
+(`src/runtime/driver.rs:648-899`).
+
+Generation-rate timing uses a `DecodeClock` spanning decoded-event observations,
+subtracting callback handling time. First-event wait, terminal wait after the last
+event, retry backoff, and tool execution are outside the observed decode interval.
+A single buffered event has no measured interval and produces a zero rate rather
+than division by a near-zero placeholder. Timing accumulates across failed and
+length-regenerated attempts and into the run accumulator before steering/error
+handling; live averages also include earlier attempts in the current turn.
+Post-turn generation and average rates both use cumulative accepted output over
+accumulated observed decode seconds. This is an observation convention, not
+provider-internal generation timing or complete discarded-attempt token usage.
+Elapsed prompt time starts with the prompt budget, including initial recording
+(`src/runtime/session.rs:85-155`, `src/runtime/session.rs:699-742`,
+`src/runtime/driver.rs:366`, `src/runtime/driver.rs:676-805`,
+`src/runtime/driver.rs:906-936`).
+
+A separate `Operation` token mirrors prompt cancellation, mailbox shutdown, or
+pending guidance at approximately 10-ms intervals. Guidance interrupts quiet
+generation and backoff without cancelling the whole prompt or interrupting an
+already executing effect. Partial interrupted model output is not added as an
+assistant message. Pending later calls from a superseded tool turn receive
+explicit rejected results, preserving call/result pairing.
+
+Mailbox locking linearizes submission classification, claim/edit/withdraw,
+dispatch readiness, and final-answer completion. Guidance receives correlated
+accepted/claimed/delivered, withdrawn, or dropped observations. The bridge's
+acceptance reply is earlier and distinct from these delivery observations.
+Delivery records are attempted before another provider request/effect.
+Required recording failures stop subsequent work. A dispatch-record hook runs
+before the final mailbox/cancellation recheck and host executor invocation.
+The readiness point is not a grant; guidance arriving after that point belongs
+to an already-started dispatch.
+
+Non-repeatable effects use canonical action hashes and an eight-entry repeat
+ring, progressing to rejection and a stalled-proposal circuit breaker.
+Host-declared repeatable observations bypass the effect breaker and can emit
+pagination guidance. The runtime does not automatically replay a tool,
+prove filesystem change, invoke observation-invariant/reasoning detection, or
+apply a temperature change merely because the shared detector supports those
+operations (`src/runtime/driver.rs:515-610`, `src/loop_detection.rs`).
+
+Tool previews include observed exit/status/timeout/cancellation/output-limit
+flags and are bounded to an approximately JSON-encoded 8-KiB envelope.
+Invalid UTF-8/NUL-bearing output is replaced with byte-count/SHA-256 metadata,
+not lossy binary payload. Text is not generically secret-redacted. Full
+`ToolOutcome` data still reaches a recorder, whose storage/redaction policy is
+owned by the host (`src/runtime/session.rs:347-412`).
+
+On exit the driver drains withdrawal/drop notices, ends mailbox ownership,
+clears invalid final answers, and attempts terminal recording even after an
+inner failure. Recorder terminal failure returns a recording error including
+the original failure description. Some errors return before a terminal sink
+event; callers must handle the returned `Result`, not rely exclusively on
+`Finished`/`PromptEnd`/`Failed`. Watcher drops notify and join their threads.
+Executors/transports/sinks/recorders must cooperate: Sav cannot preempt a blocked
+injected callback or force cancellation of an arbitrary executor.
+
+### Bounded live journal and local IPC
+
+Journal creation serializes/validates initial metadata before reserving a
+no-clobber filename, then writes and synchronizes the start record. Path opening
+walks ancestor directories with held descriptors and `openat` no-follow flags;
+the leaf is nonblocking, close-on-exec, and checked as a regular file.
+Creation requests owner-only read/write permissions. The writer and follower
+retain original descriptors across pathname replacement
+(`src/observation/journal.rs:317-385`).
+
+Record serialization stops at its byte bound before append. Validation failures
+do not append; actual write/sync failure poisons the writer. Explicit
+checkpoints synchronize prior diagnostics before host effects. Finish appends and
+synchronizes a bounded terminal disposition. Total-capacity exhaustion does not
+reserve room for a final record, so completion recording can itself fail.
+
+The follower retains partial live tails, enforces version/identity/contiguous
+sequence, exactly one initial start, bounded event types and terminal disposition,
+and rejects data after termination. Malformed polling poisons further polls.
+EOF without `run_end` or with a partial final record is incomplete; it is not
+proof of rollback, failure-free execution, or known effect disposition.
+
+Controls use a generated private directory (0700), Unix socket (0600), and one
+owned listener thread. A bounded newline frame is schema-validated before the
+host callback; replies are validated/correlated before sending. Nonblocking
+connect plus poll/read/write deadlines bound exchanges. Malformed requests do
+not invoke the callback. Server drop sets shutdown, joins the listener, and
+removes the owned directory/socket (`src/observation/control.rs`).
+
+The control callback is trusted to enqueue/acknowledge promptly; its execution
+is not itself time-limited. The pathname must remain outside agent context and
+journals, which this generic mechanism cannot enforce for its caller. There is
+no peer-credential authentication, per-request deduplication, or same-UID
+isolation. Client metadata checks cover the socket/final parent, not a
+descriptor-anchored full ancestor walk. Diagnostic/event payloads are not
+generically redacted or safe terminal-rendering output.
+
+### Opaque supervision and cancellation
+
+Supervision uses `Command`/literal argv, null stdin, piped stdout/stderr, and a
+fresh process group. No implicit shell is involved, although an explicitly
+selected shell/executable retains its own semantics and ambient host authority.
+`run_supervised_observed` accepts a cancellation token and fallible live byte
+observer; bytes remain opaque and are never decoded into native tool authority
+(`src/supervisor.rs:349-369`).
+
+Two nonblocking reader threads use an atomic combined output budget and a
+16-slot bounded channel with 4096-byte chunks. Monitoring polls cancellation,
+optional wall timeout, child exit, output, and idle/repetition conditions.
+Observer failure stops monitoring. Cleanup kills the owned process group,
+waits for the child, drains accepted output, and joins readers on normal and
+monitor-error paths. Drain timeout is one second; escaped descendants retaining
+output produce `OutputStreamsRetained` rather than an indefinitely joined reader.
+There is no containment or termination guarantee for a descendant that escapes
+the process group (`src/supervisor.rs:465-770`, `src/supervisor.rs:866-907`).
+
+General supervision may retry idle/repetition failures, with caller-visible
+prior-effect uncertainty notices; nonzero exit, output overflow, cancellation,
+and attempt timeout are terminal. The observed opaque API refuses any nonzero
+retry allowance. Cancellation/attempt-timeout errors take priority after cleanup.
+
+Signal handling installs one process-global SIGINT/SIGTERM handler. Both signals
+set a shared atomic flag and forward SIGINT to the single registered group.
+The two installation calls are the documented unsafe sites; installation failure
+is logged rather than returned. Concurrent independent supervisors/watchers
+share one group slot and a consuming interrupt flag, not a per-run signal
+registry (`src/interrupt.rs`, `src/runtime/session.rs:708-742`).
+
+## Bounded repair observations, unresolved findings, and limits
+
+These conclusions come from current source paths, not implementer descriptions
+or reproduced test runs. No statement determines compliance with external intent.
+
+### Re-inspected mechanisms
+
+- **External-profile retry policy:** `src/main.rs:692-701` derives zero retries
+  for an external profile and returns an invalid-policy error for positive
+  explicit retries. Both forwarding and JSON capture use this derived policy.
+  `tests/registry_cli_policy.rs:111-149` checks default one-attempt behavior after
+  a repetition failure, positive-retry refusal before spawn, and explicit zero,
+  in both output modes. The source no longer exhibits the previously observed
+  profile retry bypass. Explicit command retries remain a distinct caller-chosen
+  authority surface (`tests/registry_cli_policy.rs:152-188`).
+- **Profile model bounds:** `src/main.rs:574` now calls
+  `native.transport_bounded(timeout, arguments.max_response_bytes)`.
+  `src/registry.rs:147-166` takes the smaller profile/caller deadline and passes
+  the caller output cap into validated transport construction. Profile mode
+  rejects explicit slot/TTFT overrides in CLI parsing instead of silently
+  accepting them (`src/main.rs:164-171`). Source tests cover unary/streaming
+  response overflow, a short caller deadline, and invalid/inapplicable values
+  before provider contact (`tests/registry_cli_policy.rs:209-335`). The earlier
+  ignored-bound mechanism is absent from the re-inspected path.
+- **Tool-free native composition:** `src/runtime/session.rs:316-320` selects
+  `None` for an empty tool list, satisfying the direct validator's condition at
+  `src/direct_transport.rs:764-765`. Tests assert both choice branches and invoke
+  that production validator with a no-tool session request
+  (`src/runtime/accounting_tests.rs:45-71`). That directly covers validation
+  composition, not an end-to-end runtime/network session.
+- **Live counters and timing:** the driver supplies distinct cumulative input,
+  provider total, and accepted output (`src/runtime/driver.rs:425-432`).
+  Live output is cumulative, and retry decode timing is accumulated outside the
+  attempt loop and into the shared run state before error/steering disposition
+  (`src/runtime/session.rs:85-155`, `src/runtime/driver.rs:676`,
+  `src/runtime/driver.rs:803-805`). Counter, production-loop, first-token/
+  presentation exclusion, and retry-time tests are present at
+  `src/runtime/accounting_tests.rs:90-400`. The previously observed counter
+  conflation and retry-local timing reset are absent from these paths.
+
+No new concrete failure was identified in this bounded inspection of those
+repairs. This is not an assertion that every timing, authority, or lifecycle
+interleaving is tested.
+
+### Unresolved independent finding
+
+**Concurrency/lifecycle limitation: process signal ownership is singular.**
+   Registration overwrites one global PGID (`src/interrupt.rs:88-94`).
+   Supervisor cleanup clears it unconditionally
+   (`src/supervisor.rs:299-300`, `src/supervisor.rs:551`), even though a
+   conditional-clear helper exists. Concurrent runs can lose another live
+   run's forwarding registration or consume its interrupt flag. Callers need
+   serialized ownership or independent cooperative tokens; no such serialization
+   is enforced by these public supervision APIs.
+
+Additional boundaries requiring caller judgment are the non-sandboxed external
+process authority, secret-bearing event/output handling, trusted nonblocking
+callbacks, heuristic context/token estimates, public snapshot mutability,
+non-transactional concurrent registry updates, partial-schema GBNF behavior,
+and the less restrictive separate trajectory API described above.
+
+## Test-source coverage and execution limitations
+
+The inspected test sources provide the following evidence of intended checks.
+The workspace run below supplies aggregate passing execution evidence, but does
+not by itself map each source assertion to a named executed test:
+
+| Source | Observed test cases |
+| --- | --- |
+| `tests/registry.rs` | Whole-profile precedence, source/digest snapshot stability after file change, schema/type/endpoint/credential/bounds refusal, disabled profiles, malformed/missing sources, symlink upsert refusal, literal one-pass argv, read-only inspection, and one profile-selected native CLI request. |
+| `tests/registry_cli_policy.rs` | External-profile one-attempt/default/explicit-zero semantics, positive retry refusal before spawn, preserved explicit-command retry choices, unary/streaming caller response/deadline bounds, and pre-contact rejection of inapplicable watchdogs/invalid limits. |
+| `src/runtime/accounting_tests.rs` | No-tool/with-tool request shape, production direct-validation composition, deterministic decode-clock arithmetic, cumulative live input/output/provider totals, first-token/presentation/backoff exclusion, retry decode accumulation, two-turn production-loop counters/rates, and initial-recording inclusion in elapsed time. |
+| `tests/runtime_controls.rs` | Quiet-generation interruption, provisional-output exclusion, edit/withdraw/queue bounds, retained active-effect result and rejected later calls, shutdown, backoff attempt preservation, recording failure before presentation/dispatch, dispatch-recording guidance race, withdrawal after interruption, final-answer/submission classification, retained token charge, attempt cap, and shared wall deadline. |
+| `tests/observation.rs` | Live checkpoint/tail following, held-descriptor replacement behavior, 256-record batches, sequence/version/run/link/special-file rejection, atomic bounded serialization, private socket modes/drop cleanup, bounded idle client/malformed request handling, late-guidance rejection, and total journal capacity refusal. |
+| `tests/external_supervision.rs` | Opaque byte delivery, cancellation/observer-failure termination, retry refusal, and pre-cancel refusal before spawn for the observed library API. |
+| `tests/supervisor.rs` | General retry uncertainty, nonzero no-retry, idle/attempt/output limits, process-group descendant cleanup, and escaped retained-pipe termination of the supervisor wait. |
+| `tests/model_transport.rs`, `tests/model_capacity.rs`, `tests/loaded_model.rs` | Provider wire mapping, explicit/non-success finish handling, output bounds/schema fields, reasoning separation, malformed/duplicate/truncated response refusal, streaming/chunking, cancellation/deadlines/cadence, selected-model serving capacity, and loaded/router model identification. |
+| `tests/command.rs`, `tests/profiles.rs`, `tests/setup.rs`, `tests/catalog.rs`, `tests/cli.rs` | Representative argv/JSON rendering, command-profile persistence, setup qualification/force/selection and acknowledgment paths, HTTP/ACP discovery correlation, and CLI acknowledgment/output/profile-store behavior. Some CLI/catalog cases were indexed by test name rather than fully traced. |
+| `tests/gbnf.rs`, `tests/trajectory.rs`, `tests/loop_detection.rs`; source-local unit tests | Grammar string-shape/error cases, trajectory roundtrip/error cases, hash/repeat-detector cases, retry arithmetic, assistant final-answer helper, legacy context compaction, signal forwarding, and wrapper-script content assertions. |
+
+No Sav-local dedicated tests of `ContextManager::prepare` malformed-group,
+transactional failure, or first-request reserve boundaries were found in the
+inspected sources; runtime-control tests exercise successful preparation
+indirectly. The new CLI policy and accounting tests cover the formerly missing
+repair cases described above. Their timing assertions use deterministic clock
+arithmetic or bounded synthetic sleep fixtures, not actual provider decode
+telemetry. The new no-tool case directly checks validation but does not execute
+the native loop through a real HTTP endpoint. No newly inspected dedicated
+regression checks decode-time retention specifically across guidance or
+length-regeneration, nor concurrent signal-owner isolation.
+
+### Inspected pre-repair workspace execution evidence
+
+The caller reported that
+`CARGO_TARGET_DIR=/opt/target cargo test --offline --locked --workspace --no-fail-fast --quiet`
+exited 0. The observer read and mechanically summarized the supplied log at
+`/home/stefan/.copilot/session-state/13dd58ac-9d6a-4316-9d9b-bada72cc2b4c/files/workspace-tests-refreshed.log`:
+102 test-result summaries, all `ok`, totaling **1687 passed, 0 failed, and
+14 ignored**. Those totals corroborate the supplied report; they are
+workspace-wide, not a Sav-only count. The caller identified the ignored cases
+as existing; their provenance was not independently checked against history.
+This run predates the currently observed repairs and must not be treated as
+evidence that the repaired workspace has passed its full suite.
+
+The caller additionally reported successful workspace all-target Clippy with
+`-D warnings`, ordinary workspace rustdoc, and strict Sav/Skott rustdoc. Their
+logs were not inspected. Strict whole-workspace rustdoc was reported to encounter
+unchanged warnings in other components; that is not recorded as a successful
+strict workspace gate, nor were those peer sources or their change status
+inspected.
+
+### Reported post-repair targeted execution evidence
+
+Implementers reported **41 targeted CLI/registry tests** and **103 runtime tests**
+passing, together with strict Sav Clippy and formatting. No corresponding output
+was supplied for inspection in this refresh, so these remain reported results,
+not observer-run or independently log-verified results. Full post-repair
+workspace validation had not yet been run according to the caller. No test
+selection, coverage percentage, or current workspace-wide gate is inferred from
+those counts.
+
+This execution evidence does not resolve the source-based findings or establish
+coverage of real provider accounts, installed external agents, filesystem faults,
+same-UID adversaries, arbitrary callback stalls, non-Linux operation, or every
+host integration. No peer implementation, production code, or test code was
+changed or inspected beyond the stated source boundary.
