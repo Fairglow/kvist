@@ -8,6 +8,15 @@ Configuration loading materializes shared native profiles into presentation
 entries once. The registry source remains authoritative; no generated TOML copy
 is written. CLI registry override precedes config-relative registry path, then
 project and user defaults. Setup dispatch precedes normal config discovery.
+The optional registry default binding marks a retained native entry as the
+default-provider fallback before existing model/default validation; it changes
+presentation selection, not the shared profile or its authority.
+
+Structured transcript writes hold private directory descriptors, create message
+files no-clobber without following links, and replace the manifest atomically
+relative to its held directory. Replaced pathnames cannot redirect host writes.
+Each prompt reopens the presentation lifecycle as streaming; a completed answer
+is appended once before the prompt's live terminal record.
 
 ## Responsive lifecycle
 

@@ -143,6 +143,8 @@ complete, commented example. Key points:
   `.kvist/providers.toml` overrides the user Sav registry. Registry loading is
   filesystem-only; discovery/qualification happens only during explicit setup
   or execution startup. Native and external-agent backends remain distinct.
+  Optional `default_model = "NAME"` binds the local fallback to one retained
+  native shared profile of `default_provider`, without copying its backend.
 - Explicit `models` overrides declare a local provider (`llama-server` or
   `ollama`), base URL, provider model name, and a per-turn deadline. Serving
   context is discovered for the selected model, not assumed to be 8192 tokens.

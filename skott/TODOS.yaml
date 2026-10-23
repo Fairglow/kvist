@@ -26,27 +26,27 @@ tasks:
   - id: shared-runtime-implement-code
     title: "Consume shared mechanisms and inspect live runs"
     description: "Use Sav registry/native mechanisms, retain workspace executors, expose setup and independent observation/control clients."
-    context: "Shared registry/setup and Sav native mechanisms now support deterministic headless selection, actual TUI/IPC steering and private per-prompt live journals. Attach/follow is executor-free; control access is explicit. Terminal-only opaque external agents require acknowledged host authority, retain their own loop, and have no invented live steering. Full workspace tests and strict Clippy passed; independent reviews remain separate. Protected tasks never use the workspace executor."
+    context: "Independent source-only findings drove five initially failing recording regressions and private descriptor-relative, no-clobber, atomic transcript repair. Shared default bindings and duplicate-free catalogue presentation have targeted coverage. Final workspace: 1743 passed, 14 existing ignores; strict Clippy, formatting, release and documentation passed. Ancillary host-script/theme findings remain separate."
     purpose: "Keep interactive and headless clients consistent."
     expected_outcome: "Shared behavior and attachment tests pass."
     kind: implementation
     status: completed
     depends_on: [shared-runtime-write-tests]
     requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T23:39:56Z", completed_at: "2026-10-23T23:39:56Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-security-audit
     title: "Inspect observer and control boundaries"
     description: "Independently inspect bounded inputs, private control authority, detachment, explicit backend behavior and unchanged tool grants."
-    context: "Record findings and limitations without blanket certification."
+    context: "Independent source-only IMPL.md covers native controls, read-only inspection, opaque-host boundaries and repaired recording. A real PTY inspector smoke exercised guide, cancel and detach through correlated sockets without changing the journal. Ancillary host-script/theme limits remain explicit; no blanket certification."
     purpose: "Retain independent authority observations."
     expected_outcome: "Findings are corrected or explicitly retained."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on: [shared-runtime-implement-code]
     requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T23:39:56Z", completed_at: "2026-10-23T23:39:56Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-compliance-review
@@ -171,19 +171,19 @@ tasks:
   - id: "steering-security-audit"
     title: "Inspect steering control path and execution boundaries"
     description: "Independently inspect cancellation ownership, stale tool dispatch, effect replay, recording-before-effects, budget preservation, event correlation, shutdown and authority invariants."
-    context: "The steering control path is unreviewed implementation; an independent source-only audit is required to bound its authority and confirm no effect replay or stale dispatch before the task may complete."
+    context: "Independent Sav and Skott source-only observations cover operation-scoped interruption, claimed guidance, preserved effects/accounting, required recording and actual worker/IPC entrypoints. Deterministic controls and actual IPC/PTY evidence pass. Scoped audit completed with explicit delegated-evidence limits, not a proof or blanket certification."
     purpose: "Retain independent findings and limitations."
     expected_outcome: "Concrete regressions corrected or explicitly retained."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "steering-implement-code"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"
     timestamps:
       created_at: "2026-10-17T17:30:00Z"
-      updated_at: "2026-10-17T17:30:00Z"
-      completed_at: null
+      updated_at: "2026-10-23T23:39:56Z"
+      completed_at: "2026-10-23T23:39:56Z"
     blocked_reason: null
     recovery_state: null
   - id: "steering-compliance-review"

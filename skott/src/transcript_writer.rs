@@ -8,12 +8,18 @@
 //! The operational NDJSON journal remains unchanged; this is an additional
 //! human-readable structured record.
 
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use nix::fcntl::{OFlag, openat, renameat};
+use nix::sys::stat::{Mode, mkdirat};
+use nix::unistd::{UnlinkatFlags, unlinkat};
 use serde::{Deserialize, Serialize};
+
+static NEXT_MANIFEST: AtomicU64 = AtomicU64::new(0);
 
 /// Session manifest in the proposed format.
 #[derive(Debug, Serialize, Deserialize)]
@@ -46,19 +52,37 @@ pub struct ManifestEntry {
 /// TranscriptWriter accumulates session events and writes them to the structured format.
 pub struct TranscriptWriter {
     base_dir: PathBuf,
-    messages_dir: PathBuf,
-    manifest_path: PathBuf,
+    directory: File,
+    messages: File,
     manifest: SessionManifest,
     sequence: u64,
 }
 
 impl TranscriptWriter {
-    /// Create a new transcript writer for a session.
+    /// Creates a private no-clobber session using held, non-following directories.
     pub fn new(session_id: &str, base_dir: &Path, model: Option<&str>) -> io::Result<Self> {
-        fs::create_dir_all(base_dir)?;
+        if session_id.is_empty()
+            || session_id.len() > 256
+            || session_id == "."
+            || session_id == ".."
+            || !session_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "transcript session identity must be one bounded filesystem-safe component",
+            ));
+        }
+        let (_, parent) = crate::session_log::private_directory(base_dir)?;
+        mkdirat(&parent, session_id, Mode::S_IRWXU)?;
+        let flags = OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+        let directory = File::from(openat(&parent, session_id, flags, Mode::empty())?);
+        mkdirat(&directory, "messages", Mode::S_IRWXU)?;
+        let messages = File::from(openat(&directory, "messages", flags, Mode::empty())?);
+        directory.sync_all()?;
+        parent.sync_all()?;
         let base = base_dir.join(session_id);
-        let messages_dir = base.join("messages");
-        fs::create_dir_all(&messages_dir)?;
 
         let manifest = SessionManifest {
             schema_version: 1,
@@ -73,12 +97,10 @@ impl TranscriptWriter {
             entries: Vec::new(),
         };
 
-        let manifest_path = base.join("session.json");
-
         Ok(Self {
             base_dir: base,
-            messages_dir,
-            manifest_path,
+            directory,
+            messages,
             manifest,
             sequence: 0,
         })
@@ -113,15 +135,47 @@ impl TranscriptWriter {
 
     /// Write the manifest to disk.
     pub fn write_manifest(&mut self) -> io::Result<()> {
-        let json = serde_json::to_string_pretty(&self.manifest)?;
-        let mut f = File::create(&self.manifest_path)?;
-        f.write_all(json.as_bytes())?;
-        f.flush()?;
-        Ok(())
+        let temporary = format!(
+            ".session-{}-{}.tmp",
+            std::process::id(),
+            NEXT_MANIFEST.fetch_add(1, Ordering::Relaxed)
+        );
+        let flags =
+            OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+        let mut file = File::from(openat(
+            &self.directory,
+            temporary.as_str(),
+            flags,
+            Mode::S_IRUSR | Mode::S_IWUSR,
+        )?);
+        let result = (|| -> io::Result<()> {
+            serde_json::to_writer_pretty(&mut file, &self.manifest)?;
+            file.sync_all()?;
+            renameat(
+                &self.directory,
+                temporary.as_str(),
+                &self.directory,
+                "session.json",
+            )?;
+            self.directory.sync_all()
+        })();
+        if result.is_err()
+            && let Err(error) = unlinkat(
+                &self.directory,
+                temporary.as_str(),
+                UnlinkatFlags::NoRemoveDir,
+            )
+            && error != nix::errno::Errno::ENOENT
+        {
+            tracing::warn!(%error, "failed to remove an unpublished transcript manifest");
+        }
+        result
     }
 
     /// Record a user message.
     pub fn record_user(&mut self, content: &str) -> io::Result<u64> {
+        self.manifest.status = "streaming".into();
+        self.manifest.completed_at = None;
         self.sequence += 1;
         self.write_message_file(self.sequence, "user", None, content, true, false)
     }
@@ -180,11 +234,17 @@ impl TranscriptWriter {
         truncated: bool,
     ) -> io::Result<u64> {
         let filename = format!("{:06}.md", seq);
-        let full_path = self.messages_dir.join(&filename);
-
-        let mut f = File::create(&full_path)?;
+        let flags =
+            OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+        let mut f = File::from(openat(
+            &self.messages,
+            filename.as_str(),
+            flags,
+            Mode::S_IRUSR | Mode::S_IWUSR,
+        )?);
         f.write_all(content.as_bytes())?;
-        f.flush()?;
+        f.sync_all()?;
+        self.messages.sync_all()?;
 
         let entry = ManifestEntry {
             id: format!("message-{:06}", seq),

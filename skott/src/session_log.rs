@@ -114,7 +114,11 @@ fn prompt_slug(prompt: &str) -> String {
     }
     // Lowercasing can widen a single character, so re-apply the bound on a
     // char boundary.
-    slug.truncate(40);
+    let mut end = slug.len().min(40);
+    while !slug.is_char_boundary(end) {
+        end -= 1;
+    }
+    slug.truncate(end);
     slug.trim_end_matches('-').to_owned()
 }
 

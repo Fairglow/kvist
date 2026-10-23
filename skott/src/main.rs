@@ -188,19 +188,9 @@ fn list_models(
         }
     }
     for profile in config.shared_profiles.values() {
-        if let sav::registry::Backend::ExternalAgent(backend) = &profile.profile.backend {
-            println!(
-                "  {}  external-agent {}  {} (explicit host execution only)",
-                skott::error::terminal_text(&profile.name),
-                backend.provider.as_str(),
-                skott::error::terminal_text(backend.model.as_deref().unwrap_or("provider default"))
-            );
-        }
-    }
-    for profile in config.shared_profiles.values() {
         if let sav::registry::Backend::ExternalAgent(agent) = &profile.profile.backend {
             println!(
-                "  {:<12} external-agent {}  {}  {}",
+                "  {:<12} external-agent {}  {}  {} (explicit host execution only)",
                 skott::error::terminal_text(&profile.name),
                 agent.provider.as_str(),
                 skott::error::terminal_text(&agent.executable),

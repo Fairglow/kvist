@@ -33,6 +33,7 @@ theme = "dark"
 # Run `skott --setup` first, remove the explicit [[models]] below, and enable:
 # [registry]
 # profiles = ["local-coder"]
+# default_model = "local-coder"
 # Optional path relative to this configuration (CLI --registry takes precedence):
 # path = "providers.toml"
 #
