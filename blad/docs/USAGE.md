@@ -1,32 +1,36 @@
 # Blad User's Guide
 
-Blad is a terminal Markdown viewer that displays skott agent session transcripts
-and standalone Markdown files with rich formatting, interactive navigation,
-and search.
+Blad is a terminal Markdown viewer for files, with rich formatting,
+interactive navigation, and search. The default build has no session commands.
+Build with `cargo build -p blad --features sessions` to add skott transcript
+support; Kvist's all-feature build recipes include it.
 
 ## Quick Start
 
-### View a recent session
+### View a recent session (`sessions` feature)
 
 ```bash
 # List recent sessions
 blad list
 
 # View a specific session by ID or prefix
-blad show 20261012T120000
+blad session 20261012T120000
 ```
 
 ### View a Markdown file
 
 ```bash
 # View any markdown file
-blad view README.md
-
-# Smart shortcut (auto-detects file vs session)
 blad README.md
+
+# Open several files as tabs
+blad README.md GUIDE.md
+
+# Print the installed version
+blad --version
 ```
 
-### Export a session
+### Export a session (`sessions` feature)
 
 ```bash
 # Export to stdout
@@ -36,7 +40,11 @@ blad export 20261012T120000
 blad export 20261012T120000 --output transcript.md
 ```
 
-## Commands
+## Commands and files
+
+`list`, `session`, and `export` require the `sessions` Cargo feature.
+Without it, only filenames and general options are accepted. The old `show`,
+`view`, and `stream` command spellings are not aliases.
 
 ### `blad list [--limit N]`
 
@@ -47,31 +55,35 @@ blad list            # List 20 most recent
 blad list --limit 5  # List 5 most recent
 ```
 
-### `blad show <session-id>`
+### `blad session <session-id>`
 
-View a completed session transcript interactively. Accepts full session ID,
-ID prefix, or full path to session directory.
-
-```bash
-blad show 20261012T120000Z-12345
-blad show 20261012T120000        # Prefix match
-blad show /path/to/session-dir   # Path
-```
-
-### `blad stream <session-id>`
-
-Follow a session transcript. Same as `show` but intended for active sessions.
-
-### `blad view <file.md>`
-
-View a standalone Markdown file with the interactive viewer.
+Print a session transcript snapshot. Accepts full session ID, ID prefix, or
+full path to session directory. Active sessions include a snapshot notice;
+re-run the command for newer events. This is not a live-following viewer.
 
 ```bash
-blad view document.md
-blad view /path/to/file.md
+blad session 20261012T120000Z-12345
+blad session 20261012T120000        # Prefix match
+blad session /path/to/session-dir   # Path
 ```
 
-### `blad export <session-id> [OUTPUT.md]`
+### `blad FILE...`
+
+Open standalone files in tabs, in argument order, with the first active.
+Canonical duplicates reuse one tab. All initial files must be readable before
+the viewer starts or any dump output is emitted. With redirected output or
+`--dump`, render each unique input once in order.
+
+```bash
+blad document.md
+blad /path/to/file.md
+blad README.md GUIDE.md
+blad -- session  # A filename matching an enabled command
+```
+
+Session IDs are never autodetected from positional filenames.
+
+### `blad export <session-id> [--output OUTPUT.md]`
 
 Export a session to a combined Markdown document suitable for sharing or
 archival.
@@ -85,7 +97,9 @@ blad export 20261012T120000 --output transcript.md
 
 | Option | Description |
 |--------|-------------|
-| `--log-dir PATH` | Directory containing skott sessions (default: `.skott/runs`) |
+| `--log-dir PATH` | Session-only: directory containing skott sessions (default: `.skott/runs`) |
+| `--version`, `-V` | Print version without opening files or loading themes |
+| `--help`, `-h` | Print available options and, when enabled, commands |
 | `--dump` | Output plain text without interactive viewer |
 | `--line-numbers` | Show rendered-line numbers in the interactive viewer |
 | `--theme auto\|dark\|light\|terminal` | Appearance; auto uses `COLORFGBG`, otherwise dark |
@@ -96,8 +110,8 @@ blad export 20261012T120000 --output transcript.md
 | `--diagram-charset unicode\|ascii` | Diagram structural glyphs, not authored labels |
 
 ```bash
-# View session without interactive viewer
-blad show 20261012T120000 --dump
+# Render escape-free session text
+blad session 20261012T120000 --dump
 
 # Specify custom log directory
 blad list --log-dir /path/to/logs
@@ -109,13 +123,13 @@ Automatic color uses `COLORTERM=truecolor`/`24bit`, then `TERM=*256color*`, then
 the standard sixteen colors. A nonempty `NO_COLOR` disables automatic colors;
 explicit `--color always` overrides it. Monochrome retains emphasis.
 `--dump` removes **all** styling, including authored terminal escapes, and
-renders message bodies consistently for files, sessions and stream snapshots.
+renders message bodies consistently for files and session snapshots.
 `export` instead preserves the original Markdown.
 
 ### Theme files
 
 ```bash
-blad --theme-file blad/docs/theme.example.json view README.md
+blad --theme-file blad/docs/theme.example.json README.md
 ```
 
 Files are strict JSON objects with optional `theme` (`dark`, `light`,
@@ -276,9 +290,10 @@ breaks and empty lines. Without a configured width, tables stay unwrapped.
 
 ### Link Navigation
 
-The top row lists open files; brackets mark the active tab, shown first so it
-stays visible in narrow terminals. Opening an existing file reuses its tab.
-Search/link status and navigation errors appear in the footer.
+The top row lists open files in fixed opening order; brackets mark the active
+tab without moving it. Narrow terminals clip the row rather than reordering
+tabs. Opening an existing file reuses its tab. Search/link status and
+navigation errors appear in the footer.
 
 Use `Tab` to select the next link, `Shift+Tab` for the previous link, without
 entering a special mode. The selected link's rows are highlighted.
@@ -290,12 +305,18 @@ Press `Enter` to follow the link:
   viewing. Press `b` to return to the previous file.
 - **URL links** (`http://`, `https://`, `mailto:`, `tel:`) open in your
   default browser via `xdg-open`.
+
 - **Anchor links** (`#heading`) jump to local headings; `other.md#heading`
   opens the file and jumps there. Heading slugs are lowercase, replace spaces
   with hyphens, preserve Unicode/hyphens/underscores, and omit punctuation.
   Duplicate slugs gain `-1`, `-2`, etc. Explicit `{#id}` headings also work.
   Percent-encoded UTF-8 paths/fragments are decoded; missing headings and
   invalid escapes produce visible diagnostics without discarding the document.
+
+Browser-launch output is captured rather than written over the viewer.
+Success warnings or launch errors remain in the footer across redraws and
+resize until another user action replaces them. Captured diagnostics retain
+at most 4,096 bytes and identify truncation; control characters stay inert.
 
 You do not need link mode to follow a link: pressing `Enter` in normal mode
 opens the first link at or below the top of the viewport. Bare URLs
@@ -348,7 +369,7 @@ Blad uses the `$EDITOR` environment variable. If not set, it defaults to
 ```bash
 # Set your preferred editor
 export EDITOR="code --wait"
-blad view document.md
+blad document.md
 # Press 'e' in the viewer to edit
 ```
 
@@ -448,17 +469,17 @@ itself creates no worker thread.
 blad list
 
 # Find the session about the bug fix
-blad show 20261012T140000
+blad session 20261012T140000
 
-# Search for the bug description
-# Press '/' then type "segmentation fault"
+# Save a plain snapshot for inspection or sharing
+blad --dump session 20261012T140000 > snapshot.txt
 ```
 
 ### View and edit documentation
 
 ```bash
 # Open README
-blad view README.md
+blad README.md
 
 # Edit it
 # Press 'e', make changes in editor, save and close

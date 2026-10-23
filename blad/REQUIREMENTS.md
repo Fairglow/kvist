@@ -24,8 +24,8 @@ Blad must provide the following capabilities:
    (ID, model, message count, status).
 2. **R-002 Show session:** Users can view a completed session transcript with
    full Markdown rendering and syntax highlighting.
-3. **R-003 Stream session:** Users can follow a session transcript (live or
-   completed) with the same rendering as show.
+3. **R-003 Active snapshots:** With session support enabled, users can read an
+   active session's current snapshot. Live following is not provided.
 4. **R-004 Export session:** Users can export a session to a combined Markdown
    document for sharing or archival.
 5. **R-005 Load by path:** Users can load a session by its full directory path
@@ -70,8 +70,9 @@ Blad must provide the following capabilities:
 
 ### Smart Routing
 
-19. **R-019 Smart shortcut:** `blad <target>` tries to interpret the target
-    as a file path, session path, or session ID automatically.
+19. **R-019 File arguments:** `blad FILE...` opens files directly, regardless
+    of extension, with distinct files in argument order as tabs. Positional
+    arguments are never interpreted as session IDs.
 
 ## Quality requirements and constraints
 
@@ -198,6 +199,33 @@ and persistence model. ER cardinalities remain explicit textual Mermaid
 notation; graphical crow's-foot endpoints are not required.
 
 ## Constraints
+
+### Accepted standalone boundary increment
+
+44. **R-044 Optional sessions:** Standalone builds default to no session
+    integration. One opt-in Cargo `sessions` feature admits session APIs,
+    `list`, `session` and `export`, and their session-only options.
+    General viewer options remain available in both configurations.
+    `show`, `view` and `stream` are retired, without aliases or migration.
+    Kvist's all-feature build includes session support; rendering consumers do
+    not need it. Blad has no dependency on Kvist/Sav to read session files.
+45. **R-045 CLI usability:** Both builds provide `--version`/`-V` and help.
+    Empty invocation displays usage. Multiple file arguments share one viewer;
+    repeated canonical files reuse a tab and render only once in dumps, in
+    first-argument order. Unreadable files fail explicitly.
+46. **R-046 Stable tabs:** Tabs retain their initial/opening order when
+    switching, following links or returning. Selection changes do not shift
+    label columns; per-tab positions remain independent.
+47. **R-047 Browser diagnostics:** Explicit URL opening must not inherit
+    viewer stdin/stdout/stderr. Capture bounded diagnostic text, make controls
+    inert and distinguish successful launch warnings from launcher failure.
+    Results remain in the footer across redraw/focus events until another
+    user action replaces them. Browser launch does not reset the document.
+
+The human selected opt-in `sessions`, direct file arguments in both builds,
+and removal of the misleading snapshot-only `stream` command. Future real
+live-follow support needs separately approved behavior rather than another
+feature toggle now.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).

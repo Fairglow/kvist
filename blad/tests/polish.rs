@@ -133,7 +133,6 @@ fn theme_file_is_strict_bounded_and_independent_of_plain_policy() {
             .args(["--color", "always", "--theme-file"])
             .arg(&theme)
             .args(extra)
-            .arg("view")
             .arg(&doc)
             .output()
             .unwrap()

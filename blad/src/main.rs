@@ -1,31 +1,27 @@
-//! Blad: Skott session viewer and transcript browser.
-//!
-//! Reads skott's structured session transcripts from .skott/runs/ and displays
-//! them with full markdown rendering. Can also view standalone .md files.
-//!
-//! Usage:
-//!   blad list                     - list recent sessions
-//!   blad show <session-id>        - view a completed session
-//!   blad stream <session-id>      - follow a live session
-//!   blad view <file.md>           - view any markdown file
-//!   blad export <session-id>      - export session to combined markdown
-//!   blad <session-id|file.md>     - smart shortcut (show or view)
+//! Standalone Markdown viewer with optional Skott session integration.
 
-use blad::{
-    ColorDepth, DiagramCharset, MathMode, MermaidMode, RenderOptions, Theme, display, session,
-};
+#[cfg(feature = "sessions")]
+use blad::session;
+use blad::{ColorDepth, DiagramCharset, MathMode, MermaidMode, RenderOptions, Theme, display};
 use clap::{Parser, ValueEnum};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
-const DEFAULT_LOG_DIR: &str = ".skott/runs";
 mod theme_file;
 
 #[derive(Parser)]
-#[clap(name = "blad", about = "Skott session viewer and markdown browser")]
+#[command(
+    name = "blad",
+    about = "Terminal Markdown viewer",
+    version,
+    propagate_version = true,
+    arg_required_else_help = true,
+    subcommand_precedence_over_arg = true
+)]
 pub struct Cli {
     /// Directory containing skott session runs (default: .skott/runs)
     #[clap(long, global = true, value_name = "PATH")]
+    #[cfg(feature = "sessions")]
     log_dir: Option<PathBuf>,
 
     /// Output plain text without interactive viewer
@@ -60,9 +56,11 @@ pub struct Cli {
     #[clap(long, global = true, value_enum, default_value = "unicode")]
     diagram_charset: DiagramCharset,
 
-    /// Session ID or file path (smart shortcut for show/view)
-    target: Option<String>,
+    /// Files to open in tabs, in argument order
+    #[arg(value_name = "FILE", num_args = 1..)]
+    files: Vec<PathBuf>,
 
+    #[cfg(feature = "sessions")]
     #[clap(subcommand)]
     command: Option<Command>,
 }
@@ -128,16 +126,7 @@ fn render_options(cli: &Cli) -> std::io::Result<RenderOptions> {
     })
 }
 
-fn display_file(path: &std::path::Path, content: &str, cli: &Cli, options: &RenderOptions) {
-    let result = if cli.dump {
-        blad::MarkdownRenderer::with_options(options.clone())
-            .render_markdown(content, &mut std::io::stdout().lock())
-    } else {
-        display::view_markdown_file_with_options(Some(path), content, cli.line_numbers, options)
-    };
-    report_io("display markdown", result);
-}
-
+#[cfg(feature = "sessions")]
 #[derive(clap::Subcommand)]
 pub enum Command {
     /// List recent skott sessions
@@ -145,12 +134,8 @@ pub enum Command {
         #[clap(long, default_value = "20")]
         limit: usize,
     },
-    /// View a completed session transcript
-    Show { session_id: String },
-    /// Follow a live session as it streams
-    Stream { session_id: String },
-    /// View a standalone markdown file
-    View { path: PathBuf },
+    /// Read a session snapshot by ID, prefix or directory
+    Session { session_id: String },
     /// Export a session to a combined markdown document
     Export {
         session_id: String,
@@ -159,17 +144,10 @@ pub enum Command {
     },
 }
 
-fn resolve_log_dir(cli: &Cli) -> PathBuf {
-    match &cli.log_dir {
-        Some(path) => path.clone(),
-        None => PathBuf::from(DEFAULT_LOG_DIR),
-    }
-}
-
 /// Report an I/O failure and exit with the contract's error code (1).
 fn report_io(context: &str, result: std::io::Result<()>) {
     if let Err(error) = result {
-        eprintln!("Failed to {context}: {error}");
+        eprintln!("Failed to {context}: {}", error.to_string().escape_debug());
         std::process::exit(1);
     }
 }
@@ -186,7 +164,10 @@ fn fail(message: &str) -> ! {
 
 fn main() {
     let cli = Cli::parse();
-    let log_dir = resolve_log_dir(&cli);
+    #[cfg(feature = "sessions")]
+    if cli.command.is_some() && !cli.files.is_empty() {
+        fail("Files and session commands cannot be combined; use -- before command-like filenames");
+    }
     let options = render_options(&cli).unwrap_or_else(|error| {
         fail(&format!(
             "Failed to load theme: {}",
@@ -194,112 +175,56 @@ fn main() {
         ))
     });
 
-    // Smart shortcut: if no subcommand but a target was given, try show then view
-    if cli.command.is_none() {
-        if let Some(target) = &cli.target {
-            if target.ends_with(".md") || target.ends_with(".markdown") {
-                // Treat as a file path
-                match std::fs::read_to_string(target) {
-                    Ok(content) => {
-                        display_file(std::path::Path::new(target), &content, &cli, &options);
-                    }
-                    Err(e) => fail(&format!("Error reading file: {e}")),
-                }
-                return;
-            }
-
-            // Try as a session directory path
-            if PathBuf::from(target).is_dir() {
-                match session::load_session_by_path(&PathBuf::from(target)) {
-                    Some(s) => {
-                        report_io(
-                            "show session",
-                            display::show_session_with_options(&s, &options),
-                        );
-                    }
-                    None => fail(&format!("Error loading session from path: {target}")),
-                }
-                return;
-            }
-
-            // Try as a session ID
-            match session::load_session(&log_dir, target) {
-                Some(s) => {
-                    report_io(
-                        "show session",
-                        display::show_session_with_options(&s, &options),
-                    );
-                }
-                None => fail(&format!("Session not found: {target}")),
-            }
-        } else {
-            fail("Usage: blad [OPTIONS] <command> [ARGS]");
-        }
+    #[cfg(feature = "sessions")]
+    if let Some(command) = &cli.command {
+        run_session_command(command, &cli, &options);
         return;
     }
+    report_io(
+        "display markdown",
+        display::view_markdown_files_with_options(&cli.files, cli.line_numbers, &options),
+    );
+}
 
-    match &cli.command {
-        Some(Command::List { limit }) => {
-            let sessions = session::list_sessions(&log_dir, *limit);
+#[cfg(feature = "sessions")]
+fn run_session_command(command: &Command, cli: &Cli, options: &RenderOptions) {
+    let log_dir = cli
+        .log_dir
+        .as_deref()
+        .unwrap_or_else(|| std::path::Path::new(".skott/runs"));
+    match command {
+        Command::List { limit } => {
+            let sessions = session::list_sessions(log_dir, *limit);
             if sessions.is_empty() {
-                println!("No sessions found in {}", log_dir.display());
+                println!(
+                    "No sessions found in {}",
+                    log_dir.display().to_string().escape_debug()
+                );
                 return;
             }
             report_io("list sessions", display::list_sessions(&sessions));
         }
-        Some(Command::Show { session_id }) => {
-            // Try as a path first, then as an ID
-            if PathBuf::from(&session_id).is_dir() {
-                match session::load_session_by_path(&PathBuf::from(&session_id)) {
-                    Some(s) => {
-                        report_io(
-                            "show session",
-                            display::show_session_with_options(&s, &options),
-                        );
-                    }
-                    None => fail(&format!("Error loading session from path: {session_id}")),
-                }
+        Command::Session { session_id } => {
+            let loaded = if std::path::Path::new(session_id).is_dir() {
+                session::load_session_by_path(std::path::Path::new(session_id))
             } else {
-                match session::load_session(&log_dir, session_id) {
-                    Some(s) => {
-                        report_io(
-                            "show session",
-                            display::show_session_with_options(&s, &options),
-                        );
-                    }
-                    None => fail(&format!("Session not found: {session_id}")),
-                }
+                session::load_session(log_dir, session_id)
+            };
+            match loaded {
+                Some(session) => report_io(
+                    "display session",
+                    display::show_session_with_options(&session, options),
+                ),
+                None => fail(&format!("Session not found: {}", session_id.escape_debug())),
             }
         }
-        Some(Command::Stream { session_id }) => match session::load_session(&log_dir, session_id) {
-            Some(s) => report_io(
-                "stream session",
-                display::stream_session_with_options(&s, &options),
-            ),
-            None => fail(&format!("Session not found: {session_id}")),
-        },
-        Some(Command::View { path }) => match std::fs::read_to_string(path) {
-            Ok(content) => {
-                display_file(path, &content, &cli, &options);
-            }
-            Err(e) => fail(&format!("Error reading file: {e}")),
-        },
-        Some(Command::Export { session_id, output }) => {
-            match session::load_session(&log_dir, session_id) {
+        Command::Export { session_id, output } => {
+            match session::load_session(log_dir, session_id) {
                 Some(s) => report_io(
                     "export session",
                     display::export_session(&s, output.as_deref()),
                 ),
-                None => fail(&format!("Session not found: {session_id}")),
-            }
-        }
-        None => {
-            // Default: list recent sessions
-            let sessions = session::list_sessions(&log_dir, 20);
-            if sessions.is_empty() {
-                println!("No sessions found in {}", log_dir.display());
-            } else {
-                report_io("list sessions", display::list_sessions(&sessions));
+                None => fail(&format!("Session not found: {}", session_id.escape_debug())),
             }
         }
     }

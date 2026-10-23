@@ -11,6 +11,50 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-standalone-tests
+    title: "write_tests: standalone feature boundary"
+    description: "Pin feature-specific CLI surfaces, version, multi-file tabs and browser diagnostics."
+    purpose: "Specify the human-selected standalone/session boundary"
+    expected_outcome: "Regressions fail before production changes"
+    context: "Human selected opt-in sessions, file-only positional inputs and removal of view/stream."
+    timestamps: {created_at: "2026-10-22T22:25:00Z", updated_at: "2026-10-23T05:08:07Z", completed_at: "2026-10-23T05:08:07Z"}
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-044", "REQUIREMENTS.md#R-045", "REQUIREMENTS.md#R-046", "REQUIREMENTS.md#R-047"]
+  - id: blad-standalone-code
+    title: "implement_code: standalone CLI and session feature"
+    description: "Gate session integration, simplify file invocation, stabilize tabs and capture launch diagnostics."
+    purpose: "Keep standalone Blad independent and its viewer predictable"
+    expected_outcome: "Both feature configurations satisfy the new regressions"
+    context: "No compatibility aliases or live-follow behavior are introduced."
+    timestamps: {created_at: "2026-10-22T22:25:00Z", updated_at: "2026-10-23T05:08:07Z", completed_at: "2026-10-23T05:08:07Z"}
+    kind: implementation
+    status: completed
+    depends_on: [blad-standalone-tests]
+    requirements: ["REQUIREMENTS.md#R-044", "REQUIREMENTS.md#R-045", "REQUIREMENTS.md#R-046", "REQUIREMENTS.md#R-047"]
+  - id: blad-standalone-audit
+    title: "security_audit: standalone and browser boundaries"
+    description: "Inspect compile gates, file error handling and bounded subprocess diagnostics."
+    purpose: "Preserve inert terminal output and explicit process authority"
+    expected_outcome: "Scoped findings and dispositions retained"
+    context: "Scoped audit and limitations retained in IMPL.md; no whole-component security certification."
+    timestamps: {created_at: "2026-10-22T22:25:00Z", updated_at: "2026-10-23T05:08:07Z", completed_at: "2026-10-23T05:08:07Z"}
+    kind: security-audit
+    status: completed
+    depends_on: [blad-standalone-code]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-047"]
+  - id: blad-standalone-review
+    title: "compliance_review: standalone boundary evidence"
+    description: "Derive clean-source observations and compare them source-blind with the approved increment."
+    purpose: "Keep observed evidence independent of implementation intent"
+    expected_outcome: "Evidence and any discrepancies retained for human disposition"
+    context: "Independent observation/comparison retained in IMPL.md; human selected canonical dump deduplication. No Kvist acceptance or receipt."
+    timestamps: {created_at: "2026-10-22T22:25:00Z", updated_at: "2026-10-23T05:08:07Z", completed_at: "2026-10-23T05:08:07Z"}
+    kind: compliance-review
+    status: completed
+    depends_on: [blad-standalone-audit]
+    requirements: ["REQUIREMENTS.md#R-044", "REQUIREMENTS.md#R-045", "REQUIREMENTS.md#R-046", "REQUIREMENTS.md#R-047"]
   - id: blad-polish-tests
     title: "write_tests: viewer polish regressions"
     description: "Cover navigation, tabs, strict theme files, quotes and nested numbering."

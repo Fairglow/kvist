@@ -18,7 +18,7 @@ fn cli_theme_hints_explicit_appearance_and_color_encodings_are_independent() {
             .env("COLORTERM", "")
             .env("NO_COLOR", "")
             .env("COLORFGBG", hint)
-            .args(["--theme", theme, "--color", "always", "view"])
+            .args(["--theme", theme, "--color", "always"])
             .arg(&path)
             .output()
             .unwrap();
@@ -43,7 +43,7 @@ fn cli_theme_hints_explicit_appearance_and_color_encodings_are_independent() {
             .env("TERM", term)
             .env("COLORTERM", colorterm)
             .env("NO_COLOR", "1")
-            .args(["--color", "always", "view"])
+            .args(["--color", "always"])
             .arg(&path)
             .output()
             .unwrap();
@@ -70,7 +70,7 @@ fn rendering_needs_no_runtime_tools_and_does_not_consume_stdin() {
     let output = Command::new(env!("CARGO_BIN_EXE_blad"))
         .env_clear()
         .env("PATH", "")
-        .args(["--dump", "view"])
+        .arg("--dump")
         .arg(&path)
         .stdin(Stdio::from(stdin.try_clone().unwrap()))
         .output()
@@ -99,7 +99,6 @@ fn cli_projection_opt_outs_keep_source_and_plain_dump_precedence() {
             "source",
             "--mermaid",
             "source",
-            "view",
         ])
         .arg(path)
         .output()

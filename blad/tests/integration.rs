@@ -2,6 +2,8 @@
 //!
 //! Verifies that Blad can read Skott's structured session transcripts.
 
+#![cfg(feature = "sessions")]
+
 use std::fs;
 use std::path::Path;
 
@@ -93,6 +95,35 @@ fn blad_reads_skott_structured_transcript() {
     assert_eq!(messages[0].content, "Please help me with this task.");
     assert_eq!(messages[1].kind, "assistant");
     assert!(messages[1].content.contains("solution"));
+}
+
+#[test]
+fn active_session_routes_print_honest_snapshots() {
+    let temp = tempfile::tempdir().unwrap();
+    let id = "active-session";
+    create_test_session(temp.path(), id, "2026-10-09T10:00:00Z");
+    let path = temp.path().join(id);
+    let manifest_path = path.join("session.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["status"] = serde_json::json!("active");
+    manifest["completed_at"] = serde_json::Value::Null;
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    for target in [id, path.to_str().unwrap()] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_blad"))
+            .arg("--log-dir")
+            .arg(temp.path())
+            .args(["--dump", "session", target])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            text.contains("snapshot only - re-run to see updates"),
+            "{text}"
+        );
+        assert!(text.contains("Here's the solution"), "{text}");
+    }
 }
 
 #[test]
@@ -207,7 +238,11 @@ fn every_session_route_uses_the_same_escape_free_dump_policy() {
         "# Answer\n\n**bold**\n\n```rust\nfn main() {}\n```\n\nH~2~O $x^2$\n\n```mermaid\nflowchart LR\nA[Input] --> B[Output]\n```",
     )
     .unwrap();
-    for route in [vec!["show", id], vec!["stream", id], vec![id]] {
+    let session_path = temp.path().join(id);
+    for route in [
+        vec!["session", id],
+        vec!["session", session_path.to_str().unwrap()],
+    ] {
         let output = std::process::Command::new(env!("CARGO_BIN_EXE_blad"))
             .arg("--log-dir")
             .arg(temp.path())
@@ -344,7 +379,7 @@ fn dump_shows_interim_disposition_and_sanitises_unknown_kinds() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_blad"))
         .arg("--log-dir")
         .arg(temp.path())
-        .args(["--dump", id])
+        .args(["--dump", "session", id])
         .output()
         .unwrap();
     assert!(output.status.success(), "{:?}", output.stderr);

@@ -9,87 +9,12 @@ use std::io::{self, IsTerminal, Write};
 use crate::RenderOptions;
 use crate::links::{Link, extract_links};
 use crate::markdown::{MarkdownRenderer, inert_source};
-use crate::session::{Message, Session, load_messages};
+#[cfg(feature = "sessions")]
+pub use crate::session_display::{
+    dump_session, export_session, list_sessions, show_session, show_session_with_options,
+};
 use crate::terminal_text::TerminalLine;
 use crate::viewport::{Document, Frame, paint};
-
-/// List session metadata without interpreting authored terminal controls.
-pub fn list_sessions(sessions: &[Session]) -> io::Result<()> {
-    let mut stdout = io::stdout().lock();
-    for session in sessions {
-        writeln!(
-            stdout,
-            "{} - {} - {} messages - {}",
-            crate::markdown::inert_source(&session.id),
-            crate::markdown::inert_source(session.model.as_deref().unwrap_or("unknown")),
-            session.message_count,
-            if session.completed {
-                "completed"
-            } else {
-                "active"
-            }
-        )?;
-    }
-    Ok(())
-}
-
-/// Show a completed session transcript.
-pub fn show_session(session: &Session) -> io::Result<()> {
-    show_session_with_options(session, &RenderOptions::default())
-}
-
-/// Show a session with one explicit rendering policy for every message.
-pub fn show_session_with_options(session: &Session, options: &RenderOptions) -> io::Result<()> {
-    let mut stdout = io::stdout().lock();
-    writeln!(
-        stdout,
-        "Session: {}",
-        crate::markdown::inert_source(&session.id)
-    )?;
-    if let Some(model) = &session.model {
-        writeln!(stdout, "Model: {}", crate::markdown::inert_source(model))?;
-    }
-    if let Some(created_at) = &session.created_at {
-        writeln!(
-            stdout,
-            "Started: {}",
-            crate::markdown::inert_source(created_at)
-        )?;
-    }
-    writeln!(stdout, "Messages: {}\n", session.message_count)?;
-
-    let messages = load_messages(session);
-    let renderer = MarkdownRenderer::with_options(options.clone());
-    for msg in &messages {
-        print_message(msg, &mut stdout, &renderer)?;
-    }
-    Ok(())
-}
-
-/// Dump a completed session transcript to plain text (no ANSI).
-pub fn dump_session(session: &Session) -> io::Result<()> {
-    show_session_with_options(session, &RenderOptions::plain())
-}
-
-/// Stream a live or recently-completed session.
-pub fn stream_session(session: &Session) -> io::Result<()> {
-    stream_session_with_options(session, &RenderOptions::default())
-}
-
-/// Render the existing stream snapshot using explicit host settings.
-pub fn stream_session_with_options(session: &Session, options: &RenderOptions) -> io::Result<()> {
-    let messages = load_messages(session);
-    let mut stdout = io::stdout().lock();
-    let renderer = MarkdownRenderer::with_options(options.clone());
-    for msg in &messages {
-        print_message(msg, &mut stdout, &renderer)?;
-    }
-
-    if !session.completed {
-        writeln!(stdout, "\n(session still active - re-run to see updates)")?;
-    }
-    Ok(())
-}
 
 /// Check if stdout is a TTY (interactive terminal).
 fn is_tty() -> bool {
@@ -130,6 +55,59 @@ pub fn view_markdown_file_with_options(
     } else {
         MarkdownRenderer::with_options(options.clone())
             .render_markdown(content, &mut io::stdout().lock())
+    }
+}
+
+/// Open initial files in stable argument order, reusing canonical duplicates.
+///
+/// All files are read before terminal entry or output. Plain settings bypass
+/// the interactive viewer; otherwise terminal inputs share one tabbed viewer.
+pub fn view_markdown_files_with_options(
+    paths: &[std::path::PathBuf],
+    line_numbers: bool,
+    options: &RenderOptions,
+) -> io::Result<()> {
+    let mut files: Vec<OpenFile> = Vec::new();
+    for path in paths {
+        let canonical = std::fs::canonicalize(path).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("cannot open {}: {error}", path.display()),
+            )
+        })?;
+        if files
+            .iter()
+            .any(|file| file.path.as_ref() == Some(&canonical))
+        {
+            continue;
+        }
+        let content = std::fs::read_to_string(&canonical).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("cannot read {}: {error}", path.display()),
+            )
+        })?;
+        files.push(OpenFile {
+            path: Some(canonical),
+            content,
+            position: Position::default(),
+        });
+    }
+    if files.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "at least one file is required",
+        ));
+    }
+    if is_tty() && is_stdin_tty() && !options.plain {
+        run_open_files(files, line_numbers, None, options)
+    } else {
+        let renderer = MarkdownRenderer::with_options(options.clone());
+        let mut stdout = io::stdout().lock();
+        for file in files {
+            renderer.render_markdown(&file.content, &mut stdout)?;
+        }
+        Ok(())
     }
 }
 
@@ -236,18 +214,6 @@ impl Drop for TerminalGuard {
     }
 }
 
-/// Open a URL in the default browser.
-///
-/// The destination is passed as a single argument; `xdg-open` is the only
-/// external process spawned, and no shell interpretation is involved.
-fn open_url(url: &str) -> io::Result<()> {
-    let status = std::process::Command::new("xdg-open").arg(url).status()?;
-    if !status.success() {
-        return Err(io::Error::other(format!("failed to open URL: {url}")));
-    }
-    Ok(())
-}
-
 /// Follow a link in the viewer context.
 ///
 /// URL links are handed to the default browser and the viewer stays put.
@@ -255,10 +221,9 @@ fn open_url(url: &str) -> io::Result<()> {
 /// resolved against the current document's directory.
 fn follow_link(link: &Link, current_path: Option<&std::path::Path>) -> io::Result<ViewerAction> {
     match link.kind {
-        crate::links::LinkKind::Url => {
-            open_url(&link.destination)?;
-            Ok(ViewerAction::Stay)
-        }
+        crate::links::LinkKind::Url => Ok(ViewerAction::Notice(crate::browser::open(
+            &link.destination,
+        )?)),
         crate::links::LinkKind::Anchor => Ok(ViewerAction::Jump(crate::links::decode_destination(
             &link.destination[1..],
         )?)),
@@ -283,7 +248,7 @@ fn follow_link(link: &Link, current_path: Option<&std::path::Path>) -> io::Resul
 
 enum ViewerAction {
     Quit,
-    Stay,
+    Notice(String),
     Edit(std::path::PathBuf),
     OpenFile(std::path::PathBuf, Option<String>),
     Jump(String),
@@ -312,11 +277,20 @@ fn run_viewer(
     width_limit: Option<usize>,
     options: &RenderOptions,
 ) -> io::Result<()> {
-    let mut files = vec![OpenFile {
+    let files = vec![OpenFile {
         path: path.map(std::fs::canonicalize).transpose()?,
         content: content.to_string(),
         position: Position::default(),
     }];
+    run_open_files(files, line_numbers, width_limit, options)
+}
+
+fn run_open_files(
+    mut files: Vec<OpenFile>,
+    line_numbers: bool,
+    width_limit: Option<usize>,
+    options: &RenderOptions,
+) -> io::Result<()> {
     let mut active = 0;
     let mut history = Vec::new();
     let mut status = String::new();
@@ -338,7 +312,8 @@ fn run_viewer(
         )?;
         match action {
             ViewerAction::Quit => return Ok(()),
-            ViewerAction::Stay | ViewerAction::Jump(_) => {}
+            ViewerAction::Notice(message) => status = message,
+            ViewerAction::Jump(_) => {}
             ViewerAction::Edit(path) => {
                 files[active].content = edit_file(&path)?;
             }
@@ -399,10 +374,15 @@ fn tab_title(files: &[OpenFile], active: usize) -> String {
                 |name| name.to_string_lossy().into_owned(),
             )
     };
-    let mut title = format!("=== Blad: [{}]", label(active));
+    let mut title = "=== Blad: ".to_string();
     for index in 0..files.len() {
-        if index != active {
-            title.push_str(&format!(" | {}", label(index)));
+        if index > 0 {
+            title.push_str(" | ");
+        }
+        if index == active {
+            title.push_str(&format!("[{}]", label(index)));
+        } else {
+            title.push_str(&format!(" {} ", label(index)));
         }
     }
     title
@@ -819,7 +799,7 @@ fn viewer_session(
                     }
                     selected_link = None;
                 }
-                Ok(ViewerAction::Stay) => {}
+                Ok(ViewerAction::Notice(message)) => *status = message,
                 Ok(action) => return Ok(action),
                 Err(error) => *status = format!("Error following link: {error}"),
             }
@@ -906,80 +886,4 @@ fn edit_file(path: &std::path::Path) -> io::Result<String> {
         )));
     }
     std::fs::read_to_string(path)
-}
-
-/// Export a session to a combined markdown document.
-pub fn export_session(session: &Session, output: Option<&std::path::Path>) -> io::Result<()> {
-    let mut doc = String::new();
-    doc.push_str("# Session Transcript\n\n");
-    doc.push_str(&format!("Session: {}\n", session.id));
-    if let Some(model) = &session.model {
-        doc.push_str(&format!("Model: {}\n", model));
-    }
-    if let Some(created_at) = &session.created_at {
-        doc.push_str(&format!("Started: {}\n", created_at));
-    }
-    doc.push_str("\n---\n\n");
-
-    let messages = load_messages(session);
-    for msg in &messages {
-        let kind_label = match msg.kind.as_str() {
-            "user" => "User",
-            "assistant" => "Assistant",
-            "reasoning" => "Thinking",
-            "tool_dispatch" => "Tool Call",
-            "tool_result" => "Tool Result",
-            "notice" => "Notice",
-            _ => &msg.kind,
-        };
-        doc.push_str(&format!("## {}\n\n", inert_source(kind_label)));
-        doc.push_str(&msg.content);
-        // A blank line before the separator keeps a message whose last line is
-        // not blank from being read as a setext heading by any Markdown
-        // consumer of the export.
-        if !msg.content.ends_with('\n') {
-            doc.push('\n');
-        }
-        doc.push_str("\n---\n\n");
-    }
-
-    match output {
-        Some(path) => {
-            let mut file = std::fs::File::create(path)?;
-            file.write_all(doc.as_bytes())?;
-            println!("Exported to {}", path.display());
-        }
-        None => {
-            io::stdout().write_all(doc.as_bytes())?;
-        }
-    }
-    Ok(())
-}
-
-/// Print a single message with its label.
-fn print_message(
-    msg: &Message,
-    w: &mut impl Write,
-    renderer: &MarkdownRenderer,
-) -> std::io::Result<()> {
-    let kind_label = match msg.kind.as_str() {
-        "user" => "User",
-        "assistant" => "Assistant",
-        "reasoning" => "Thinking",
-        "tool_dispatch" => "Tool Call",
-        "tool_result" => "Tool Result",
-        "notice" => "Notice",
-        _ => &msg.kind,
-    };
-
-    let disposition = match &msg.disposition {
-        Some(d) if d == "final" => " [final]",
-        Some(d) if d == "interim" => " [interim]",
-        _ => "",
-    };
-
-    writeln!(w, "### {}{}", inert_source(kind_label), disposition)?;
-    renderer.render_markdown(&msg.content, w)?;
-    writeln!(w)?;
-    Ok(())
 }

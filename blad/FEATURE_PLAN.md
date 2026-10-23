@@ -13,7 +13,8 @@
 ## What was implemented
 
 Open files form reusable tabs with per-file vertical/horizontal positions.
-The active tab appears first, bracketed, in the top row. `Alt+Left`/`Alt+Right`
+Tabs remain in opening order; brackets mark the active tab without moving it.
+The row is clipped in narrow terminals. `Alt+Left`/`Alt+Right`
 switch tabs; `b` follows tab visit history. Search/link/error status is in the
 footer. Tab/Shift+Tab select links without a special mode, Enter follows them,
 and inline/named labels support left-click hit testing.

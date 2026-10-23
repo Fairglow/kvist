@@ -1,7 +1,7 @@
 # Blad Feature Showcase
 
 This document demonstrates all Markdown features supported by Blad. Open it
-with `blad view docs/EXAMPLES.md` to see rendered output.
+with `blad docs/EXAMPLES.md` to see rendered output.
 
 ## Headers
 
@@ -34,7 +34,7 @@ This is an autolink: https://example.com
 # Shell script example
 for file in *.md; do
     echo "Processing $file"
-    blad view "$file"
+    blad "$file"
 done
 ```
 

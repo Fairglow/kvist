@@ -146,7 +146,7 @@ impl Viewer {
         // Crossterm prefers /dev/tty over stdin for terminal state and size.
         let mut command = Command::new("setsid");
         command
-            .args(["--ctty", "--wait", env!("CARGO_BIN_EXE_blad"), "view"])
+            .args(["--ctty", "--wait", env!("CARGO_BIN_EXE_blad")])
             .arg(path);
         command.args(args).envs(environment.iter().copied());
         if numbers {
@@ -778,4 +778,91 @@ fn theme_file_settings_survive_tabs_edit_and_resize() {
     viewer.resize(70, 16);
     assert!(String::from_utf8_lossy(&viewer.raw).contains("\x1b[38;2;1;2;3m"));
     viewer.quit();
+}
+
+#[test]
+fn multiple_initial_tabs_keep_their_order_and_deduplicate() {
+    let temp = tempfile::tempdir().unwrap();
+    let first = temp.path().join("first.md");
+    let second = temp.path().join("second.md");
+    std::fs::write(&first, "# First").unwrap();
+    std::fs::write(&second, "# Second").unwrap();
+    let mut viewer = Viewer::start_with(
+        &first,
+        80,
+        12,
+        false,
+        &[second.to_str().unwrap(), first.to_str().unwrap()],
+        &[],
+    );
+    assert!(
+        viewer.screen.line(0).contains("[first.md] |  second.md"),
+        "{}",
+        viewer.screen.line(0)
+    );
+    let first_column = viewer.screen.line(0).find("first.md");
+    let second_column = viewer.screen.line(0).find("second.md");
+    viewer.keys(b"\x1b[1;3C");
+    assert!(
+        viewer.screen.line(0).contains("first.md  | [second.md]"),
+        "{}",
+        viewer.screen.line(0)
+    );
+    assert_eq!(viewer.screen.line(1), "# Second");
+    assert_eq!(viewer.screen.line(0).find("first.md"), first_column);
+    assert_eq!(viewer.screen.line(0).find("second.md"), second_column);
+    viewer.keys(b"\x1b[1;3D");
+    assert!(viewer.screen.line(0).contains("[first.md] |  second.md"));
+    viewer.quit();
+}
+
+#[test]
+fn browser_output_is_captured_and_retained_without_corrupting_the_screen() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("browser.md");
+    let launcher = temp.path().join("xdg-open");
+    let tools_path = format!(
+        "{}:{}",
+        temp.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    std::fs::write(&path, "# Document\n\n[web](https://example.test)").unwrap();
+    for (script, expected) in [
+        (
+            "#!/bin/sh\nprintf 'launcher warning\\n' >&2\nprintf 'opened\\n'\n",
+            "Opened in browser: launcher warning",
+        ),
+        (
+            "#!/bin/sh\nprintf 'cannot launch\\n' >&2\nexit 7\n",
+            "exit status: 7",
+        ),
+        (
+            "#!/bin/sh\nif IFS= read -r line; then exit 9; fi\nprintf 'stdin closed; \\033[2Jinert warning\\n' >&2\n",
+            "Opened in browser: stdin closed;",
+        ),
+        (
+            "#!/bin/sh\ni=0; while [ \"$i\" -lt 9000 ]; do printf x; i=$((i+1)); done\n",
+            "output truncated",
+        ),
+    ] {
+        std::fs::write(&launcher, script).unwrap();
+        std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut viewer = Viewer::start_with(&path, 100, 12, false, &[], &[("PATH", &tools_path)]);
+        viewer.keys(b"\r");
+        assert!(
+            viewer.screen.line(11).contains(expected),
+            "{}",
+            viewer.screen.line(11)
+        );
+        assert_eq!(viewer.screen.line(1), "# Document");
+        assert_eq!(viewer.screen.scrolls, 0);
+        viewer.resize(110, 14);
+        assert!(
+            viewer.screen.line(13).contains(expected),
+            "{}",
+            viewer.screen.line(13)
+        );
+        viewer.quit();
+    }
 }

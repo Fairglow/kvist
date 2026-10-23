@@ -4,6 +4,93 @@
 
 Date: 2026-10-12
 
+## Standalone/session boundary observation - 2026-10-23
+
+An independent clean-slate observer inspected current application source,
+manifests and tests without intent, queues, prior records/reviews, project
+documents, chat, Git history/diffs or peer implementations. It ran no Cargo
+commands and made no compliance judgment. Its source-derived observations:
+
+- `Cargo.toml` declares empty defaults and opt-in `sessions`. `lib.rs`,
+  `display.rs` and `main.rs` compile-gate session APIs, display helpers,
+  commands and `--log-dir`; general rendering dependencies/options remain.
+- The CLI accepts positional files, with `list`, `session` and `export` only
+  in session builds. General options can precede commands; mixed file/command
+  invocations fail. `--` disambiguates command-like filenames. Help/version
+  terminate before theme/file loading; empty invocation requests help.
+- `display.rs` canonicalizes and preloads initial UTF-8 file contents before
+  output/terminal entry, preserves first-argument order and reuses canonical
+  duplicates. Interactive mode requires terminal input/output and non-plain
+  settings; other routes render each unique file sequentially. Tabs retain
+  opening order, start with the first file, and wrap during Alt-arrow switching.
+- `session_display.rs` prints noninteractive snapshots with metadata, message
+  labels/dispositions, and an active-session snapshot notice. Export writes
+  source Markdown rather than applying render projections. Session directory
+  lookup belongs to `session`; export still resolves ID/prefix.
+- `browser.rs` invokes `xdg-open` directly with one URL argument and null
+  stdin. Nonblocking combined stdout/stderr capture retains 4,096 bytes with
+  explicit truncation, bounded drain batches and status-based success/error
+  reporting. Collection does not await descendant-held EOF. Viewer footer
+  notices are sanitized/clipped and survive repaint/resize until replaced.
+- Inspected assertions cover CLI feature surfaces, version, argument ordering,
+  unreadable initial files without partial output, non-UTF-8 filenames, stable
+  tabs, snapshot routes and fake browser diagnostics. Browser assertions
+  include success warnings, nonzero status, null stdin, control-containing
+  output, truncation and resize persistence. Socket-level coverage retains an
+  open writer while testing bounded nonblocking reads.
+
+The observer also identified limitations: a launcher that never exits blocks
+the synchronous viewer indefinitely; the existing session reader silently
+substitutes empty bodies for message-read failures, suppresses discovery
+errors, and bounds ID lookup to 1,000 listed sessions with first-prefix
+selection. Browser code uses Unix APIs and `xdg-open`. The synchronous wait
+and existing session-reader behavior are retained, not newly corrected or
+certified by this increment; no timeout/live-follow promise is made.
+
+Parent-executed checks cover both feature configurations: 200 tests passed
+with sessions and 188 without, with two existing optional characterization
+tests ignored in each. Strict all-target standalone and all-feature workspace
+Clippy and an all-feature workspace build passed. These are parent-run
+results, not execution by the observer.
+
+Scoped implementation audit: compile gates and removed unused dependencies
+were inspected; browser execution uses no shell or inherited viewer stdio,
+retained output is bounded, diagnostics cross the inert footer boundary,
+and initial file errors precede output. An empty-session listing path now
+escapes controls, covered by a CLI regression. This is not a whole-component
+security certification or a dependency-internals audit.
+
+A separate source-blind comparator read only current requirements, contract,
+design and this observation. It supported the scoped feature, CLI, tab and
+browser semantics, distinguishing parent-run verification from independent
+execution. It raised one contract ambiguity: "each input" could require dump
+duplicates while the observed implementation renders unique canonical files.
+The human explicitly selected `unique`; requirements/contract now specify
+one rendering per distinct canonical file in first-argument order. No code
+or tests were silently changed to conceal the discrepancy.
+
+The comparator retained coverage reservations for exhaustive option placement,
+every retired alias, per-tab position/back-link combinations, focus events
+and document preservation. Existing passing assertions and source evidence
+support bounded behavior, not exhaustive terminal/platform certification.
+An obsolete `stream_session` design inventory entry was removed. No Kvist
+acceptance, advisory receipt or whole-component certification is claimed.
+
+An additional parent regression measured actual filename columns, not just
+tab order, and failed because brackets shifted labels by one/two columns.
+Inactive tabs now reserve both marker columns. A narrow clean-source observer
+inspected only the title builder and regression, confirming equal-width
+wrappers and unchanged label starts for the same file list. A separate
+source-blind comparator supported fixed-column behavior from that evidence,
+without claiming exhaustive link/history, scroll-position or duplicate-tab
+coverage. Neither narrow reviewer executed tests.
+
+Final parent workspace verification passed 1,597 tests across 90 suites,
+with 14 existing ignored tests; formatter and whitespace checks passed.
+The first workspace run exposed the local ignored vendor manifest's stale
+lock digest after unused dependencies were removed. `kvist vendor .` refreshed
+it offline, then the targeted readiness test and full workspace run passed.
+
 ## Text-only integration observation - 2026-10-21
 
 An independent clean-slate observer inspected final application source/tests

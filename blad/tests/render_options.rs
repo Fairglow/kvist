@@ -96,7 +96,7 @@ fn cli_dump_forces_plain_output_and_accepts_theme_options() {
     let path = temporary.path().join("document.md");
     std::fs::write(&path, "# Heading\n\n**bold**").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_blad"))
-        .args(["--theme", "light", "--color", "always", "--dump", "view"])
+        .args(["--theme", "light", "--color", "always", "--dump"])
         .arg(path)
         .output()
         .unwrap();
@@ -164,7 +164,7 @@ fn cli_color_policy_honors_nonempty_no_color_and_explicit_override() {
         let output = Command::new(env!("CARGO_BIN_EXE_blad"))
             .env("NO_COLOR", "1")
             .env("TERM", "xterm-256color")
-            .args(["--color", color, "view"])
+            .args(["--color", color])
             .arg(&path)
             .output()
             .unwrap();

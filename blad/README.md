@@ -1,14 +1,15 @@
 # Blad
 
 First-class terminal Markdown viewer with interactive navigation, search, and
-rich rendering. Blad reads skott agent session transcripts and standalone
-Markdown files, and renders them with full CommonMark and GitHub-Flavored
+rich rendering. Blad reads standalone Markdown files and, with optional
+session support, skott agent transcripts, using CommonMark and GitHub-Flavored
 Markdown support.
 
 Blad is a standalone binary (`blad`) that is independent of the `kvist` CLI:
-it needs no Kvist project and no skott configuration. It reads skott session
-transcripts from `.skott/runs/` (or a `--log-dir` override) and any Markdown
-file you point it at. It is also the Markdown rendering library that `skott`
+it needs no Kvist project and no skott configuration. The default build
+opens files directly; the `sessions` Cargo feature adds transcript commands
+and `.skott/runs/` discovery (or a `--log-dir` override). It is also the
+Markdown rendering library that `skott`
 uses for its live TUI transcript, so the rendering you see in skott is the same
 rendering blad uses to display sessions afterwards.
 
@@ -27,9 +28,8 @@ rendering blad uses to display sessions afterwards.
 - **Edit mode:** Press `e` to edit files in your preferred editor
 - **Link following:** Tab/Shift+Tab and Enter without a special mode, or click
   inline/named links; local/cross-file heading jumps and open-file tabs
-- **Session viewing:** Read and display skott agent session transcripts
-- **Live streaming:** Follow an active session transcript as it streams
-- **Export:** Export sessions to combined Markdown documents
+- **Optional sessions:** List and read skott transcript snapshots, or export
+  them to combined Markdown documents (`sessions` feature)
 - **Text-only Mermaid:** Spatial Unicode/ASCII boxes, connectors and labels for
   admitted flowchart, sequence, state, class and ER diagrams; no graphics/tools
 - **GFM alerts:** Color-coded [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]
@@ -37,8 +37,9 @@ rendering blad uses to display sessions afterwards.
 ## Prerequisites
 
 **Building.** Rust **1.95** (MSRV) on Linux. Blad is a workspace member, so
-`cargo build -p blad` at the repository root builds it together with its
-dependency (`sav`). No other tools are needed to build or run the test suite.
+`cargo build -p blad` at the repository root builds the standalone viewer;
+`cargo build -p blad --features sessions` includes session integration.
+Neither needs the other workspace components at runtime.
 The Linux viewer tests need `setsid` and `stty` from util-linux/coreutils; they
 attach each child to its own controlling PTY, so they run unchanged from an
 interactive terminal or a noninteractive CI runner.
@@ -50,44 +51,43 @@ queries stdin or launches document-selected commands.
 ## Usage
 
 ```bash
-# List recent sessions
+# Open files in tabs, preserving argument order
+blad README.md GUIDE.md
+blad --version
+
+# A filename matching an enabled command
+blad -- session
+
+# These commands require a build with --features sessions
 blad list
-
-# View a session
-blad show <session-id>
-
-# Follow an active session as it streams
-blad stream <session-id>
-
-# View a markdown file
-blad view <file.md>
-
-# Smart shortcut: auto-detects a session ID or a file path
-blad <session-id-or-file>
-
-# Export a session
-blad export <session-id> [output.md]
+blad session <session-id-or-directory>
+blad export <session-id> --output output.md
 
 # Plain text output (no interactive viewer)
-blad show <session-id> --dump
+blad session <session-id> --dump
 
 # Show rendered-line numbers in the interactive viewer
-blad show <session-id> --line-numbers
+blad --line-numbers README.md
 
 # Choose appearance independently of terminal color capability
-blad --theme light view README.md
-blad --theme terminal --color never view README.md
-blad --theme-file blad/docs/theme.example.json view README.md
+blad --theme light README.md
+blad --theme terminal --color never README.md
+blad --theme-file blad/docs/theme.example.json README.md
 
 # Plain rendered text, even when color is explicitly requested
-blad --color always --dump view README.md
+blad --color always --dump README.md
 
 # Text boxes/arrows, with ASCII structural glyphs
-blad --diagram-charset ascii view diagrams.md
+blad --diagram-charset ascii diagrams.md
 
 # Inspect unprojected expressions and diagram source
-blad --math source --mermaid source view document.md
+blad --math source --mermaid source document.md
 ```
+
+General viewer options, including `--help` and `--version`, remain available
+without session support. Only session commands and `--log-dir` are gated.
+There is no `view`, `show`, or `stream` command, nor session autodetection.
+Active sessions are snapshots; re-run `session` for newer events.
 
 ## Keyboard Shortcuts
 

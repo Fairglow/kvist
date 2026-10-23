@@ -5,6 +5,7 @@
 pub mod display;
 pub mod links;
 pub mod markdown;
+#[cfg(feature = "sessions")]
 pub mod session;
 pub mod theme;
 
@@ -15,6 +16,7 @@ pub use theme::{
     Color, ColorDepth, DiagramCharset, MathMode, MermaidMode, Palette, RenderOptions, Theme,
 };
 
+mod browser;
 mod diagram;
 mod inline;
 mod math;
@@ -22,6 +24,8 @@ mod mermaid;
 mod output;
 mod render_writer;
 mod scripts;
+#[cfg(feature = "sessions")]
+mod session_display;
 mod table;
 mod terminal_text;
 mod viewport;

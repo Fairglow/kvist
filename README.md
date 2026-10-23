@@ -64,16 +64,18 @@ the canonical component table in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 **Dependency direction.** `maerg` (the `kvist` CLI) depends on `sav` as a
 library and speaks to `galla` only through the versioned sandbox protocol.
 `skott` depends on `sav`, `galla`, and `blad` (its Markdown renderer). `blad`
-depends on `sav`. `galla` is an independent enforcement boundary: nothing
-imports its types, and it receives no maerg authority. The maerg and the
+has no runtime dependency on the other workspace components. `galla` is an
+independent enforcement boundary: nothing imports its types, and it receives
+no maerg authority. The maerg and the
 installed runner communicate only through the versioned protocol, so the
 enforcement boundary stays independently installed and separately approved.
 
 **Standalone use.** `skott` and `blad` are standalone binaries that do not
 require the `kvist` CLI. `skott` is a self-contained agent shell driven by its
-own TOML configuration; `blad` reads skott session transcripts and any
-Markdown file. Both can also be launched from Kvist (`kvist prompt` runs
-`skott`; `blad` views the resulting transcripts). `sav` and `galla` are
+own TOML configuration; `blad` opens Markdown files directly, with an opt-in
+`sessions` Cargo feature for skott transcript commands. Kvist's all-feature
+build recipes include that feature. Both can also be launched from Kvist
+(`kvist prompt` runs `skott`; `blad` views the resulting transcripts). `sav` and `galla` are
 reusable libraries with their own CLIs (`sav-run`, `galla-runner`) and are
 usable independently of the `kvist` CLI.
 

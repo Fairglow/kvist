@@ -22,18 +22,32 @@ display. It does not own session creation or modification.
 
 The `blad` executable provides:
 
-- `blad [OPTIONS] <TARGET>` — smart shortcut that resolves session IDs, paths, or files
-- `blad list [--limit <n>]` — list recent skott sessions with metadata
-- `blad show <session-id>` — view a completed session transcript interactively
-- `blad stream <session-id>` — follow an active session transcript
-- `blad view <file.md>` — view a standalone Markdown file interactively
-- `blad export <session-id> [OUTPUT.md]` — export a session to Markdown document
+- `blad [OPTIONS] <FILE>...` — open files in one viewer, in argument order
+- `blad --version` / `blad -V` — package version, without opening files
+- With Cargo feature `sessions` only: `blad list [--limit <n>]`,
+  `blad session <ID-OR-DIRECTORY>`, and `blad export <ID> [--output FILE]`
+
+The default feature set is empty. Session APIs and session-only options
+(`--log-dir`, list `--limit`, export `--output`) MUST be absent without
+`sessions`. General rendering options MUST remain in both builds. Kvist
+all-feature builds enable sessions; embedders can use the renderer alone.
+No command aliases or positional session auto-detection are retained.
+`view`, `show` and `stream` are not subcommands. Filenames matching enabled
+subcommands are passed after `--`. Empty invocation displays help.
+Active sessions are current snapshots, explicitly identified as such; no
+background/live follow is promised.
+
+Files need not have Markdown extensions. Canonical duplicates reuse one tab.
+All initial files are loaded before viewer entry; read errors fail explicitly.
+Noninteractive/dump output renders each distinct canonical file once, in
+first-argument order.
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--log-dir <PATH>` | Directory containing skott session runs (default: `.skott/runs`) |
+| `--log-dir <PATH>` | With `sessions` only: session runs directory (default: `.skott/runs`) |
+| `--version`, `-V` | Print the package version |
 | `--dump` | Output plain text without interactive viewer |
 | `--line-numbers` | Show rendered-line numbers in the interactive viewer |
 | `--theme auto\|dark\|light\|terminal` | Appearance; defaults to `auto`, conservatively dark when unknown |
@@ -67,9 +81,16 @@ replace spaces with hyphens, omit punctuation and suffix duplicates with `-1`,
 and file paths are decoded as UTF-8; malformed encoding is an actionable error.
 Other: `e` hands the whole file to `$EDITOR`, `b` returns to the previous tab,
 `Alt+Left`/`Alt+Right` switch open-file tabs, `q`/`Esc` quit.
-The top row lists open files with the active tab bracketed. Opening an existing
+The top row lists files in stable opening order with the active tab bracketed.
+Label columns remain fixed when the active marker changes. Opening an existing
 file reuses its tab; switching tabs preserves vertical/horizontal position.
 Missing files/anchors and browser errors appear in the footer.
+Explicit browser launches have null stdin and captured stdout/stderr, never
+inheriting the viewer terminal. At most 4,096 diagnostic bytes are retained;
+truncation is explicit. Successful launcher diagnostics are labelled as such,
+not reported as failure. Nonzero exit and spawn failures remain visible errors.
+The latest result survives redraw/focus events until the next user action.
+The synchronous launcher has no new timeout or background process ownership.
 
 Theme files are JSON objects (serde_json's JSON dialect) with optional `theme`
 (`dark`, `light`, `terminal`) and `palette` objects. Palette keys are `heading`,

@@ -88,6 +88,12 @@ jobs:
       - name: Lint
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
+      - name: Lint standalone Blad
+        run: cargo clippy --locked -p blad --no-default-features --all-targets -- -D warnings
+
+      - name: Test standalone Blad
+        run: cargo test --locked -p blad --no-default-features
+
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --all-targets --all-features
 

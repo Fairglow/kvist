@@ -2,11 +2,10 @@
 
 # Blad Design
 
-Blad is a viewer for skott agent sessions and standalone Markdown files. It
-reads skott's structured session format from `.skott/runs/` and provides
-interactive viewing, live streaming, session listing, transcript export,
-full Markdown rendering with syntax highlighting, search/navigation, and
-optional edit mode.
+Blad is an interactive Markdown file viewer with syntax highlighting,
+search/navigation, tabs, and optional external editing. The opt-in `sessions`
+feature reads skott's structured format from `.skott/runs/`, adding session
+listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
@@ -91,9 +90,8 @@ viewer session.
 
 ### Terminal display (`display.rs`)
 
-- `show_session(session)`: Display completed session transcript
+- `show_session(session)`: Display current session snapshot (`sessions` only)
 - `dump_session(session)`: Output session as plain text
-- `stream_session(session)`: Stream session transcript
 - `view_markdown(content)`: View rendered markdown interactively
 - `view_markdown_file(path, content)`: View with edit support
 - `dump_markdown(content)`: Output rendered markdown as plain text
@@ -214,6 +212,43 @@ rendered-geometry integration regressions and large prepared-text cases.
 
 ## Failure and recovery
 
+### Standalone/session boundary increment
+
+Use an empty default feature set and one `sessions` feature. Compile-gate the
+session module, session display helpers, session CLI subcommands/options and
+session-specific tests. Keep common flags and positional `Vec<PathBuf>` inputs
+in both configurations. Clap version/help need no file/theme I/O.
+Session commands live behind a private CLI adapter; `session ID` replaces
+`show ID`, while the old non-following `stream` and redundant `view` disappear.
+Keep rendering consumers feature-minimal; Kvist's existing all-feature recipes
+and CI retain sessions, with an additional no-default-feature CI check.
+Remove unused direct runtime dependencies rather than feature-gating them.
+
+Preload canonicalized initial files into the existing open-file vector, dedupe
+without changing argument order, and reuse the same event loop for single and
+multiple inputs. Keep tab vector order fixed and bracket the selected entry.
+Reserve the same marker columns for inactive tabs so labels never shift.
+The terminal clips overflow without bringing the active tab to the front.
+
+Capture explicit `xdg-open` diagnostics with a standard-library Unix socket pair:
+child stdin is null, stdout/stderr share the capture socket, and the reader is
+nonblocking. Drain in bounded per-iteration batches while waiting for the
+launcher, retaining at most 4,096 bytes with explicit truncation. Once the
+launcher exits, drain only immediately available output; inherited browser
+descriptors must not keep the viewer waiting for EOF. No shell or new daemon
+is introduced. Preserve synchronous launcher semantics (no new timeout).
+Successful diagnostics become a retained notice; nonzero status includes the
+bounded diagnostics in an error. The viewport inert-text boundary owns display.
+
+Tests precede implementation: both feature sets' help/version/CLI surfaces,
+file extension independence, duplicate/multiple-file tabs, stable placement,
+active snapshots, and fake launchers producing success warnings, failure,
+large/control output and null-stdin reads. Socket-level coverage exercises
+bounded reads while a writer remains open. No live browser is required.
+This human-approved boundary uses a deliberate advisory exception while the
+planned receipt mechanism is unavailable; independent observation/comparison
+remain separate from implementation and are not acceptance.
+
 ### Viewer polish increment
 
 Use renderer-owned navigation metadata, recorded when inline link spans and
@@ -224,8 +259,8 @@ extraction and rendering. Decode UTF-8 percent escapes before path/fragment
 resolution; do not invoke a shell.
 
 Keep an indexed open-file list with per-tab viewport offsets and a history of
-visited tabs. Render the active tab first in the clipped top row so it remains
-visible in narrow viewports. Search/link status and errors belong in the footer.
+visited tabs. Render tabs in opening order in the clipped top row, marking
+the active tab without reordering. Search/link status and errors belong in the footer.
 Navigation failures retain the current document and expose a diagnostic.
 Editing hands the complete file to the existing editor after terminal release.
 
