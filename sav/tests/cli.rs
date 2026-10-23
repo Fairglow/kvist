@@ -13,7 +13,7 @@ use nix::{
     sys::signal::{Signal, kill},
     unistd::Pid,
 };
-use sav::load_profile;
+use sav::registry::{Backend, ExternalProvider, Registry};
 use tempfile::TempDir;
 
 #[test]
@@ -207,7 +207,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"models":{"availableModels":[{"
 #[test]
 fn invalid_xdg_config_home_falls_back_to_absolute_home() {
     let workspace = TempDir::new().expect("workspace");
-    let expected = workspace.path().join(".config/sav/config.toml");
+    let expected = workspace.path().join(".config/sav/registry.toml");
+    fs::create_dir_all(expected.parent().unwrap()).unwrap();
+    fs::write(&expected, "schema_version = 1\n[profiles.selected.backend]\nkind = \"external-agent\"\nprovider = \"custom-script\"\nexecutable = \"/bin/echo\"\narguments = [\"{prompt}\"]\n").unwrap();
 
     for xdg in ["", "relative-config"] {
         let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
@@ -218,23 +220,23 @@ fn invalid_xdg_config_home_falls_back_to_absolute_home() {
                 "run",
                 "--allow-host-execution",
                 "--profile",
-                "missing",
+                "selected",
                 "hello",
             ])
             .output()
             .expect("resolve default profile path");
 
-        assert!(!output.status.success());
         assert!(
-            String::from_utf8(output.stderr)
-                .expect("UTF-8 stderr")
-                .contains(&expected.to_string_lossy().into_owned())
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
         );
+        assert_eq!(output.stdout, b"hello\n");
     }
 }
 
 #[test]
-fn default_profile_path_reads_legacy_store_when_canonical_store_is_absent() {
+fn retired_profile_store_is_not_read_when_registry_is_absent() {
     let workspace = TempDir::new().expect("workspace");
     let legacy_directory = workspace.path().join("supervised-agent");
     fs::create_dir(&legacy_directory).expect("create legacy profile directory");
@@ -262,16 +264,9 @@ fn default_profile_path_reads_legacy_store_when_canonical_store_is_absent() {
         .output()
         .expect("run legacy profile");
 
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8(output.stdout)
-            .expect("UTF-8 output")
-            .contains("legacy profile")
-    );
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not found"));
 }
 
 #[test]
@@ -291,7 +286,7 @@ fn canonical_profile_store_takes_precedence_over_legacy_store() {
     let canonical_directory = workspace.path().join("sav");
     fs::create_dir(&canonical_directory).expect("create canonical profile directory");
     fs::write(
-        canonical_directory.join("config.toml"),
+        canonical_directory.join("registry.toml"),
         "not valid profile configuration",
     )
     .expect("write canonical profiles");
@@ -400,10 +395,11 @@ fn standalone_run_selects_reasoning_effort_per_prompt() {
     fs::write(
         &configuration,
         "schema_version = 1\n\
-         [[profiles]]\n\
-         name = \"copilot-high\"\n\
+         [profiles.copilot-high.backend]\n\
+         kind = \"external-agent\"\n\
          provider = \"copilot\"\n\
-         command = \"/bin/echo '{reasoning_effort}'\"\n",
+         executable = \"/bin/echo\"\n\
+         arguments = [\"{reasoning_effort}\"]\n",
     )
     .expect("write profile");
 
@@ -413,7 +409,7 @@ fn standalone_run_selects_reasoning_effort_per_prompt() {
             "--allow-host-execution",
             "--profile",
             "copilot-high",
-            "--config",
+            "--registry",
         ])
         .arg(configuration)
         .args(["--reasoning-effort", "high", "hello"])
@@ -472,7 +468,7 @@ fn setup_uses_fixed_prompt_and_refuses_failed_qualification() {
 
     let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
         .current_dir(workspace.path())
-        .args(["setup", "--config"])
+        .args(["setup", "--registry"])
         .arg(&configuration)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -509,7 +505,7 @@ fn setup_force_persists_profile_after_failed_qualification() {
 
     let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
         .current_dir(workspace.path())
-        .args(["setup", "--force", "--config"])
+        .args(["setup", "--force", "--registry"])
         .arg(&configuration)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -529,7 +525,9 @@ fn setup_force_persists_profile_after_failed_qualification() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
-        load_profile(&configuration, "forced")
+        Registry::load(&configuration)
+            .unwrap()
+            .resolve("forced")
             .expect("forced profile")
             .name,
         "forced"
@@ -575,7 +573,7 @@ fn setup_persists_a_profile_and_run_can_select_it() {
 
     let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
         .current_dir(workspace.path())
-        .args(["setup", "--config", "profiles.toml"])
+        .args(["setup", "--registry", "profiles.toml"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -601,7 +599,7 @@ fn setup_persists_a_profile_and_run_can_select_it() {
             "--allow-host-execution",
             "--profile",
             "standalone",
-            "--config",
+            "--registry",
         ])
         .arg(&configuration)
         .arg("hello profile")
@@ -636,7 +634,7 @@ fn llama_cli_fallback_preserves_provider_and_uses_supported_flags() {
     let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
         .current_dir(workspace.path())
         .env("PATH", &empty_path)
-        .args(["setup", "--force", "--config"])
+        .args(["setup", "--force", "--registry"])
         .arg(&configuration)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -655,19 +653,22 @@ fn llama_cli_fallback_preserves_provider_and_uses_supported_flags() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let profile = load_profile(&configuration, "local-llama").expect("load profile");
-    assert_eq!(profile.provider, "llama-cli");
-    assert!(profile.command.starts_with(&format!(
-        "\"{}\" --model \"{}\" --prompt",
-        wrapper.display(),
-        model.display()
-    )));
-    assert!(profile.command.contains("--single-turn"));
-    assert!(profile.command.contains("--simple-io"));
-    assert!(profile.command.contains("--no-display-prompt"));
-    assert!(profile.command.contains("--predict 4096"));
-    assert!(!profile.command.contains("--context"));
-    assert!(!profile.command.contains("--format"));
+    let profile = Registry::load(&configuration)
+        .unwrap()
+        .resolve("local-llama")
+        .unwrap();
+    let Backend::ExternalAgent(agent) = profile.profile.backend else {
+        panic!()
+    };
+    assert_eq!(agent.provider, ExternalProvider::LlamaCli);
+    assert_eq!(agent.executable, wrapper.to_string_lossy());
+    assert_eq!(agent.model.as_deref(), model.to_str());
+    assert!(agent.arguments.contains(&"--single-turn".into()));
+    assert!(agent.arguments.contains(&"--simple-io".into()));
+    assert!(agent.arguments.contains(&"--no-display-prompt".into()));
+    assert!(agent.arguments.contains(&"4096".into()));
+    assert!(!agent.arguments.contains(&"--context".into()));
+    assert!(!agent.arguments.contains(&"--format".into()));
 }
 
 #[test]
@@ -694,7 +695,7 @@ fn installed_gemini_and_copilot_use_noninteractive_templates() {
         let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
             .current_dir(workspace.path())
             .env("PATH", &bin)
-            .args(["setup", "--force", "--config"])
+            .args(["setup", "--force", "--registry"])
             .arg(&configuration)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -714,25 +715,34 @@ fn installed_gemini_and_copilot_use_noninteractive_templates() {
             String::from_utf8_lossy(&output.stderr)
         );
 
-        let profile = load_profile(&configuration, profile_name).expect("load profile");
-        if profile.provider == "gemini-cli" {
-            assert!(profile.command.starts_with("\"gemini\" --prompt"));
-            assert!(profile.command.contains("--output-format text"));
-            assert!(profile.command.contains("--approval-mode yolo"));
-            assert!(profile.command.contains("--model"));
-            assert!(profile.command.contains("auto"));
-            assert!(!profile.command.contains("--files"));
+        let profile = Registry::load(&configuration)
+            .unwrap()
+            .resolve(profile_name)
+            .expect("load profile");
+        let Backend::ExternalAgent(agent) = profile.profile.backend else {
+            panic!()
+        };
+        if agent.provider == ExternalProvider::Gemini {
+            assert_eq!(agent.executable, "gemini");
+            assert!(agent.arguments.contains(&"--output-format".into()));
+            assert!(agent.arguments.contains(&"yolo".into()));
+            assert!(agent.arguments.contains(&"--model".into()));
+            assert!(agent.arguments.contains(&"auto".into()));
+            assert!(!agent.arguments.contains(&"--files".into()));
         } else {
-            assert_eq!(profile.provider, "copilot");
-            assert!(profile.command.starts_with("\"copilot\" --prompt"));
-            assert!(profile.command.contains("--silent"));
-            assert!(profile.command.contains("--allow-all-tools"));
-            assert!(profile.command.contains("--no-ask-user"));
-            assert!(profile.command.contains("--reasoning-effort"));
-            assert!(profile.command.contains("{reasoning_effort}"));
-            assert!(profile.command.contains("--model"));
-            assert!(profile.command.contains("gpt-5.4"));
-            assert!(!profile.command.contains("copilot chat"));
+            assert_eq!(agent.provider, ExternalProvider::Copilot);
+            assert_eq!(agent.executable, "copilot");
+            for argument in [
+                "--silent",
+                "--allow-all-tools",
+                "--no-ask-user",
+                "--reasoning-effort",
+                "{reasoning_effort}",
+                "--model",
+                "gpt-5.4",
+            ] {
+                assert!(agent.arguments.contains(&argument.into()));
+            }
         }
     }
 }
@@ -768,7 +778,7 @@ exit 0
     let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
         .current_dir(workspace.path())
         .env("PATH", &bin)
-        .args(["setup", "--config"])
+        .args(["setup", "--registry"])
         .arg(&configuration)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -789,12 +799,18 @@ exit 0
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let profile = load_profile(&configuration, "gemini").expect("load Gemini profile");
-    assert!(profile.command.contains("--model \"current\""));
+    let profile = Registry::load(&configuration)
+        .unwrap()
+        .resolve("gemini")
+        .expect("load Gemini profile");
+    let Backend::ExternalAgent(agent) = profile.profile.backend else {
+        panic!()
+    };
+    assert_eq!(agent.model.as_deref(), Some("current"));
     let stdout = String::from_utf8(output.stdout).expect("UTF-8 setup output");
     assert!(stdout.contains("2) current"));
     assert!(stdout.contains("3) Other model ID..."));
-    assert!(stdout.contains("no-prompt ACP model discovery"));
+    assert!(stdout.contains("current"));
 }
 
 #[test]
@@ -810,7 +826,7 @@ fn unusable_provider_fallback_is_rejected_before_persistence() {
     let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
         .current_dir(workspace.path())
         .env("PATH", &empty_path)
-        .args(["setup", "--config"])
+        .args(["setup", "--registry"])
         .arg(&configuration)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -855,7 +871,7 @@ fn cancelling_conventional_probe_does_not_request_a_fallback() {
     let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
         .current_dir(workspace.path())
         .env("PATH", &bin)
-        .args(["setup", "--config", "profiles.toml"])
+        .args(["setup", "--registry", "profiles.toml"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -71,6 +71,30 @@ replaces a bounded regular non-link file. Explicit setup shares discovery and
 qualification, discloses host authority and possible billing, and persists no
 credentials. Forced failed qualification does not mark a capability tested.
 
+Registry files are at most 64 KiB and contain at most 128 profiles, including
+the resolved union. Names use 1–128 ASCII letters/digits or `.`, `_`, `-`, `:`.
+Each capability list contains at most 32 unique identifiers with the same
+syntax. Model IDs are nonblank, control-free strings of at most 1024 bytes;
+catalog discovery does not confer authority on them.
+
+Native optional fields are `context_limit` (2–1048576), `response_reserve`
+(1–1048576, less than configured context), `deadline_secs` (1–600, default
+300), `max_attempts` (1–32, default 3), `retry_base_delay_secs` (default 2),
+`retry_max_delay_secs` (default 30, at most 3600 and at least the base delay),
+and `cadence_timeout_secs` (0–600, default 30; zero disables the watchdog).
+The endpoint defaults to numeric-loopback Ollama port 11434 or llama-server
+port 9931. Construction and validation perform no network I/O.
+
+External providers are `copilot`, `gemini`, `claude`, `llama-cli` or
+`custom-script`. Executables are nonblank, control-free strings of at most
+4096 bytes. At most 128 literal arguments, each at most 16384 bytes and
+NUL-free, are stored; credential-bearing flags/values are refused. An optional
+external model uses the same model-ID bounds. `command_spec` substitutes
+`{prompt}`, `{model}`, `{cwd}`, and `{reasoning_effort}` once; an entire
+`{context_files}` argument expands into separate paths. Inserted values are
+not interpreted again. Rendered argv is bounded to 256 entries and 2 MiB, with
+a 1 MiB prompt bound. Returning a command specification never executes it.
+
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
 described in BCP 14 (RFC 2119 and RFC 8174) when, and only when, they appear in
@@ -91,6 +115,9 @@ decisions, grants, approved resources or credentials, promotion, or canonical
 compliance evidence.
 
 ## Provided interfaces
+
+The public mechanisms below accept host-selected authority and propagate
+bounded, explicit outcomes without owning application policy.
 
 ### Live diagnostic journals and private controls
 
@@ -139,6 +166,8 @@ Guidance delivery is a later journal event. Socket errors and malformed input
 do not invoke the handler. The owner closes and joins its listener on drop;
 observer/client loss cannot terminate the run.
 
+### Additional runtime and transport mechanisms
+
 The shared runtime boundary described in ADR 0015 separates registry,
 native-loop, external-agent and observation interfaces. Registry facts and
 resolution belong to Sav; application role bindings and authorization do not.
@@ -181,14 +210,15 @@ messages/turns, and local direct transports.
 
 The standalone `sav-run` CLI provides:
 
-- `setup [--force]` for profile creation, automatic qualification, and update;
+- `setup [--registry PATH] [--force]` for shared profile qualification and update;
+- `registry [--registry PATH] [--profile NAME]` for filesystem-only JSON inspection;
 - `models --provider PROVIDER [--endpoint URL] [--executable PATH]
 [--allow-host-discovery] [--json]` for bounded provider-model discovery;
 - `run` for supervised provider command execution from positional, file,
   editor, or redirected prompt input, with named profile selection,
   `--reasoning-effort`, and optional `--json` output; and
 - `model` for text-only unary or streaming local model requests, with explicit
-  provider/model selection, an optional `--output-schema` JSON Schema,
+  provider/model selection or `--profile NAME [--registry PATH]`, an optional `--output-schema` JSON Schema,
   `--reasoning-effort`, `--show-reasoning`, and optional `--json` output.
 
 `run` requires exactly one command template or stored profile and explicit
@@ -209,8 +239,9 @@ depending on Kvist.
 
 ## Data and schemas
 
-Profile TOML has `schema_version = 1` and uniquely named profile tables
-containing a case-sensitive name, provider kind, and command template.
+Shared registry TOML uses the typed schema defined in the shared registry
+section. Raw command-template library helpers do not resolve backend identity
+and are not a compatibility parser for registry files.
 Provider-neutral model types represent messages, text, tool intent/results,
 provider-supplied reasoning, provider/model and request identities, usage,
 finish reason, capabilities, runtime events, and typed errors.
@@ -324,7 +355,7 @@ deterministic warning that earlier side effects may remain.
 
 Profile updates preserve unrelated content, validate complete input and output,
 and atomically create or replace the selected regular non-link file. Canonical
-and legacy configuration locations are never merged.
+and retired configuration locations are never consulted by shared resolution.
 
 Setup always tests the generated profile with the fixed prompt
 `Reply with exactly: OK`. It neither asks for a test prompt nor asks for a

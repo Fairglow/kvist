@@ -25,27 +25,27 @@ tasks:
   - id: shared-runtime-write-tests
     title: "Pin shared registry, runtime controls and observation"
     description: "Write deterministic failing tests for shared profile resolution, backend distinctions, native control handoff, live journals, malformed input, bounds and failure propagation."
-    context: "Human approved ADR 0015 on 2026-10-23. Advisory receipts are unavailable; no acceptance or certification is implied."
+    context: "Human approved ADR 0015 on 2026-10-23. Deterministic registry, runtime_controls, observation and external_supervision regressions cover malformed input, pinning, bounds, quiet generation, backoff, effects, final-answer races, recording failure and budget preservation. The refreshed offline locked full workspace suite passed. Advisory receipts are unavailable; this records test work, not acceptance or certification."
     purpose: "Define shared mechanisms without host authority."
     expected_outcome: "Regression tests fail before each implementation increment."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-implement-code
     title: "Consolidate reusable agent mechanisms"
     description: "Implement the shared registry/resolver, native mechanisms, external-agent adapter and live diagnostic/control interfaces without terminal or maerg dependencies."
-    context: "Each commit retains host-injected authority and explicit unsupported combinations."
+    context: "Shared registry/setup, native conversation/context/retry/loop/control, bounded observation and zero-retry opaque process supervision are implemented. Hosts retain authorization and effects. The offline locked full workspace suite and strict all-target Clippy passed. Independent observation/audit and source-blind comparison remain separate tasks."
     purpose: "Remove divergent provider and runtime facts."
     expected_outcome: "Consumers use shared mechanisms and deterministic regression tests pass."
     kind: implementation
-    status: pending
+    status: completed
     depends_on: [shared-runtime-write-tests]
     requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-security-audit

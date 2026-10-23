@@ -20,10 +20,12 @@ pub mod gbnf;
 mod interrupt;
 pub mod loop_detection;
 mod model;
-pub mod offline_rust;
 pub mod observation;
+pub mod offline_rust;
 mod profile;
 mod prompt;
+pub mod registry;
+pub mod runtime;
 mod setup;
 mod supervisor;
 pub mod trajectory;
@@ -51,16 +53,17 @@ pub use profile::{
 pub use prompt::{MAX_PROMPT_BYTES, resolve_prompt};
 pub use setup::{
     SETUP_TEST_PROMPT, SetupOptions, collect_profile, collect_profile_with_options,
-    run_setup_wizard, run_setup_wizard_with_options, verify_profile,
+    qualify_registry_profile, run_registry_setup, run_setup_wizard, run_setup_wizard_with_options,
+    verify_profile,
 };
 pub use supervisor::{
     ACTION_HASH_RING_CAPACITY, ActionHashRing, ActionRecord, AttemptContext,
     CONSECUTIVE_IDENTICAL_ACTION_LIMIT, CapturedExecutionReport, CommandSpec,
     DEFAULT_TEMPERATURE_JITTER, ExecutionReport, LoopDecision, MAX_STALLED_TURNS,
-    OBSERVATION_INVARIANT_LIMIT, REASONING_NGRAM_SIZE, REASONING_SIMILARITY_THRESHOLD, RetryCause,
-    SupervisionPolicy, WINDOW_IDENTICAL_ACTION_LIMIT, compute_action_hash,
-    compute_ngram_jaccard_similarity, compute_observation_hash, normalize_json, run_supervised,
-    run_supervised_capture, run_supervised_observed, OutputStream,
+    OBSERVATION_INVARIANT_LIMIT, OutputStream, REASONING_NGRAM_SIZE,
+    REASONING_SIMILARITY_THRESHOLD, RetryCause, SupervisionPolicy, WINDOW_IDENTICAL_ACTION_LIMIT,
+    compute_action_hash, compute_ngram_jaccard_similarity, compute_observation_hash,
+    normalize_json, run_supervised, run_supervised_capture, run_supervised_observed,
 };
 pub use trajectory::{
     TrajectoryEvent, TrajectoryRecorder, TrajectoryReplayReport, replay_trajectory,

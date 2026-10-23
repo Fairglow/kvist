@@ -4,7 +4,7 @@
 provider-neutral mechanics of running AI agents and language models under
 supervision. It owns prompt acquisition, shell-free command rendering, named
 provider profiles, process supervision, local model transport, and the
-planned provider-neutral native agent runtime. It is independent of Kvist
+provider-neutral native agent runtime. It is independent of Kvist
 component discovery, task queues, roles, project policy, artifact promotion,
 and compliance evidence; an embedding host supplies authority through narrow
 interfaces.
@@ -32,6 +32,10 @@ boundary when isolation is required.
   reasoning-text exposure.
 - **Provider-model discovery** (`models`) against loopback HTTP catalogs and
   account-aware ACP catalogs, without running inference.
+- **Shared native runtime** with host-injected tools, context fitting, retries,
+  bounded steering and cancellation that preserve task accounting.
+- **Independent observation** through private versioned live journals and
+  separately authorized local control capabilities.
 
 ## Building
 
@@ -72,8 +76,13 @@ sav-run models --provider llama-server --endpoint http://127.0.0.1:9931
 # Run a supervised provider command from a prompt source
 sav-run run --allow-host-execution --command "local-agent --prompt '{prompt}' {context_files}" --file prompt.md
 
-# Run a stored profile by name
-sav-run run --allow-host-execution --profile local-coder "Review this change"
+# Inspect shared configuration without probing a provider
+sav-run registry
+
+# Resolve native and external profiles without copying provider facts
+sav-run model --profile local-coder "Review this change"
+sav-run run --allow-host-execution --profile copilot-coder "Review this change"
+sav-run models --profile local-coder
 
 # Send a text-only request through the local model transport
 sav-run model --provider ollama --endpoint http://127.0.0.1:11434 --model qwen3-coder --stream --file prompt.md
@@ -83,8 +92,35 @@ sav-run model --provider llama-server --endpoint http://127.0.0.1:9931 --model Q
 `run` requires exactly one command template or stored profile and an explicit
 `--allow-host-execution`; host mode is a reliability aid, not a sandbox.
 `model` exposes no tools and performs no host process execution. Standalone
-profiles are stored at `$XDG_CONFIG_HOME/sav/config.toml`, falling back to
-`$HOME/.config/sav/config.toml`.
+profiles are stored at `$XDG_CONFIG_HOME/sav/registry.toml`, falling back to
+`$HOME/.config/sav/registry.toml`. `--registry PATH` overrides that source;
+`.kvist/providers.toml` supplies project definitions. Whole named definitions
+resolve in explicit > project > user order, without process probes or legacy
+schema fallback.
+
+```toml
+schema_version = 1
+[profiles.local-coder.backend]
+kind = "native"
+provider = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "qwen3-coder"
+context_limit = 32768
+
+[profiles.copilot-coder.backend]
+kind = "external-agent"
+provider = "copilot"
+executable = "copilot"
+arguments = ["--prompt", "{prompt}", "--silent", "--model", "auto"]
+model = "auto"
+```
+
+Native profiles cannot run as opaque processes, and external profiles cannot
+be used as model transports. External argv is literal, not a parsed command.
+Setup discloses inherited host authority and possible billing; `--force` can
+persist failed qualification but does not authorize execution or claim tested
+capabilities. Advertised catalog models and configured capability lists never
+grant tool authority.
 
 ## Documentation
 
@@ -98,8 +134,8 @@ The component's intent and realization live in
 [`CONTRACT.md`](CONTRACT.md), and
 [`DESIGN.md`](DESIGN.md). The layered runtime decision is documented in
 [`docs/architecture.md`](../docs/architecture.md),
-the current and planned runtime choices in
-[`docs/runtime-selection.md`](../docs/runtime-selection.md), and the Rig 0.42.0
-adoption decision and contained optional adapter gates in ADR 0009.
+the current runtime choices and explicit limitations in
+[`docs/runtime-selection.md`](../docs/runtime-selection.md). ADR 0009 records
+the rejected Rig experiment; no Rig adapter is in the dependency graph.
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.

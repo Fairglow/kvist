@@ -49,7 +49,8 @@ pub struct SupervisionPolicy {
 }
 
 impl SupervisionPolicy {
-    fn validate(&self) -> Result<()> {
+    /// Validates resource limits before any command construction or process spawn.
+    pub fn validate(&self) -> Result<()> {
         if self.idle_timeout.is_zero() || self.idle_timeout > MAX_IDLE_TIMEOUT {
             return Err(Error::InvalidPolicy {
                 reason: "idle timeout must be between 1 and 3600 seconds".to_owned(),

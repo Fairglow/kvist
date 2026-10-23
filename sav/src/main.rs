@@ -12,10 +12,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use sav::{
     CancellationToken, CatalogProvider, CommandSpec, DirectModelTransport, Error,
     LocalModelProvider, ModelDiscoveryOptions, ModelMessage, ModelRequest, ModelStreamEvent,
-    ModelTransport, ReasoningEffort, SetupOptions, SupervisionPolicy, ToolChoice,
-    default_profile_config_path, discover_models, load_profile,
-    render_command_with_reasoning_effort, resolve_prompt, run_setup_wizard_with_options,
-    run_supervised, run_supervised_capture,
+    ModelTransport, ReasoningEffort, SetupOptions, SupervisionPolicy, ToolChoice, discover_models,
+    render_command_with_reasoning_effort, resolve_prompt, run_registry_setup, run_supervised,
+    run_supervised_capture,
 };
 
 #[derive(Debug, Parser)]
@@ -40,6 +39,16 @@ enum Command {
     Replay(ReplayArguments),
     /// Interactively create or update a reusable provider profile.
     Setup(SetupArguments),
+    /// Inspect configured shared profiles without discovery or qualification.
+    Registry(RegistryArguments),
+}
+
+#[derive(Debug, Args)]
+struct RegistryArguments {
+    #[arg(long, value_name = "PATH")]
+    registry: Option<PathBuf>,
+    #[arg(long)]
+    profile: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -59,8 +68,19 @@ struct ReplayArguments {
 
 #[derive(Debug, Args)]
 struct ModelsArguments {
-    #[arg(long, value_enum)]
-    provider: CatalogProviderArgument,
+    #[arg(
+        long,
+        value_enum,
+        required_unless_present = "profile",
+        conflicts_with = "profile"
+    )]
+    provider: Option<CatalogProviderArgument>,
+
+    #[arg(long, conflicts_with_all = ["endpoint", "executable"])]
+    profile: Option<String>,
+
+    #[arg(long, value_name = "PATH", requires = "profile")]
+    registry: Option<PathBuf>,
 
     #[arg(long, value_name = "HTTP_LOOPBACK_URL")]
     endpoint: Option<String>,
@@ -122,8 +142,19 @@ struct ModelArguments {
     #[arg(long, conflicts_with_all = ["prompt", "file"])]
     editor: bool,
 
-    #[arg(long, value_enum)]
-    provider: ModelProviderArgument,
+    #[arg(
+        long,
+        value_enum,
+        required_unless_present = "profile",
+        conflicts_with = "profile"
+    )]
+    provider: Option<ModelProviderArgument>,
+
+    #[arg(long, conflicts_with_all = ["provider", "endpoint", "model"])]
+    profile: Option<String>,
+
+    #[arg(long, value_name = "PATH", requires = "profile")]
+    registry: Option<PathBuf>,
 
     /// Seconds to wait for the endpoint to begin serving before failing.
     /// Local servers spawn a requested model on a routed port, which can take
@@ -137,11 +168,15 @@ struct ModelArguments {
     #[arg(long, default_value_t = 120)]
     ttft_timeout: u64,
 
-    #[arg(long, value_name = "HTTP_LOOPBACK_URL")]
-    endpoint: String,
+    #[arg(
+        long,
+        value_name = "HTTP_LOOPBACK_URL",
+        required_unless_present = "profile"
+    )]
+    endpoint: Option<String>,
 
-    #[arg(long, value_name = "MODEL")]
-    model: String,
+    #[arg(long, value_name = "MODEL", required_unless_present = "profile")]
+    model: Option<String>,
 
     #[arg(long)]
     stream: bool,
@@ -237,7 +272,7 @@ struct RunArguments {
     profile: Option<String>,
 
     #[arg(long, value_name = "PATH")]
-    config: Option<PathBuf>,
+    registry: Option<PathBuf>,
 
     #[arg(long = "context", value_name = "PATH")]
     context_paths: Vec<PathBuf>,
@@ -272,7 +307,7 @@ struct RunArguments {
 struct SetupArguments {
     /// Override the Linux user profile configuration path.
     #[arg(long, value_name = "PATH")]
-    config: Option<PathBuf>,
+    registry: Option<PathBuf>,
 
     /// Save the profile even when mandatory live qualification fails.
     #[arg(long)]
@@ -297,6 +332,20 @@ fn execute() -> sav::Result<()> {
         Command::Run(arguments) => run(arguments),
         Command::Replay(arguments) => replay(arguments),
         Command::Setup(arguments) => setup(arguments),
+        Command::Registry(arguments) => {
+            let registry = registry_paths(arguments.registry)?.load()?;
+            let profiles = match arguments.profile {
+                Some(name) => vec![registry.resolve(&name)?],
+                None => registry.profiles().cloned().collect(),
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&profiles).map_err(|_| Error::ProfileSetup {
+                    reason: "cannot encode registry".into()
+                })?
+            );
+            Ok(())
+        }
     }
 }
 
@@ -392,16 +441,58 @@ fn replay(arguments: ReplayArguments) -> sav::Result<()> {
 }
 
 fn models(arguments: ModelsArguments) -> sav::Result<()> {
-    let provider = arguments.provider.catalog_provider()?;
+    let resolved = arguments
+        .profile
+        .as_deref()
+        .map(|name| {
+            registry_paths(arguments.registry.clone())?
+                .load()?
+                .resolve(name)
+        })
+        .transpose()?;
+    let (provider, endpoint, executable) = if let Some(profile) = resolved {
+        use sav::registry::{Backend, ExternalProvider};
+        match profile.profile.backend {
+            Backend::Native(model) => (
+                match model.provider {
+                    LocalModelProvider::Ollama => CatalogProvider::Ollama,
+                    LocalModelProvider::LlamaServer => CatalogProvider::LlamaServer,
+                },
+                Some(model.base_url),
+                None,
+            ),
+            Backend::ExternalAgent(agent) => {
+                let provider = match agent.provider {
+                    ExternalProvider::Copilot => CatalogProvider::Copilot,
+                    ExternalProvider::Gemini => CatalogProvider::Gemini,
+                    _ => {
+                        return Err(Error::ProfileSetup {
+                            reason: "selected external provider has no catalog".into(),
+                        });
+                    }
+                };
+                (provider, None, Some(agent.executable))
+            }
+        }
+    } else {
+        (
+            arguments
+                .provider
+                .ok_or_else(|| Error::ProfileSetup {
+                    reason: "provider or profile required".into(),
+                })?
+                .catalog_provider()?,
+            arguments.endpoint,
+            arguments.executable,
+        )
+    };
     match provider {
-        CatalogProvider::Ollama | CatalogProvider::LlamaServer
-            if arguments.executable.is_some() =>
-        {
+        CatalogProvider::Ollama | CatalogProvider::LlamaServer if executable.is_some() => {
             return Err(Error::ModelCatalogInvalid {
                 reason: "--executable is only valid for ACP providers".to_owned(),
             });
         }
-        CatalogProvider::Copilot | CatalogProvider::Gemini if arguments.endpoint.is_some() => {
+        CatalogProvider::Copilot | CatalogProvider::Gemini if endpoint.is_some() => {
             return Err(Error::ModelCatalogInvalid {
                 reason: "--endpoint is only valid for HTTP providers".to_owned(),
             });
@@ -416,8 +507,8 @@ fn models(arguments: ModelsArguments) -> sav::Result<()> {
     let catalog = discover_models(
         provider,
         &ModelDiscoveryOptions {
-            endpoint: arguments.endpoint,
-            executable: arguments.executable,
+            endpoint,
+            executable,
             working_directory,
             timeout: Duration::from_secs(arguments.timeout),
             max_response_bytes: arguments.max_response_bytes,
@@ -456,7 +547,15 @@ fn model(arguments: ModelArguments) -> sav::Result<()> {
         arguments.file.as_deref(),
         arguments.editor,
     )?;
-    let provider = arguments.provider.into();
+    let selected = arguments
+        .profile
+        .as_deref()
+        .map(|name| {
+            registry_paths(arguments.registry.clone())?
+                .load()?
+                .resolve(name)
+        })
+        .transpose()?;
     let output_schema = arguments
         .output_schema
         .map(|schema| {
@@ -476,16 +575,27 @@ fn model(arguments: ModelArguments) -> sav::Result<()> {
             ),
         });
     }
-    let transport: Box<dyn ModelTransport> = Box::new(DirectModelTransport::with_watchdogs(
-        provider,
-        &arguments.endpoint,
-        timeout,
-        arguments.max_response_bytes,
-        slot_timeout,
-        ttft_timeout,
-    )?);
+    let (transport, model): (Box<dyn ModelTransport>, String) = if let Some(profile) = selected {
+        let native = profile.native()?;
+        (Box::new(native.transport()?), native.model.clone())
+    } else {
+        let missing = || Error::ProfileSetup {
+            reason: "provider, endpoint and model are required without --profile".into(),
+        };
+        (
+            Box::new(DirectModelTransport::with_watchdogs(
+                arguments.provider.ok_or_else(missing)?.into(),
+                &arguments.endpoint.ok_or_else(missing)?,
+                timeout,
+                arguments.max_response_bytes,
+                slot_timeout,
+                ttft_timeout,
+            )?),
+            arguments.model.ok_or_else(missing)?,
+        )
+    };
     let request = ModelRequest {
-        model: arguments.model,
+        model,
         messages: vec![ModelMessage::User(prompt.clone())],
         tools: Vec::new(),
         tool_choice: ToolChoice::None,
@@ -559,11 +669,20 @@ fn run(arguments: RunArguments) -> sav::Result<()> {
         max_retries: arguments.max_retries,
         max_output_bytes: arguments.max_output_bytes,
     };
-    let command_template = match (arguments.command, arguments.profile) {
-        (Some(command), None) => command,
+    let (command_template, external) = match (arguments.command, arguments.profile) {
+        (Some(command), None) => (Some(command), None),
         (None, Some(profile)) => {
-            let config_path = resolve_config_path(arguments.config)?;
-            load_profile(&config_path, &profile)?.command
+            let profile = registry_paths(arguments.registry)?
+                .load()?
+                .resolve(&profile)?;
+            match profile.profile.backend {
+                sav::registry::Backend::ExternalAgent(agent) => (None, Some(agent)),
+                sav::registry::Backend::Native(_) => return Err(Error::ProfileSetup {
+                    reason:
+                        "native profiles use `sav-run model --profile NAME`, not process execution"
+                            .into(),
+                }),
+            }
         }
         _ => {
             return Err(Error::ProfileSetup {
@@ -578,8 +697,20 @@ fn run(arguments: RunArguments) -> sav::Result<()> {
             Some(notice) => format!("{prompt}\n\n{notice}"),
             None => prompt.clone(),
         };
+        if let Some(agent) = &external {
+            return agent.command_spec(
+                &prompt,
+                &arguments.context_paths,
+                &arguments.working_directory,
+                reasoning_effort,
+            );
+        }
         let (program, command_arguments) = render_command_with_reasoning_effort(
-            &command_template,
+            command_template
+                .as_deref()
+                .ok_or_else(|| Error::ProfileSetup {
+                    reason: "command or external profile required".into(),
+                })?,
             &prompt,
             &arguments.context_paths,
             &arguments.working_directory,
@@ -609,7 +740,12 @@ fn run(arguments: RunArguments) -> sav::Result<()> {
 }
 
 fn setup(arguments: SetupArguments) -> sav::Result<()> {
-    let config_path = resolve_config_path(arguments.config)?;
+    let config_path = arguments
+        .registry
+        .or_else(sav::registry::default_registry_path)
+        .ok_or_else(|| Error::ProfileSetup {
+            reason: "cannot resolve registry; set HOME or --registry".into(),
+        })?;
     let current_directory = std::env::current_dir().map_err(|source| Error::Io {
         operation: "determine setup working directory",
         path: PathBuf::from("."),
@@ -619,7 +755,7 @@ fn setup(arguments: SetupArguments) -> sav::Result<()> {
     let mut reader = std::io::BufReader::new(stdin.lock());
     let stdout = std::io::stdout();
     let mut writer = stdout.lock();
-    run_setup_wizard_with_options(
+    run_registry_setup(
         &mut reader,
         &mut writer,
         &current_directory,
@@ -664,9 +800,13 @@ fn write_json(writer: &mut impl Write, turn: &sav::ModelTurn) -> sav::Result<()>
     })
 }
 
-fn resolve_config_path(path: Option<PathBuf>) -> sav::Result<PathBuf> {
-    path.or_else(default_profile_config_path)
-        .ok_or_else(|| Error::ProfileSetup {
-            reason: "cannot resolve profile configuration; set HOME or XDG_CONFIG_HOME".to_owned(),
-        })
+fn registry_paths(explicit: Option<PathBuf>) -> sav::Result<sav::registry::RegistryPaths> {
+    let cwd = std::env::current_dir().map_err(|source| Error::Io {
+        operation: "resolve registry project",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let mut paths = sav::registry::RegistryPaths::for_project(&cwd);
+    paths.explicit = explicit;
+    Ok(paths)
 }

@@ -17,6 +17,250 @@ const LLAMA_SERVER_DEFAULT_URL: &str = "http://127.0.0.1:9931";
 /// The fixed minimal qualification prompt used for live profile verification.
 pub const SETUP_TEST_PROMPT: &str = "Reply with exactly: OK";
 
+/// Collects, discovers, qualifies and atomically saves a shared typed profile.
+///
+/// This explicit operator action acknowledges host discovery and qualification,
+/// not any later external-agent execution.
+pub fn run_registry_setup<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    working_directory: &Path,
+    registry_path: &Path,
+    options: SetupOptions,
+) -> Result<crate::registry::ResolvedProfile> {
+    use crate::registry::{Backend, ExternalAgent, ExternalProvider, NativeModel, Profile};
+    write_output(
+        writer,
+        "Shared provider setup\n\
+         Discovery and qualification use current host permissions and may incur provider billing.\n\
+         No inline credentials are stored. Qualification does not authorize later execution.\n\
+         1) llama-cli (external process)\n\
+         2) llama-server (native HTTP)\n\
+         3) Ollama (native HTTP)\n\
+         4) Copilot (external agent)\n\
+         5) Gemini (external agent)\n\
+         6) Custom executable (external agent)\n\
+         Choose (1-6) [3]: ",
+    )?;
+    let selection = read_input(reader)?;
+    let (name, backend) = match selection.as_str() {
+        "2" | "3" | "" => {
+            let provider = if selection == "2" {
+                crate::LocalModelProvider::LlamaServer
+            } else {
+                crate::LocalModelProvider::Ollama
+            };
+            let default_url = match provider {
+                crate::LocalModelProvider::LlamaServer => options.llama_server_url.as_deref(),
+                crate::LocalModelProvider::Ollama => options.ollama_url.as_deref(),
+            }
+            .unwrap_or(provider.default_endpoint());
+            let url = prompt_with_default(reader, writer, "Provider base URL", default_url)?;
+            let catalog_provider = match provider {
+                crate::LocalModelProvider::LlamaServer => CatalogProvider::LlamaServer,
+                crate::LocalModelProvider::Ollama => CatalogProvider::Ollama,
+            };
+            let model = select_discovered_model(
+                reader,
+                writer,
+                catalog_provider,
+                ModelDiscoveryOptions {
+                    endpoint: Some(url.clone()),
+                    working_directory: working_directory.to_path_buf(),
+                    ..setup_discovery_options()
+                },
+                if provider == crate::LocalModelProvider::Ollama {
+                    "llama3.1:8b"
+                } else {
+                    "default"
+                },
+            )?;
+            let default_name = if is_valid_profile_name(&model) {
+                &model
+            } else {
+                "local-model"
+            };
+            let name = prompt_with_default(reader, writer, "Profile name", default_name)?;
+            (
+                name,
+                Backend::Native(NativeModel::new(provider, url, model)),
+            )
+        }
+        "1" | "4" | "5" | "6" => {
+            let (provider, conventional) = match selection.as_str() {
+                "1" => (ExternalProvider::LlamaCli, "llama-cli"),
+                "4" => (ExternalProvider::Copilot, "copilot"),
+                "5" => (ExternalProvider::Gemini, "gemini"),
+                _ => (ExternalProvider::CustomScript, "custom"),
+            };
+            let executable = if provider == ExternalProvider::CustomScript {
+                let input = prompt_required(reader, writer, "Path to custom executable: ")?;
+                let path = resolve_setup_file(&expand_home_path(&input), "custom executable")?;
+                validate_custom_executable(&path)?;
+                path.to_string_lossy().into_owned()
+            } else {
+                select_cli_executable(
+                    reader,
+                    writer,
+                    conventional,
+                    "Path to provider executable: ",
+                )?
+            };
+            let model = match provider {
+                ExternalProvider::Copilot | ExternalProvider::Gemini => {
+                    Some(select_discovered_model(
+                        reader,
+                        writer,
+                        if provider == ExternalProvider::Copilot {
+                            CatalogProvider::Copilot
+                        } else {
+                            CatalogProvider::Gemini
+                        },
+                        ModelDiscoveryOptions {
+                            executable: Some(executable.clone()),
+                            working_directory: working_directory.to_path_buf(),
+                            allow_host_discovery: true,
+                            ..setup_discovery_options()
+                        },
+                        "auto",
+                    )?)
+                }
+                ExternalProvider::LlamaCli => {
+                    let input = prompt_required(reader, writer, "Path to GGUF model: ")?;
+                    Some(
+                        resolve_setup_file(&expand_home_path(&input), "GGUF model")?
+                            .to_string_lossy()
+                            .into_owned(),
+                    )
+                }
+                _ => None,
+            };
+            let name = prompt_with_default(reader, writer, "Profile name", conventional)?;
+            let mut arguments = vec!["--prompt".to_owned(), "{prompt}".to_owned()];
+            if let Some(model) = &model {
+                arguments.extend(["--model".to_owned(), model.clone()]);
+            }
+            if provider == ExternalProvider::LlamaCli {
+                arguments.extend([
+                    "--single-turn".to_owned(),
+                    "--simple-io".to_owned(),
+                    "--no-display-prompt".to_owned(),
+                    "--predict".to_owned(),
+                    "4096".to_owned(),
+                ]);
+            }
+            if provider == ExternalProvider::Copilot {
+                arguments.extend([
+                    "--silent".to_owned(),
+                    "--allow-all-tools".to_owned(),
+                    "--no-ask-user".to_owned(),
+                    "--reasoning-effort".to_owned(),
+                    "{reasoning_effort}".to_owned(),
+                ]);
+            }
+            if provider == ExternalProvider::Gemini {
+                arguments.extend([
+                    "--output-format".to_owned(),
+                    "text".to_owned(),
+                    "--approval-mode".to_owned(),
+                    "yolo".to_owned(),
+                    "--skip-trust".to_owned(),
+                ]);
+            }
+            (
+                name,
+                Backend::ExternalAgent(ExternalAgent {
+                    provider,
+                    executable,
+                    arguments,
+                    model,
+                }),
+            )
+        }
+        _ => {
+            return Err(Error::ProfileSetup {
+                reason: "choose a provider from 1 through 6".into(),
+            });
+        }
+    };
+    let mut profile = Profile::new(backend);
+    profile.validate()?;
+    write_output(
+        writer,
+        "Qualifying with the fixed prompt `Reply with exactly: OK`...\n",
+    )?;
+    match qualify_registry_profile(&profile, working_directory, true) {
+        Ok(()) => write_output(
+            writer,
+            "Qualification succeeded (not execution authorization).\n",
+        )?,
+        Err(error @ Error::Cancelled) => return Err(error),
+        Err(error) if options.force => write_output(
+            writer,
+            &format!("Qualification failed: {error}\n--force saves this unqualified profile.\n"),
+        )?,
+        Err(error) => {
+            return Err(Error::ProfileSetup {
+                reason: format!(
+                    "qualification failed; profile not saved: {error}; --force permits explicit persistence"
+                ),
+            });
+        }
+    }
+    crate::registry::upsert(registry_path, &name, &profile)?;
+    write_output(
+        writer,
+        &format!(
+            "Saved shared profile `{name}` in {}.\n",
+            registry_path.display()
+        ),
+    )?;
+    crate::registry::Registry::load(registry_path)?.resolve(&name)
+}
+
+/// Performs an explicitly requested bounded qualification, never implicit load.
+pub fn qualify_registry_profile(
+    profile: &crate::registry::Profile,
+    working_directory: &Path,
+    host_execution_acknowledged: bool,
+) -> Result<()> {
+    use crate::{ModelTransport, registry::Backend};
+    if !host_execution_acknowledged {
+        return Err(Error::HostExecutionNotAcknowledged);
+    }
+    profile.clone().validate()?;
+    match &profile.backend {
+        Backend::Native(model) => {
+            let request = crate::ModelRequest {
+                model: model.model.clone(),
+                messages: vec![crate::ModelMessage::User(SETUP_TEST_PROMPT.into())],
+                tools: Vec::new(),
+                tool_choice: crate::ToolChoice::None,
+                reasoning_effort: None,
+                output_schema: None,
+                max_output_tokens: Some(32),
+            };
+            model
+                .transport()?
+                .complete(&request, &CancellationToken::new())
+                .map(|_| ())
+        }
+        Backend::ExternalAgent(agent) => {
+            let policy = SupervisionPolicy {
+                idle_timeout: Duration::from_secs(30),
+                attempt_timeout: Some(Duration::from_secs(300)),
+                detect_loops: true,
+                max_retries: 0,
+                max_output_bytes: 64 * 1024,
+            };
+            run_supervised_capture(&policy, |_| {
+                agent.command_spec(SETUP_TEST_PROMPT, &[], working_directory, None)
+            })
+            .map(|_| ())
+        }
+    }
+}
+
 /// Controls the non-interactive qualification decision made by setup.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SetupOptions {
