@@ -10,6 +10,58 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: shared-runtime-write-tests
+    title: "Pin shared profiles and independent run inspection"
+    description: "Test shared configuration consumption, headless parity, read-only journal attachment and explicitly authorized controls before code."
+    context: "Human approved ADR 0015; steering lifecycle tasks remain separately traceable."
+    purpose: "Prevent presentation from owning execution or broadening authority."
+    expected_outcome: "Deterministic regressions pin observer independence and profile consistency."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: shared-runtime-implement-code
+    title: "Consume shared mechanisms and inspect live runs"
+    description: "Use Sav registry/native mechanisms, retain workspace executors, expose setup and independent observation/control clients."
+    context: "Do not route protected tasks through the workspace shell."
+    purpose: "Keep interactive and headless clients consistent."
+    expected_outcome: "Shared behavior and attachment tests pass."
+    kind: implementation
+    status: pending
+    depends_on: [shared-runtime-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: shared-runtime-security-audit
+    title: "Inspect observer and control boundaries"
+    description: "Independently inspect bounded inputs, private control authority, detachment, explicit backend behavior and unchanged tool grants."
+    context: "Record findings and limitations without blanket certification."
+    purpose: "Retain independent authority observations."
+    expected_outcome: "Findings are corrected or explicitly retained."
+    kind: security-audit
+    status: pending
+    depends_on: [shared-runtime-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: shared-runtime-compliance-review
+    title: "Compare independent client observations"
+    description: "Source-only IMPL derivation followed by separate source-blind intent comparison."
+    context: "No automatic acceptance or receipt."
+    purpose: "Prevent implementer self-certification."
+    expected_outcome: "Persistent scoped observations and comparison."
+    kind: compliance-review
+    status: pending
+    depends_on: [shared-runtime-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
   - id: "lifecycle-write-tests"
     title: "Pin responsive startup and router selection"
     description: "Reproduce router metadata failure and test input, held prompts, explicit-choice precedence, cancellation and concise status. Match reconstructed PTY screen contents across interleaved redraws without accepting erased text or cross-row concatenation."

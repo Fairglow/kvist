@@ -199,6 +199,13 @@ current workspace and are never resumed or cached.
 
 ## Boundary and ownership
 
+Under ADR 0015, Skott is a client of Sav's shared registry and native runtime.
+It retains workspace tools and terminal presentation, not maerg task authority.
+Read-only run attachment requires neither model initialization nor workspace
+tool initialization; detachment does not terminate the owner. Control access
+is separate and explicit, and guidance cannot replace approved task intent.
+Exact command grammar is documented when each interface is delivered.
+
 This document defines what `skott` exposes to consumers: the library
 public API, the configuration schema, the command-line interface, and the exact
 sandbox request it produces. Private algorithm choices live in `DESIGN.md`.

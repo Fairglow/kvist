@@ -23,6 +23,15 @@ compliance evidence.
 
 ## Provided interfaces
 
+The shared runtime boundary described in ADR 0015 separates registry,
+native-loop, external-agent and observation interfaces. Registry facts and
+resolution belong to Sav; application role bindings and authorization do not.
+Run events are bounded, versioned diagnostic observations, never approval or
+canonical compliance evidence. Observers have no effect authority; controls
+require an explicitly granted private capability. Native hosts supply their
+own tools, execution and recorders; a refusal never selects another executor.
+Exact exported Rust APIs and CLI grammar are documented alongside delivery.
+
 `DirectModelTransport::loaded_model` reads `/props` for standalone llama-server
 identity (`model`, `model_alias`, then `model_path`). Router-mode properties
 trigger read-only `/models` discovery, returning an actually loaded entry's

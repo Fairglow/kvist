@@ -2,6 +2,21 @@
 
 # Skott — Requirements
 
+## RUN-REQ-SHARED-RUNTIME
+
+Skott MUST consume Sav's shared registry/resolver and native mechanisms rather
+than maintain a conflicting provider catalog. TUI and headless execution MUST
+retain equivalent authority and runtime behavior. Native and external-agent
+backends MUST be visibly distinct. Shared setup MUST disclose authority and
+possible billing and MUST NOT grant subsequent execution.
+
+Skott MUST support bounded read-only replay/follow of live runtime journals
+without requiring provider configuration or owning the run. Closing the viewer
+MUST NOT cancel execution. Cancellation and guidance MUST be separate explicitly
+authorized operations, display truthful acknowledgements and preserve the run's
+existing grants and context. Protected task inspection MUST NOT expose Skott's
+workspace executor as a fallback. Private logs are not canonical evidence.
+
 ## RUN-REQ-PROMPT-STEERING
 
 When a user submits a prompt while an autonomous task is running, the submission

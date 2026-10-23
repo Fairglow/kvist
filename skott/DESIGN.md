@@ -128,6 +128,13 @@ edge cases that the tests cover.
 
 ## Design overview
 
+ADR 0015 moves reusable native state and mechanisms into Sav while retaining
+workspace executors, tool rendering and presentation here. Re-exports/adapters
+must not form a reverse dependency. Registry resolution is shared with other
+clients. A journal-follow presentation path must initialize no provider or
+effect executor. Optional controls use an explicit private capability, not a
+writable journal or model-generated instruction.
+
 ```
 src/
   lib.rs        crate roots, public re-exports
