@@ -90,6 +90,7 @@ fn log_scope(log_dir: &Path, workdir: &Path) -> Result<PathBuf> {
             reason: "log path must be canonical and contain no . or ..".into(),
         });
     }
+
     if absolute.starts_with(workdir) {
         return Err(Error::Config {
             path: None,
@@ -99,11 +100,44 @@ fn log_scope(log_dir: &Path, workdir: &Path) -> Result<PathBuf> {
     Ok(absolute)
 }
 
+pub(crate) fn control_log_directory(log_dir: Option<&Path>, workdir: &Path) -> Result<PathBuf> {
+    let directory = log_scope(
+        &match log_dir {
+            Some(path) => path.to_owned(),
+            None => state_directory()?,
+        },
+        workdir,
+    )?;
+    let mut ancestor = directory.as_path();
+    while !ancestor.exists() {
+        ancestor = ancestor.parent().ok_or_else(|| Error::Control {
+            reason: "cannot resolve private control log location".into(),
+        })?;
+    }
+    if ancestor.canonicalize()?.starts_with(workdir) {
+        return Err(Error::Control {
+            reason: "control logging must be outside the sandbox writable workspace".into(),
+        });
+    }
+    Ok(directory)
+}
+
 /// Executes one prompt with mandatory private recording and sandbox-only tools.
 ///
 /// JSON writes ordered version-one NDJSON; plain mode writes only a successful
 /// final answer. Startup failures use diagnostics rather than success events.
 pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<RunSummary> {
+    run_with_controls(config, overrides, json_output, false)
+}
+
+/// Runs headlessly with an explicitly enabled private operator control socket.
+/// The capability is printed only to stderr and removed when execution ends.
+pub fn run_with_controls(
+    config: Config,
+    overrides: Overrides,
+    json_output: bool,
+    allow_control: bool,
+) -> Result<RunSummary> {
     if overrides.allow_host_execution || overrides.host_turns.is_some() || overrides.no_logs {
         return Err(Error::Config {
             path: None,
@@ -127,19 +161,20 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
             .as_deref()
             .unwrap_or(&config.working_directory),
     )?;
-    let logs = log_scope(
-        &match &overrides.log_dir {
-            Some(path) => path.clone(),
-            None => state_directory()?,
-        },
-        &workdir,
-    )?;
-    // Active-model-first selection (headless): an explicit --model wins, then the
-    // default provider's already-loaded model (no switch), then a single
-    // default-provider model, then the default provider's default model. The
-    // active probe is bounded, read-only, and loopback-only; a down provider
-    // yields no entry and falls through.
-    let active = crate::config::probe_active_models(&config);
+    let logs = if allow_control {
+        control_log_directory(overrides.log_dir.as_deref(), &workdir)?
+    } else {
+        log_scope(
+            &match &overrides.log_dir {
+                Some(path) => path.clone(),
+                None => state_directory()?,
+            },
+            &workdir,
+        )?
+    };
+    // Batch selection is pinned to explicit/configured defaults, never mutable
+    // provider loading state. Active-model preference belongs to the terminal.
+    let active = std::collections::BTreeMap::new();
     let selection =
         crate::config::select_active_model(&config, overrides.model.as_deref(), &active);
     let model_id = match &selection {
@@ -278,17 +313,30 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
         }
     }
     sav::install_handler();
+    let cancellation = CancellationToken::new();
+    let controls = crate::ControlMailbox::default();
+    let control_server = if allow_control {
+        let server = sav::observation::bind_runtime_controls(&controls, &cancellation)?;
+        crate::run::validate_control_path(server.path(), &workdir)?;
+        eprintln!("private control socket: {}", server.path().display());
+        Some(server)
+    } else {
+        None
+    };
     let result = Skott::with_retry(crate::session::MAX_TURNS, model.retry_policy())
         .with_limits(budgets.limits)?
-        .run(
+        .run_controlled(
             &mut session,
             &transport,
             &executor,
             &sink,
-            &CancellationToken::new(),
+            &cancellation,
             &mut context,
             Some(&mut log),
+            &controls,
         );
+    controls.shutdown();
+    drop(control_server);
     let summary = match &result {
         Ok(summary) => summary.clone(),
         Err(error) => {

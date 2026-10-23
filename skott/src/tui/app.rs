@@ -555,6 +555,18 @@ impl App {
     /// Feeds one loop event into the transcript, wrapping at the current width.
     pub fn push_event(&mut self, event: Event) {
         match event {
+            Event::Control(notice) => {
+                self.flush_pending();
+                let state = match notice.state {
+                    crate::GuidanceState::Accepted => "accepted",
+                    crate::GuidanceState::Claimed => "interrupting",
+                    crate::GuidanceState::Delivered => "added to model context",
+                    crate::GuidanceState::Withdrawn => "withdrawn",
+                    crate::GuidanceState::Dropped => "not delivered",
+                };
+                self.status = format!("guidance #{}: {state}", notice.id.0);
+                self.note(self.theme.dim, &self.status.clone());
+            }
             Event::AttemptStart { attempt } => {
                 if attempt > 1 {
                     self.flush_pending();
@@ -1333,7 +1345,7 @@ impl App {
         self.note(
             self.theme.dim,
             &format!(
-                "model → {} (applies to the next prompt; the session restarts)",
+                "model → {} (applies to the next idle task; new session cancels active work)",
                 self.model.as_deref().unwrap_or("?")
             ),
         );
@@ -1358,7 +1370,7 @@ impl App {
         self.note(
             self.theme.dim,
             &format!(
-                "thinking effort → {} (applies to the next prompt; the session restarts)",
+                "thinking effort → {} (applies to the next idle task; new session cancels active work)",
                 self.effort.as_str()
             ),
         );
@@ -1885,7 +1897,7 @@ impl App {
                     self.model = Some(model.clone());
                     self.note(
                         self.theme.accent,
-                        &format!("model changed to {model}; applies to the next prompt"),
+                        &format!("model changed to {model}; applies to the next idle task"),
                     );
                 }
                 self.overlay = Overlay::Menu;
@@ -1920,7 +1932,7 @@ impl App {
                     self.note(
                         self.theme.accent,
                         &format!(
-                            "thinking effort changed to {}; applies to the next prompt",
+                            "thinking effort changed to {}; applies to the next idle task",
                             effort.as_str()
                         ),
                     );

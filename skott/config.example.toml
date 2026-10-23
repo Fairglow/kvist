@@ -29,7 +29,15 @@ default_thinking_effort = "medium"
 # skott source for the full schema and inline documentation.
 theme = "dark"
 
-# Models selectable in the UI with -m/--model.
+# Preferred: reference Sav profiles instead of duplicating provider facts.
+# Run `skott --setup` first, remove the explicit [[models]] below, and enable:
+# [registry]
+# profiles = ["local-coder"]
+# Optional path relative to this configuration (CLI --registry takes precedence):
+# path = "providers.toml"
+#
+# Explicit local overrides use the same Sav native-model parser and validator.
+# IDs must not collide with referenced shared profiles.
 [[models]]
 id = "local"
 provider = "llama-server"

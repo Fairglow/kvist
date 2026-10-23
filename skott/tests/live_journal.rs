@@ -34,6 +34,15 @@ fn native_prompt_journals_are_live_bounded_and_separate_from_canonical_evidence(
         8192
     );
     assert_eq!(prompt.event["data"]["truncated"], true);
+    recorder
+        .model_event(&sav::ModelStreamEvent::TextDelta("provisional".into()))
+        .expect("stream");
+    recorder
+        .control(&skott::GuidanceNotice {
+            id: skott::GuidanceId(1),
+            state: skott::GuidanceState::Delivered,
+        })
+        .expect("control");
     let intent = ToolIntent {
         id: "call-1".into(),
         provider_id: None,
@@ -48,6 +57,16 @@ fn native_prompt_journals_are_live_bounded_and_separate_from_canonical_evidence(
         dispatch
             .iter()
             .any(|row| row.event["type"] == "tool_dispatch")
+    );
+    assert!(
+        dispatch
+            .iter()
+            .any(|row| row.event["type"] == "text" && row.event["provisional"] == true)
+    );
+    assert!(
+        dispatch
+            .iter()
+            .any(|row| row.event["type"] == "control" && row.event["data"]["state"] == "delivered")
     );
     assert!(
         !fs::read_to_string(&first)

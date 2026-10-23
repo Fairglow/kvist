@@ -7,11 +7,11 @@
 //! Steering messages flow over a separate steering channel and are injected at
 //! safe interruption points during an active task.
 
-use std::sync::mpsc;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use std::sync::{Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -21,7 +21,36 @@ use sav::ModelTransport;
 use crate::context::ContextManager;
 use crate::error::{Error, Result};
 use crate::retry::RetryPolicy;
-use crate::session::{AgentSession, Event, EventSink, Recorder, RunLimits, Skott, ToolExecutor};
+use crate::session::{
+    AgentSession, ControlMailbox, Event, EventSink, Recorder, RunLimits, Skott, Submission,
+    ToolExecutor,
+};
+
+/// Bounded submission capability. Classification belongs to the run owner,
+/// never to potentially stale UI state.
+#[derive(Clone)]
+pub struct PromptSender {
+    controls: ControlMailbox,
+    lifetime: Arc<()>,
+}
+
+impl PromptSender {
+    pub fn send(&self, text: String) -> Result<Submission> {
+        self.controls.submit(text).map_err(Into::into)
+    }
+
+    /// Requires active work, so a simultaneous completion cannot enqueue a new
+    /// task on a model the frontend has already deselected.
+    pub fn steer(&self, text: String) -> Result<Submission> {
+        self.controls
+            .steer(text)
+            .map(|id| Submission {
+                id,
+                kind: crate::SubmissionKind::Guidance,
+            })
+            .map_err(Into::into)
+    }
+}
 
 /// Receives [`Event`]s from the worker; implements [`EventSink`].
 struct ChannelSink {
@@ -51,18 +80,64 @@ pub struct SessionHandle {
     cancellation: CancellationToken,
     thread: Option<JoinHandle<()>>,
     shutdown: Arc<AtomicBool>,
+    controls: ControlMailbox,
+    recording: bool,
+    control_server: Arc<Mutex<Option<sav::observation::ControlServer>>>,
 }
 
 impl SessionHandle {
     /// Requests cancellation of the running turn.
     pub fn cancel(&self) {
-        self.cancellation.cancel();
+        if let Err(error) = self.controls.cancel_active(&self.cancellation) {
+            self.cancellation.cancel();
+            tracing::error!(%error, "active cancellation state unavailable");
+        }
     }
 
     /// Stops the session permanently, including queued prompts.
     pub fn shutdown(&self) {
         self.shutdown.store(true, Ordering::SeqCst);
-        self.cancel();
+        self.controls.shutdown();
+        self.cancellation.cancel();
+        if let Ok(mut server) = self.control_server.lock() {
+            server.take();
+        }
+    }
+
+    /// Clones the private in-process guidance capability for library callers.
+    pub fn controls(&self) -> ControlMailbox {
+        self.controls.clone()
+    }
+
+    /// Enables a private socket owned by this worker. The embedding host must
+    /// additionally require sandboxed execution and agent-inaccessible logging,
+    /// and must disclose the returned capability only to the human operator.
+    pub fn enable_controls(&self) -> Result<std::path::PathBuf> {
+        if !self.recording || self.shutdown.load(Ordering::SeqCst) || !self.is_running() {
+            return Err(Error::Control {
+                reason: "controls require a live worker with durable recording".into(),
+            });
+        }
+        let mut server = self.control_server.lock().map_err(|_| Error::Control {
+            reason: "control endpoint ownership is unavailable".into(),
+        })?;
+        if self.controls.is_shutdown() {
+            return Err(Error::Control {
+                reason: "worker is shut down".into(),
+            });
+        }
+        if server.is_none() {
+            *server = Some(sav::observation::bind_runtime_controls(
+                &self.controls,
+                &self.cancellation,
+            )?);
+        }
+        server
+            .as_ref()
+            .map(|server| server.path().to_owned())
+            .ok_or_else(|| Error::Control {
+                reason: "control endpoint was not created".into(),
+            })
     }
 
     /// Reports whether the owned worker is alive (including idle prompt waits).
@@ -98,6 +173,35 @@ impl Drop for SessionHandle {
 /// autonomous multi-turn loop that a caller opts into explicitly.
 #[allow(clippy::too_many_arguments)]
 pub fn start<M, E>(
+    session: AgentSession,
+    transport: M,
+    executor: E,
+    context: ContextManager,
+    recorder: Option<Box<dyn Recorder>>,
+    retry: RetryPolicy,
+    max_turns: u32,
+    limits: RunLimits,
+) -> Result<(SessionHandle, mpsc::Receiver<Event>, PromptSender)>
+where
+    M: ModelTransport + Send + 'static,
+    E: ToolExecutor + Send + 'static,
+{
+    start_with_controls(
+        session,
+        transport,
+        executor,
+        context,
+        recorder,
+        retry,
+        max_turns,
+        limits,
+        ControlMailbox::default(),
+    )
+}
+
+/// Starts a worker with an explicitly supplied private control capability.
+#[allow(clippy::too_many_arguments)]
+pub fn start_with_controls<M, E>(
     mut session: AgentSession,
     transport: M,
     executor: E,
@@ -106,17 +210,26 @@ pub fn start<M, E>(
     retry: RetryPolicy,
     max_turns: u32,
     limits: RunLimits,
-) -> Result<(SessionHandle, mpsc::Receiver<Event>, mpsc::Sender<String>)>
+    controls: ControlMailbox,
+) -> Result<(SessionHandle, mpsc::Receiver<Event>, PromptSender)>
 where
     M: ModelTransport + Send + 'static,
     E: ToolExecutor + Send + 'static,
 {
-    let (prompt_tx, prompt_rx) = mpsc::channel::<String>();
+    let prompt_tx = PromptSender {
+        controls: controls.clone(),
+        lifetime: Arc::new(()),
+    };
+    let prompt_lifetime = Arc::downgrade(&prompt_tx.lifetime);
+    let worker_controls = controls.clone();
+    let recording = recorder.is_some();
     let (tx, rx) = mpsc::sync_channel(128);
     let cancellation = CancellationToken::new();
     let handle_cancellation = cancellation.clone();
     let shutdown = Arc::new(AtomicBool::new(false));
     let worker_shutdown = Arc::clone(&shutdown);
+    let control_server = Arc::new(Mutex::new(None::<sav::observation::ControlServer>));
+    let worker_server = Arc::clone(&control_server);
     let thread = thread::Builder::new()
         .name("agent-session".into())
         .spawn(move || {
@@ -129,7 +242,9 @@ where
             // boundary in the durable recorder, so the worker does not manage the
             // record lifecycle itself. Cancellation re-arms the token after each
             // turn so a cancelled turn does not end the session.
-            while let Some(text) = wait_for_prompt(&prompt_rx, &worker_shutdown) {
+            while let Some(text) =
+                wait_for_prompt(&worker_controls, &prompt_lifetime, &worker_shutdown)
+            {
                 if worker_shutdown.load(Ordering::SeqCst) {
                     break;
                 }
@@ -148,7 +263,7 @@ where
                 // Borrow the recorder only for this run; the borrow ends before the
                 // next iteration, and each run starts and finishes its own record.
                 let result = runner.with_limits(limits).and_then(|runner| {
-                    runner.run(
+                    runner.run_controlled(
                         &mut session,
                         &transport,
                         &executor,
@@ -156,6 +271,7 @@ where
                         &cancellation,
                         &mut context,
                         borrow_recorder(&mut recorder),
+                        &worker_controls,
                     )
                 });
                 if worker_shutdown.load(Ordering::SeqCst) {
@@ -172,12 +288,19 @@ where
                     break;
                 }
             }
+            worker_controls.shutdown();
+            if let Ok(mut server) = worker_server.lock() {
+                server.take();
+            }
         })?;
     Ok((
         SessionHandle {
             cancellation: handle_cancellation,
             thread: Some(thread),
             shutdown,
+            controls,
+            recording,
+            control_server,
         },
         rx,
         prompt_tx,
@@ -186,13 +309,24 @@ where
 
 /// Blocks until the next prompt arrives or every prompt sender is dropped.
 /// Returns `None` when the channel closes, which ends the worker.
-fn wait_for_prompt(rx: &mpsc::Receiver<String>, shutdown: &AtomicBool) -> Option<String> {
+fn wait_for_prompt(
+    controls: &ControlMailbox,
+    lifetime: &std::sync::Weak<()>,
+    shutdown: &AtomicBool,
+) -> Option<String> {
     while !shutdown.load(Ordering::SeqCst) {
-        match rx.recv_timeout(Duration::from_millis(25)) {
-            Ok(prompt) => return Some(prompt),
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        match controls.next_task() {
+            Ok(Some(prompt)) => return Some(prompt),
+            Err(error) => {
+                tracing::error!(%error, "submission queue unavailable");
+                break;
+            }
+            Ok(None) => {}
         }
+        if lifetime.upgrade().is_none() || controls.is_shutdown() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
     }
     None
 }
@@ -208,6 +342,29 @@ fn borrow_recorder(recorder: &mut Option<Box<dyn Recorder>>) -> Option<&mut dyn 
         Some(boxed) => Some(&mut **boxed),
         None => None,
     }
+}
+
+/// The capability must not reside in an agent-writable namespace, even when
+/// a host's temporary-root environment points there.
+pub(crate) fn validate_control_path(
+    path: &std::path::Path,
+    workdir: &std::path::Path,
+) -> Result<()> {
+    if path
+        .to_str()
+        .is_none_or(|text| text.chars().any(char::is_control))
+    {
+        return Err(Error::Control {
+            reason: "private control socket requires a printable UTF-8 operator capability path"
+                .into(),
+        });
+    }
+    if path.canonicalize()?.starts_with(workdir) {
+        return Err(Error::Control {
+            reason: "private control socket must be outside the sandbox writable workspace".into(),
+        });
+    }
+    Ok(())
 }
 
 /// Builds the default system prompt for the agent, describing its sandbox scope.
@@ -287,6 +444,18 @@ You may use any Markdown in your results, including tables, lists, links, refere
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn control_capability_presentation_rejects_unprintable_paths_before_filesystem_access() {
+        use std::os::unix::ffi::OsStrExt;
+        let workdir = std::path::Path::new(".");
+        for path in [
+            std::path::Path::new("\u{1b}bad/control.sock"),
+            std::path::Path::new(std::ffi::OsStr::from_bytes(b"/bad-\xff/control.sock")),
+        ] {
+            assert!(matches!(validate_control_path(path,workdir),
+                Err(Error::Control{reason}) if reason.contains("printable")));
+        }
+    }
     use std::sync::mpsc::RecvTimeoutError;
     use std::time::Duration;
 
@@ -624,6 +793,120 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("backpressure must not prevent join");
         drop((rx, prompt_tx));
+    }
+
+    struct GuidedTransport {
+        started: mpsc::Sender<()>,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl ModelTransport for GuidedTransport {
+        fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
+            unreachable!()
+        }
+
+        fn stream(
+            &self,
+            request: &ModelRequest,
+            token: &CancellationToken,
+            _: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+        ) -> sav::Result<ModelTurn> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.started.send(()).unwrap();
+                while !token.is_cancelled() {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                return Err(AgentError::ModelTransportCancelled);
+            }
+            assert!(
+                request
+                    .messages
+                    .contains(&sav::ModelMessage::User("original objective".into()))
+            );
+            assert!(
+                request
+                    .messages
+                    .contains(&sav::ModelMessage::User("additional guidance".into()))
+            );
+            Ok(ModelTurn {
+                text: "guided completion".into(),
+                reasoning: None,
+                tool_intents: vec![],
+                finish_reason: sav::FinishReason::Stop,
+                provider: sav::LocalModelProvider::LlamaServer,
+                model: "test".into(),
+                response_id: None,
+                provider_request_id: None,
+                usage: None,
+            })
+        }
+
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(5)
+        }
+    }
+
+    #[test]
+    fn real_submission_path_interrupts_active_generation_instead_of_queuing_a_task() {
+        let (started, ready) = mpsc::channel();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (handle, receiver, prompts) = start(
+            test_session(),
+            GuidedTransport {
+                started,
+                calls: calls.clone(),
+            },
+            NoopExecutor,
+            ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+            RetryPolicy::new(3, Duration::from_millis(1), Duration::from_millis(1)),
+            5,
+            RunLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            prompts.send("original objective".into()).unwrap().kind,
+            crate::SubmissionKind::Task
+        );
+        ready.recv_timeout(Duration::from_secs(1)).unwrap();
+        let guidance = prompts.send("additional guidance".into()).unwrap();
+        assert_eq!(guidance.kind, crate::SubmissionKind::Guidance);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut states = Vec::new();
+        loop {
+            let event = receiver
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .unwrap();
+            match event {
+                Event::Control(notice) => {
+                    assert_eq!(notice.id, guidance.id);
+                    states.push(notice.state);
+                }
+                Event::Finished { message } => {
+                    assert_eq!(message, "guided completion");
+                    break;
+                }
+                Event::Failed(message) => panic!("{message}"),
+                _ => {}
+            }
+        }
+        assert_eq!(
+            states,
+            vec![
+                crate::GuidanceState::Accepted,
+                crate::GuidanceState::Claimed,
+                crate::GuidanceState::Delivered
+            ]
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(!handle.controls().is_active());
+        assert!(prompts.steer("not a replacement task".into()).is_err());
+        assert_eq!(handle.controls().next_task().unwrap(), None);
+        assert!(
+            receiver.recv_timeout(Duration::from_millis(30)).is_err(),
+            "guidance must never silently start a replacement task"
+        );
+        handle.shutdown();
     }
 
     #[test]

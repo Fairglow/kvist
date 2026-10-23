@@ -11,7 +11,6 @@
 
 mod cli;
 mod host;
-mod kvist_import;
 mod logging;
 mod markdown;
 mod process;
@@ -21,9 +20,11 @@ pub mod config;
 pub mod context;
 pub mod error;
 pub mod executor;
+pub mod external;
 pub mod file_tools;
 pub mod headless;
 pub mod history;
+pub mod inspection;
 pub mod retry;
 pub mod sandbox;
 pub mod session;
@@ -42,15 +43,19 @@ pub use context::{
 pub use error::{Error, Result};
 pub use executor::SandboxExecutor;
 pub use host::HostExecutor;
-pub use kvist_import::{KVIST_CONFIG_FILE, import_models, resolve_kvist_config_path};
 pub use markdown::{MarkdownRenderer, MarkdownStyles, RenderedLine, render_document};
 pub use retry::{
     DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_BASE_DELAY, DEFAULT_RETRY_MAX_DELAY, RetryPolicy,
 };
 pub use run::system_prompt;
+pub use run::{
+    PromptSender, SessionHandle, start as start_session,
+    start_with_controls as start_session_with_controls,
+};
 pub use sandbox::ToolOutcome;
 pub use session::{
-    AgentSession, Event, EventSink, MAX_TURNS, Recorder, RunLimits, RunSummary, Skott, ToolExecutor,
+    AgentSession, ControlMailbox, Event, EventSink, GuidanceId, GuidanceNotice, GuidanceState,
+    MAX_TURNS, Recorder, RunLimits, RunSummary, Skott, Submission, SubmissionKind, ToolExecutor,
 };
 pub use session_log::{DEFAULT_LOG_DIR, SessionLog};
 pub use toolchain::{ProfileSetting, ToolProfile, ToolchainProbe};

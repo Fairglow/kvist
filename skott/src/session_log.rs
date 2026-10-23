@@ -147,7 +147,7 @@ fn argument_shape(args: &Value) -> Value {
     Value::Object(shape)
 }
 
-fn private_directory(path: &Path) -> io::Result<(PathBuf, File)> {
+pub(crate) fn private_directory(path: &Path) -> io::Result<(PathBuf, File)> {
     let absolute = if path.is_absolute() {
         path.to_owned()
     } else {

@@ -147,6 +147,7 @@ struct Tui {
     master: File,
     output: Vec<u8>,
     _root: tempfile::TempDir,
+    control_logs: Option<tempfile::TempDir>,
 }
 
 // Model the screen operations used by the TUI, not just the printable byte history.
@@ -314,6 +315,63 @@ fn terminal_output_does_not_join_separate_rows() {
     assert!(!visible_text(output).contains("typed-before-discovery"));
 }
 
+#[test]
+fn interactive_control_socket_cancels_quiet_provider_without_becoming_context_or_evidence() {
+    use sav::observation::{ControlRequest, send_control};
+    let provider = Provider::blocked("/v1/chat/completions");
+    let mut tui = Tui::start_options(&provider, Some("a"), false, false, true);
+    tui.wait_for("private control socket:");
+    let screen = visible_text(&tui.output);
+    let path = screen
+        .lines()
+        .find_map(|line| {
+            let (_, path) = line.split_once("privatecontrolsocket:")?;
+            let end = path.find("/control.sock")? + "/control.sock".len();
+            Some(std::path::PathBuf::from(&path[..end]))
+        })
+        .expect("operator control capability");
+    assert!(
+        path.exists(),
+        "printed control path must be usable: {}",
+        path.display()
+    );
+    tui.type_text(b"operator controlled task\r\r");
+    let (route, request) = provider.next();
+    assert_eq!(route, "/v1/chat/completions");
+    assert!(!request.to_string().contains(path.to_str().unwrap()));
+    let reply = send_control(&path, &ControlRequest::cancel(71), Duration::from_secs(1)).unwrap();
+    assert_eq!(reply.status, "cancellation_requested");
+    tui.wait_for("cancelled");
+    let late = send_control(
+        &path,
+        &ControlRequest::guide(72, "late guide"),
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    assert_eq!(late.status, "rejected");
+    let logs = tui.control_logs.as_ref().unwrap().path().join("private");
+    tui.quit();
+    assert!(!path.exists(), "quit removes the owner capability");
+    let capability = path.to_str().unwrap().as_bytes();
+    let mut directories = vec![logs];
+    while let Some(directory) = directories.pop() {
+        for file in std::fs::read_dir(directory).unwrap() {
+            let file = file.unwrap();
+            if file.file_type().unwrap().is_dir() {
+                directories.push(file.path());
+            } else {
+                let bytes = std::fs::read(file.path()).unwrap();
+                assert!(
+                    !bytes
+                        .windows(capability.len())
+                        .any(|part| part == capability),
+                    "operator capability leaked into durable evidence"
+                );
+            }
+        }
+    }
+}
+
 impl Tui {
     fn start(provider: &Provider, explicit: Option<&str>, discover_capacity: bool) -> Self {
         Self::start_with_ignore(provider, explicit, discover_capacity, false)
@@ -325,7 +383,18 @@ impl Tui {
         discover_capacity: bool,
         fifo: bool,
     ) -> Self {
+        Self::start_options(provider, explicit, discover_capacity, fifo, false)
+    }
+
+    fn start_options(
+        provider: &Provider,
+        explicit: Option<&str>,
+        discover_capacity: bool,
+        fifo: bool,
+        allow_control: bool,
+    ) -> Self {
         let root = tempfile::tempdir().unwrap();
+        let control_logs = allow_control.then(|| tempfile::tempdir().unwrap());
         if fifo {
             nix::unistd::mkfifo(
                 &root.path().join(".gitignore"),
@@ -369,11 +438,18 @@ impl Tui {
         command
             .arg("--config")
             .arg(config)
-            .arg("--no-logs")
             .env("TERM", "xterm-256color")
             .stdin(Stdio::from(slave.try_clone().unwrap()))
             .stdout(Stdio::from(slave.try_clone().unwrap()))
             .stderr(Stdio::from(slave));
+        if let Some(logs) = &control_logs {
+            command
+                .arg("--allow-control")
+                .arg("--log-dir")
+                .arg(logs.path().join("private"));
+        } else {
+            command.arg("--no-logs");
+        }
         if let Some(id) = explicit {
             command.args(["--model", id]);
         }
@@ -383,6 +459,7 @@ impl Tui {
             master,
             output: Vec::new(),
             _root: root,
+            control_logs,
         }
     }
 

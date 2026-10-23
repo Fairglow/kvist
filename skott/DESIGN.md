@@ -52,6 +52,24 @@ protection.
 
 ### Shared runtime steering delivery (ADR 0015)
 
+#### Optional control socket ownership
+
+The CLI passes `--allow-control` separately to interactive/headless
+`run_with_controls` wrappers, avoiding an added `Overrides` field. Interactive
+discovery carries the opt-in into its private session builder; each worker
+owns one shared mutex-protected `ControlServer`, so natural worker exit and
+handle shutdown can both close it. The headless stack owns its server around
+the controlled native run. Both use Sav's single runtime-control binding, whose
+callback only enqueues `steer` or atomically cancels active work.
+
+Before publishing the capability, hosts require sandboxed execution, durable
+agent-inaccessible logs and a socket outside the writable namespace. The UI
+prints the path directly into operator presentation, never through the runtime
+sink/recorder; headless prints it only to stderr. Tests invoke the actual
+headless binary and a real pseudo-terminal against quiet providers, assert
+guidance/cancellation works, and scan all durable files and model requests for
+capability absence.
+
 `session`, `context`, and `retry` are thin Sav adapters/reexports. Skott keeps
 its existing application errors and tool/recorder traits through static bridges;
 only generic mechanism failures cross Sav's runtime boundary. Workspace-native
