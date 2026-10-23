@@ -2,6 +2,13 @@
 
 ## Decision
 
+The current ownership and consolidation decision is
+[ADR 0015](decisions/0015-shared-runtime-and-run-inspection.md). Sav supplies
+shared registry, native-loop and diagnostic/control mechanisms. Skott supplies
+interactive/headless workspace integration and independent run inspection.
+Maerg retains protected task policy and evidence. Sections below describe
+authority layers; future backend examples do not imply current support.
+
 Kvist will follow a layered agent architecture organized by authority. The
 standalone component owns reusable runtime mechanisms; Kvist owns the task
 policy, grants, approved bindings, promotion, and durable evidence that decide
@@ -211,19 +218,17 @@ the trusted policy boundary.
 
 Existing projects are useful at different boundaries:
 
-- Rig is a narrow transport implementation. On the `rig-integration`
-  experiment branch, exactly pinned `rig-core` 0.42.0 is enabled by default
-  behind the `rig-transport` Cargo feature and component-owned canonical
-  types. The direct adapter remains an explicit fallback and conformance
-  baseline; failures never trigger automatic cross-transport replay.
+- Rig was evaluated as a narrow transport implementation and rejected
+  (ADR 0009). The direct local transport is the sole implemented native
+  transport; there is no automatic cross-transport fallback or replay.
 - Goose is a valuable Rust agent/runtime reference and possible external agent.
 - Aider is a useful patch-oriented external agent and conformance benchmark.
 - OpenHands is a reference for separating control and execution environments.
 - Cline is a possible structured external-agent adapter.
 - Continue is a useful source of local-model compatibility experience.
 
-Kvist imports only Rig's core provider conversion, not its agent runtime.
-Dependencies must preserve the authority split above, pass the project MSRV
+Kvist imports no Rig conversion or agent runtime.
+Future dependencies must preserve the authority split above, pass the project MSRV
 and supply-chain gates, and remain replaceable behind standalone canonical
 types.
 
@@ -249,9 +254,8 @@ Kvist therefore requires:
 2. Implement transactional workspaces and strict Linux execution.
 3. Define standalone-owned canonical model, capability, tool-intent, and
    runtime-event contracts, plus the host authority traits they consume.
-4. Complete independent security and compliance review of the direct local
-   HTTP transport and exactly pinned Rig transport before either
-   becomes a dependency of the native loop.
+4. Complete independent security and compliance review of shared transports
+   and native mechanisms before declaring their integration compliant.
 5. Implement the typed broker mechanism and Kvist policy, grant, binding, and
    compliance-evidence services against those traits.
 6. Implement a bounded native loop using the selected transport.
