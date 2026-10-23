@@ -95,7 +95,7 @@ pub fn run_wizard_with_force<R: BufRead, W: Write>(
     run_wizard_inner(reader, writer, project_dir, None, force)
 }
 
-/// Runs setup with an explicit standalone profile store.
+/// Binds an existing shared profile from an explicit registry.
 pub fn run_wizard_with_profile_config<R: BufRead, W: Write>(
     reader: &mut R,
     writer: &mut W,
@@ -125,33 +125,58 @@ fn run_wizard_inner<R: BufRead, W: Write>(
          agent model profiles for Kvist.\n\n",
     )?;
 
-    let model = if let Some(profile_config) = profile_config {
-        let profiles = sav::load_profiles(profile_config)?;
-        if profiles.is_empty() {
+    let registry_path = profile_config
+        .map(Path::to_path_buf)
+        .or_else(sav::registry::default_registry_path)
+        .unwrap_or_else(|| project_dir.join(".kvist/providers.toml"));
+    let registry_path = if registry_path.is_absolute() {
+        registry_path
+    } else {
+        std::env::current_dir()
+            .map_err(|source| KvistError::Io {
+                operation: "resolve registry directory",
+                path: registry_path.clone(),
+                source,
+            })?
+            .join(registry_path)
+    };
+    let existing_selection = if profile_config.is_none() && registry_path.exists() {
+        let registry = sav::registry::Registry::load(&registry_path)?;
+        write_output(writer, "Existing shared profiles:\n")?;
+        for profile in registry.profiles().filter(|p| p.profile.enabled) {
+            write_output(writer, &format!("  {}\n", profile.name))?;
+        }
+        write_output(
+            writer,
+            "Reuse profile name, or Enter to discover/configure a new profile: ",
+        )?;
+        let name = read_input(reader)?;
+        if name.is_empty() {
+            None
+        } else {
+            Some(registry.resolve(&name)?)
+        }
+    } else {
+        None
+    };
+    let model = if let Some(profile) = existing_selection {
+        profile
+    } else if profile_config.is_some() {
+        let registry = sav::registry::Registry::load(&registry_path)?;
+        if registry.profiles().next().is_none() {
             return Err(KvistError::AgentSetupFailed {
                 reason: format!(
-                    "no standalone profiles exist in `{}`; run `sav-run setup` first",
-                    profile_config.display()
+                    "no shared profiles exist in `{}`; run `sav-run setup` first",
+                    registry_path.display()
                 ),
             });
         }
-        write_output(writer, "\nAvailable standalone profiles:\n")?;
-        for profile in &profiles {
-            write_output(
-                writer,
-                &format!("  {} ({})\n", profile.name, profile.provider),
-            )?;
+        write_output(writer, "\nAvailable shared profiles:\n")?;
+        for profile in registry.profiles().filter(|p| p.profile.enabled) {
+            write_output(writer, &format!("  {}\n", profile.name))?;
         }
         let name = prompt_required(reader, writer, "Profile name: ")?;
-        profiles
-            .into_iter()
-            .find(|profile| profile.name == name)
-            .ok_or_else(|| KvistError::AgentSetupFailed {
-                reason: format!(
-                    "profile `{name}` does not exist in `{}`",
-                    profile_config.display()
-                ),
-            })?
+        registry.resolve(&name)?
     } else {
         let setup_options = if let Ok(cfg) = config::load(project_dir) {
             sav::SetupOptions {
@@ -165,7 +190,7 @@ fn run_wizard_inner<R: BufRead, W: Write>(
                 ..Default::default()
             }
         };
-        sav::collect_profile_with_options(reader, writer, project_dir, setup_options)?
+        sav::run_registry_setup(reader, writer, project_dir, &registry_path, setup_options)?
     };
 
     write_output(writer, "\nWhere should this configuration be saved?\n")?;
@@ -184,12 +209,25 @@ fn run_wizard_inner<R: BufRead, W: Write>(
         })?
     };
 
-    persist_model(&config_path, project_dir, project_local, &model)?;
+    write_output(
+        writer,
+        "Bind role (developer, architect, security-reviewer) [developer]: ",
+    )?;
+    let role = read_input(reader)?;
+    let role = normalize_role_name(if role.is_empty() { "developer" } else { &role })?;
+    persist_shared_binding(
+        &config_path,
+        project_dir,
+        project_local,
+        &registry_path,
+        &model.name,
+        &role,
+    )?;
     write_output(
         writer,
         &format!(
-            "\nSuccessfully configured model `{}` in {}.\n\
-             Next Step: Run 'kvist agent role set <ROLE> {}' to assign this model to a role.\n\
+            "\nSuccessfully bound shared profile `{}` in {}.\n\
+             Role `{role}` references profile `{}`; no provider facts were copied.\n\
              ==================================================\n",
             model.name,
             config_path.display(),
@@ -198,11 +236,13 @@ fn run_wizard_inner<R: BufRead, W: Write>(
     )
 }
 
-fn persist_model(
+fn persist_shared_binding(
     config_path: &Path,
     project_dir: &Path,
     project_local: bool,
-    model: &sav::ModelProfile,
+    registry_path: &Path,
+    profile_name: &str,
+    role: &str,
 ) -> Result<()> {
     let (mut document, existing_contents) = load_document(config_path, project_local)?;
     if let Some(contents) = existing_contents.as_deref() {
@@ -212,7 +252,17 @@ fn persist_model(
             config::validate_agent_configuration_contents(config_path, contents)?;
         }
     }
-    upsert_provider_and_profile(&mut document, model)?;
+    let agent = ensure_table(&mut document["agent"], "agent")?;
+    if agent.contains_key("providers") || agent.contains_key("profiles") {
+        return Err(KvistError::AgentSetupFailed {
+            reason: "shared registry bindings cannot be mixed with local provider/profile definitions; remove explicit local definitions deliberately before configuring shared bindings".into(),
+        });
+    }
+    let registry = ensure_table(&mut agent["registry"], "agent.registry")?;
+    registry["path"] = value(registry_path.to_string_lossy().as_ref());
+    let roles = ensure_table(&mut agent["roles"], "agent.roles")?;
+    let binding = ensure_table(&mut roles[role], "agent.roles.ROLE")?;
+    binding["profile"] = value(profile_name);
     let contents = document.to_string();
     if contents.len() as u64 > config::MAX_CONFIGURATION_BYTES {
         return Err(KvistError::ProjectConfigurationTooLarge {
@@ -311,37 +361,13 @@ fn ensure_table<'a>(item: &'a mut Item, config_path: &str) -> Result<&'a mut Tab
         })
 }
 
-fn upsert_provider_and_profile(
-    document: &mut DocumentMut,
-    model: &sav::ModelProfile,
-) -> Result<()> {
-    let agent = ensure_table(&mut document["agent"], "agent")?;
-
-    // 1. Ensure provider table
-    let providers = ensure_table(&mut agent["providers"], "agent.providers")?;
-    if !providers.contains_key(&model.provider) {
-        let provider_table = ensure_table(
-            &mut providers[&model.provider],
-            &format!("agent.providers.{}", model.provider),
-        )?;
-        provider_table["type"] = value(&model.provider);
-    }
-
-    // 2. Ensure profile table
-    let profiles = ensure_table(&mut agent["profiles"], "agent.profiles")?;
-    let profile_table = ensure_table(
-        &mut profiles[&model.name],
-        &format!("agent.profiles.{}", model.name),
-    )?;
-    profile_table["provider"] = value(&model.provider);
-    profile_table["model"] = value(&model.name);
-    profile_table["command"] = value(&model.command);
-
-    Ok(())
-}
-
 /// Returns whether `config_path` declares `[agent.profiles.<name>]`.
 fn declared_profile(config_path: &Path, name: &str) -> bool {
+    if config::load_agent_file(config_path)
+        .is_ok_and(|config| config.shared_profiles.contains_key(name))
+    {
+        return true;
+    }
     load_document(config_path, false)
         .ok()
         .and_then(|(doc, _)| {
@@ -356,6 +382,14 @@ fn declared_profile(config_path: &Path, name: &str) -> bool {
 
 /// Returns whether `config_path` declares any `[agent.profiles.*]` entry.
 fn declared_any_profile(config_path: &Path) -> bool {
+    if load_document(config_path, false).is_ok_and(|(document, _)| {
+        document
+            .get("agent")
+            .and_then(Item::as_table)
+            .is_some_and(|agent| agent.contains_key("registry"))
+    }) {
+        return true;
+    }
     load_document(config_path, false)
         .ok()
         .and_then(|(doc, _)| {
@@ -550,6 +584,7 @@ pub fn remove_all_models(
     }
 
     if let Some(agent) = document.get_mut("agent").and_then(Item::as_table_mut) {
+        agent.remove("registry");
         if agent.contains_key("profiles") {
             agent.remove("profiles");
         }
@@ -584,6 +619,13 @@ pub fn list_models(project_dir: &Path) -> Result<String> {
     let config_path = project_dir.join("kvist.toml");
     let (document, existing_contents) =
         load_document(&config_path, true).unwrap_or((DocumentMut::new(), None));
+    if document
+        .get("agent")
+        .and_then(Item::as_table)
+        .is_some_and(|agent| agent.contains_key("registry"))
+    {
+        append_shared_profiles(&mut output, &config_path)?;
+    }
 
     let mut project_models = Vec::new();
     if existing_contents.is_some()
@@ -623,6 +665,16 @@ pub fn list_models(project_dir: &Path) -> Result<String> {
                 output.push_str(&format!("│      Model ID: {mid}\n"));
             }
         }
+    }
+
+    if let Some(user_path) = config::global_user_config_path()
+        && let Ok((document, Some(_))) = load_document(&user_path, false)
+        && document
+            .get("agent")
+            .and_then(Item::as_table)
+            .is_some_and(|agent| agent.contains_key("registry"))
+    {
+        append_shared_profiles(&mut output, &user_path)?;
     }
 
     // List user-global profiles if ~/.config/kvist/config.toml exists
@@ -666,6 +718,32 @@ pub fn list_models(project_dir: &Path) -> Result<String> {
 
     output.push_str("╰──────────────────────────────────────────────────────────────────");
     Ok(output)
+}
+
+fn append_shared_profiles(output: &mut String, config_path: &Path) -> Result<()> {
+    let config = config::load_agent_file(config_path)?;
+    output.push_str(&format!(
+        "│  Shared profiles referenced by {}:\n",
+        config_path.display()
+    ));
+    for (name, resolved) in config.shared_profiles {
+        let label = match resolved.profile.backend {
+            sav::registry::Backend::Native(native) => format!(
+                "native {} {} {}",
+                native.provider, native.base_url, native.model,
+            ),
+            sav::registry::Backend::ExternalAgent(agent) => format!(
+                "external-agent {} {}",
+                agent.provider.as_str(),
+                agent.executable,
+            ),
+        };
+        output.push_str(&format!(
+            "│    • {name}: {label} ({})\n",
+            resolved.source.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Normalizes a role string to canonical form: "developer", "architect", or "security-reviewer".
@@ -904,6 +982,38 @@ pub fn check_agents<R: BufRead, W: Write>(
         "the project configuration"
     };
     let (document, existing_contents) = load_document(&config_path, !global)?;
+    if document
+        .get("agent")
+        .and_then(Item::as_table)
+        .is_some_and(|agent| agent.contains_key("registry"))
+    {
+        let config = config::load_agent_file(&config_path)?;
+        write_output(
+            writer,
+            "Shared qualification uses current host permissions and may incur billing.\nRun qualification now? [y/N]: ",
+        )?;
+        if !matches!(
+            read_input(reader)?.to_ascii_lowercase().as_str(),
+            "y" | "yes"
+        ) {
+            write_output(
+                writer,
+                "agent check cancelled; no qualification was executed\n",
+            )?;
+            return Ok(());
+        }
+        for (name, profile) in config.shared_profiles {
+            match sav::qualify_registry_profile(&profile.profile, project_dir, true) {
+                Ok(()) => write_output(writer, &format!("{name} ... ok\n"))?,
+                Err(sav::Error::Cancelled) => return Err(KvistError::AgentSetupCancelled),
+                Err(error) => write_output(
+                    writer,
+                    &format!("{name} ... FAILED: {error}; shared definition unchanged\n"),
+                )?,
+            }
+        }
+        return Ok(());
+    }
     let mut profiles: Vec<CheckProfile> = Vec::new();
     if existing_contents.is_some()
         && let Some(agent) = document.get("agent").and_then(Item::as_table)
@@ -1057,6 +1167,9 @@ pub fn set_role_model_with_effort(
     let (mut document, existing_contents) = load_document(config_path, project_local)?;
 
     let mut found = false;
+    if let Ok(config) = config::load_agent_file(config_path) {
+        found = config.shared_profiles.contains_key(model_name);
+    }
 
     if let Some(agent) = document.get("agent").and_then(Item::as_table)
         && let Some(profiles) = agent.get("profiles").and_then(Item::as_table)

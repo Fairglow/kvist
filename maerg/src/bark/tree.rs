@@ -830,6 +830,7 @@ mod tests {
             candidates,
             vec![
                 "--stream".to_owned(),
+                "--allow-control".to_owned(),
                 "--json".to_owned(),
                 "--help".to_owned(),
                 "-h".to_owned()

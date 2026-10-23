@@ -465,6 +465,9 @@ pub enum TaskCommand {
         /// Optional flag to stream agent stdout and stderr directly to the console.
         #[arg(long)]
         stream: bool,
+        /// Enable a private local cancel/guidance capability for this task attempt.
+        #[arg(long)]
+        allow_control: bool,
     },
     /// View the raw execution log of an agent task attempt.
     ///
@@ -1022,15 +1025,17 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     component_dir,
                     task_id,
                     stream,
+                    allow_control,
                 },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
                 let component = project.resolve_component(component_dir.as_deref())?;
-                let message = task_commands::run_task_or_item(
+                let message = task_commands::run_task_or_item_with_controls(
                     &project.project_dir,
                     &component,
                     task_id.as_deref(),
                     stream,
+                    allow_control,
                 )?;
                 let task_id_field = match task_id.as_deref() {
                     Some(id) => format!("\"{id}\""),
@@ -1527,15 +1532,17 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                         component_dir,
                         task_id,
                         stream,
+                        allow_control,
                     },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
                 let component = project.resolve_component(component_dir.as_deref())?;
-                task_commands::run_task_or_item(
+                task_commands::run_task_or_item_with_controls(
                     &project.project_dir,
                     &component,
                     task_id.as_deref(),
                     stream,
+                    allow_control,
                 )
                 .map(CommandOutput::message)
             }
@@ -2447,6 +2454,7 @@ mod tests {
                     component_dir,
                     task_id,
                     stream,
+                    ..
                 },
         }) = cli.command
         else {
@@ -2469,6 +2477,7 @@ mod tests {
                     component_dir,
                     task_id,
                     stream,
+                    ..
                 },
         }) = cli.command
         else {
@@ -2491,6 +2500,7 @@ mod tests {
                     component_dir,
                     task_id,
                     stream,
+                    ..
                 },
         }) = cli.command
         else {

@@ -119,6 +119,9 @@ pub enum KvistError {
     /// The reusable agent runtime rejected or failed an operation.
     #[error(transparent)]
     Sav(#[from] sav::Error),
+
+    #[error(transparent)]
+    Runtime(#[from] sav::runtime::Error),
     /// A project is not safe for `init` to modify.
     #[error(
         "cannot initialize `{project_dir}` because its Kvist project state is {state}; \

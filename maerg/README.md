@@ -93,9 +93,9 @@ design lives in [`docs/command-set.md`](../docs/command-set.md).
 | `kvist task log [COMPONENT_DIR] TASK_ID`                     | Print the most recent bounded, redacted agent log for a task.                                                                                                                                                           |
 | `kvist task approve-policy [PROJECT_DIR]`                    | Record approval of the complete effective execution policy.                                                                                                                                                             |
 | `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a prompt in the interactive skott shell (sandboxed and multi-turn by default); without a terminal it runs the same shell headless (`--headless --json`), sandbox-only.                                       |
-| `kvist agent setup [--force]`                                | Collect, qualify, and register a new model profile without assigning roles.                                                                                                                                             |
+| `kvist agent setup [--force]`                                | Discover or reuse a shared profile, qualify new profiles, and persist a role/profile reference. |
 | `kvist agent list`                                           | List all configured and standalone model profiles with their active role assignments.                                                                                                                                   |
-| `kvist agent remove <MODEL_NAME> [--all]`                    | Remove configured model profile(s) or clear all agent configuration.                                                                                                                                                    |
+| `kvist agent remove <MODEL_NAME> [--all]`                    | Remove local definitions/bindings or clear agent configuration; shared registry definitions are not deleted. |
 | `kvist agent role [list]`                                    | Inspect current role assignments (developer, architect, security-reviewer).                                                                                                                                             |
 | `kvist agent role set <ROLE> <MODEL>`                        | Bind a configured or standalone profile to a role.                                                                                                                                                                      |
 | `kvist agent role clear <ROLE> [--all]`                      | Clear role assignment(s).                                                                                                                                                                                               |
@@ -122,23 +122,37 @@ configuration as a side effect.
 
 ### Per-role model selection
 
-Each `architect` and `developer` profile can choose a named entry from its
-`models` list:
+Role policy binds shared Sav profile names; model/provider facts have one home:
 
 ```toml
-[agent.profiles.developer]
-model = "local"
-default_model = "default"
-models = [
-  { name = "default", command = "example-agent --message '{prompt}' {context_files}" },
-  { name = "local", command = "local-agent --prompt '{prompt}' {context_files}", system_prompt = "Follow the component contract." },
-]
+[agent.registry]
+path = "providers.toml"
+
+[agent.roles.developer]
+profile = "local-coder"
+timeout_seconds = 300
+max_output_bytes = 65536
 ```
 
-`model` takes precedence over `default_model`. If neither names a concrete
-entry, the aliases `default` and `default-model` select the first listed
-model. Names are case-sensitive. An unknown selected name fails before the
-agent program is invoked and lists the available names.
+Paths are relative to the containing configuration. An empty `[agent.registry]`
+uses `.kvist/providers.toml` and the standard user registry. Whole named
+definitions resolve explicit > project > user; names are case-sensitive.
+Disabled, unknown and malformed profiles fail closed. Registry reads never
+probe processes or endpoints. Selected typed backend data and source digests
+are pinned at load time; a loaded interactive model cannot change a task role.
+External coding agents cannot author protected tasks.
+
+Protected runs report a private `*.events.jsonl` path on stderr as execution
+starts. Inspect it independently with `skott --attach PATH`; detachment never
+stops the task. `task run . TASK_ID --allow-control` additionally reports a
+private local socket. Pass it with `skott --attach PATH --control SOCKET` to
+request cancellation (`c`) or supplemental guidance (`g`). Queue acceptance is
+not delivery, guidance does not expand approved grants, and executing effects
+finish before steering. Explicit cancellation terminates an owned sandbox
+effect; acquisition/verification phases retain their existing bounded
+timeout/signal behavior. No control implies rollback or automatic replay.
+Model deltas are journaled live when `task run --stream` is enabled; otherwise
+request, completed-turn, broker and effect progress remain inspectable live.
 
 Agent settings come from one selected source; they are not merged across the
 paths above. `[agent]` in the project `kvist.toml` wins when present. Otherwise
@@ -216,11 +230,11 @@ Create a reusable provider profile interactively, then use it by name:
 cargo run --locked -p sav --bin sav-run -- setup
 cargo run --locked -p sav --bin sav-run -- run \
   --allow-host-execution \
-  --profile local-coder \
+  --profile copilot-coder \
   "Review this change"
 ```
 
-Send a text-only request through the Rig-backed local Ollama or llama-server
+Send a text-only request through the shared direct Ollama or llama-server
 transport:
 
 ```bash
@@ -238,8 +252,7 @@ cargo run --locked -p sav --bin sav-run -- model \
   "Summarize the supplied prompt"
 ```
 
-The exactly pinned Rig adapter is enabled and selected by default on the
-`rig-integration` branch. It accepts loopback HTTP only, has no proxy or
+The direct transport accepts loopback HTTP only, has no proxy or
 credential support, and exposes no tools through this command. The library API
 additionally supports canonical tool descriptors and returns tool calls as
 untrusted `ToolIntent` values; it never executes them.
@@ -254,9 +267,8 @@ cargo run --locked -p sav --bin sav-run -- model \
 ```
 
 Provider-native schema enforcement is a generation constraint; callers still
-parse and validate the returned content. The direct adapter remains an
-explicit conformance and fallback path via `--transport direct`. Kvist never
-automatically replays a failed Rig request through it.
+parse and validate the returned content. There is no alternate Rig transport
+or automatic transport fallback.
 
 List provider-advertised model IDs without running inference:
 
@@ -289,18 +301,18 @@ Copilot and Gemini, `default` for llama-server, or `llama3.1:8b` for Ollama)
 and the custom choice. The reusable profile name is selected separately from
 the provider model ID.
 
-Standalone profiles are stored at
-`$XDG_CONFIG_HOME/sav/config.toml`, falling back to
-`$HOME/.config/sav/config.toml`. Version 1 stores generic profile
-names, provider kinds, and command templates:
+Shared profiles are stored at
+`$XDG_CONFIG_HOME/sav/registry.toml`, falling back to
+`$HOME/.config/sav/registry.toml`. Schema one stores typed backend facts:
 
 ```toml
 schema_version = 1
 
-[[profiles]]
-name = "local-coder"
+[profiles.local-coder.backend]
+kind = "native"
 provider = "ollama"
-command = "ollama run qwen3-coder '{prompt}'"
+base_url = "http://127.0.0.1:11434"
+model = "qwen3-coder"
 ```
 
 The library crate is named `sav`. Its outcomes and constraints,
@@ -310,11 +322,10 @@ consumer boundary, and private realization live in
 [`sav/DESIGN.md`](../sav/DESIGN.md).
 The layered runtime decision is documented in
 [`docs/architecture.md`](../docs/architecture.md),
-the current and planned runtime choices in
+the current runtime choices in
 [`docs/runtime-selection.md`](../docs/runtime-selection.md),
-the direct transport is available for local testing, and the Rig 0.42.0
-adoption decision and contained optional adapter gates are recorded in
-ADR 0009.
+the rejected Rig experiment is recorded in ADR 0009; no Rig dependency or
+adapter remains.
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.
 
@@ -356,11 +367,13 @@ llama-cli profile, unless the editable wrapper intentionally owns model
 selection. Explicit wrapper and GGUF paths are stored as canonical absolute
 paths so later working-directory choices cannot change what is executed.
 
-`kvist agent setup` can call the same reusable provider-profile collection or
-load an existing standalone profile. It then asks which Kvist roles should use
-the profile and where the Kvist binding should be stored. The exact profile
-name and command are copied into Kvist configuration rather than dynamically
-referenced, so execution approval remains bound to reviewed command bytes.
+`kvist agent setup` reuses shared discovery, qualification and persistence or
+selects an existing shared profile without qualification. It asks which role
+should reference the profile and where that binding should be stored. Only
+the registry path and profile reference are persisted in Kvist; provider facts
+and commands are never copied. Execution approval binds the exact resolved
+source bytes. Shared and copied local definitions cannot be mixed; setup
+refuses rather than silently migrating or deleting existing definitions.
 Existing project-local and user-global Kvist TOML is updated atomically:
 unrelated settings, models, and comments are retained.
 
@@ -475,9 +488,7 @@ boundaries for possible future restoration.
 
 Kvist's MSRV is Rust **1.95**. Edition 2024 itself is available from Rust 1.85,
 but the interactive shell's reedline 0.51 integration raises the floor to 1.95.
-The exactly pinned Rig 0.42.0 transport dependency, whose upstream-tested
-compiler was 1.94, remains supported on the same toolchain. CI tests Rust 1.95
-and current stable on Linux.
+CI tests Rust 1.95 and current stable on Linux.
 `Cargo.lock` is committed and every CI build/test command uses
 `--locked`. Kvist's own repository dogfoods the component model: the root Rust
 workspace lives at the repository root (`Cargo.toml`), with `maerg/`,
@@ -870,8 +881,7 @@ cargo deny --manifest-path maerg/Cargo.toml --all-features --locked check adviso
 
 CI rejects known advisories, wildcard requirements, unknown registries or Git
 sources, and licenses outside the reviewed allowlist. Duplicate dependency
-versions remain warnings because the pinned Rig graph currently contains
-legitimate duplicates that are tracked as footprint cost.
+versions remain warnings and are tracked as dependency footprint cost.
 
 The runtime uses [toml](https://crates.io/crates/toml) 1 to validate the
 project-local configuration before reading its component tree.

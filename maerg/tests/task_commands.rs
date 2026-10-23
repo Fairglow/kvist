@@ -335,6 +335,7 @@ fn gateway_stream_body(deltas: &[&str]) -> String {
         ));
         body.push('\n');
     }
+    body.push_str("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n");
     body.push_str("data: [DONE]\n");
     body
 }
@@ -952,7 +953,10 @@ command = "/usr/bin/echo 'mocking verify'"
         "run failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(output.stderr, b"");
+    let stderr = String::from_utf8(output.stderr.clone()).expect("diagnostic text");
+    assert_eq!(stderr.lines().count(), 1);
+    assert!(stderr.starts_with("live run journal: "));
+    assert!(stderr.ends_with(".events.jsonl\n"));
     let stdout_str = String::from_utf8_lossy(&output.stdout);
     assert!(stdout_str.contains("executed and verified successfully"));
     assert!(stdout_str.contains("Logs written to"));

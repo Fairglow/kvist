@@ -189,6 +189,9 @@ impl Eq for ProfileConfig {}
 /// Configuration for an agent role (task intent, persona, policy, and profile binding).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleConfig {
+    /// Typed selection pinned by shared registry loading, never command-inferred.
+    #[serde(default)]
+    pub resolved_profile: Option<sav::registry::ResolvedProfile>,
     /// The role (Architect, Developer, SecurityReviewer).
     pub role: Role,
     /// Name of the assigned model profile.
@@ -233,6 +236,7 @@ impl RoleConfig {
             ),
         };
         Self {
+            resolved_profile: None,
             role,
             profile: profile.clone(),
             command_template: command_template.clone(),
@@ -281,6 +285,8 @@ pub struct AgentDiscoveryConfig {
 /// separated providers, model profiles, and role policies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentConfig {
+    /// Shared definitions pinned at load time; empty for explicit local configs.
+    pub shared_profiles: BTreeMap<String, sav::registry::ResolvedProfile>,
     /// Configured providers: wire protocols and transport endpoints.
     pub providers: BTreeMap<String, ProviderConfig>,
     /// Configured model profiles: model identifiers and metadata.
@@ -300,6 +306,19 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
+    /// Returns a pinned shared selection without discovery or command inference.
+    pub fn resolve_named_profile(&self, name: &str) -> Result<&sav::registry::ResolvedProfile> {
+        self.shared_profiles.get(name).ok_or_else(|| invalid_configuration(
+            Path::new(&self.source.identity),
+            &format!("shared profile `{name}` is unavailable; configure [agent.registry] and an enabled profile"),
+        ))
+    }
+
+    /// Resolves exactly the role's configured profile, never a loaded default.
+    pub fn resolve_role_profile(&self, role: Role) -> Result<&sav::registry::ResolvedProfile> {
+        self.resolve_named_profile(&self.role(role).profile)
+    }
+
     pub fn role(&self, role: Role) -> &RoleConfig {
         match role {
             Role::Architect => &self.architect,
@@ -351,6 +370,7 @@ impl AgentConfig {
                 .or_insert_with(|| RoleConfig::default_for_role(role));
             role_cfg.models = models_list.clone();
             role_cfg.default_model = role_cfg.profile.clone();
+            role_cfg.resolved_profile = self.shared_profiles.get(&role_cfg.profile).cloned();
 
             if let Some(prof) = self.profiles.get(&role_cfg.profile) {
                 if let Some(cmd) = &prof.command {
@@ -447,6 +467,7 @@ impl Default for AgentConfig {
         roles.insert(Role::SecurityReviewer, security_reviewer.clone());
 
         Self {
+            shared_profiles: BTreeMap::new(),
             providers,
             profiles,
             roles,
@@ -720,6 +741,15 @@ pub(crate) fn validate_agent_configuration_contents(
         Path::new("built-in:agent-default-v1")
     };
     parse_agent_config_from_table(config_path, contents, source_path, &table).map(|_| ())
+}
+
+/// Loads one explicit agent configuration, including pinned shared references.
+/// No discovery, probing, execution or filesystem writes occur.
+pub fn load_agent_file(config_path: &Path) -> Result<AgentConfig> {
+    let contents = read_agent_config_candidate(config_path, "explicit")?
+        .ok_or_else(|| invalid_configuration(config_path, "agent configuration does not exist"))?;
+    let table = toml_table_from_str(config_path, &contents)?;
+    parse_agent_config_from_table(config_path, &contents, config_path, &table)
 }
 
 fn parse_sandbox_config(
@@ -1272,6 +1302,13 @@ fn load_agent_config(
             project_config_path,
             table,
         )?;
+        if table
+            .get("agent")
+            .and_then(toml::Value::as_table)
+            .is_some_and(|agent| agent.contains_key("registry"))
+        {
+            return Ok(config);
+        }
         // Inherit providers from user global config if not defined locally
         if let Some(user_path) = global_user_config_path()
             && let Some(contents) = read_agent_config_candidate(&user_path, "user")?
@@ -1450,7 +1487,144 @@ fn parse_agent_config_from_table(
         ..AgentConfig::default()
     };
     merge_agent_config_from_table(&mut config, config_path, table)?;
+    resolve_shared_registry(&mut config, config_path, table)?;
     Ok(config)
+}
+
+fn resolve_shared_registry(
+    config: &mut AgentConfig,
+    config_path: &Path,
+    table: &toml::map::Map<String, toml::Value>,
+) -> Result<()> {
+    use sav::registry::{Backend, RegistryPaths};
+    let lookup = table
+        .get("agent")
+        .and_then(toml::Value::as_table)
+        .unwrap_or(table);
+    let Some(registry) = lookup.get("registry") else {
+        return Ok(());
+    };
+    let registry = registry
+        .as_table()
+        .ok_or_else(|| invalid_configuration(config_path, "`agent.registry` must be a table"))?;
+    if registry.keys().any(|key| key != "path") {
+        return Err(invalid_configuration(
+            config_path,
+            "unknown agent.registry field",
+        ));
+    }
+    if lookup.contains_key("providers")
+        || lookup.contains_key("profiles")
+        || table.contains_key("providers")
+        || table.contains_key("profiles")
+    {
+        return Err(invalid_configuration(
+            config_path,
+            "shared registry references cannot be mixed with copied local providers/profiles",
+        ));
+    }
+    if let Some(roles) = lookup.get("roles").and_then(toml::Value::as_table) {
+        for role in roles.values().filter_map(toml::Value::as_table) {
+            if role.keys().any(|key| {
+                !matches!(
+                    key.as_str(),
+                    "profile"
+                        | "thinking_effort"
+                        | "timeout_seconds"
+                        | "token_limit"
+                        | "max_output_bytes"
+                        | "redaction_values"
+                )
+            }) {
+                return Err(invalid_configuration(
+                    config_path,
+                    "shared role bindings accept profile references and role policy only; no backend command/model overrides",
+                ));
+            }
+        }
+    }
+    let base = config_path.parent().unwrap_or(Path::new("."));
+    let project = if base.file_name().is_some_and(|name| name == ".kvist") {
+        base.parent().unwrap_or(base)
+    } else {
+        base
+    };
+    let mut paths = RegistryPaths::for_project(project);
+    if let Some(path) = registry.get("path") {
+        let path = path.as_str().ok_or_else(|| {
+            invalid_configuration(config_path, "`agent.registry.path` must be a string")
+        })?;
+        let path = PathBuf::from(path);
+        paths.explicit = Some(if path.is_absolute() {
+            path
+        } else {
+            base.join(path)
+        });
+    }
+    let resolved = paths.load()?;
+    config.shared_profiles = resolved
+        .profiles()
+        .filter(|p| p.profile.enabled)
+        .map(|p| (p.name.clone(), p.clone()))
+        .collect();
+    config.providers.clear();
+    config.profiles.clear();
+    for (name, profile) in &config.shared_profiles {
+        let (provider, base_url, model, context_window) = match &profile.profile.backend {
+            Backend::Native(native) => (
+                native.provider.to_string(),
+                Some(native.base_url.clone()),
+                Some(native.model.clone()),
+                native.context_limit,
+            ),
+            Backend::ExternalAgent(agent) => (
+                agent.provider.as_str().to_owned(),
+                None,
+                agent.model.clone(),
+                None,
+            ),
+        };
+        config
+            .providers
+            .entry(provider.clone())
+            .or_insert_with(|| ProviderConfig {
+                name: provider.clone(),
+                provider_type: provider.clone(),
+                base_url,
+                // Inspection only. Execution must select the pinned typed backend.
+                command_template: Some(String::new()),
+                timeout_seconds: None,
+            });
+        config.profiles.insert(
+            name.clone(),
+            ProfileConfig {
+                name: name.clone(),
+                provider,
+                model,
+                context_window,
+                supports_thinking: None,
+                default_thinking_effort: None,
+                temperature: None,
+                system_prompt: None,
+                command: Some(String::new()),
+            },
+        );
+    }
+    for role in config.roles.values_mut() {
+        role.command_template.clear();
+    }
+    config.sync_roles_and_profiles();
+    let mut binding = config.source.digest.as_bytes().to_vec();
+    for profile in resolved.profiles() {
+        binding.extend_from_slice(profile.name.as_bytes());
+        binding.push(0);
+        binding.extend_from_slice(profile.source.as_os_str().as_encoded_bytes());
+        binding.push(0);
+        binding.extend_from_slice(profile.digest.as_bytes());
+        binding.push(0);
+    }
+    config.source.digest = sha256(&binding);
+    Ok(())
 }
 
 fn merge_agent_config_from_table(
