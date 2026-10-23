@@ -2,6 +2,15 @@
 
 # Kvist Maerg Design
 
+## Shared registry realization (ADR 0015)
+
+The agent configuration loader resolves the shared registry after parsing local
+role policy and retains immutable resolved profiles. Runtime callers select
+these typed profiles directly; no command-string inference is used on this
+path. Setup persists a shared registry plus role/profile reference tables using
+the existing atomic configuration writer. Existing explicit local policy is
+preserved.
+
 ## Design overview
 
 ADR 0015 replaces duplicated provider resolution with Sav's shared registry
@@ -22,6 +31,17 @@ process mechanisms while retaining task policy, authority, context, and
 evidence.
 
 ## Internal structure
+
+Live task diagnostics use a run-owned Sav journal adjacent to existing attempt
+logs. The outer execution owner finishes the diagnostic on every ordinary
+result/error path; an abrupt crash leaves a visibly incomplete journal. Model
+and authorization events precede execution, each dispatch is synchronized,
+and tool results follow observed sandbox completion. Stream text is redacted
+with the existing cross-delta redactor. The private control capability is
+created only on explicit CLI opt-in and is never placed in model context or
+the agent-readable journal. Controls are drained through the shared bounded
+runtime mailbox at safe boundaries; a currently executing effect completes
+before guidance invalidates remaining stale proposals.
 
 | Area              | Modules                                                                                                            | Responsibility                                                                                                                      |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
