@@ -78,7 +78,10 @@ cancellation and `g` composes supplemental guidance. Nonterminal controls use
 Guidance interrupts generation/backoff but never an executing effect, preserves
 task budgets and grants, and cannot silently become a replacement task.
 Cancellation cannot undo effects or authorize replay. Protected acquisition and
-verification retain their existing bounded timeout/signal behavior. Protected
+verification retain their existing bounded timeout/signal behavior. Automatic
+model-requested provisioning is refused before effects until exact identity
+binding and mediated vendor repacking exist; it never falls back to host
+package managers. Explicit human `kvist vendor` remains separate. Protected
 model text deltas require `--stream`; other progress is journaled without it.
 
 An explicitly selected external profile can run through terminal Skott using
@@ -221,9 +224,13 @@ When running supervised processes (`sav-run run`), the harness applies strict bo
 * **Idle Timeout (`--idle-timeout <SECONDS>`):** Maximum duration (default: 900s) allowed to elapse without bytes emitted on standard output or standard error. Prevents hanging processes waiting on unmonitored stdin.
 * **Attempt Timeout:** Optional maximum wall-clock duration permitted for a single attempt.
 * **Output Bound (`--max-output-bytes <BYTES>`):** Cumulative stdout and stderr bytes allowed before terminating the attempt (default: 1 MiB).
-* **Retry Limit (`--max-retries <COUNT>`):** Number of supervised restarts (default: 3) permitted when an attempt encounters an idle timeout or repetition loop.
+* **Retry Limit (`--max-retries <COUNT>`):** Raw `--command` execution defaults to three supervised restarts. Typed external-agent profiles default to zero and reject positive values before spawning: uncertain effects must not be replayed.
 * **Loop Detection (`--detect-loops`):** Enables sliding stream cycle analysis and repetition detection.
 * **Host Execution Acknowledgement (`--allow-host-execution`):** Required security flag acknowledging that commands are executed directly on the host rather than inside a container or sandbox namespace.
+
+Native `sav-run model --profile NAME` honors the stricter configured and CLI
+timeout/output bounds. Explicit profile-mode slot/first-token watchdog
+overrides are rejected instead of silently ignored.
 
 ---
 
