@@ -5,30 +5,38 @@ use std::time::Duration;
 use sav::observation::RunJournal;
 use sav::{CancellationToken, ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use crate::{KvistError, Result};
 
-use super::{StreamRedactor, redact_bounded};
+use super::{StreamRedactor, redact, redact_bounded};
 
 /// Diagnostic recording is required independently of whether an observer exists.
 pub(super) struct LiveRun {
     journal: Mutex<RunJournal>,
+    redactions: Vec<String>,
 }
 
 impl LiveRun {
-    pub(super) fn create(path: &Path, run_id: &str, task: &str, profile: &str) -> Result<Self> {
-        let journal = RunJournal::create(
-            path,
-            run_id,
-            json!({"host":"kvist","task_id":task,"profile":profile,"canonical_evidence":false,
-                "execution_scope":"protected_task"}),
-        )?;
+    pub(super) fn create(
+        path: &Path,
+        run_id: &str,
+        task: &str,
+        profile: &str,
+        redactions: &[String],
+    ) -> Result<Self> {
+        let mut metadata = json!({"host":"kvist","task_id":task,"profile":profile,"canonical_evidence":false,
+                "execution_scope":"protected_task"});
+        redact_values(&mut metadata, redactions);
+        let identity = format!("kvist-{}", hex::encode(Sha256::digest(run_id.as_bytes())));
+        let journal = RunJournal::create(path, &identity, metadata)?;
         eprintln!(
             "live run journal: {}",
             path.display().to_string().escape_debug()
         );
         Ok(Self {
             journal: Mutex::new(journal),
+            redactions: redactions.to_owned(),
         })
     }
 
@@ -36,7 +44,9 @@ impl LiveRun {
         let mut journal = self.journal.lock().map_err(|_| sav::Error::Observation {
             reason: "required live journal lock is poisoned".into(),
         })?;
-        journal.record(event)?;
+        let mut event = event.clone();
+        redact_values(&mut event, &self.redactions);
+        journal.record(&event)?;
         if checkpoint {
             journal.checkpoint()?;
         }
@@ -53,6 +63,25 @@ impl LiveRun {
             })?
             .finish(disposition)?;
         Ok(())
+    }
+}
+
+fn redact_values(value: &mut serde_json::Value, redactions: &[String]) {
+    match value {
+        serde_json::Value::String(text) => *text = redact(text, redactions),
+        serde_json::Value::Array(values) => {
+            for value in values {
+                redact_values(value, redactions);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                if key != "type" {
+                    redact_values(value, redactions);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -137,5 +166,42 @@ impl<T: ModelTransport> ModelTransport for ObservedTransport<'_, T> {
 
     fn deadline(&self) -> Duration {
         self.transport.deadline()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sav::observation::JournalFollower;
+
+    #[test]
+    fn all_diagnostic_values_are_redacted_without_corrupting_envelopes() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let path = fixture.path().join("run.events.jsonl");
+        let redactions = vec!["private-value".into()];
+        let live = LiveRun::create(
+            &path,
+            "private-value-run",
+            "private-value-task",
+            "private-value-profile",
+            &redactions,
+        )
+        .expect("live run");
+        live.record(
+            &json!({"type":"model_result","data":{
+                "model":"private-value-model",
+                "calls":[{"call_id":"private-value-id","destination":"src/private-value.rs"}]
+            }}),
+            true,
+        )
+        .expect("metadata");
+        live.finish("success").expect("finish");
+        let text = std::fs::read_to_string(&path).expect("journal");
+        assert!(!text.contains("private-value"));
+        assert!(text.contains("[REDACTED]"));
+        let mut follower = JournalFollower::open(&path).expect("follower");
+        let events = follower.poll().expect("valid protocol");
+        assert!(follower.is_finished());
+        assert_eq!(events[1].event["type"], "model_result");
     }
 }

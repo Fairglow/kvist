@@ -35,6 +35,10 @@ use crate::vendoring::{
     offline_cargo_config, remove_stale_vendored_packages,
 };
 
+#[cfg(test)]
+#[path = "vendor_command/protected_tests.rs"]
+mod protected_tests;
+
 /// The readiness outcome of a `kvist vendor` pass, per language.
 ///
 /// Rust reports the exact registry/Git/path dependency counts from its manifest
@@ -95,6 +99,128 @@ pub struct VendorOptions {
     /// vendored registry offline (never contacting the network). When absent
     /// (no sandbox configured), the classic host `cargo vendor` pass is used.
     pub sandbox: Option<crate::config::SandboxConfig>,
+}
+
+/// Task-owned authority and controls for protected dependency provisioning.
+///
+/// This is deliberately separate from [`VendorOptions`]: selecting protected
+/// execution cannot authorize the explicit human command's host fallback.
+pub struct ProtectedVendorOptions<'a> {
+    pub sandbox: &'a crate::config::SandboxConfig,
+    pub vcs_selection: crate::config::VcsSelection,
+    /// The task's already approved runner, never a freshly selected identity.
+    pub expected_runner: &'a crate::sandbox::RunnerIdentity,
+    /// The task's authenticated approval digest, not a derived replacement.
+    pub policy_identity: &'a str,
+    pub cancellation: &'a sav::CancellationToken,
+    /// Remaining whole-task budget, not a fresh provisioning timeout.
+    pub remaining_budget: std::time::Duration,
+}
+
+/// Refuse protected model dependency requests that cannot be bound exactly.
+///
+/// This entry point has no exact requested-dependency identity binding and
+/// therefore always returns an error, even when existing vendoring is ready.
+/// Readiness is not evidence that a fresh requested dependency is present.
+/// No paths are inspected, state staged, or commands executed. There is no
+/// fallback to [`vendor_project`]. Read-only readiness inspection is a separate
+/// operation: [`check_protected_vendor_readiness`].
+pub fn vendor_project_protected(
+    project_dir: &Path,
+    options: ProtectedVendorOptions<'_>,
+) -> Result<VendorReport> {
+    if options.cancellation.is_cancelled() {
+        return Err(KvistError::Sav(sav::Error::Cancelled));
+    }
+    let reason = if options.remaining_budget.is_zero() {
+        "the remaining task wall-time budget is exhausted"
+    } else {
+        "the model-requested dependency identity is not bound to the existing lock/manifest; \
+         protected request fulfillment is unsupported even when existing vendoring is ready"
+    };
+    Err(KvistError::VendoringUnavailable {
+        path: project_dir.to_string_lossy().into_owned(),
+        reason: format!(
+            "protected dependency provisioning refused: {reason}; host fallback is disabled"
+        ),
+    })
+}
+
+/// Inspect ready Rust vendoring without fulfilling a model dependency request.
+///
+/// A successful report only describes the existing lockfile and registry. It
+/// does not bind, fetch, or establish the presence of any requested dependency.
+/// The acquisition runner permits `cargo fetch`, but not the `cargo vendor`
+/// repack needed to provision registry material. Other languages and Rust
+/// state needing changes are refused without provisioning writes or package
+/// manager execution.
+pub fn check_protected_vendor_readiness(
+    project_dir: &Path,
+    options: ProtectedVendorOptions<'_>,
+) -> Result<VendorReport> {
+    let started = std::time::Instant::now();
+    let refused = |reason: String| KvistError::VendoringUnavailable {
+        path: project_dir.to_string_lossy().into_owned(),
+        reason: format!(
+            "protected dependency provisioning refused: {reason}; host fallback is disabled; \
+             provision dependencies with an explicit human `kvist vendor` invocation outside \
+             the protected task"
+        ),
+    };
+    let check_control = || -> Result<()> {
+        if options.cancellation.is_cancelled() {
+            return Err(KvistError::Sav(sav::Error::Cancelled));
+        }
+        if started.elapsed() >= options.remaining_budget {
+            return Err(refused(
+                "the remaining task wall-time budget is exhausted".into(),
+            ));
+        }
+        Ok(())
+    };
+    check_control()?;
+    crate::acquisition::ContentIdentity::new(options.policy_identity)
+        .map_err(|error| refused(format!("invalid approved policy identity: {error}")))?;
+    let project_dir = canonical_or(project_dir)?;
+    let current_runner =
+        crate::sandbox::runner_identity(options.sandbox, &project_dir, options.vcs_selection)?;
+    if &current_runner != options.expected_runner {
+        return Err(KvistError::SandboxUnavailable {
+            runner: options.sandbox.runner.clone(),
+            reason: "trusted sandbox runner identity or content changed after approval".into(),
+        });
+    }
+    check_control()?;
+    let strategy = crate::language_vendoring::detect_language_strategy(&project_dir)?;
+    if strategy.id() != "rust" {
+        return Err(refused(format!(
+            "language `{}` has no mediated provisioning implementation",
+            strategy.id()
+        )));
+    }
+    let manifest = VendorManifest::load(&project_dir)?.ok_or_else(|| {
+        refused(
+            "Rust has no existing vendoring manifest and the sandbox cannot perform the \
+             required vendor repack"
+                .into(),
+        )
+    })?;
+    if manifest.schema_version != crate::vendoring::VENDOR_SCHEMA_VERSION || !manifest.verified {
+        return Err(refused(
+            "the existing Rust vendoring manifest is not verified at the supported version".into(),
+        ));
+    }
+    let report = manifest.assert_ready(&project_dir)?;
+    let vendored_dir = manifest.vendored_registry(&project_dir);
+    if !vendored_dir.is_dir()
+        || !find_stale_vendored_packages(&project_dir, &vendored_dir)?.is_empty()
+    {
+        return Err(refused(
+            "the Rust registry requires a vendor repack that the sandbox cannot perform".into(),
+        ));
+    }
+    check_control()?;
+    Ok(VendorReport::Rust(report))
 }
 
 /// Ensure a locked project can build offline and record what was produced.

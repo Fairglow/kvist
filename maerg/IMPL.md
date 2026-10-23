@@ -1,650 +1,360 @@
 <!-- kvist-implementation-record-version: 1 -->
-
 # Component Implementation Record
 
-## Scoped bin-only consumer observation - 2026-10-14
-
-Independent clean-slate `bin-policy-observer` read bounded source/tests and CI,
-excluding intent, queues, records, reviews and history. It executed no tests and
-made no acceptance or compliance claim.
-
-Language selection excludes administrative original and canonical paths,
-prefers component-wise System-prefix candidates, and otherwise retains the
-first nonadministrative outside-System candidate. Tests specify prefix
-boundaries, preference, fallback and administrative rejection. Host lookup
-canonicalizes file/link candidates and reports actionable inspection,
-canonicalization, missing-tool and non-UTF-8 errors; it does not independently
-verify executable permission. The lexical policy is independently mirrored
-without linking the runner library.
-
-Prepared Rust applies `/rust/runtime/bin:/usr/bin:/bin:/usr/local/bin`,
-replacing Rust/Cargo controls and enabling offline/no-auto-install behavior.
-The workflow provisions prerequisites on the host, with Quality additionally
-running ignored native suites. These are source-defined conditions, not
-observed successful execution.
-
-No concrete high-confidence scoped regression was established. The path-based
-policy does not classify every executable copy or establish race resistance.
-
-## Scoped bare-remote fixture observation - 2026-10-14
-
-Independent source-only `mask-observer` inspected the updated acceptance-test
-query without intent, queues, records, reviews or history. It executed no
-maerg test and made no compliance claim. The fixture query uses
-`-c safe.bareRepository=explicit --git-dir <fixture> rev-parse refs/heads/main`
-and asserts successful querying and an unchanged previous commit. The query
-itself does not contact a network remote.
-
-## Scoped CI repair observation - 2026-10-14
-
-Independent clean-slate `repair-observer` read only enumerated source/test
-files and build manifests, excluding intent, queues, prior records/reviews and
-history. It executed no tests and made no compliance or acceptance claim.
-
-`src/sandbox/rust_environment.rs` owns staged wrappers/settings and registers
-installed toolchains read-only at `/rust/toolchains/<index>`. Existing project
-vendor material is a live read-only bind at `/rust/vendor`, not Skott's copied
-snapshot; absent vendor material uses a staged empty directory. Authoring uses
-invocation scratch `/tmp/target`, resets Rust/Cargo environment overrides and
-wraps dispatch with shared initialization. Source-defined native tests assert
-installed inventory/targets, private defaults, unchanged host Rust state,
-protected workspace-provider context, edited/new source visibility and
-generic-authoring isolation. CI provisions prerequisites outside sandbox/test
-bodies; ignored verification trials explicitly grant concrete executables.
-
-## Scoped installed-Rust authoring observation - 2026-10-10
-
-Clean-slate `offline-rust-final-observer` inspected current sandbox preparation,
-Cargo build context and native tests without intent, queues, prior
-records/reviews or history. This supplement supersedes older generic-authoring
-statements below only for components with a local Cargo manifest.
-
-Authoring adds Rust preparation only for a regular component `Cargo.toml`;
-generic authoring remains unchanged. Standard installed inventories receive
-read-only sandbox-native grants and generated private settings; ambient
-Rust/Cargo overrides are replaced. Bare known Rust tools route through wrappers.
-Bounded Cargo context follows workspace members and declared local dependencies
-inside the approved project, excluding provider intent/hidden/generated roots,
-rejecting links/escapes and writable-provider overlap. Build context is
-read-only; source-path remapping retains component src/tests editing. Unlike
-Skott, existing vendor material is a read-only host-directory grant, not an
-independent snapshot.
-
-The observer independently ran three ordinary native tests: all passed.
-They exercised private-default inventory/offline builds with unchanged host
-Rust snapshot, workspace/provider builds including formatting when installed
-and newly edited/authored tests with unchanged provider/lock, and generic
-authoring without Rust state. Four older generic-verification tests remained
-ignored, including dedicated Clippy coverage. Unit tests, exhaustive rejection
-paths and non-Linux behavior were not executed by this observer. These
-observations are not compliance certification.
-
-## Scoped generic-authoring observation - 2026-10-10
-
-Clean-slate observer `rust-chain-observer` inspected current sandbox source,
-native tests, manifests, runner source and CI only, without intent, queues,
-prior records, reviews, chat or Git history. This supplement supersedes earlier
-observations only for generic authoring; it is not certification.
-
-- `execute_with_timeout` validates/resolves the requested program, rechecks
-  runner/backend identities and serializes a denied-network System request
-  with the supplied environment unchanged. It does not create Skott `/rust`
-  resources, query rustup or add generated rustup state. Cache is absent;
-  separately supplied scratch remains optional. The generic toolchain-root
-  identity derives from its path, not a complete tree content digest.
-- Authoring requires the five protected document files as separate read-only
-  context grants, and grants write access only to existing real `src`/`tests`
-  directories, not the component root.
-- The observer independently executed
-  `generic_authoring_preserves_environment_without_rustup_state`: 1 passed,
-  exit 0. It observed preserved PATH/HOME, absent `RUSTUP_HOME` and `/rust`,
-  and successful source output creation. This trial does not exhaustively test
-  protected-document writes.
-- Offline Cargo verification/acquisition remain separate executors/topologies.
-  The observer source-inspected, but did not execute, their pinned/native
-  trials. Stable CI explicitly enables the generic authoring regression.
-
-> Historical evidence notice: this record predates the one-way move from the
-> repository-root Rust layout to `maerg/`. Its original evidence paths are
-> retained rather than rewritten as a new clean-slate derivation.
-
-## Evidence boundary
-
-This record was derived from the Rust implementation files directly under
-`src/`, the integration tests under `tests/`, and the root Cargo manifest.
-`src/sav/` was not inspected and is treated as an opaque dependency.
-No intent, architecture, existing implementation-record, review, guide, or
-version-control evidence was used.
-
-The root package is `kvist` version `0.2.0`, uses Rust edition 2024, declares a
-minimum Rust version of 1.94, forbids unsafe code in the library, and fails
-compilation on non-Linux targets. It builds a library and a CLI binary. The
-workspace also names the opaque `sav` package as a path dependency.
-
-## Observed process boundary
-
-- `kvist::run()` parses process arguments with Clap and dispatches through
-  `cli::execute`.
-- The binary prints non-empty successful output to stdout and returns exit
-  status 0.
-- Failures are printed to stderr. Parser-controlled help and parser errors use
-  Clap's exit status and rendering; all other root-defined errors return status
-  1. Structured component-validation failures in JSON mode are written as the
-     complete JSON error object without an added `error:` prefix.
-- `--json` is a global flag. Most commands wrap successful results in JSON;
-  `status` emits its own versioned JSON representation and `prompt` emits a
-  JSON object containing captured provider output. Plain mode emits
-  human-readable text.
-- JSON generation is implemented in the root component rather than through one
-  uniform response schema. Command-specific fields and command names therefore
-  differ by operation.
-
-## Observed CLI commands
-
-### `init [PROJECT_DIR]`
-
-- Defaults to `.` and creates a missing directory tree.
-- Rejects a file or link-like project path.
-- Inspects the complete root artifact set before writing. A current project is
-  reported unchanged; partial, invalid, or unsupported-version state is
-  refused without repair.
-- An uninitialized directory containing both `Cargo.toml` and a real `src`
-  directory is routed to existing-Rust-project conversion instead of normal
-  initialization.
-- Normal initialization creates nine deterministic files: `kvist.toml`,
-  three project-level Markdown files, three root-component intent documents,
-  `src/TODOS.yaml`, and `src/IMPL.md`.
-- Parent directories are checked as real, non-link directories. Individual
-  files are written via synchronized same-directory temporary files with
-  no-clobber publication.
-- Preflight validation reduces overwrite risk, but the sequence has no
-  transaction spanning every generated file; an I/O failure after earlier
-  writes can leave a partial artifact set.
-
-### `convert PROJECT_DIR`
-
-- Requires a real project directory, a parseable Cargo manifest with nonblank
-  package name and version, and a real non-link `src` directory.
-- Reads package description, authors, dependency names, and feature names.
-- Creates `.kvist/` without changing the manifest, implementation, tests, or
-  benchmarks, then writes draft `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`,
-  `TODOS.yaml`, `IMPL.md`, and `COMPLIANCE_REVIEW.md`.
-- Generated component documents and queue are validated before publication.
-- An existing `.kvist` directory is accepted as already converted only when
-  all six expected entries are real files. Other pre-existing metadata states
-  are refused.
-- Writes are individually no-clobber and the metadata directory is synced, but
-  there is no all-files rollback after publication begins.
-
-### `import REPO_URL [DEST_DIR]`
-
-- Runs `git clone --branch <branch> --depth 1` directly without a shell;
-  `--branch` defaults to `main` and destination defaults to `.`.
-- The destination must be absent or an empty directory and must be representable
-  as UTF-8 for the `git` argument.
-- An optional `--component` selects a directory inside the clone.
-- If the selected directory has a complete adjacent artifact set, or a
-  complete `.kvist` conversion set, the three documents and queue are parsed
-  and validated.
-- Otherwise the selected directory is passed to initialization, which may
-  initialize it or convert an existing Rust project.
-- Clone or post-clone validation failures are reported, but the cloned
-  destination is not removed automatically.
-
-### `reverse-discover PATH`
-
-- Requires a real non-link directory and refuses to overwrite intent documents
-  in `.kvist` or `src`.
-- Recursively scans non-link files while skipping `.git`, `.kvist`, `target`,
-  and `node_modules`.
-- For Rust it records lines beginning with selected `pub` declarations and
-  simple test-name patterns. For Python it records public-looking classes and
-  functions. Other languages are not analyzed.
-- Supplemental Markdown contributes only its first line. Read failures for
-  supplemental Markdown are converted to empty content rather than reported.
-- The scanner is textual, not a language parser; multiline declarations,
-  re-exports, macros, visibility variants, nested semantics, and runtime
-  behavior can be missed or misclassified.
-- Writes six generated files under `.kvist`. It validates generated documents
-  and queue first and uses no-clobber file creation, but has no transaction or
-  rollback spanning the complete set.
-
-### `tree [PROJECT_DIR]`
-
-- Loads project configuration, discovers the configured component root, and
-  renders a deterministic ASCII list headed by `component root:`.
-- Components are lexically ordered and indented by relative path depth.
-- Each component is labeled complete, incomplete with missing filenames, or
-  invalid with the observed filesystem-object class.
-- This command checks artifact layout, not complete artifact contents.
-
-### `doctor [PROJECT_DIR]`
-
-- Performs read-only root, component, and VCS inspection and renders the
-  resulting `ProjectInspection`.
-- Root state precedence is unsupported version, invalid, uninitialized,
-  current, then partial.
-- Component state precedence is unsupported version, invalid, missing, stale,
-  blocked, then current.
-- Inspection validates bounded UTF-8 regular files, version markers, required
-  headings or document sections, queue semantics, recorded document hashes,
-  nearest ancestor component-contract context, and durable-artifact tracking.
-- Configuration or discovery errors encountered after a current root
-  classification are retained as diagnostics rather than causing repair.
-
-### `status [PROJECT_DIR]`
-
-- Emits status format version 1 as stable text or compact JSON.
-- Supports `--only-documents`, `--only-impls`, and `--unfinished`.
-- Text output escapes control characters in paths and includes next-step
-  guidance for stale, blocked, invalid, and missing components.
-- The blocked-task guidance lists each task's `blocked_reason` first line in
-  full; the queue parser bounds the reason to a single bounded line, and no
-  renderer-side ellipsis truncation remains.
-- The overview's per-document change details (`expected`, `observed`, and the
-  `git diff HEAD -- <path>` hint) carry the report's left border, aligned
-  under the changed document's name.
-- JSON includes project state, component root, components, filtered artifact
-  states, revalidation causes, and any discovery error.
-- Rendering itself performs no filesystem I/O; command dispatch first obtains
-  a `ProjectInspection`.
-
-In the interactive shell, output that scrolls past the terminal height is
-paged by the built-in full-screen pager (`shell/scroll_pager.rs`): the render
-pass draws every content line at column 0 of its own terminal row (crossterm
-`MoveTo` takes the column first) with the scrollbar in the last column, so the
-full screen height carries content; the pass writes to any `Write`, and tests
-assert the emitted cursor geometry. The shared wrap primitive
-(`shell/style.rs::wrap_line`) aligns the continuation lines of a `key: value`
-line under the value's column, keeps the plain leading-whitespace indent
-otherwise, and hard-splits only words longer than the available width.
-
-### `component new COMPONENT_DIR`
-
-- Creates a missing component directory and writes deterministic version-1
-  requirements, contract, and design templates.
-- Refuses a link-like or non-directory component path.
-- Preflights all three destinations and refuses the operation if any already
-  exists.
-- Checked-in template strings are structurally validated before each write.
-  Publication is no-clobber but is not transactional across all three files.
-
-### `component validate COMPONENT_DIR`
-
-- Reads `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` as regular non-link
-  UTF-8 files no larger than 1 MiB each.
-- Requires an exact line-one positive version marker, the supported version 1,
-  all kind-specific headings exactly once and in order, and nonblank content
-  below every required heading.
-- Diagnostics use one-based line and column positions and deterministic source
-  ordering. Validation does not rewrite documents.
-- Plain mode returns a domain error on invalid input. JSON mode returns a
-  structured object with `valid: false` and per-document diagnostics through
-  the structured-failure path.
-
-### `component accept COMPONENT_DIR`
-
-- Requires a current project, complete VCS tracking, and a discovered component
-  whose artifact conditions allow acceptance.
-- Accepts component-root-relative paths, paths prefixed by the configured
-  component root, and absolute paths inside the project.
-- Revalidates the three local documents, computes SHA-256 revisions, resolves
-  the nearest ancestor component through transparent directories, and records
-  only that ancestor's `CONTRACT.md` revision for non-root components.
-- Updates the queue's revision fields, sets revalidation to current, records a
-  timestamp, clears staleness evidence, and atomically replaces `TODOS.yaml`.
-- It does not modify the accepted Markdown documents.
-
-### `task next COMPONENT_DIR`
-
-- Requires a current project, a current component, and every required durable
-  artifact reported as tracked by the selected VCS.
-- Returns the first pending task in authored queue order whose complete
-  dependency chain is completed. It returns `no ready task` in text mode or
-  `ready_task_id: null` in JSON mode when none exists.
-- Selection does not mutate the queue.
-
-### `task transition COMPONENT_DIR TASK_ID STATUS`
-
-- Supports pending, in-progress, blocked, and completed states.
-- Allowed edges are pending to in-progress/blocked, in-progress to
-  pending/blocked/completed, and blocked to pending/in-progress.
-- Starting requires every direct and transitive dependency to be completed.
-  Completion is accepted only from in-progress. Blocking requires a nonblank
-  `--reason`; reasons are rejected for other target states.
-- A user-owned per-component lock serializes mutation. Lock identity is derived
-  from canonical project and component paths and stored outside the project in
-  the platform user-state directory with restricted Unix directory
-  permissions.
-- Each transition appends a synced `prepared` JSON line, atomically replaces
-  the queue, then appends a synced `committed` line under
-  `.kvist-attempts/<task-id>.jsonl`.
-- A trailing prepared record blocks later transition attempts pending explicit
-  recovery. Normal scope exit removes the lock; abrupt process termination can
-  leave a lock for `task unlock`.
-
-### `task run COMPONENT_DIR [TASK_ID]`
-
-- Refuses execution before mutation unless sandbox configuration, test policy,
-  authenticated execution approval, runner identity, capability probe, current
-  project/component state, and complete VCS tracking are present.
-- If no task ID is supplied, it selects the first ready task. An already
-  in-progress task can also be resumed.
-- One lifecycle lock covers selection, transition, external execution,
-  evidence, verification, and terminal transition.
-- Test and implementation tasks use the developer profile; security-audit
-  tasks use the security-reviewer profile; compliance-review tasks use the
-  architect profile.
-- The task prompt comes from a component-local language template, otherwise a
-  user-global template, otherwise a built-in Rust, Python, or generic
-  template. Language detection inspects only shallow file/manifest patterns.
-  Missing built-in template files are created under `.kvist/templates` on a
-  best-effort basis; related filesystem errors are ignored by that helper.
-- The sandbox request mounts the selected component read-write at
-  `/workspace/component`, mounts the project root contract read-only, and for
-  non-root components mounts the nearest ancestor component contract
-  read-only. The root code passes the five local artifact paths plus these
-  context paths to the configured agent command.
-- Agent stdout and stderr are combined, redacted using configured literal
-  values and allowed environment values, bounded, and written to a unique log
-  under `.kvist/logs`. Optional streaming writes the same retained combined
-  output to stdout; stream-write errors are ignored.
-- Optional token counts are read from a conventionally named JSON run record
-  if present and parseable; absent or malformed records do not fail the task.
-- Successful test, security-audit, and compliance-review executions complete
-  immediately. A successful implementation execution additionally runs the
-  configured test command in the sandbox. Verification failure or inability
-  blocks the task with bounded redacted evidence.
-- Agent failure, timeout, or output-limit termination blocks the task and
-  records the bounded log path. State-transition and execution evidence is
-  appended to the task attempt JSONL file.
-
-### `task log COMPONENT_DIR TASK_ID`
-
-- Requires the same current component and VCS context as other non-transition
-  task reads.
-- Selects the lexically latest real, non-link
-  `.kvist/logs/<task-id>_*.log` and returns it as UTF-8 text.
-- Missing log directories or matching files are reported as queue
-  unavailability.
-
-### `task approve-policy [PROJECT_DIR]`
-
-- Resolves and hashes the complete effective execution material: schema and
-  protocol versions, root-contract bytes, agent configuration source and
-  profiles, redaction and resource policies, sandbox configuration, canonical
-  runner path and content, and optional test policy.
-- Rejects a legacy project-contained approval record.
-- Stores the approval outside the project/worktree under the platform
-  user-state directory. The record is tied to canonical project and selected
-  VCS worktree identities.
-- Creates or reads a 32-byte user-owned secret and authenticates approval
-  records with an HMAC-SHA-256 construction. Unix secret permissions must not
-  expose group or other bits.
-- Later execution reconstructs all material, validates record shape, digest,
-  authentication tag, project/worktree identity, and equality with current
-  inputs before returning the approved runner identity.
-
-### `task unlock COMPONENT_DIR`
-
-- Resolves the user-owned component lock. A non-regular or link-like lock is
-  refused.
-- `--force` removes it directly; otherwise confirmation is read from stdin and
-  only `y` or `yes` proceeds.
-- Missing locks and user cancellation are successful no-op outcomes.
-
-### `prompt [PROMPT]`
-
-- Accepts exactly one direct prompt source, `--file`, or `--editor` according
-  to Clap conflicts; detailed acquisition is delegated to the opaque
-  `sav` dependency.
-- Requires `--allow-host-execution`; without it the opaque runtime supplies the
-  error.
-- Selects developer, architect, or security-reviewer configuration. An
-  unrecognized role is rejected.
-- Supports an optional model, typed reasoning effort, idle timeout, loop
-  detection, and restart limit.
-- Root code builds an opaque-runtime supervision policy, renders a direct
-  command without a shell, and re-renders it for retries with the runtime's
-  retry notice.
-- Plain mode connects supervised provider output to the terminal and emits no
-  synthetic success text. JSON mode captures stdout and converts invalid UTF-8
-  lossily before JSON escaping.
-
-### `agent setup`
-
-- Runs an interactive wizard using stdin and stdout in plain mode; JSON mode
-  sends wizard interaction to stderr so stdout remains machine-readable.
-- Either collects a provider profile through the opaque runtime or loads a
-  named saved runtime profile.
-- Assigns the model to developer, architect, security-reviewer, or all roles
-  and stores it in project-local `kvist.toml` or the user-global config.
-- Existing TOML is parsed and validated before editing. The wizard updates or
-  appends matching model entries while preserving the rest of the document,
-  validates the resulting configuration, enforces the 64 KiB bound, and
-  atomically replaces or creates the file.
-- `--force` is passed only to opaque-runtime profile collection as the
-  root-observed failed-qualification override.
-
-### `completions SHELL`
-
-- Generates completion scripts for Bash, Zsh, Fish, or PowerShell.
-- Plain mode emits the script. JSON mode embeds the script as an escaped JSON
-  string.
-
-## Observed configuration model
-
-- `kvist.toml` must be a regular non-link UTF-8 file no larger than 64 KiB with
-  positive supported `schema_version = 1`.
-- `component_root` is required, non-empty, relative, and limited to normal path
-  segments; absolute paths, `.` and `..` segments are rejected.
-- Discovery defaults are depth 64, 10,000 directories, 10,000 components,
-  10,000 entries per directory, and 4,096 encoded relative-path bytes. Config
-  may lower or raise them only up to hard maxima of 256, 100,000, 100,000,
-  100,000, and 32,768 respectively.
-- VCS selection is `auto`, `git`, or `jj`, defaulting to auto.
-- Sandbox configuration, when present, requires schema 1, an absolute nonblank
-  runner path, `network = "deny"`, `mount = "component"`, and unique ASCII
-  environment-variable names.
-- Agent configuration resolution order is project-root `kvist.toml`, project
-  `.kvist/config.toml`, user config, system config, then built-in defaults.
-  Candidate external configuration files must be regular non-link files within
-  the same 64 KiB limit. The selected source identity and SHA-256 digest are
-  retained for execution approval.
-- Three agent profiles contain model command templates, optional system
-  prompts, model selection, optional token limit, timeout, output bound, and
-  literal redaction values. Timeout is capped at 3,600 seconds and output at
-  1,048,576 bytes.
-- Test policy schema 1 contains component/project working-directory selection,
-  environment allowlist, timeout, output bound, and component command entries.
-  Test command inheritance walks from the selected component toward `.` and
-  uses the first exact component match.
-
-## Observed component discovery and project state
-
-- A component has five adjacent artifacts: requirements, contract, design,
-  task queue, and implementation record.
-- Discovery always represents the configured root and represents descendants
-  when at least one required artifact entry exists. Ordinary directories may
-  transparently contain deeper components.
-- Traversal is deterministic, bounded, and lexical. It skips `.git`, `.hg`,
-  `.jj`, `node_modules`, and `target`.
-- Any link-like descendant encountered outside an artifact filename aborts
-  discovery rather than being followed. Artifact links are classified as
-  invalid.
-- The implementation record validator requires only the exact line-one
-  positive supported marker and a line equal to
-  `# Component Implementation Record`; it does not validate this record's
-  remaining section structure or factual completeness.
-- Staleness is derived from SHA-256 comparisons of the three local documents
-  and, for children, the nearest ancestor component's contract. Parent
-  requirements and design are not compared.
-
-## Observed task queue format and invariants
-
-- `TODOS.yaml` is a strict Serde schema with unknown fields denied and
-  `schema_version = 1`.
-- Revisions are `sha256:` plus exactly 64 lowercase hexadecimal digits.
-- Parent contract paths consist of one or more `..` segments followed only by
-  `CONTRACT.md`.
-- Current revalidation requires no stale timestamp or causes. Stale
-  revalidation requires a valid stale timestamp not later than `checked_at`
-  and at least one cause whose expected and observed hashes differ.
-- Task IDs are 1-64 lowercase kebab-case ASCII characters. Titles are trimmed,
-  one line, nonblank, and at most 120 characters. Description, context,
-  purpose, and expected outcome are trimmed, nonblank, and at most 4,096
-  characters.
-- Dependency and requirement lists must be lexically sorted and duplicate-free.
-  Requirements must contain nonblank source and `#` locator parts.
-- Dependencies must refer to earlier tasks, cannot self-reference, and must be
-  acyclic.
-- Implementation tasks require a transitive test predecessor, security-audit
-  tasks an implementation predecessor, and compliance-review tasks a
-  security-audit predecessor.
-- Timestamps use exact whole-second UTC `YYYY-MM-DDTHH:MM:SSZ` syntax and are
-  calendar-validated. Completion and blocker metadata must agree with status.
-- Serialization emits deterministic quoted YAML and revalidates before
-  producing output.
-
-## Observed VCS behavior
-
-- VCS inspection invokes Git and jj directly and requests locale-stable output.
-  It does not stage or commit.
-- Auto selection rejects a checkout in which both Git and jj are detected.
-- Git uses `ls-files` and `check-ignore --no-index` with bounded batches and
-  NUL-separated paths. On Unix it preserves non-UTF-8 path bytes.
-- jj uses `--ignore-working-copy` and its saved `@` snapshot. A path absent
-  from that snapshot is reported as not tracked by jj without claiming whether
-  it is ignored, excluded, or newly created.
-- Required paths must be non-empty normal relative paths. Paths too large for
-  the bounded VCS argument batch are reported with unknown tracking state.
-- Task commands require every reported durable artifact to be `Tracked`; an
-  ignored, untracked, missing, unknown, or jj-unlisted artifact blocks them.
-
-## Observed sandbox and external-process boundary
-
-- The configured runner must be an absolute real file or directory outside
-  both the canonical project and selected VCS worktree.
-- Runner identity consists of canonical path and SHA-256 content. Directory
-  identity concatenates readable regular-file contents in filename order.
-- Before launch, identity is recalculated and must equal the approved identity.
-  The runner is copied into a restricted temporary state directory; on Linux
-  the copied executable is opened and launched through `/proc/self/fd/<fd>`.
-- Runner processes are started directly, never through a shell, with a cleared
-  environment populated only from the configured allowlist.
-- Availability requires exact stdout from a version-1 capability probe
-  asserting denied network and a component mount.
-- Execution sends a JSON protocol-version-1 request on stdin. It declares the
-  working directory `/workspace/component`, network denial, one read-write
-  component mount, optional read-only mounts, arguments as an array, explicit
-  environment, and context-file names.
-- Stdout and stderr are captured concurrently under one combined byte budget.
-  Exceeding the budget or timeout kills the runner's process group with
-  `SIGKILL`; there is no host-execution fallback.
-- The implementation establishes and validates the runner protocol request and
-  response boundaries but cannot itself prove that an arbitrary configured
-  runner enforces the requested filesystem or network isolation.
-
-## Public Rust library surface
-
-- Public modules expose artifact templates, configuration types/loading,
-  document creation/validation, conversion, import, project inspection,
-  discovery, status/tree rendering, task queue parsing/validation/serialization,
-  task commands, VCS inspection, sandbox execution, agent command construction
-  and execution, prompt resolution, reverse discovery, initialization, and the
-  setup wizard.
-- Public result structures generally expose owned paths, classifications,
-  bounded output, token counts, timestamps, or diagnostics. `KvistError` is
-  non-exhaustive and is the shared domain error.
-- Several public root functions call `sav` for prompt acquisition,
-  command rendering, supervision, profile storage/collection, and runtime
-  errors. Only the arguments supplied and results consumed by the root
-  component are established here.
-
-## Failure and durability characteristics
-
-- Filesystem, parsing, subprocess, validation, clock, approval, and sandbox
-  failures are converted to explicit domain errors with an operation and path
-  where implemented.
-- Root artifact and component-document readers reject links, non-files,
-  oversize content, invalid UTF-8, malformed schemas, and unsupported versions.
-- Atomic replacement uses a same-directory synchronized temporary file and
-  syncs the parent directory. No-clobber creation synchronizes the temporary
-  file before publication but does not explicitly sync the parent directory in
-  the shared helper.
-- Multi-file generation and repository import are not transactional.
-- Task mutation has a prepared/committed audit protocol and external lock, but
-  crash recovery is refusal-oriented: a detected incomplete prepared attempt
-  must be recovered explicitly rather than automatically rolled forward or
-  back.
-- Evidence redaction is literal string replacement. It does not detect encoded,
-  transformed, partially matching, or otherwise unknown secrets.
-- Output limits retain a prefix at a valid UTF-8 boundary. Invalid external
-  bytes are converted lossily where byte output becomes text.
-
-## Test evidence observed
-
-The repository contains unit tests in root modules and integration suites for
-agent command rendering/execution, component commands and documents,
-completions, conversion, discovery and configured limits, import,
-initialization, JSON output, project state, prompt acquisition/execution,
-reverse discovery, status, task commands, task queues, tree rendering, VCS
-inspection, and the setup wizard.
-
-Observed test cases cover:
-
-- initialization completeness, idempotence, no-clobber behavior, invalid
-  parents, files, and symbolic links;
-- all root project-state classes, independent version domains, oversized and
-  invalid-UTF-8 artifacts;
-- deterministic discovery/tree order, ignored directories, link refusal,
-  malformed layouts, transparent namespace directories, and every configured
-  traversal bound;
-- document templates, bounded regular-file validation, diagnostics, and
-  symbolic-link rejection;
-- canonical queue round trips, transition edges, malformed YAML, unknown
-  fields, hash/path/timestamp metadata, dependency errors, cycles, and
-  lifecycle ordering;
-- status text/JSON, filters, escaping, blocked/stale/missing/invalid states,
-  nearest-parent contract behavior, and independent local revision causes;
-- Git tracked/ignored/untracked behavior, missing repositories, malformed
-  repositories, non-UTF-8 Unix paths, and conditional jj snapshot behavior;
-- task selection without queue writes, VCS prerequisites, prepared/committed
-  transitions, block reasons, acceptance revision updates, parent-contract
-  resolution, lock behavior, execution role routing, prompt templates, log
-  selection, test-command success/failure/timeout/output bounds, failure
-  blocking, redaction across streams and outputs, and attempt evidence;
-- approval changes to root-contract bytes, agent source/templates/resource
-  limits, runner content, sandbox configuration, and test policy, including
-  rejection of project-forged approval records and runner changes after probe;
-- sandbox absence and project/worktree-local runner refusal before task
-  mutation;
-- prompt files, redirected stdin, editor use, conflicts, size/link rejection,
-  host acknowledgement, typed reasoning efforts, literal shell metacharacters,
-  output bounds, JSON capture, and invalid provider UTF-8;
-- conversion/import/reverse-discovery outcomes and refusal to overwrite;
-- setup wizard merging, pre-save qualification, force/cancellation paths,
-  project/global routing, JSON stdout separation, invalid existing
-  configuration, and standalone-profile materialization.
-
-These tests were inspected as source evidence only. They were not executed
-during this documentation pass, so this record does not assert their current
-pass/fail result.
-
-## Uncertainty and limits of this record
-
-- The opaque `sav` implementation was not read. Its internal prompt
-  limits, editor behavior, command grammar, provider qualification,
-  supervision, retry/loop detection, profile persistence, and error semantics
-  are unknown except where root code supplies inputs or consumes outputs.
-- No build, test, external Git/jj operation, sandbox probe, provider command,
-  or wizard session was executed for this record.
-- Behavior dependent on operating-system facilities, filesystem race timing,
-  environment variables, user-state permissions, external tools, configured
-  runner correctness, and provider behavior remains observationally
-  unverified.
-- The source contains conditional non-Linux branches, but the library's
-  compile-time Linux restriction prevents treating those branches as a
-  supported runtime surface.
-- This record describes observed implementation and test source. It makes no
-  statement about intended behavior, sufficiency, or compliance.
+Bounded observation of current `maerg` source and test source. This record
+describes implemented behavior and its limits; it is not a compliance
+determination, approval, certification, or review receipt.
+
+## Observed public contract
+
+### Command and workflow surface
+
+The package exposes the `kvist` executable and library modules for command
+dispatch, project/component inspection, durable task queues, supervised
+execution, provisioning, and domain errors. The library forbids unsafe code
+and rejects non-Linux compilation.
+
+The CLI includes project initialization, conversion, import, reverse
+discovery, tree/status/doctor, queue repair, component document
+creation/validation/acceptance/commit, task selection/transition/run/log/replay,
+policy approval, unlock/recovery/finalization, agent configuration and
+qualification, dependency/toolchain provisioning, custom prompts, an
+interactive workspace shell, help, and completions. A hidden `authoring-apply`
+command applies staged effects. This is a summary, not an exhaustive
+option-by-option interface specification.
+
+Task execution is distinct from arbitrary custom prompts. Tasks use validated
+project/component state, VCS tracking checks, explicit execution approval,
+lifecycle locking, task-kind role selection, and the protected broker/effect
+path. Implementation success additionally invokes verification and records
+pending human disposition. Other successful task kinds can transition directly
+to completed. Surfaced decisions pause in awaiting-decision; ordinary recorded
+agent/verification failures can lead to blocked state. Errors can instead leave
+an unfinished prepared attempt. Exact task selection, item-prefix batches, and
+`all` are supported; omission of a task requires interactive confirmation.
+
+Custom prompts delegate to a standalone `skott` subprocess, forwarding prompt
+and model/effort selection. Child runtime and sandbox behavior are delegated,
+not established by this inspection. Headless prompt dispatch rejects the host
+execution opt-out. The interactive workspace shell is a separate front end to
+these workflows.
+
+Evidence: `src/lib.rs`, `src/cli.rs`, and
+`src/task_commands.rs::{run_task_with_controls,run_task_or_item_with_controls,
+verify_task,finalize}`.
+
+### Shared selection and pinned authority
+
+`AgentConfig` retains typed, enabled shared registry profiles as loaded
+snapshots. Named and role-based resolution select the configured profile;
+resolution does not itself rediscover a backend. Shared bindings disallow
+mixing copied local provider/profile definitions and restrict role tables to
+profile references plus role policy. Registry parsing and lookup are delegated
+to `sav::registry`.
+
+The agent configuration source digest incorporates resolved profile names,
+source paths, and digests. Execution approval also incorporates serialized role
+configuration, limits/redaction policy, root-context digest, sandbox settings,
+runner/backend identity, and test policy. Task execution passes its approved
+runner, capability probe, and policy digest into effect execution.
+
+Protected shared task selection requires the resolved native backend. Disabled
+or incompatible selections are refused; an external-agent profile is not
+silently executed instead. Explicit local command configurations remain a
+separate supported path: Kvist extracts model endpoint/provider/model data and
+uses structured transport rather than executing the configured agent command.
+
+Evidence: `src/config.rs::{resolve_shared_registry,AgentConfig}`,
+`src/task_commands.rs::build_execution_approval_for_runner`, and
+`src/agent.rs::{select_model_choice,execute_host_turn}`.
+
+### Observation and explicit controls
+
+Agent execution creates a required live journal at
+`.kvist/runs/<session>.events.jsonl` and announces its path on stderr before
+generation. Events include shared-profile identity, model budgets and request
+counts, redacted model output/failures, broker counts, dispatch/results,
+guidance/control notices, compaction, and terminal disposition. These live
+records are labeled noncanonical evidence, separate from workflow acceptance.
+
+`task run --allow-control` is explicit opt-in and is passed through text/JSON
+dispatch and batch execution. Default execution opens no control server.
+With opt-in, binding a private endpoint and enforcing its protocol are
+delegated to `sav::observation::bind_runtime_controls`; the endpoint is
+announced on stderr. A library entry point accepts caller-owned mailbox and
+cancellation objects without opening IPC.
+
+Guidance is supplemental: the original task and selected artifacts are pinned
+in the session's system context, the original task is also supplied as the
+initial user message, and guidance appends another user message explicitly
+preserving task and approved scope. Mailbox notices distinguish accepted,
+claimed, delivered, withdrawn, and dropped guidance. Superseded calls receive
+not-executed tool results rather than being silently treated as applied.
+
+Evidence: `src/agent.rs::{execute_agent_with_controls,execute_agent_controlled,
+execute_agent_inner}`, `src/agent/live.rs`, `src/agent/controls.rs`,
+`src/cli.rs::TaskCommand::Run`, and `tests/control_cli.rs`.
+
+## Observed requirements and constraints
+
+The following are source-enforced checks and observed limits, not inferred
+normative requirements.
+
+- Agent execution has a 64-generation ceiling and a shared elapsed-time budget.
+  Transient generation retries are capped at three attempts, additionally
+  bounded by shared native retry settings. Steering interruptions consume
+  generation/attempt budgets; they do not create unlimited retries. A normal
+  completed turn resets its generation-attempt counter.
+- The endpoint transport is constructed for validation before liveness contact.
+  The probe independently requires a numeric loopback address, uses short
+  connects, checks cancellation, and performs cancellation-aware backoff.
+  Malformed/oversized responses, response-level failures, and cancellation are
+  not ordinary availability retries. Text-emitting streamed attempts are not
+  retried.
+- Shared native context capacity is explicit or obtained through a delegated
+  capacity lookup. If unavailable, the run refuses inference rather than
+  guessing capacity or choosing an opaque backend. Response reserve is
+  configured or derived from capacity. Explicit local endpoint selections use
+  the runtime library's default context capacity and a default response reserve.
+- Selected context is restricted to the five local component artifacts and
+  exact root/parent contract file mounts. At most seven paths are accepted,
+  each path is bounded to 4,096 bytes, each file to 1 MiB, and aggregate file
+  content to 4 MiB. Files must be regular UTF-8 files; descriptor-relative
+  no-follow opening covers each path segment. Size and modification/change
+  timestamps are compared around bounded reads. There is no recursive
+  source/peer discovery.
+- Context files and the original task are quoted into system context before
+  request preparation. Delegated context management can compact completed
+  conversation groups but a request whose retained context cannot fit fails;
+  selected artifacts are not silently omitted to obtain a request.
+- A configured role token limit is cumulative. Each inference attempt reserves
+  estimated input plus output allowance before dispatch, reducing output
+  allowance to fit remaining budget. Known positive usage replaces that
+  reservation; failed, missing-usage, and zero-usage attempts retain conservative
+  charges. Retries and steering share this accounting.
+- Reported input/output totals sum known usage across retained turns, not just
+  the last turn. The log distinguishes reported/unavailable turns and
+  conservatively charged or unknown attempts. Known totals are not a claim of
+  exact usage for unreported work.
+- The closed authoring vocabulary is `write_file`, `edit_file`,
+  `propose_decision`, and `request_dependency`. Default file authority is
+  `src/` and `tests/`, with protected document names and absolute/traversal
+  destinations rejected. Default depth/content bounds are 12 levels, 1 MiB
+  per effect, and 8 MiB per plan. Edits require a single matching substring.
+  These tools do not grant arbitrary shell execution or general file reading.
+
+Evidence: `src/agent.rs`, `src/agent/context.rs`,
+`src/agent/accounting.rs`, and `src/authoring/mod.rs`.
+
+## Observed internal design and failure paths
+
+### Conversation and effect ownership
+
+`execute_agent_inner` selects the backend, creates log/live state, establishes
+mailbox ownership and optional IPC, resolves capacity, materializes selected
+context, and starts a `sav::runtime::AgentSession`. Each iteration delivers
+guidance, obtains a request, prepares context, performs token preflight, and
+calls observed structured transport under the remaining time budget.
+Conversation, context preparation, operation-token linkage, transport protocol,
+and shared control internals are library delegation.
+
+A completed model turn is retained before token-limit checks, turn validation,
+steering processing, broker decisions, or effects can return an error.
+Superseded completed turns therefore retain available usage. Interrupted
+attempts without a completed response cannot supply an invented turn or usage
+report.
+
+The broker reduces untrusted proposals to file effects, decisions, accepted
+dependency requests, or dropped intents. A decision records bounded proposal
+evidence and pauses before that turn's effects. Dropped intents prevent file
+effect application. Accepted dependency requests are recorded, but protected
+fulfillment is explicitly unsupported as described below.
+
+File effects are staged under component state with content identity and then
+applied by the current Kvist executable inside the effect sandbox. Requests
+carry the task's pinned runner/probe/policy, read-only context and staged input,
+network-denied authoring phase, remaining timeout, output bound, and owner
+cancellation token. The applier revalidates destination/content and edit
+preconditions before replacement. Effects are sequential, not transactional:
+earlier writes are not rolled back when later work fails.
+
+### Steering, cancellation, and retained outcomes
+
+Dispatch readiness is checked before staging and before launching another
+effect. A conservative uncertain-effect record is inserted into the
+owner-retained turn before dispatch. Confirmed results replace it; dispatch
+errors leave it explicitly uncertain. Cancelled, timed-out, output-limited, or
+otherwise unsuccessful dispatched effects are treated as potentially mutating,
+not as proof that nothing changed. Staged-file cleanup is scope-owned.
+
+The turn/effect collection lives outside the execution closure. The finalizer
+attempts one aggregate log/trajectory record after ordinary success, early
+error, or cancellation from that closure. The text log is synchronized;
+trajectory recording errors propagate rather than being silently ignored.
+Original execution errors remain errors even if recording also fails; a
+recording failure is then logged. Mailbox closure and live finish are both
+attempted without replacing an existing execution error.
+
+Trajectory entries redact session/task/call/tool/destination diagnostics and
+retain dispatch/result correlation. Its legacy mutation boolean cannot express
+uncertainty, so possible mutation is represented conservatively as true with
+an explanatory diagnostic. Decision/dependency evidence filenames are SHA-256
+hashes of call IDs; untrusted IDs are payload data, not path selectors.
+Replacement uses the shared synchronized atomic file helper.
+
+These changes do not make storage infallible: initialization failures before
+the execution closure, recording failures, crashes, and panics do not establish
+complete evidence. A bounded text log can also truncate later detail.
+
+Evidence: `src/agent.rs::{execute_agent_inner,apply_authoring_effects_with,
+summarize_effect,record_turn_outcome,evidence_filename,write_atomic}`,
+`src/agent/controls.rs`, and `src/agent/regression_tests.rs`.
+
+### Redaction and live records
+
+Streaming redaction scans at UTF-8 character boundaries and chooses the longest
+matching configured literal. Incomplete candidate prefixes are held across
+deltas and final flush is explicit. This avoids arbitrary byte slicing and
+preserves matches across the tested Unicode/overlap partitions.
+
+`LiveRun` recursively filters string values in metadata and events using its
+stored profile redaction values, preserving `type` discriminators. The run
+identity in the journal envelope is derived from a hash. Text/result filtering
+also uses the agent redaction set, which includes allowed environment values.
+Diagnostic recording remains required whether or not an observer is attached.
+
+The sets are not identical: `LiveRun::create` receives
+`profile.redaction_values`, while `redaction_values(profile, sandbox_config)`
+later adds environment values for text/outcome filtering. Consequently,
+environment-only literals in model/call metadata are not assured the same
+recursive filtering as configured profile literals. Literal replacement is
+not general secret detection, and announced filesystem paths/tracing output
+are not established as universally redacted.
+
+Evidence: `src/agent/redaction.rs`, `src/agent/live.rs`, and
+`src/agent.rs::{execute_agent_inner,redaction_values,redact}`.
+
+### Protected provisioning and verification
+
+The agent invokes `vendor_project_protected` with the task-approved runner,
+VCS selection, policy identity, owner cancellation token, and remaining budget.
+That entry point refuses all model dependency fulfillment: it lacks an exact
+requested-dependency binding to the existing lock/manifest. It checks
+pre-cancellation/zero budget and returns a clear unsupported error without
+inspecting paths, staging work, or launching a host package manager. Existing
+ready vendoring is not misrepresented as fulfillment of a fresh request.
+The agent propagates this error after retaining request/turn evidence; it does
+not log acquisition failure and continue as though dependencies were available.
+
+`check_protected_vendor_readiness` is a separate read-only operation. It checks
+controls, policy-identity syntax, comparison against the provided runner
+identity, Rust strategy, verified supported manifest, locked readiness, and
+absence of stale registry material. It refuses other languages or Rust state
+needing repacking. It does not fetch, fulfill a model request, or fall back to
+the standalone provisioning command.
+
+Standalone `vendor_project` remains distinct human-invoked provisioning:
+its Rust path can fall back from sandbox fetch to host `cargo vendor`, and
+other language paths can run host package managers. Host repacking/capture
+there does not become protected merely because protected request options exist.
+
+Task verification remains outside the agent control-server scope. It checks
+approval and component working-directory policy, then routes through generic
+network-denied or vendored offline sandbox topologies. Implementation success
+records pending human disposition. Runner/OS enforcement and peer runtime
+internals are not independently established here.
+
+Evidence: `src/vendor_command.rs::{ProtectedVendorOptions,
+vendor_project_protected,check_protected_vendor_readiness,vendor_project}`,
+`src/vendor_command/protected_tests.rs`, `src/agent.rs::execute_agent_inner`,
+and `src/task_commands.rs::verify_task`.
+
+## Remaining observed scope and workflow limits
+
+- The optional private server exists only during agent execution; it does not
+  control later verification. Readiness checks and sandbox launch are separate
+  caller operations. This source inspection does not establish the delegated
+  mailbox's concurrency linearization or prove absence of a dispatch/guidance
+  race.
+- On an agent error, lower-level log/trajectory finalization is attempted, but
+  `run_task_with_controls` still propagates `Err` before appending its
+  task-level `agent-execution` record. Lower-level evidence preservation is
+  not the same as a completed task journal/status transition.
+- Successful implementation finalization still builds its change list from
+  immediate files in `component/tests`, labeling them create with null
+  pre-digests. Source files, nested tests, and deletions are not captured by
+  that enumeration; listed-change validation does not supply a complete
+  post-execution source-tree snapshot. This is a broader workflow limit,
+  separate from runtime turn/effect retention.
+- The dependency broker's private-origin predicate still checks prefixes of
+  the full origin rather than parsing the host. A private numeric host inside
+  an HTTPS URL can be classified as accepted. Protected fulfillment nevertheless
+  refuses before any fetch; classification alone does not demonstrate network
+  contact.
+- Verification's literal set includes architect/developer values and sandbox
+  environment values, not security-reviewer-only literals. The additional
+  test-policy environment allowlist only restricts the sandbox allowlist:
+  `allowed_environment` intersects the lists. There is no source support for
+  an assertion that test-policy-only variables are additionally exposed.
+- Shared registry qualification, control endpoint permissions/authentication,
+  context estimation/compaction, journal protocol/durability, transport
+  cancellation, and sandbox OS enforcement depend on delegated libraries or
+  processes. This record does not infer their internals from call sites.
+
+Evidence: `src/task_commands.rs:4196-4228`, `:4285-4306`,
+`src/task_commands.rs::{finalize,evidence_redactions}`,
+`src/authoring/mod.rs::is_unverified_origin`,
+`src/sandbox.rs::allowed_environment`, and the agent sources above.
+
+## Evidence and verification limits
+
+The current observation read only permitted `maerg` source/test source.
+It did not read standalone intent documents, queues, previous implementation
+records, repository metadata/history/diffs, peer implementation, or prior
+reviews as evidence. No production/test files were modified. The implementation
+record was replaced without reading its prior contents.
+
+**Current execution evidence:** the caller reports that selected maerg
+library, agent, live-runtime, control-CLI, and task-command tests passed, and
+that all 60 dogfood boundary tests passed. No corresponding fresh run log was
+independently inspected for this refresh. No tests, builds, linters, or
+reproduction commands were run by this observer. Fresh broader workspace gates
+were still pending when this observation was requested; no post-repair
+workspace-wide test, Clippy, or rustdoc pass is claimed.
+
+**Inspected test-source coverage, distinct from execution evidence:**
+
+- `src/agent.rs` includes Unicode/overlap redaction cases checked across UTF-8
+  partitions, endpoint/probe and retry bounds, streaming retry behavior,
+  selection, and effect summaries.
+- `src/agent/accounting.rs` covers cumulative known usage, output capping,
+  conservative missing/zero usage charges, and reservations retained across
+  retries/interruption.
+- `src/agent/regression_tests.rs` covers selected-context restrictions,
+  no-follow paths, UTF-8/file/aggregate/context-window bounds, retained partial
+  and uncertain dispatch outcomes, cumulative known usage with missing reports,
+  pre-cancelled probing, redacted trajectory correlation, and hashed evidence
+  filenames for hostile call IDs. Injected dispatch tests establish local
+  bookkeeping behavior, not real sandbox writes.
+- `src/agent/live.rs` covers recursive diagnostic-value redaction with valid
+  journal envelopes.
+- `tests/live_runtime.rs` checks early journal visibility, profile-literal
+  filtering in returned model metadata, quiet-generation steering, original
+  task preservation, mailbox closure, opaque-backend refusal, actual selected
+  context in native and explicit endpoint requests, cumulative steering usage
+  and token limits, forbidden endpoint refusal before probing, retention after
+  cancellation, and refusal of context that cannot fit.
+- `tests/control_cli.rs` covers default-off/explicit opt-in parsing in both
+  output modes, not an independent control-socket round trip.
+- `src/vendor_command/protected_tests.rs` covers unconditional unbound-request
+  refusal, pre-cancellation/exhausted budgets, read-only ready-Rust inspection,
+  pinned runner mismatch, malformed policy, refusal of unsupported/stale/missing
+  material, and host-tool sentinels.
+- The inspected dogfood fixture in `tests/dogfood_boundary/support.rs` uses a
+  shared native mock profile with explicit `context_limit = 65536` and
+  `response_reserve = 1024`. Its context capacity is fixture configuration,
+  not evidence that production silently omits context or assumes that capacity.
+
+This bounded observation does not establish exhaustive race coverage,
+crash/power-loss durability, universal secret filtering, exact billing for
+unreported provider work, or absence of other defects.

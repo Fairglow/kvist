@@ -619,12 +619,20 @@ pub fn list_models(project_dir: &Path) -> Result<String> {
     let config_path = project_dir.join("kvist.toml");
     let (document, existing_contents) =
         load_document(&config_path, true).unwrap_or((DocumentMut::new(), None));
-    if document
-        .get("agent")
-        .and_then(Item::as_table)
-        .is_some_and(|agent| agent.contains_key("registry"))
-    {
-        append_shared_profiles(&mut output, &config_path)?;
+    let shared_source = if declares_shared_registry(&document) {
+        Some((config_path.clone(), document.clone()))
+    } else {
+        config::load(project_dir).ok().and_then(|configuration| {
+            let source = PathBuf::from(configuration.agent.source.identity);
+            let (document, contents) = load_document(&source, false).ok()?;
+            (contents.is_some() && declares_shared_registry(&document))
+                .then_some((source, document))
+        })
+    };
+    if let Some((source, document)) = shared_source {
+        append_shared_profiles(&mut output, &source, &document)?;
+        output.push_str("╰──────────────────────────────────────────────────────────────────");
+        return Ok(output);
     }
 
     let mut project_models = Vec::new();
@@ -674,7 +682,7 @@ pub fn list_models(project_dir: &Path) -> Result<String> {
             .and_then(Item::as_table)
             .is_some_and(|agent| agent.contains_key("registry"))
     {
-        append_shared_profiles(&mut output, &user_path)?;
+        append_shared_profiles(&mut output, &user_path, &document)?;
     }
 
     // List user-global profiles if ~/.config/kvist/config.toml exists
@@ -720,28 +728,78 @@ pub fn list_models(project_dir: &Path) -> Result<String> {
     Ok(output)
 }
 
-fn append_shared_profiles(output: &mut String, config_path: &Path) -> Result<()> {
+fn declares_shared_registry(document: &DocumentMut) -> bool {
+    document
+        .get("agent")
+        .and_then(Item::as_table)
+        .unwrap_or_else(|| document.as_table())
+        .contains_key("registry")
+}
+
+fn append_shared_profiles(
+    output: &mut String,
+    config_path: &Path,
+    document: &DocumentMut,
+) -> Result<()> {
     let config = config::load_agent_file(config_path)?;
     output.push_str(&format!(
         "│  Shared profiles referenced by {}:\n",
         config_path.display()
     ));
-    for (name, resolved) in config.shared_profiles {
-        let label = match resolved.profile.backend {
+    if config.shared_profiles.is_empty() {
+        output.push_str("│    (no enabled shared profiles)\n");
+    }
+    for (name, resolved) in &config.shared_profiles {
+        let label = match &resolved.profile.backend {
             sav::registry::Backend::Native(native) => format!(
                 "native {} {} {}",
                 native.provider, native.base_url, native.model,
             ),
             sav::registry::Backend::ExternalAgent(agent) => format!(
-                "external-agent {} {}",
+                "external-agent {} {} {}",
                 agent.provider.as_str(),
                 agent.executable,
+                agent.model.as_deref().unwrap_or("(provider default)"),
             ),
         };
         output.push_str(&format!(
             "│    • {name}: {label} ({})\n",
             resolved.source.display()
         ));
+    }
+    output.push_str(&format!("│  Role bindings in {}:\n", config_path.display()));
+    let agent = document
+        .get("agent")
+        .and_then(Item::as_table)
+        .unwrap_or_else(|| document.as_table());
+    let mut has_bindings = false;
+    if let Some(roles) = agent.get("roles").and_then(Item::as_table) {
+        for (name, item) in roles {
+            let Some(role) = config::Role::from_str_case_insensitive(name) else {
+                continue;
+            };
+            let Some(profile) = item
+                .as_table()
+                .and_then(|table| table.get("profile"))
+                .and_then(Item::as_value)
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            let availability = if config.shared_profiles.contains_key(profile) {
+                ""
+            } else {
+                " (unavailable)"
+            };
+            output.push_str(&format!(
+                "│    {} -> {profile}{availability}\n",
+                role.as_str()
+            ));
+            has_bindings = true;
+        }
+    }
+    if !has_bindings {
+        output.push_str("│    (none configured)\n");
     }
     Ok(())
 }

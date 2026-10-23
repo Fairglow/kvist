@@ -12,6 +12,13 @@ mod live;
 use live::{LiveRun, ObservedTransport};
 mod controls;
 use controls::RunControls;
+mod redaction;
+use redaction::StreamRedactor;
+mod accounting;
+mod context;
+use accounting::TokenBudget;
+#[cfg(test)]
+mod regression_tests;
 
 use std::{
     fs::{self, OpenOptions},
@@ -33,9 +40,11 @@ use crate::{
 };
 
 use sav::{
-    CancellationToken, DirectModelTransport, Error as ModelError, LocalModelProvider, ModelMessage,
-    ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn, ToolChoice,
+    CancellationToken, DirectModelTransport, Error as ModelError, LocalModelProvider, ModelRequest,
+    ModelStreamEvent, ModelTransport, ModelTurn,
 };
+#[cfg(test)]
+use sav::{ModelMessage, ToolChoice};
 
 /// Structured execution result of an external agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,9 +52,9 @@ pub struct AgentRunResult {
     /// True when the turn produced a usable result, no proposed intent was
     /// dropped, and every authorized effect applied.
     pub success: bool,
-    /// Number of prompt/input tokens used, if reported by the provider.
+    /// Cumulative known prompt/input tokens; `None` if no turn reported usage.
     pub tokens_input: Option<usize>,
-    /// Number of output/completion tokens used, if reported by the provider.
+    /// Cumulative known output tokens; unavailable turns remain explicit in the log.
     pub tokens_output: Option<usize>,
     /// Path to the redacted execution log file.
     pub log_path: PathBuf,
@@ -444,10 +453,15 @@ impl TurnBudget {
 /// load, select, or shift a model slot. It is a pure liveness check that lets a
 /// down gateway fail fast with an actionable message instead of a cryptic
 /// transport error buried deep inside a turn.
-fn probe_gateway_reachable(endpoint: &str, budget: &TurnBudget) -> Result<()> {
+fn probe_gateway_reachable(
+    endpoint: &str,
+    budget: &TurnBudget,
+    cancellation: &CancellationToken,
+) -> Result<()> {
     let authority = endpoint
         .trim_start_matches("https://")
-        .trim_start_matches("http://");
+        .trim_start_matches("http://")
+        .trim_end_matches('/');
     let addr: std::net::SocketAddr =
         authority
             .parse()
@@ -455,14 +469,22 @@ fn probe_gateway_reachable(endpoint: &str, budget: &TurnBudget) -> Result<()> {
                 endpoint: endpoint.to_owned(),
                 reason: format!("endpoint `{endpoint}` is not a host:port address: {source}"),
             })?;
+    if !addr.ip().is_loopback() {
+        return Err(KvistError::Sav(ModelError::InvalidModelTransport {
+            reason: "liveness probing requires a numeric loopback endpoint".into(),
+        }));
+    }
 
     let mut attempt = 1u32;
     loop {
+        if cancellation.is_cancelled() {
+            return Err(KvistError::Sav(ModelError::ModelTransportCancelled));
+        }
         let remaining = budget.remaining();
         if remaining.is_zero() {
             return Err(KvistError::Sav(ModelError::ModelTransportTimedOut));
         }
-        let connect_timeout = Duration::from_secs(2).min(remaining);
+        let connect_timeout = Duration::from_millis(100).min(remaining);
         match std::net::TcpStream::connect_timeout(&addr, connect_timeout) {
             Ok(_) => return Ok(()),
             Err(source) if attempt < GATEWAY_PROBE_ATTEMPTS => {
@@ -472,7 +494,13 @@ fn probe_gateway_reachable(endpoint: &str, budget: &TurnBudget) -> Result<()> {
                     endpoint,
                     "local model gateway not yet accepting connections; retrying liveness probe"
                 );
-                thread::sleep(GATEWAY_PROBE_BACKOFF.min(budget.remaining()));
+                let until = Instant::now() + GATEWAY_PROBE_BACKOFF.min(budget.remaining());
+                while Instant::now() < until && !cancellation.is_cancelled() {
+                    thread::sleep(
+                        Duration::from_millis(10)
+                            .min(until.saturating_duration_since(Instant::now())),
+                    );
+                }
                 attempt += 1;
             }
             Err(source) => {
@@ -513,75 +541,6 @@ fn is_retryable_transport_error(error: &ModelError) -> bool {
             )
         }
         _ => false,
-    }
-}
-
-/// Relays streaming text to standard output with the run's redaction values
-/// applied.
-///
-/// A redaction value may straddle two deltas, so the redactor retains the
-/// longest tail of every absorbed chunk that is still a prefix of some
-/// redaction value and re-examines it as later deltas arrive; the retained
-/// remainder is redacted once when the stream finishes. Without this carry, a
-/// secret split across a delta boundary would reach the console unreplaced.
-struct StreamRedactor {
-    values: Vec<String>,
-    carry: String,
-    max_len: usize,
-}
-
-impl StreamRedactor {
-    fn new(values: &[String]) -> Self {
-        let max_len = values.iter().map(String::len).max().unwrap_or(0);
-        Self {
-            values: values.to_vec(),
-            carry: String::new(),
-            max_len,
-        }
-    }
-
-    /// Folds a new delta into the retained tail and returns the redacted
-    /// prefix that is safe to emit immediately.
-    fn absorb(&mut self, delta: &str) -> String {
-        self.carry.push_str(delta);
-        let retain = self.max_suffix_prefix_len();
-        let safe_len = self.carry.len() - retain;
-        let safe = self.carry[..safe_len].to_owned();
-        self.carry = self.carry[safe_len..].to_owned();
-        redact(&safe, &self.values)
-    }
-
-    /// The longest carry suffix that is a prefix of a redaction value.
-    ///
-    /// Such a tail may complete into a secret once later deltas arrive, so it
-    /// is held back instead of being emitted; every shorter candidate is
-    /// covered by the longest one. A suffix that already equals a whole value
-    /// is held back too, so it is redacted on the next absorb or on finish.
-    fn max_suffix_prefix_len(&self) -> usize {
-        let max = self.max_len.min(self.carry.len());
-        (0..=max)
-            .rev()
-            .find(|&len| {
-                let suffix = &self.carry[self.carry.len() - len..];
-                self.values.iter().any(|value| value.starts_with(suffix))
-            })
-            .unwrap_or(0)
-    }
-
-    /// The redacted remainder to emit when the stream completes.
-    fn finish(&mut self) -> String {
-        let remainder = redact(&self.carry, &self.values);
-        self.carry.clear();
-        remainder
-    }
-
-    fn emit_to_stdout(text: &str) {
-        if text.is_empty() {
-            return;
-        }
-        let mut stdout = io::stdout().lock();
-        let _ = stdout.write_all(text.as_bytes());
-        let _ = stdout.flush();
     }
 }
 
@@ -642,6 +601,7 @@ fn complete_turn<T: ModelTransport>(
             MODEL_TURN_RETRY_BACKOFF,
             MODEL_TURN_RETRY_BACKOFF,
         ),
+        &mut TokenBudget::new(None),
     )
 }
 
@@ -656,6 +616,7 @@ fn complete_turn_counted<T: ModelTransport>(
     task_id: &str,
     attempts: &mut u32,
     retry: &sav::runtime::RetryPolicy,
+    tokens: &mut TokenBudget,
 ) -> Result<ModelTurn> {
     loop {
         if cancellation.is_cancelled() {
@@ -674,13 +635,18 @@ fn complete_turn_counted<T: ModelTransport>(
         }
         *attempts += 1;
         let transport = make_transport()?;
+        let mut request = request.clone();
+        let reservation = tokens.reserve(&mut request)?;
         let (outcome, emitted) = if stream_output {
-            run_stream_attempt(&transport, request, cancellation, redactions)
+            run_stream_attempt(&transport, &request, cancellation, redactions)
         } else {
-            (transport.complete(request, cancellation), false)
+            (transport.complete(&request, cancellation), false)
         };
         match outcome {
-            Ok(turn) => return Ok(turn),
+            Ok(turn) => {
+                tokens.finish(reservation, turn.usage);
+                return Ok(turn);
+            }
             Err(source)
                 if is_retryable_transport_error(&source)
                     && *attempts < retry.max_attempts
@@ -728,10 +694,11 @@ fn execute_host_turn(
     request: &AgentExecutionRequest<'_>,
     budget: &TurnBudget,
     redactions: &[String],
-    messages: &[ModelMessage],
+    model_request: &ModelRequest,
     cancellation: &CancellationToken,
     live: &LiveRun,
     attempts: &mut u32,
+    tokens: &mut TokenBudget,
 ) -> Result<ModelTurn> {
     if choice.is_none {
         return Err(KvistError::InvalidModelSelection {
@@ -761,26 +728,32 @@ fn execute_host_turn(
         )
     };
 
+    let mut model_request = model_request.clone();
+    model_request.model = provider_model;
+    tokens.preflight(&model_request)?;
+
     // Liveness pre-check: fail fast with an actionable message when the local
     // model gateway is down, instead of surfacing a cryptic transport error
     // inside a turn. A TCP connect only confirms the port; it never loads or
     // shifts a model slot.
-    probe_gateway_reachable(&endpoint, budget)?;
+    // Construction validates native endpoint authority without network I/O.
+    // This must precede even a TCP liveness probe.
+    if let Some(native) = native {
+        native.transport_bounded(budget.remaining(), profile.max_output_bytes)?;
+    } else {
+        DirectModelTransport::new(
+            provider,
+            &endpoint,
+            budget.remaining(),
+            profile.max_output_bytes,
+        )?;
+    }
+    probe_gateway_reachable(&endpoint, budget, cancellation)?;
 
     // llama-server/ollama gateways route on the provider-facing model identifier,
     // which the command embeds; the selector alone is not a model the gateway
     // recognizes (it returns 400). Fall back to the selector when the command
     // carries no such identifier.
-    let model_request = ModelRequest {
-        model: provider_model,
-        messages: messages.to_vec(),
-        tools: authoring::authoring_tool_definitions(),
-        tool_choice: ToolChoice::Auto,
-        reasoning_effort: profile.thinking_effort,
-        output_schema: None,
-        max_output_tokens: native.and_then(|model| model.response_reserve),
-    };
-
     complete_turn_counted(
         || {
             let transport = if let Some(native) = native {
@@ -822,6 +795,7 @@ fn execute_host_turn(
                 )
             },
         ),
+        tokens,
     )
 }
 
@@ -845,6 +819,8 @@ struct EffectRecord {
     destination: String,
     /// True when the sandboxed applier confirmed the write.
     applied: bool,
+    /// Dispatch may have mutated state, but completion was not confirmed.
+    uncertain: bool,
     /// Bounded diagnostics when the effect did not apply.
     detail: String,
     /// True when the effect dispatch hit its wall-clock limit.
@@ -904,6 +880,7 @@ fn dispatch_effect(
 /// propagates after removing the staged file; a dispatch that ran but failed
 /// is recorded as an unapplied effect so the turn fails closed rather than
 /// pretending the model's request was honored.
+#[allow(clippy::too_many_arguments)]
 fn apply_authoring_effects(
     profile: &AgentProfile,
     sandbox: &EffectSandbox<'_>,
@@ -912,7 +889,8 @@ fn apply_authoring_effects(
     turn: &ModelTurn,
     session_id: &str,
     live: &LiveRun,
-) -> Result<Vec<EffectRecord>> {
+    records: &mut Vec<EffectRecord>,
+) -> Result<()> {
     let kvist_binary =
         std::env::current_exe().map_err(|source| KvistError::SandboxUnavailable {
             runner: sandbox.config.runner.clone(),
@@ -929,12 +907,34 @@ fn apply_authoring_effects(
         STAGED_INTENT_MOUNT_PATH.to_owned(),
     ];
 
-    let mut records = Vec::with_capacity(plan.effects.len());
+    apply_authoring_effects_with(
+        request,
+        plan,
+        turn,
+        session_id,
+        live,
+        sandbox.steering,
+        records,
+        |staged_path| dispatch_effect(profile, sandbox, request, &program, &arguments, staged_path),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_authoring_effects_with(
+    request: &AgentExecutionRequest<'_>,
+    plan: &AuthoringPlan,
+    turn: &ModelTurn,
+    session_id: &str,
+    live: &LiveRun,
+    steering: &RunControls<'_>,
+    records: &mut Vec<EffectRecord>,
+    mut dispatch: impl FnMut(&Path) -> Result<sandbox::ExecutionResult>,
+) -> Result<()> {
     for effect in &plan.effects {
-        if sandbox.steering.cancellation.is_cancelled() {
+        if steering.cancellation.is_cancelled() {
             return Err(KvistError::Sav(ModelError::Cancelled));
         }
-        if !sandbox.steering.mailbox.dispatch_ready()? {
+        if !steering.mailbox.dispatch_ready()? {
             break;
         }
         let raw = turn
@@ -954,42 +954,41 @@ fn apply_authoring_effects(
             }}),
             true,
         )?;
-        if !sandbox.steering.mailbox.dispatch_ready()?
-            || sandbox.steering.cancellation.is_cancelled()
-        {
+        if steering.cancellation.is_cancelled() {
+            return Err(KvistError::Sav(ModelError::Cancelled));
+        }
+        if !steering.mailbox.dispatch_ready()? {
             break;
         }
-        let result = match dispatch_effect(
-            profile,
-            sandbox,
-            request,
-            &program,
-            &arguments,
-            &staged_path,
-        ) {
-            Ok(result) => result,
-            Err(source) => {
-                // Infrastructure failure: remove the staged file, then
-                // propagate so the caller fences the attempt.
-                return Err(source);
-            }
-        };
-        // The staged file is consumed; remove it so no residue remains under
-        // the component state directory.
-        if result.cancelled {
-            return Err(KvistError::Sav(sav::Error::Cancelled));
-        }
+        records.push(EffectRecord {
+            call_id: effect.call_id.clone(),
+            tool: effect.tool.clone(),
+            destination: effect.destination.clone(),
+            applied: false,
+            uncertain: true,
+            detail: "dispatch completion unknown; state may have mutated; do not replay".into(),
+            timed_out: false,
+            output_limit_exceeded: false,
+        });
+        let result = dispatch(&staged_path)?;
+        let cancelled = result.cancelled;
         let record = summarize_effect(effect, result);
+        if let Some(retained) = records.last_mut() {
+            *retained = record.clone();
+        }
         live.record(
             &serde_json::json!({"type":"tool_result","data":{
                 "call_id":record.call_id,"name":record.tool,"applied":record.applied,
+                "uncertain":record.uncertain,
                 "timed_out":record.timed_out,"output_limit_exceeded":record.output_limit_exceeded
             }}),
             true,
         )?;
-        records.push(record);
+        if cancelled {
+            return Err(KvistError::Sav(sav::Error::Cancelled));
+        }
     }
-    Ok(records)
+    Ok(())
 }
 
 struct StagedIntentCleanup(PathBuf);
@@ -1020,7 +1019,9 @@ fn summarize_effect(
             "effect for `{}` -> {} exited with {:?}",
             effect.tool, effect.destination, output.status
         );
-        if result.timed_out {
+        if result.cancelled {
+            text.push_str(" after cancellation");
+        } else if result.timed_out {
             text.push_str(" after its wall-clock limit");
         } else if result.output_limit_exceeded {
             text.push_str(" after exceeding its output bound");
@@ -1035,6 +1036,7 @@ fn summarize_effect(
             text.push_str("\nstderr:\n");
             text.push_str(&stderr);
         }
+        text.push_str("\nstate may have mutated; completion unconfirmed; do not replay");
         truncate_utf8(&mut text, 4096);
         text
     };
@@ -1043,6 +1045,7 @@ fn summarize_effect(
         tool: effect.tool.clone(),
         destination: effect.destination.clone(),
         applied,
+        uncertain: !applied,
         detail,
         timed_out: result.timed_out,
         output_limit_exceeded: result.output_limit_exceeded,
@@ -1238,6 +1241,7 @@ fn execute_agent_inner(
         &session_id,
         request.task_id,
         &choice.model,
+        &profile.redaction_values,
     )?;
     if let Some(resolved) = &profile.resolved_profile {
         live.record(
@@ -1256,7 +1260,9 @@ fn execute_agent_inner(
         live: &live,
         redactions: &redactions,
     };
-    let outcome = (|| {
+    let mut run_turns: Vec<RunTurn> = Vec::new();
+    let mut tokens = TokenBudget::new(profile.token_limit);
+    let outcome: Result<Option<TurnFailure>> = (|| {
         let _server = if allow_control {
             let server = sav::observation::bind_runtime_controls(controls, cancellation)?;
             eprintln!(
@@ -1283,25 +1289,32 @@ fn execute_agent_inner(
             native.context_limit = Some(limit);
             native.response_reserve = Some(reserve);
             live.record(&serde_json::json!({"type":"model_budget","data":{"context_limit":limit,"response_reserve":reserve}}),true)?;
-            Some(sav::runtime::ContextManager::new(limit, 4))
+            sav::runtime::ContextManager::new(limit, 4)
         } else {
-            None
+            sav::runtime::ContextManager::new(sav::runtime::DEFAULT_CONTEXT_TOKENS, 4)
         };
 
         let mut conversation = sav::runtime::AgentSession::new(
             sav::runtime::ModelIdentity {
                 id: choice.model.clone(),
-                model: choice.model.clone(),
+                model: choice
+                    .native
+                    .as_ref()
+                    .map(|native| native.model.clone())
+                    .or_else(|| extract_provider_model(&choice.command))
+                    .unwrap_or_else(|| choice.model.clone()),
             },
             profile
                 .thinking_effort
                 .unwrap_or(sav::ReasoningEffort::None),
             authoring::authoring_tool_definitions(),
-            choice.system_prompt.clone().unwrap_or_default(),
+            context::system_context(
+                &request,
+                choice.system_prompt.as_deref().unwrap_or_default(),
+            )?,
         );
         conversation.push_user(request.prompt);
 
-        let mut run_turns: Vec<RunTurn> = Vec::new();
         let mut generations = 0;
         let mut model_attempts = 0;
 
@@ -1327,16 +1340,7 @@ fn execute_agent_inner(
                     output_limit_exceeded: false,
                     cancelled: false,
                 };
-                return record_turn_outcome(
-                    profile,
-                    &request,
-                    &session_id,
-                    &log_path,
-                    &mut log_file,
-                    &redactions,
-                    &run_turns,
-                    Some(&failure),
-                );
+                return Ok(Some(failure));
             }
 
             // 1. The model turn runs on the host: numeric loopback gateway only,
@@ -1350,21 +1354,12 @@ fn execute_agent_inner(
                     reason: "protected conversation lost its original task".into(),
                 })
             })?;
-            if let Some(context) = &mut context
-                && let Some(compaction) = context.prepare(
-                    &mut model_request,
-                    choice
-                        .native
-                        .as_ref()
-                        .and_then(|native| native.response_reserve)
-                        .ok_or_else(|| {
-                            KvistError::Runtime(sav::runtime::Error::Config {
-                                path: None,
-                                reason: "shared response reserve was not resolved".into(),
-                            })
-                        })?,
-                )?
-            {
+            let reserve = choice
+                .native
+                .as_ref()
+                .and_then(|native| native.response_reserve)
+                .unwrap_or(1024);
+            if let Some(compaction) = context.prepare(&mut model_request, reserve)? {
                 live.record(&serde_json::json!({"type":"context_compaction","data":{"completed_groups":compaction.compacted_turns,"lossy":true,"canonical_evidence":false}}),true)?;
             }
             let generated = execute_host_turn(
@@ -1373,11 +1368,27 @@ fn execute_agent_inner(
                 &request,
                 &budget,
                 &redactions,
-                &model_request.messages,
+                &model_request,
                 operation.token(),
                 &live,
                 &mut model_attempts,
+                &mut tokens,
             );
+            // Retain a completed turn before validation, controls, or any
+            // effect/error path can exit the owner.
+            if let Ok(turn) = &generated {
+                run_turns.push(RunTurn {
+                    turn: turn.clone(),
+                    effects: vec![],
+                    drops: vec![],
+                    surfaced_decisions: vec![],
+                    accepted_requests: vec![],
+                });
+                tokens.check()?;
+            }
+            if cancellation.is_cancelled() || controls.is_shutdown() {
+                return Err(KvistError::Sav(ModelError::Cancelled));
+            }
             if (operation.was_steered() || controls.has_pending())
                 && (generated.is_ok()
                     || matches!(
@@ -1390,13 +1401,6 @@ fn execute_agent_inner(
                     sav::runtime::validate_turn(&turn)?;
                     conversation.apply_assistant(turn.clone());
                     steering.skip_calls(turn.tool_intents.iter(), &[], &mut conversation)?;
-                    run_turns.push(RunTurn {
-                        turn,
-                        effects: vec![],
-                        drops: vec![],
-                        surfaced_decisions: vec![],
-                        accepted_requests: vec![],
-                    });
                 }
                 drop(operation);
                 continue;
@@ -1411,42 +1415,27 @@ fn execute_agent_inner(
                         "agent model turn failed"
                     );
                     let failure = TurnFailure::from_kvist_error(&source);
-                    let result = record_turn_outcome(
-                        profile,
-                        &request,
-                        &session_id,
-                        &log_path,
-                        &mut log_file,
-                        &redactions,
-                        &run_turns,
-                        Some(&failure),
-                    )?;
                     if failure.cancelled {
-                        return Err(KvistError::Sav(sav::Error::Cancelled));
+                        return Err(source);
                     }
-                    return Ok(result);
+                    return Ok(Some(failure));
                 }
             };
             sav::runtime::validate_turn(&turn)?;
+            let turn_index = run_turns.len() - 1;
             model_attempts = 0;
 
             // Feed the assistant message back so the model observes its own output.
             conversation.apply_assistant(turn.clone());
             if controls.has_pending() {
                 steering.skip_calls(turn.tool_intents.iter(), &[], &mut conversation)?;
-                run_turns.push(RunTurn {
-                    turn,
-                    effects: vec![],
-                    drops: vec![],
-                    surfaced_decisions: vec![],
-                    accepted_requests: vec![],
-                });
                 continue;
             }
 
             // 2. Broker: reduce untrusted intents to capability-bound effects.
             let plan =
                 authoring::authorize_turn(request.target_dir, &turn, &BrokerPolicy::default());
+            run_turns[turn_index].drops = plan.dropped.clone();
             live.record(&serde_json::json!({"type":"broker_decision","data":{
             "authorized_effects":plan.effects.len(),"denied_intents":plan.dropped.len(),
             "decisions":plan.decisions.len(),"dependency_requests":plan.dependency_requests.len()
@@ -1470,23 +1459,9 @@ fn execute_agent_inner(
                     );
                     recorded.push(decision.clone());
                 }
-                run_turns.push(RunTurn {
-                    turn,
-                    effects: Vec::new(),
-                    drops: plan.dropped.clone(),
-                    surfaced_decisions: recorded,
-                    accepted_requests: plan.dependency_requests.clone(),
-                });
-                return record_turn_outcome(
-                    profile,
-                    &request,
-                    &session_id,
-                    &log_path,
-                    &mut log_file,
-                    &redactions,
-                    &run_turns,
-                    None,
-                );
+                run_turns[turn_index].surfaced_decisions = recorded;
+                run_turns[turn_index].accepted_requests = plan.dependency_requests.clone();
+                return Ok(None);
             }
 
             // 2b. In-policy dependency requests are recorded as durable evidence and
@@ -1503,6 +1478,9 @@ fn execute_agent_inner(
                     "accepted an in-policy dependency request for acquisition"
                 );
                 accepted_requests.push(dep_request.clone());
+                run_turns[turn_index]
+                    .accepted_requests
+                    .push(dep_request.clone());
             }
 
             // Trigger the acquisition phase if there were accepted dependency requests.
@@ -1512,12 +1490,21 @@ fn execute_agent_inner(
                     dependency_count = accepted_requests.len(),
                     "triggering dependency acquisition phase"
                 );
-                match crate::vendor_command::vendor_project(
+                let expected_runner = expected_runner.ok_or_else(|| {
+                    KvistError::SandboxUnavailable {
+                        runner: sandbox_config.runner.clone(),
+                        reason: "protected dependency requests require the task-approved runner; host fallback is disabled".into(),
+                    }
+                })?;
+                match crate::vendor_command::vendor_project_protected(
                     request.project_root,
-                    crate::vendor_command::VendorOptions {
-                        vendored_dir: None,
-                        populate: true,
-                        sandbox: Some(sandbox_config.clone()),
+                    crate::vendor_command::ProtectedVendorOptions {
+                        sandbox: sandbox_config,
+                        vcs_selection: request.vcs_selection,
+                        expected_runner,
+                        policy_identity: request.policy_identity,
+                        cancellation: steering.cancellation,
+                        remaining_budget: budget.remaining(),
                     },
                 ) {
                     Ok(report) => {
@@ -1527,13 +1514,7 @@ fn execute_agent_inner(
                             "dependency acquisition phase completed"
                         );
                     }
-                    Err(source) => {
-                        tracing::warn!(
-                            task_id = %request.task_id,
-                            error = %source,
-                            "dependency acquisition phase failed; continuing without new dependencies"
-                        );
-                    }
+                    Err(source) => return Err(source),
                 }
             }
 
@@ -1543,28 +1524,12 @@ fn execute_agent_inner(
             if !plan.dropped.is_empty() {
                 let reason = drop_reason(&plan.dropped);
                 tracing::warn!(task_id = %request.task_id, %reason);
-                run_turns.push(RunTurn {
-                    turn,
-                    effects: Vec::new(),
-                    drops: plan.dropped,
-                    surfaced_decisions: Vec::new(),
-                    accepted_requests: accepted_requests.clone(),
-                });
-                return record_turn_outcome(
-                    profile,
-                    &request,
-                    &session_id,
-                    &log_path,
-                    &mut log_file,
-                    &redactions,
-                    &run_turns,
-                    Some(&TurnFailure {
-                        reason,
-                        timed_out: false,
-                        output_limit_exceeded: false,
-                        cancelled: false,
-                    }),
-                );
+                return Ok(Some(TurnFailure {
+                    reason,
+                    timed_out: false,
+                    output_limit_exceeded: false,
+                    cancelled: false,
+                }));
             }
 
             // No intents at all: the model produced a final answer rather than
@@ -1572,22 +1537,8 @@ fn execute_agent_inner(
             if plan.effects.is_empty() {
                 if !controls.finish_if_idle()? {
                     steering.skip_calls(turn.tool_intents.iter(), &[], &mut conversation)?;
-                    run_turns.push(RunTurn {
-                        turn,
-                        effects: vec![],
-                        drops: vec![],
-                        surfaced_decisions: vec![],
-                        accepted_requests: accepted_requests.clone(),
-                    });
                     continue;
                 }
-                run_turns.push(RunTurn {
-                    turn,
-                    effects: Vec::new(),
-                    drops: Vec::new(),
-                    surfaced_decisions: Vec::new(),
-                    accepted_requests: accepted_requests.clone(),
-                });
                 break;
             }
 
@@ -1600,28 +1551,12 @@ fn execute_agent_inner(
                     plan.effects.len()
                 );
                 tracing::warn!(task_id = %request.task_id, %reason);
-                run_turns.push(RunTurn {
-                    turn,
-                    effects: Vec::new(),
-                    drops: Vec::new(),
-                    surfaced_decisions: Vec::new(),
-                    accepted_requests: accepted_requests.clone(),
-                });
-                return record_turn_outcome(
-                    profile,
-                    &request,
-                    &session_id,
-                    &log_path,
-                    &mut log_file,
-                    &redactions,
-                    &run_turns,
-                    Some(&TurnFailure {
-                        reason,
-                        timed_out: false,
-                        output_limit_exceeded: false,
-                        cancelled: false,
-                    }),
-                );
+                return Ok(Some(TurnFailure {
+                    reason,
+                    timed_out: false,
+                    output_limit_exceeded: false,
+                    cancelled: false,
+                }));
             };
 
             let sandbox_context = EffectSandbox {
@@ -1631,7 +1566,7 @@ fn execute_agent_inner(
                 steering: &steering,
                 budget: &budget,
             };
-            let effects = apply_authoring_effects(
+            apply_authoring_effects(
                 profile,
                 &sandbox_context,
                 &request,
@@ -1639,11 +1574,13 @@ fn execute_agent_inner(
                 &turn,
                 &session_id,
                 &live,
+                &mut run_turns[turn_index].effects,
             )?;
+            let effects = &run_turns[turn_index].effects;
 
             // Feed each effect's outcome back to the model as a tool result so it
             // can react to a failed or skipped write on a later turn.
-            for record in &effects {
+            for record in effects {
                 let content = if record.applied {
                     "applied".to_owned()
                 } else {
@@ -1670,7 +1607,7 @@ fn execute_agent_inner(
                             .iter()
                             .any(|effect| effect.call_id == intent.id)
                     }),
-                    &effects,
+                    effects,
                     &mut conversation,
                 )?;
             }
@@ -1678,84 +1615,50 @@ fn execute_agent_inner(
             // An unapplied effect fails the turn: partial application would
             // misrepresent what the model requested.
             if effects.iter().any(|record| !record.applied) {
-                let reason = apply_reason(&effects);
+                let reason = apply_reason(effects);
                 tracing::warn!(task_id = %request.task_id, %reason);
-                run_turns.push(RunTurn {
-                    turn,
-                    effects,
-                    drops: Vec::new(),
-                    surfaced_decisions: Vec::new(),
-                    accepted_requests: accepted_requests.clone(),
-                });
-                return record_turn_outcome(
-                    profile,
-                    &request,
-                    &session_id,
-                    &log_path,
-                    &mut log_file,
-                    &redactions,
-                    &run_turns,
-                    Some(&TurnFailure {
-                        reason,
-                        timed_out: false,
-                        output_limit_exceeded: false,
-                        cancelled: false,
-                    }),
-                );
+                return Ok(Some(TurnFailure {
+                    reason,
+                    timed_out: false,
+                    output_limit_exceeded: false,
+                    cancelled: false,
+                }));
             }
-
-            run_turns.push(RunTurn {
-                turn,
-                effects,
-                drops: Vec::new(),
-                surfaced_decisions: Vec::new(),
-                accepted_requests: accepted_requests.clone(),
-            });
         }
-
-        let result = record_turn_outcome(
-            profile,
-            &request,
-            &session_id,
-            &log_path,
-            &mut log_file,
-            &redactions,
-            &run_turns,
-            None,
-        )?;
-
-        if result.success {
-            tracing::info!(
-                task_id = %request.task_id,
-                tokens_input = ?result.tokens_input,
-                tokens_output = ?result.tokens_output,
-                total_turns = run_turns.len(),
-                log_path = %result.log_path.display(),
-                "agent execution completed successfully"
-            );
-        } else if result.timed_out {
-            tracing::warn!(
-                task_id = %request.task_id,
-                log_path = %result.log_path.display(),
-                "agent execution timed out"
-            );
-        } else if result.output_limit_exceeded {
-            tracing::warn!(
-                task_id = %request.task_id,
-                log_path = %result.log_path.display(),
-                "agent execution exceeded output limit"
-            );
-        } else {
-            tracing::warn!(
-                task_id = %request.task_id,
-                log_path = %result.log_path.display(),
-                "agent model turn failed"
-            );
-        }
-
-        Ok(result)
+        Ok(None)
     })();
-    steering.close()?;
+    let failure = match &outcome {
+        Ok(failure) => failure.as_ref().map(|failure| TurnFailure {
+            reason: failure.reason.clone(),
+            timed_out: failure.timed_out,
+            output_limit_exceeded: failure.output_limit_exceeded,
+            cancelled: failure.cancelled,
+        }),
+        Err(error) => Some(TurnFailure::from_kvist_error(error)),
+    };
+    // Finalize once, outside the execution closure: errors must not discard
+    // already completed turns or partially applied/uncertain effects.
+    let recorded = record_turn_outcome(
+        profile,
+        &request,
+        &session_id,
+        &log_path,
+        &mut log_file,
+        &redactions,
+        &run_turns,
+        failure.as_ref(),
+        tokens.uncertain_attempts,
+    );
+    let outcome = match outcome {
+        Err(error) => {
+            if let Err(recording) = &recorded {
+                tracing::error!(%recording, "could not retain interrupted agent evidence");
+            }
+            Err(error)
+        }
+        Ok(_) => recorded,
+    };
+    let closed = steering.close();
     let disposition = match &outcome {
         Ok(result) if result.surfaced_decision => "awaiting_decision",
         Ok(result) if result.success => "completed",
@@ -1765,7 +1668,11 @@ fn execute_agent_inner(
         }
         Err(_) => "failed",
     };
-    live.finish(disposition)?;
+    let finished = live.finish(disposition);
+    if outcome.is_ok() {
+        closed?;
+        finished?;
+    }
     outcome
 }
 
@@ -1788,6 +1695,7 @@ fn record_turn_outcome(
     redactions: &[String],
     run_turns: &[RunTurn],
     failure: Option<&TurnFailure>,
+    uncertain_attempts: u32,
 ) -> Result<AgentRunResult> {
     // The final turn is the run's answer; the earlier turns are the steps that
     // led to it. Aggregate effects and dropped intents across the whole run so
@@ -1813,8 +1721,6 @@ fn record_turn_outcome(
     let turn_ok = last_turn
         .as_ref()
         .is_some_and(|turn| !turn.text.trim().is_empty() || !turn.tool_intents.is_empty());
-    // A surfaced decision pauses the run for the human; it is neither a success
-    // nor a failure, so force success off and report it separately.
     // A surfaced decision pauses the run for the human; it is neither a success
     // nor a failure, so force success off and report it separately.
     let surfaced_decision = !all_decisions.is_empty();
@@ -1847,7 +1753,21 @@ fn record_turn_outcome(
             .iter()
             .any(|record| record.output_limit_exceeded);
 
-    let mut log = String::new();
+    let mut input = 0_u64;
+    let mut output = 0_u64;
+    let mut reported = 0;
+    for usage in run_turns.iter().filter_map(|run_turn| run_turn.turn.usage) {
+        input = input.saturating_add(usage.input_tokens);
+        output = output.saturating_add(usage.output_tokens);
+        reported += 1;
+    }
+    let tokens_input = (reported > 0).then_some(input.min(usize::MAX as u64) as usize);
+    let tokens_output = (reported > 0).then_some(output.min(usize::MAX as u64) as usize);
+    let mut log = format!(
+        "token accounting: known input={tokens_input:?}, known output={tokens_output:?}; \
+         reported turns={reported}, unavailable turns={}, conservatively charged/unknown attempts={uncertain_attempts}\n\n",
+        run_turns.len() - reported,
+    );
     for (index, run_turn) in run_turns.iter().enumerate() {
         if index > 0 {
             log.push_str("\n\n");
@@ -1929,10 +1849,11 @@ fn record_turn_outcome(
             path: log_path.to_path_buf(),
             source,
         })?;
-
-    let usage = last_turn.and_then(|turn| turn.usage);
-    let tokens_input = usage.map(|usage| usage.input_tokens as usize);
-    let tokens_output = usage.map(|usage| usage.output_tokens as usize);
+    log_file.sync_all().map_err(|source| KvistError::Io {
+        operation: "sync agent log",
+        path: log_path.to_owned(),
+        source,
+    })?;
 
     // Record the structured session trajectory journal: one dispatch/result
     // pair per applied-or-failed effect across every turn, so `state_mutated`
@@ -1944,11 +1865,11 @@ fn record_turn_outcome(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let _ = recorder.record_event(&sav::TrajectoryEvent::SessionStart {
-        session_id: session_id.to_owned(),
-        task_id: request.task_id.to_string(),
+    recorder.record_event(&sav::TrajectoryEvent::SessionStart {
+        session_id: redact(session_id, redactions),
+        task_id: redact(request.task_id, redactions),
         timestamp: now_ts,
-    });
+    })?;
 
     let mut total_tokens: u64 = 0;
     for (index, run_turn) in run_turns.iter().enumerate() {
@@ -1957,31 +1878,36 @@ fn record_turn_outcome(
         let usage = turn.usage;
         let new_tokens = usage.map(|usage| usage.input_tokens);
         let output_tokens = usage.map(|usage| usage.output_tokens);
-        total_tokens += new_tokens.unwrap_or(0) + output_tokens.unwrap_or(0);
+        total_tokens = total_tokens
+            .saturating_add(new_tokens.unwrap_or(0))
+            .saturating_add(output_tokens.unwrap_or(0));
 
-        let _ = recorder.record_event(&sav::TrajectoryEvent::TurnStart {
+        recorder.record_event(&sav::TrajectoryEvent::TurnStart {
             turn: turn_number,
             timestamp: now_ts,
-        });
-        let _ = recorder.record_event(&sav::TrajectoryEvent::PromptEval {
+        })?;
+        recorder.record_event(&sav::TrajectoryEvent::PromptEval {
             turn: turn_number,
             cached_tokens: None,
             new_tokens,
             eval_duration_ms: None,
-        });
+        })?;
         for record in &run_turn.effects {
-            let args = serde_json::json!({ "destination": record.destination });
-            let _ = recorder.record_event(&sav::TrajectoryEvent::ToolDispatch {
+            let args =
+                serde_json::json!({ "destination": redact(&record.destination, redactions) });
+            let tool = redact(&record.tool, redactions);
+            let call_id = redact(&record.call_id, redactions);
+            recorder.record_event(&sav::TrajectoryEvent::ToolDispatch {
                 turn: turn_number,
-                call_id: record.call_id.clone(),
-                tool: record.tool.clone(),
+                call_id: call_id.clone(),
+                tool: tool.clone(),
                 args: args.clone(),
-                action_hash: sav::compute_action_hash(&record.tool, &args),
-            });
-            let _ = recorder.record_event(&sav::TrajectoryEvent::ToolResult {
+                action_hash: sav::compute_action_hash(&tool, &args),
+            })?;
+            recorder.record_event(&sav::TrajectoryEvent::ToolResult {
                 turn: turn_number,
-                call_id: record.call_id.clone(),
-                tool: record.tool.clone(),
+                call_id,
+                tool,
                 stdout: if record.applied {
                     "applied".to_owned()
                 } else {
@@ -1990,27 +1916,29 @@ fn record_turn_outcome(
                 stderr: redact_bounded(&record.detail, redactions, profile.max_output_bytes),
                 exit_code: if record.applied { 0 } else { 1 },
                 bytes: record.detail.len(),
-                state_mutated: record.applied,
-            });
+                // The legacy trajectory boolean cannot represent uncertainty;
+                // conservatively retain possible mutation and explain it in stderr.
+                state_mutated: record.applied || record.uncertain,
+            })?;
         }
         let finish_reason = serde_json::to_value(&turn.finish_reason)
             .ok()
             .and_then(|value| value.as_str().map(str::to_owned))
             .unwrap_or_else(|| "stop".to_owned());
-        let _ = recorder.record_event(&sav::TrajectoryEvent::TurnFinish {
+        recorder.record_event(&sav::TrajectoryEvent::TurnFinish {
             turn: turn_number,
             output_tokens,
-            finish_reason,
-        });
+            finish_reason: redact(&finish_reason, redactions),
+        })?;
     }
 
-    let _ = recorder.record_event(&sav::TrajectoryEvent::SessionFinish {
-        session_id: session_id.to_owned(),
-        task_id: request.task_id.to_string(),
+    recorder.record_event(&sav::TrajectoryEvent::SessionFinish {
+        session_id: redact(session_id, redactions),
+        task_id: redact(request.task_id, redactions),
         total_turns: run_turns.len(),
         total_tokens,
         success,
-    });
+    })?;
 
     Ok(AgentRunResult {
         success,
@@ -2102,7 +2030,7 @@ fn record_decision_evidence(
             reason: format!("cannot serialize the surfaced proposal: {source}"),
         }
     })?;
-    let path = proposals_dir.join(format!("{}.json", decision.call_id));
+    let path = proposals_dir.join(evidence_filename(&decision.call_id));
     write_atomic(&path, payload)?;
     Ok(path)
 }
@@ -2132,25 +2060,19 @@ fn record_dependency_evidence(
             reason: format!("cannot serialize the accepted dependency request: {source}"),
         }
     })?;
-    let path = authoring_dir.join(format!("{}.json", request.call_id));
+    let path = authoring_dir.join(evidence_filename(&request.call_id));
     write_atomic(&path, payload)?;
     Ok(path)
 }
 
-/// Writes bytes to `path` atomically via a temp file in the same directory and a
-/// rename, so a reader never observes a half-written proposal.
+fn evidence_filename(call_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{}.json", hex::encode(Sha256::digest(call_id.as_bytes())))
+}
+
+/// Uses synchronized same-directory replacement without a predictable staging path.
 fn write_atomic(path: &Path, payload: String) -> Result<()> {
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, payload.as_bytes()).map_err(|source| KvistError::Io {
-        operation: "write authoring evidence",
-        path: tmp.clone(),
-        source,
-    })?;
-    fs::rename(&tmp, path).map_err(|source| KvistError::Io {
-        operation: "commit authoring evidence",
-        path: path.to_path_buf(),
-        source,
-    })
+    crate::file_io::replace_file_atomically(path, &payload)
 }
 
 fn redaction_values(profile: &AgentProfile, sandbox_config: &SandboxConfig) -> Vec<String> {
@@ -2329,8 +2251,8 @@ mod tests {
 
         let endpoint = format!("http://{dead_port}");
         let budget = TurnBudget::new(Duration::from_secs(300));
-        let error =
-            probe_gateway_reachable(&endpoint, &budget).expect_err("gateway should be unreachable");
+        let error = probe_gateway_reachable(&endpoint, &budget, &CancellationToken::new())
+            .expect_err("gateway should be unreachable");
         match error {
             KvistError::LocalModelGatewayUnreachable {
                 endpoint: returned_endpoint,
@@ -2341,13 +2263,44 @@ mod tests {
     }
 
     #[test]
+    fn stream_redaction_is_unicode_safe_and_partition_invariant() {
+        for (text, values, expected) in [
+            ("é", vec!["secret".into()], "é"),
+            ("ababab", vec!["ababa".into()], "[REDACTED]b"),
+            (
+                "ésecret🙂secret",
+                vec!["secret".into()],
+                "é[REDACTED]🙂[REDACTED]",
+            ),
+            ("ababa", vec!["aba".into(), "ababa".into()], "[REDACTED]"),
+        ] {
+            let boundaries: Vec<usize> = text
+                .char_indices()
+                .map(|(index, _)| index)
+                .chain(std::iter::once(text.len()))
+                .collect();
+            for first in &boundaries {
+                for second in boundaries.iter().filter(|second| *second >= first) {
+                    let mut redactor = StreamRedactor::new(&values);
+                    let mut output = redactor.absorb(&text[..*first]);
+                    output.push_str(&redactor.absorb(&text[*first..*second]));
+                    output.push_str(&redactor.absorb(&text[*second..]));
+                    output.push_str(&redactor.finish());
+                    assert_eq!(output, expected, "partition {first}, {second}: {text}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn probe_gateway_reachable_passes_when_a_listener_accepts() {
         // Hold a listener open for the duration of the probe so the connect
         // succeeds; dropping it at function end releases the port.
         let _listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind free port");
         let endpoint = format!("http://{}", _listener.local_addr().expect("local addr"));
         let budget = TurnBudget::new(Duration::from_secs(300));
-        probe_gateway_reachable(&endpoint, &budget).expect("gateway should be reachable");
+        probe_gateway_reachable(&endpoint, &budget, &CancellationToken::new())
+            .expect("gateway should be reachable");
     }
 
     #[test]
@@ -2360,8 +2313,8 @@ mod tests {
         let endpoint = format!("http://{dead_port}");
         let budget = TurnBudget::new(Duration::from_millis(1));
         thread::sleep(Duration::from_millis(5));
-        let error =
-            probe_gateway_reachable(&endpoint, &budget).expect_err("budget must be exhausted");
+        let error = probe_gateway_reachable(&endpoint, &budget, &CancellationToken::new())
+            .expect_err("budget must be exhausted");
         assert!(
             matches!(
                 error,
@@ -2675,7 +2628,7 @@ mod tests {
         assert_eq!(transport.attempt_count(), 0);
     }
 
-    fn test_execution_request<'a>(target: &'a Path) -> AgentExecutionRequest<'a> {
+    pub(super) fn test_execution_request<'a>(target: &'a Path) -> AgentExecutionRequest<'a> {
         AgentExecutionRequest {
             project_root: target,
             vcs_selection: crate::config::VcsSelection::Git,
@@ -2690,7 +2643,7 @@ mod tests {
         }
     }
 
-    fn test_profile(command: &str) -> AgentProfile {
+    pub(super) fn test_profile(command: &str) -> AgentProfile {
         AgentProfile {
             role: crate::config::Role::Developer,
             profile: "default".to_owned(),
@@ -2719,6 +2672,7 @@ mod tests {
             "refusal",
             "fixture",
             "fixture",
+            &[],
         )
         .expect("live");
         let target = std::env::temp_dir();
@@ -2738,10 +2692,11 @@ mod tests {
             &request,
             &budget,
             &[],
-            &[],
+            &test_request("fixture"),
             &sav::CancellationToken::new(),
             &live,
             &mut 0,
+            &mut TokenBudget::new(None),
         )
         .expect_err("a non-loopback command must be refused");
         assert!(
@@ -2758,6 +2713,7 @@ mod tests {
             "refusal",
             "fixture",
             "fixture",
+            &[],
         )
         .expect("live");
         let target = std::env::temp_dir();
@@ -2777,10 +2733,11 @@ mod tests {
             &request,
             &budget,
             &[],
-            &[],
+            &test_request("fixture"),
             &sav::CancellationToken::new(),
             &live,
             &mut 0,
+            &mut TokenBudget::new(None),
         )
         .expect_err("the no-op model must be refused");
         assert!(

@@ -55,6 +55,11 @@ redacted model/broker/effect lifecycle events as they occur. A synchronized
 dispatch record precedes every effect, and recording failure aborts later
 effects. Existing canonical attempt evidence remains separate.
 
+Configured literal redactions apply to diagnostic metadata and observed text,
+including model names and tool identities. Journal run identities are derived
+digests, not raw task text; protocol event tags and private filesystem paths
+remain administrative identifiers.
+
 `cancel` requests cooperative termination and retains observed/unknown effects.
 `guide` queues bounded supplemental human guidance for the next safe boundary;
 it never edits intent or changes a grant. Only an explicitly enabled run can
@@ -62,6 +67,20 @@ accept controls. Guidance is recorded before it reaches model context, all
 pending assistant calls receive results, and the original wall/token/turn
 accounting is retained. Completion closes the control capability. There is no
 automatic replay/resume. An observer never needs control access.
+
+The native request materializes only selected local artifacts and exact
+root/parent contract mounts. Reads reject links, non-regular files, traversal,
+invalid text and size overflow; invalid selected context fails instead of
+disappearing. Profile token limits cover the cumulative run, including
+conservative reservations for unknown/interrupted attempts. Known provider
+usage remains distinct from those estimates. Errors and cancellation retain
+known usage and observed or uncertain effects; they do not authorize replay.
+
+Protected model-requested dependency fulfillment currently fails explicitly:
+there is no exact request-to-lock binding and no mediated vendor-repack
+contract. A ready unrelated registry is not fulfillment. No host package-manager
+fallback is allowed. The broader automatic-acquisition target remains unmet,
+not certified or silently waived; explicit human `kvist vendor` is separate.
 
 ### Command surface
 

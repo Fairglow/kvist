@@ -84,7 +84,7 @@ fn protected_run_is_observable_before_provider_completion_and_is_redacted() {
                 .recv_timeout(Duration::from_secs(3))
                 .expect("release");
             let body = serde_json::json!({
-                "model":"fixture","message":{"role":"assistant","content":"done private-value"},
+                "model":"private-value","message":{"role":"assistant","content":"done private-value"},
                 "done":true,"done_reason":"stop"
             })
             .to_string();
@@ -297,4 +297,392 @@ fn protected_tasks_refuse_opaque_agents_before_creating_execution_state() {
     .expect_err("external backend cannot receive protected task authority");
     assert!(error.to_string().contains("broker contract"));
     assert!(!dir.path().join(".kvist").exists());
+}
+
+fn read_request(stream: &mut std::net::TcpStream) -> Option<serde_json::Value> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("deadline");
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; 8192];
+    loop {
+        let count = stream.read(&mut chunk).expect("read request");
+        if count == 0 {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+        if let Some(split) = bytes.windows(4).position(|tail| tail == b"\r\n\r\n") {
+            let header = String::from_utf8_lossy(&bytes[..split]).to_ascii_lowercase();
+            let length = header
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length:").map(str::trim))
+                .expect("length")
+                .parse::<usize>()
+                .expect("number");
+            if bytes.len() >= split + 4 + length {
+                return Some(
+                    serde_json::from_slice(&bytes[split + 4..split + 4 + length])
+                        .expect("JSON body"),
+                );
+            }
+        }
+    }
+}
+
+fn respond(stream: &mut std::net::TcpStream, input: u64, output: u64) {
+    let body = serde_json::json!({
+        "model":"fixture","message":{"role":"assistant","content":"observed answer"},
+        "done":true,"done_reason":"stop","prompt_eval_count":input,"eval_count":output
+    })
+    .to_string();
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .expect("response");
+}
+
+fn shared_profile(endpoint: &str, context_limit: usize) -> AgentProfile {
+    let mut selected = profile(endpoint);
+    let mut native = sav::registry::NativeModel::new(
+        sav::LocalModelProvider::Ollama,
+        endpoint.into(),
+        "fixture".into(),
+    );
+    native.context_limit = Some(context_limit);
+    native.response_reserve = Some(256);
+    selected.resolved_profile = Some(sav::registry::ResolvedProfile {
+        name: "shared-fixture".into(),
+        profile: sav::registry::Profile::new(sav::registry::Backend::Native(native)),
+        source: "providers.toml".into(),
+        digest: format!("sha256:{}", "0".repeat(64)),
+    });
+    selected
+}
+
+#[test]
+fn approved_context_reaches_native_and_explicit_endpoint_requests() {
+    for shared in [true, false] {
+        let dir = tempfile::tempdir_in(".").expect("workspace");
+        let root = dir.path().canonicalize().expect("absolute workspace");
+        fs::write(root.join("REQUIREMENTS.md"), "local-context-marker").expect("local");
+        fs::write(root.join("ROOT_CONTRACT.md"), "root-context-marker").expect("root");
+        fs::write(root.join("PARENT_CONTRACT.md"), "parent-context-marker").expect("parent");
+        fs::write(root.join("peer.rs"), "never-include-peer-marker").expect("peer");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+        let endpoint = format!("http://{}", listener.local_addr().expect("address"));
+        let provider = thread::spawn(move || {
+            loop {
+                let (mut stream, _) = listener.accept().expect("accept");
+                if let Some(request) = read_request(&mut stream) {
+                    let text = request.to_string();
+                    for marker in [
+                        "local-context-marker",
+                        "root-context-marker",
+                        "parent-context-marker",
+                        "fixture task",
+                    ] {
+                        assert!(text.contains(marker), "missing selected context: {marker}");
+                    }
+                    assert!(!text.contains("never-include-peer-marker"));
+                    respond(&mut stream, 10, 4);
+                    break;
+                }
+            }
+        });
+        let selected = if shared {
+            shared_profile(&endpoint, 8192)
+        } else {
+            profile(&endpoint)
+        };
+        let context = [
+            "/workspace/component/REQUIREMENTS.md".into(),
+            "/workspace/context/ROOT_CONTRACT.md".into(),
+            "/workspace/context/PARENT_CONTRACT.md".into(),
+        ];
+        let mounts = [
+            kvist::sandbox::ReadOnlyMount::file(
+                root.join("ROOT_CONTRACT.md"),
+                "/workspace/context/ROOT_CONTRACT.md",
+            ),
+            kvist::sandbox::ReadOnlyMount::file(
+                root.join("PARENT_CONTRACT.md"),
+                "/workspace/context/PARENT_CONTRACT.md",
+            ),
+        ];
+        let result = execute_agent(
+            &selected,
+            &SandboxConfig {
+                runner: "/usr/bin/true".into(),
+                backend: "/usr/bin/true".into(),
+                environment_allowlist: vec![],
+                acquisition: Default::default(),
+            },
+            None,
+            None,
+            AgentExecutionRequest {
+                project_root: &root,
+                vcs_selection: VcsSelection::Git,
+                prompt: "fixture task",
+                context_paths: &context,
+                read_only_mounts: &mounts,
+                target_dir: &root,
+                task_id: "context-task",
+                stream_output: false,
+                role: Role::Developer,
+                policy_identity: "fixture",
+            },
+        );
+        provider.join().expect("provider");
+        assert!(result.expect("run").success);
+    }
+}
+
+#[test]
+fn steering_retains_whole_run_usage_and_cumulative_token_limit() {
+    for limited in [false, true] {
+        let dir = tempfile::tempdir_in(".").expect("workspace");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+        let endpoint = format!("http://{}", listener.local_addr().expect("address"));
+        let mailbox = sav::runtime::ControlMailbox::default();
+        let controls = mailbox.clone();
+        let provider = thread::spawn(move || {
+            let mut inference = 0;
+            loop {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let Some(request) = read_request(&mut stream) else {
+                    continue;
+                };
+                inference += 1;
+                if inference == 1 {
+                    controls.steer("continue with guidance").expect("guidance");
+                    respond(&mut stream, if limited { 6500 } else { 11 }, 7);
+                    if limited {
+                        break;
+                    }
+                } else {
+                    assert!(request.to_string().contains("continue with guidance"));
+                    respond(&mut stream, 13, 5);
+                    break;
+                }
+            }
+        });
+        let mut selected = shared_profile(&endpoint, 8192);
+        selected.token_limit = limited.then_some(7000);
+        let result = kvist::agent::execute_agent_controlled(
+            &selected,
+            &SandboxConfig {
+                runner: "/usr/bin/true".into(),
+                backend: "/usr/bin/true".into(),
+                environment_allowlist: vec![],
+                acquisition: Default::default(),
+            },
+            None,
+            None,
+            AgentExecutionRequest {
+                project_root: dir.path(),
+                vcs_selection: VcsSelection::Git,
+                prompt: "fixture task",
+                context_paths: &[],
+                read_only_mounts: &[],
+                target_dir: dir.path(),
+                task_id: "usage-task",
+                stream_output: false,
+                role: Role::Developer,
+                policy_identity: "fixture",
+            },
+            &mailbox,
+            &sav::CancellationToken::new(),
+        )
+        .expect("recorded outcome");
+        provider.join().expect("provider");
+        assert_eq!(result.success, !limited);
+        assert_eq!(result.tokens_input, Some(if limited { 6500 } else { 24 }));
+        assert_eq!(result.tokens_output, Some(if limited { 7 } else { 12 }));
+        if limited {
+            assert!(result.stderr.contains("token"), "{}", result.stderr);
+        }
+        let trajectory = fs::read_dir(dir.path().join(".kvist/runs"))
+            .expect("runs")
+            .map(|entry| entry.expect("entry").path())
+            .find(|path| path.to_string_lossy().ends_with(".trajectory.jsonl"))
+            .expect("trajectory");
+        let replay = sav::replay_trajectory(&trajectory, None).expect("replay");
+        assert!(replay.events.iter().any(|event| matches!(
+            event,
+            sav::TrajectoryEvent::SessionFinish { total_tokens, .. }
+                if *total_tokens == if limited {6507} else {36}
+        )));
+    }
+}
+
+#[test]
+fn forbidden_native_endpoint_is_refused_before_liveness_connect() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    let listener = TcpListener::bind("0.0.0.0:0").expect("listener");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let endpoint = format!("http://{}", listener.local_addr().expect("address"));
+    let result = execute_agent(
+        &shared_profile(&endpoint, 8192),
+        &SandboxConfig {
+            runner: "/usr/bin/true".into(),
+            backend: "/usr/bin/true".into(),
+            environment_allowlist: vec![],
+            acquisition: Default::default(),
+        },
+        None,
+        None,
+        AgentExecutionRequest {
+            project_root: dir.path(),
+            vcs_selection: VcsSelection::Git,
+            prompt: "fixture",
+            context_paths: &[],
+            read_only_mounts: &[],
+            target_dir: dir.path(),
+            task_id: "forbidden-endpoint",
+            stream_output: false,
+            role: Role::Developer,
+            policy_identity: "fixture",
+        },
+    );
+    assert!(result.is_err() || !result.expect("outcome").success);
+    assert_eq!(
+        listener
+            .accept()
+            .expect_err("must not probe forbidden authority")
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}
+
+#[test]
+fn cancelled_generation_keeps_earlier_turn_evidence_and_usage() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+    let endpoint = format!("http://{}", listener.local_addr().expect("address"));
+    let mailbox = sav::runtime::ControlMailbox::default();
+    let controls = mailbox.clone();
+    let token = sav::CancellationToken::new();
+    let cancel = token.clone();
+    let provider = thread::spawn(move || {
+        let mut inference = 0;
+        loop {
+            let (mut stream, _) = listener.accept().expect("accept");
+            if read_request(&mut stream).is_none() {
+                continue;
+            }
+            inference += 1;
+            if inference == 1 {
+                controls.steer("continue").expect("guidance");
+                respond(&mut stream, 11, 7);
+            } else {
+                cancel.cancel();
+                break;
+            }
+        }
+    });
+    let error = kvist::agent::execute_agent_controlled(
+        &shared_profile(&endpoint, 8192),
+        &SandboxConfig {
+            runner: "/usr/bin/true".into(),
+            backend: "/usr/bin/true".into(),
+            environment_allowlist: vec![],
+            acquisition: Default::default(),
+        },
+        None,
+        None,
+        AgentExecutionRequest {
+            project_root: dir.path(),
+            vcs_selection: VcsSelection::Git,
+            prompt: "original task",
+            context_paths: &[],
+            read_only_mounts: &[],
+            target_dir: dir.path(),
+            task_id: "cancel-evidence",
+            stream_output: false,
+            role: Role::Developer,
+            policy_identity: "fixture",
+        },
+        &mailbox,
+        &token,
+    )
+    .expect_err("cancellation must not become a success-shaped result");
+    assert!(error.to_string().contains("cancel"));
+    provider.join().expect("provider");
+    let log = fs::read_dir(dir.path().join(".kvist/logs"))
+        .expect("logs")
+        .next()
+        .expect("log")
+        .expect("entry")
+        .path();
+    let text = fs::read_to_string(log).expect("log");
+    assert!(text.contains("observed answer"));
+    assert!(text.contains("known input=Some(11)"));
+    assert!(text.contains("known output=Some(7)"));
+    assert!(text.contains("cancel"));
+    let trajectory = fs::read_dir(dir.path().join(".kvist/runs"))
+        .expect("runs")
+        .map(|entry| entry.expect("entry").path())
+        .find(|path| path.to_string_lossy().ends_with(".trajectory.jsonl"))
+        .expect("trajectory");
+    let replay = sav::replay_trajectory(&trajectory, None).expect("replay");
+    assert_eq!(replay.final_success, Some(false));
+    assert!(replay.events.iter().any(|event| matches!(
+        event,
+        sav::TrajectoryEvent::SessionFinish {
+            total_tokens: 18,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn selected_context_that_cannot_fit_refuses_inference_instead_of_omitting_it() {
+    for shared in [true, false] {
+        let dir = tempfile::tempdir_in(".").expect("workspace");
+        fs::write(
+            dir.path().join("REQUIREMENTS.md"),
+            "selected artifact ".repeat(4096),
+        )
+        .expect("selected artifact");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let endpoint = format!("http://{}", listener.local_addr().expect("address"));
+        let selection = if shared {
+            shared_profile(&endpoint, 8192)
+        } else {
+            profile(&endpoint)
+        };
+        let context = ["/workspace/component/REQUIREMENTS.md".into()];
+        let error = execute_agent(
+            &selection,
+            &SandboxConfig {
+                runner: "/usr/bin/true".into(),
+                backend: "/usr/bin/true".into(),
+                environment_allowlist: vec![],
+                acquisition: Default::default(),
+            },
+            None,
+            None,
+            AgentExecutionRequest {
+                project_root: dir.path(),
+                vcs_selection: VcsSelection::Git,
+                prompt: "fixture task",
+                context_paths: &context,
+                read_only_mounts: &[],
+                target_dir: dir.path(),
+                task_id: "context-refusal",
+                stream_output: false,
+                role: Role::Developer,
+                policy_identity: "fixture",
+            },
+        )
+        .expect_err("cannot fit selected context");
+        assert!(error.to_string().contains("context"), "{error}");
+        assert_eq!(
+            listener.accept().expect_err("no inference or probe").kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
 }
