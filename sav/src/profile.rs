@@ -32,19 +32,7 @@ pub struct ModelProfile {
 pub fn default_profile_config_path() -> Option<PathBuf> {
     let base = absolute_environment_path("XDG_CONFIG_HOME")
         .or_else(|| absolute_environment_path("HOME").map(|home| home.join(".config")))?;
-    let canonical = base.join("sav").join("config.toml");
-    match fs::symlink_metadata(&canonical) {
-        Ok(_) => Some(canonical),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let legacy = base.join("supervised-agent").join("config.toml");
-            if fs::symlink_metadata(&legacy).is_ok() {
-                Some(legacy)
-            } else {
-                Some(canonical)
-            }
-        }
-        Err(_) => Some(canonical),
-    }
+    Some(base.join("sav").join("config.toml"))
 }
 
 fn absolute_environment_path(name: &str) -> Option<PathBuf> {
@@ -238,7 +226,7 @@ pub(crate) fn is_valid_profile_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':'))
 }
 
-fn read_configuration(path: &Path) -> Result<String> {
+pub(crate) fn read_configuration(path: &Path) -> Result<String> {
     let metadata = fs::symlink_metadata(path).map_err(|source| Error::Io {
         operation: "inspect profile configuration",
         path: path.to_path_buf(),
@@ -294,7 +282,7 @@ fn read_configuration(path: &Path) -> Result<String> {
         .map_err(|_| invalid_configuration(path, "configuration must be valid UTF-8"))
 }
 
-fn persist_configuration(path: &Path, contents: &[u8], existed: bool) -> Result<()> {
+pub(crate) fn persist_configuration(path: &Path, contents: &[u8], existed: bool) -> Result<()> {
     let parent = match path.parent() {
         Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
         Some(parent) => parent,

@@ -2,6 +2,17 @@
 
 # Sav Requirements
 
+## Shared registry configuration acceptance (ADR 0015)
+
+- One bounded typed representation MUST distinguish native local HTTP models
+  from external agents and expose pinned, source-bound named resolution.
+- Explicit/project/user precedence MUST be deterministic, filesystem-only and
+  fail closed for invalid input. Dynamic catalog IDs MUST remain advisory.
+- Shared setup MUST reuse catalog discovery and qualification, preserve atomic
+  writes, disclose inherited authority/billing, and store no inline secrets.
+- Tests MUST cover malformed/unknown fields, precedence, pinning, disabled
+  profiles, capability separation, endpoint constraints, and atomic persistence.
+
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
 described in BCP 14 (RFC 2119 and RFC 8174) when, and only when, they appear in
@@ -11,7 +22,7 @@ all capitals.
 
 `sav` provides a reusable Linux-first Rust library and standalone CLI
 for bounded prompt acquisition, provider profile management, shell-free command
-rendering, process supervision, local model transport, and the planned
+rendering, process supervision, local model transport, and the
 provider-neutral native agent runtime.
 
 It is independent of Kvist component discovery, task queues, roles, project
@@ -31,6 +42,19 @@ authority through narrow interfaces.
   event responsibilities.
 
 ## Functional requirements
+
+The following stable identifiers define the reusable runtime's mandatory
+behavior. Host-specific policy may impose stricter execution constraints.
+
+### Shared native runtime verification (ADR 0015)
+
+The native runtime control boundary MUST expose finite message/byte bounds and
+correlated identities. Regression evidence MUST include quiet-provider
+interruption, backoff wakeup, effect completion before guidance, complete
+skipped-result pairing, final-answer/submission arbitration, pre-claim
+edit/withdraw, required-delivery recording failure, shutdown, and preservation
+of wall/token/attempt budgets. Hosts using low-level mechanisms retain
+authorization, delivery recording and policy responsibilities.
 
 ### AR-REQ-SHARED-RUNTIME
 
@@ -57,9 +81,6 @@ validate bounded messages, and acknowledge actual acceptance/delivery.
 External-agent execution MUST require an explicit execution boundary and MUST
 NOT silently become an unconfined native transport.
 
-The requirements below define the mandatory behavior of the reusable runtime
-component and its standalone CLI.
-
 ### AR-REQ-ACTIVE-MODEL
 
 Read-only loaded-model discovery MUST recognize llama-server router metadata:
@@ -70,9 +91,6 @@ authority, cancellation, a shared probe deadline, 1-MiB response bounds, and a
 128-model bound, without inference or model loading. Model identifiers MUST be
 nonblank, control-free and at most 256 bytes. A deliberate advisory exception
 covers this human-requested repair while receipts remain unimplemented.
-
-The following stable requirement identifiers define the mandatory behavior of
-the reusable runtime component.
 
 ### AR-REQ-PROMPT-COMMAND
 

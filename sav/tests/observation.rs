@@ -131,6 +131,7 @@ fn oversized_initial_metadata_never_reserves_a_filename_and_serialization_is_bou
                 self.0.fetch_add(1, Ordering::Relaxed);
                 sequence.serialize_element(&0)?;
             }
+
             sequence.end()
         }
     }
@@ -150,6 +151,43 @@ fn oversized_initial_metadata_never_reserves_a_filename_and_serialization_is_bou
         "stop serializing at the byte bound"
     );
     assert_eq!(fs::read(&path).expect("unchanged"), before);
+}
+
+#[test]
+fn runtime_control_bridge_never_promotes_late_guidance_to_new_tasks() {
+    let controls = sav::runtime::ControlMailbox::default();
+    let cancellation = sav::CancellationToken::new();
+    let server = sav::observation::bind_runtime_controls(&controls, &cancellation).expect("server");
+    let send =
+        |request| send_control(server.path(), &request, Duration::from_secs(1)).expect("exchange");
+    assert_eq!(
+        send(ControlRequest::guide(1, "too early")).status,
+        "rejected"
+    );
+    assert_eq!(send(ControlRequest::cancel(2)).status, "rejected");
+    assert!(!cancellation.is_cancelled());
+    controls.begin_run().expect("owner");
+    let reply = send(ControlRequest::guide(3, "retain the original objective"));
+    assert_eq!(reply.status, "queued");
+    let guidance = controls.claim().expect("claim");
+    assert_eq!(guidance.len(), 1);
+    assert!(
+        reply
+            .message
+            .expect("correlation")
+            .contains(&format!("#{}", guidance[0].id.0))
+    );
+    assert_eq!(
+        send(ControlRequest::cancel(4)).status,
+        "cancellation_requested"
+    );
+    assert!(cancellation.is_cancelled());
+    controls.end_run().expect("end");
+    assert_eq!(
+        send(ControlRequest::guide(5, "not a replacement")).status,
+        "rejected"
+    );
+    assert!(controls.next_task().expect("tasks").is_none());
 }
 
 #[test]
