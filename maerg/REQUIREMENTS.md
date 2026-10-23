@@ -246,13 +246,14 @@ policy, it MUST NOT be applied automatically. It is instead surfaced to the huma
 as a blocking decision and placed the component in an awaiting-decision state
 until the human approves it, rejects it, or narrows the policy.
 
-Current implementation status: the broker accepts the `request_dependency` tool,
-evaluates each origin against the dependency policy, and for in-policy requests
-immediately triggers the dependency acquisition phase. The acquisition sandbox
-(`cargo fetch` with allowlisted package sources) runs before the effect sandbox
-executes, then the fetched material is repacked into the vendored registry. An
-out-of-policy request is surfaced as a decision that places the component in an
-awaiting-decision state.
+Current delivery limitation, exposed by the independent ADR 0015 source review:
+the broker evaluates requests, but exact request-to-lock identity binding and
+mediated vendor repacking are unavailable. The former automatic host-provisioning
+fallback is not an implementation of the protected requirement above. Protected
+requests now fail explicitly before provisioning effects, even if unrelated
+vendoring is ready. Explicit human `kvist vendor` remains separate. Automatic
+fulfillment is an unmet target requiring arbitration, not an approved deferral
+or a claim of compliance. Out-of-policy requests still surface a decision.
 
 ### REQ-RUST-TOOLCHAIN
 
@@ -725,8 +726,9 @@ explicitly draft rather than inferred truth.
 - Multi-turn agent execution, bounded whole-project reading, decision-driven
   awaiting-decision states, and the `propose_decision`/`request_dependency`
   tools (request, policy evaluation, and run-harness pause) are implemented and
-  claimed by the current CLI. Agent-driven dependency requests that auto-fetch
-  an in-policy revision (the dependency acquisition phase) are implemented.
+  claimed by the current CLI. Automatic exact dependency-request fulfillment
+  remains an explicit unmet target; protected requests fail closed rather than
+  invoking a host package-manager fallback.
   Whole-component-minus-exclusions writing scope (write at the component root
   for `Cargo.toml`/`deny.toml`) remains a target requirement.
 - Configuration is limited to 64 KiB. Component Markdown and YAML artifacts

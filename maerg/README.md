@@ -153,6 +153,10 @@ effect; acquisition/verification phases retain their existing bounded
 timeout/signal behavior. No control implies rollback or automatic replay.
 Model deltas are journaled live when `task run --stream` is enabled; otherwise
 request, completed-turn, broker and effect progress remain inspectable live.
+Automatic model-requested dependency fulfillment currently fails closed: exact
+request-to-lock binding and mediated vendor repacking are not implemented.
+There is no host package-manager fallback; explicit human `kvist vendor`
+remains available separately. Independent review records this unmet target.
 
 Agent settings come from one selected source; they are not merged across the
 paths above. `[agent]` in the project `kvist.toml` wins when present. Otherwise

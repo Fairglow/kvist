@@ -422,6 +422,24 @@ with allowlisted package sources) runs before the effect sandbox executes, then
 the fetched material is repacked into the vendored registry. An out-of-policy
 request is surfaced as a decision and stops the run in `AwaitingDecision`.
 
+ADR 0015 source review found that the automatic path above was not fully
+mediated: vendor repacking could fall back to host execution and the requested
+identity was not bound to the resulting lock. The delivered protected entrypoint
+therefore refuses fulfillment before effects, using the task's controls and
+remaining budget rather than selecting another executor. A separate read-only
+readiness check does not establish fulfillment. The automatic design remains
+an unmet target for explicit arbitration; this note is not a compliance pass.
+
+Native context materialization is isolated in `agent::context`: selected paths
+must resolve to the five local artifacts or an exact approved root/parent
+contract mount. Descriptor-relative no-follow reads enforce regular UTF-8
+files, component-document bounds and a 4 MiB aggregate cap; the resulting
+documents are pinned into the initial conversation. `agent::accounting`
+reserves estimated input plus bounded output before each attempt, replaces
+reservations with nonzero known provider totals, and retains conservative
+charges for absent or interrupted reports across retries and steering.
+Known usage and completed/uncertain effects survive terminal errors.
+
 The model is advertised exactly these tools, with schemas and the scope and
 protected-document notice, by [`authoring_tool_definitions`](src/authoring/mod.rs)
 and the authoring-scope directive in the task prompt. Trivial-issueness, the

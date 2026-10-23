@@ -291,27 +291,31 @@ impl MockGateway {
     }
 }
 
-/// Extracts the user-message content from an OpenAI-style request body, for the
-/// echo-prompt gateway. The serializer may emit the message's `content` field
-/// before or after its `role` field, so take the nearest `"content":"` around
-/// the `"role":"user"` marker. The prompts in these tests carry no quotes, so
-/// reading to the next quote is sufficient.
+/// Extracts the first user message without depending on JSON key order.
 #[cfg(target_os = "linux")]
 fn extract_user_content(bytes: &[u8]) -> Option<String> {
-    let text = std::str::from_utf8(bytes).ok()?;
-    let user_pos = text.find("\"role\":\"user\"")?;
-    let marker = "\"content\":\"";
-    let start = text[..user_pos]
-        .rfind(marker)
-        .map(|pos| pos + marker.len())
-        .or_else(|| {
-            text[user_pos..]
-                .find(marker)
-                .map(|pos| user_pos + pos + marker.len())
-        })?;
-    let rest = &text[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_owned())
+    let request: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    request["messages"]
+        .as_array()?
+        .iter()
+        .find(|message| message["role"] == "user")?["content"]
+        .as_str()
+        .map(str::to_owned)
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn mock_gateway_extracts_user_content_independently_of_json_field_order() {
+    let requests: [&[u8]; 2] = [
+        br#"{"messages":[{"role":"system","content":"system"},{"role":"user","content":"CUSTOM_RUST_BKM: \"quoted\""}]}"#,
+        br#"{"messages":[{"content":"system","role":"system"},{"content":"CUSTOM_RUST_BKM: \"quoted\"","role":"user"}]}"#,
+    ];
+    for request in requests {
+        assert_eq!(
+            extract_user_content(request).as_deref(),
+            Some("CUSTOM_RUST_BKM: \"quoted\"")
+        );
+    }
 }
 
 /// Lowercases an ASCII byte slice (for header inspection).

@@ -30,27 +30,27 @@ tasks:
   - id: shared-runtime-implement-code
     title: "Integrate shared mechanisms beneath task authority"
     description: "Resolve shared profiles and emit live journal/control state while retaining context, broker, acquisition, verification and canonical evidence ownership."
-    context: "Shared profile pinning, native conversation/context/retry/control integration, required live diagnostics and task --allow-control are wired without workspace-shell or opaque-agent fallback. Protected broker, acquisition, verification and canonical evidence remain local. Full workspace tests and strict Clippy passed; independent gates remain separate."
+    context: "Tests-first audit repairs materialize bounded selected context, preserve cumulative accounting and partial/uncertain effects, redact metadata and stream boundaries, and contain evidence identities. Unsupported automatic provisioning now refuses before host effects; its normative target remains unmet for arbitration. Final workspace: 1743 passed, 14 existing ignores; strict lint, format, release and documentation gates passed."
     purpose: "Enable independent inspection without weakening protected execution."
     expected_outcome: "Protected regression tests and new live diagnostics pass."
     kind: implementation
     status: completed
     depends_on: [shared-runtime-write-tests]
     requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T23:39:56Z", completed_at: "2026-10-23T23:39:56Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-security-audit
     title: "Inspect protected integration authority"
     description: "Independently inspect required recording, control authorization, task grants and absence of unconfined fallback or effect replay."
-    context: "Retain concrete findings and scope limitations."
+    context: "Independent source-only IMPL.md was refreshed after repairs, correcting unsupported claims. Broader finalization, origin-classification and verification-redaction limits remain explicit. Protected provisioning refusal is observed, not represented as fulfillment of the automatic dependency requirement. This records audit activity, not acceptance."
     purpose: "Keep host authority explicit."
     expected_outcome: "Scoped findings corrected or explicitly retained."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on: [shared-runtime-implement-code]
     requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T23:39:56Z", completed_at: "2026-10-23T23:39:56Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-compliance-review

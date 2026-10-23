@@ -135,11 +135,6 @@ impl Drop for LocalModel {
     }
 }
 
-/// A literal command-template value (TOML single-quoted) that talks to a
-/// loopback endpoint. `{prompt_json}` and `ENDPOINT_PLACEHOLDER` are
-/// substituted by the caller; the host-side turn only needs the endpoint.
-const MOCK_COMMAND_TOML_VALUE: &str = r#"curl --request POST --json "{\"model\":\"kvist-test-mock\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "ENDPOINT_PLACEHOLDER"#;
-
 impl LocalModel {
     fn spawn() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback mock provider");
@@ -585,11 +580,25 @@ resolver = "3"
     create_child(&maerg, "sav", "fixture-sav");
     create_child(&maerg, "galla", "fixture-galla-runner");
     let runner = write_controlled_runner(project.path(), external_tools.path());
-    // The host-side model turn extracts a loopback endpoint from the profile
-    // command template. Inject a reachable one (hermetic mock by default) so the
-    // turn completes without a real, remote, or contended local model.
     let (model_endpoint, local_model) = resolve_local_test_model();
-    let command_template = MOCK_COMMAND_TOML_VALUE.replace("ENDPOINT_PLACEHOLDER", &model_endpoint);
+    let base_url = model_endpoint
+        .strip_suffix("/v1/chat/completions")
+        .unwrap_or(&model_endpoint);
+    fs::write(
+        project.path().join("providers.toml"),
+        format!(
+            r#"schema_version = 1
+[profiles.fixture.backend]
+kind = "native"
+provider = "llama-server"
+base_url = "{base_url}"
+model = "kvist-test-mock"
+context_limit = 65536
+response_reserve = 1024
+"#
+        ),
+    )
+    .expect("write shared fixture profile");
     fs::write(
         project.path().join("kvist.toml"),
         format!(
@@ -602,8 +611,11 @@ required = false
 [vcs]
 kind = "git"
 
-[agent.profiles.developer]
-command_template = '{}'
+[agent.registry]
+path = "providers.toml"
+
+[agent.roles.developer]
+profile = "fixture"
 timeout_seconds = 5
 max_output_bytes = 65536
 
@@ -626,7 +638,6 @@ max_output_bytes = 65536
 component = "."
 command = "/usr/bin/test -f tests/generated.rs"
 "##,
-            command_template,
             runner.display()
         ),
     )
