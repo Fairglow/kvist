@@ -438,6 +438,7 @@ struct RawConfig {
 #[serde(deny_unknown_fields)]
 struct RegistryConfig {
     path: Option<PathBuf>,
+    default_model: Option<String>,
     #[serde(default)]
     profiles: Vec<String>,
 }
@@ -529,6 +530,24 @@ impl Config {
                     });
                 }
                 raw.shared_profiles.insert(name, profile);
+            }
+            if let Some(name) = registry.default_model {
+                let model = raw
+                    .models
+                    .iter_mut()
+                    .find(|model| {
+                        model.id == name
+                            && model.provider == raw.default_provider
+                            && raw.shared_profiles.contains_key(&name)
+                    })
+                    .ok_or_else(|| Error::Config {
+                        path: Some(path.display().to_string()),
+                        reason: format!(
+                            "registry.default_model `{name}` must reference a retained enabled native shared profile of default_provider `{}`",
+                            raw.default_provider
+                        ),
+                    })?;
+                model.is_default = true;
             }
         }
         for model in &mut raw.models {

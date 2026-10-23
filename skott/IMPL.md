@@ -1,1127 +1,582 @@
 <!-- kvist-implementation-record-version: 1 -->
-
 # Component Implementation Record
 
-## Scoped responsive lifecycle observation - 2026-10-17
-
-Separate source-blind `lifecycle-comparator` compared this new record with scoped
-intent and attributed runtime evidence. It established no concrete unresolved
-scoped discrepancy and made no acceptance claim. Older record entries were
-inadvertently displayed during extraction but excluded from that comparison;
-source blindness remained intact. The initial 602-pass component run preceded
-the three follow-up corrections; final coverage was 54 targeted passes plus
-reported formatting, strict lint and release-build success. Neither independent
-context executed runtime verification. Local timings are not universal bounds.
-
-Independent clean-slate `lifecycle-observer` inspected current source/tests and
-the immediate toolchain dependency, excluding intent, queues, prior records,
-reviews, chat and Git history. It executed no builds or tests. The statements
-below describe inspected behavior and assertions, not independent runtime
-verification or acceptance.
-
-- Model/tool discovery and bootstrap own cancellation tokens and joining handles;
-  result polling uses `try_recv`. Exit requests cancellation/shutdown and restores
-  the terminal before owned-worker teardown. Session workers separately own a
-  permanent-shutdown flag, check event backpressure, wake prompt waits every
-  25 ms and join on handle drop
-  (`src/tui/startup.rs:32-80`, `src/tui/mod.rs:543-582,615-677`,
-  `src/run.rs:28-80,113-192`).
-- Interactive submissions during discovery accumulate FIFO until a matching
-  model/effort worker is ready; stale bootstrap results are shut down. Explicit
-  selection skips active probing and a manual choice survives late results.
-  Default-provider endpoint strings are deduplicated under five-second probes.
-  Matching uses provider names, including implicit Ollama `:latest`. Budget
-  resolution honors CLI, configuration, then provider metadata; missing capacity
-  fails rather than assuming a default
-  (`src/tui/app.rs:1141-1175`, `src/tui/mod.rs:268-279,352-369,597-612,680-697`,
-  `src/config.rs:166-223,887-948,960-1038`).
-- Concise toolchain/Rust summaries go to the UI; detailed resource notices go
-  to the recorder when enabled and budget provenance to metadata. Auto Rust
-  failures suppress advertisement; explicit/forced failures propagate. Host
-  opt-out uses a distinct executor/prompt. Rust hashing, vendor preparation and
-  bounded rustup subprocesses receive cancellation
-  (`src/tui/mod.rs:303-318,446-511,635-637`, `src/tools.rs:179-211`,
-  `src/rust_environment.rs:117-132,219-249,431-469,838-860,1130-1197`).
-
-The observer identified three concrete branches, then inspected their repairs:
-the advisory scan now uses a fixed nine-manifest table and a regular-descriptor,
-no-follow/nonblocking `.gitignore` read bounded to 64 KiB plus one overflow byte;
-nonblank initial prompts enter the editor before the dispatch-length guard;
-and startup status leaves live-worker status untouched
-(`src/toolchain.rs:260-279,360-417`, `src/tui/app.rs:499-526`,
-`src/tui/startup.rs:10-24`, `src/tui/mod.rs:732-737`).
-Inspected tests assert ignore-file size/link/FIFO/UTF-8 boundaries, PTY readiness
-and subsecond quit with a FIFO, overlong prompt preservation, live-status
-precedence, held-prompt ordering, loaded-model reuse and cancellation
-(`src/toolchain.rs:642-670`, `src/tui/startup.rs:182-222`,
-`tests/startup_lifecycle.rs:181-195,279-415`, `src/run.rs:565-629`).
-Their existence does not establish passing results; the observer ran none.
-
-Retained limitations: cancellation is cooperative and cannot interrupt every
-filesystem syscall. Held-prompt retries are count-bounded without timed backoff.
-Earlier source inspection found the pre-existing Rust preparation budget of
-180 seconds paired with a diagnostic saying 30 seconds; the correction-only
-recheck did not re-investigate that discrepancy. No new concrete defect was
-found in the three inspected repairs. This is not blanket compliance.
-
-## Scoped repository scheduling observation - 2026-10-14
-
-Independent clean-slate `repository-scheduling-observer` read only bounded
-configuration and source/test snippets, excluding intent, queues, records,
-reviews and history. It executed no tests and made no acceptance claim.
-
-The default nextest override selects the exact `skott` package,
-`rust_build_environment` binary and repository trial and specifies
-`threads-required = "num-test-threads"`. The regression parses TOML and asserts
-the exact selector and setting; it does not itself establish effective override
-precedence or runtime scheduling. `#[serial]` is process-local, whereas nextest
-uses separate test processes.
-
-The native trial resolves the actual repository root, runs sandboxed Cargo
-metadata and the Galla library tests with two internal libtest threads.
-Other fixtures reside beneath `skott`; Rust resource staging is created in
-their workspace parent as mode-0700 `.skott-rust-*`. Generated registration
-links target sandbox-only toolchain destinations. The production scope scan
-still rejects resolved links escaping its writable root.
-
-The observer established no concrete newly introduced correctness or authority
-issue. Fixture `TempDir` cleanup is observed; the exact retained resource-owner
-lifetime was outside the bounded read. External writers remain uncoordinated,
-and source inspection does not establish successful runtime exclusivity.
-
-## Scoped final bin-only discovery observation - 2026-10-14
-
-Independent clean-slate `bin-policy-observer` read bounded source/tests and CI,
-excluding intent, queues, records, reviews and history. It executed no tests and
-made no acceptance or compliance claim.
-
-System roots are `/usr`, `/lib`, `/lib64` and `/bin`. Language availability
-rejects administrative original and canonical candidates, rustup proxies,
-non-files, nonexecutables, canonicalization errors and paths outside mounted
-roots. Generic PATH defaults to `/usr/local/bin:/usr/bin:/bin`; accepted supplied
-environment variables can override defaults. Prepared Rust preserves runtime,
-compiler and optional Cargo-extension precedence, then uses
-`/usr/bin:/bin:/usr/local/bin`. The synthetic test asserts both extension branches.
-Host-PATH executable resolution excludes administrative candidates, but absolute
-paths and canonical aliases do not receive an equivalent resolver check; that
-resolver alone is not an authority guarantee.
-
-Discovery tests are ordinary nonignored tests without availability skips.
-They require runner/Bubblewrap and enabled profiles; JavaScript explicitly
-enables prepared Rust and checks its Cargo shim and `/usr/local/bin`. GCC
-evidence exactly matches a successful host compiler query's first nonblank
-line; distribution-banner cases reject missing/mismatched output. This
-establishes banner agreement, not compilation or executable identity.
-Quality and MSRV provision tools, Rust inventory and vendors on the host
-before tests; only Quality adds the explicitly ignored native suites.
-
-No concrete high-confidence scoped regression was established. The prior
-observation's weak Node-version predicate remains an explicit pre-existing
-evidence limitation. Administrative exclusion is path-based, not binary
-classification or race-resistant resolution.
-
-## Scoped portable toolchain evidence observation - 2026-10-14
-
-Independent clean-slate `ci-portability-observer` read only
-`tests/toolchain_discoverability.rs` and `.github/workflows/rust.yml`, excluding
-intent, queues, records, reviews and history. It executed no tests and made no
-compliance or acceptance claim.
-
-Discovery trials explicitly enable profiles, assert their presence and run
-version commands through `SandboxExecutor` with `/usr/bin/bwrap`. Missing
-runners fail rather than skip. Commands use `&&`, and tests require successful
-execution before examining up to 8192 characters of output. GCC evidence
-requires an exact line matching the first nonblank stdout line from a
-successful native `/usr/bin/gcc --version` query with UTF-8 output. Matcher
-cases cover distribution banners, unrelated preceding output and mismatches.
-Quality and MSRV provision system language packages, Rust inventory/targets,
-Cargo extensions, system-prefix Go and vendored dependencies on the CI host;
-test bodies do not install prerequisites.
-
-The observer noted that Node's version predicate accepts unrelated dotted
-output, including other version banners in the combined trial; it does not
-independently establish Node-specific version evidence. Enforcement internals,
-actual native execution and historical regression attribution were outside
-the observation scope.
-
-## Scoped vendor-alias test observation - 2026-10-14
-
-Independent source-only `mask-observer` inspected the updated native test
-mechanics without intent, queues, records, reviews or history. It did not
-execute these native suites or make a compliance claim.
-
-The serial snapshot trial modifies the host dependency manifest after
-preparation, then asserts that sandbox builds still succeed. Workspace alias
-checks deny read/write/traversal, listing, file reads, creation and permission
-changes; a sibling `.kvist` file remains readable. Post-execution assertions
-check preserved host permissions/manifest and no attempted file. An executor
-without vendor resources retains ordinary workspace-vendor visibility.
-Diagnostic capture remains a marker-controlled separate process, with serial
-fixture execution; inventory expects `/workspace/target`.
-
-## Scoped CI repair observation - 2026-10-14
-
-Independent clean-slate `repair-observer` read only enumerated source/test
-files and build manifests, excluding intent, queues, prior records/reviews and
-history. It executed no tests and made no compliance or acceptance claim.
-
-`src/rust_environment.rs` retains staged wrappers, registrations and a copied
-vendor snapshot through an `Arc` owner; final-owner drop removes staging.
-Grants expose these read-only under `/rust/*`, including `/rust/vendor`,
-outside the writable workspace. HOME, Cargo cache and selection settings are
-invocation scratch; `/workspace/target` persists. The effective preparation
-budget is 180 seconds, with at most eight copy workers. Source-defined tests
-cover cleanup, resource drift, snapshot independence, persistent
-binaries/documentation and native Rust commands. Diagnostic capture re-executes
-the test in a separate process to isolate global tracing callsites and asserts
-payload exclusion. CI provisions rustup, toolchains/components/targets,
-cargo-nextest, Bubblewrap and vendored dependencies beforehand.
-
-The observer retained pre-existing limits outside this repair: snapshot
-enumeration bounds file sizes, but workers do not aggregate copied sizes after
-concurrent growth; preparation's diagnostic still says 30 seconds despite its
-180-second bound; an older preparation diagnostic describes a private target.
-Inventory/context/backend internals were excluded from this scoped reading.
-These observations are not new repair regressions or blanket safety evidence.
-
-## Observed implementation: skott
-
-## Scoped private-default observation - 2026-10-10
-
-Clean-slate `offline-rust-final-observer` inspected current preparation, shell
-rendering and native inventory tests without intent, queues, prior
-records/reviews or history. This supplement supersedes older read-only-settings,
-selection-wrapper and ignored-inventory statements below.
-
-Workspace resolution parses bounded pins, resolves system rustup and standard
-installed roots, validates selected tools/libraries and delegates complete
-inventory resolution/revalidation. Generated read-only registrations and
-wrappers use private HOME, rustup settings, Cargo cache and target; pins set
-`RUSTUP_TOOLCHAIN`. Vendor material is independently copied and digested under
-byte/entry/path/depth/time bounds. Rust On fails on preparation failure; Auto
-records unavailability without advertising Rust; Off omits preparation. Both
-inline and staged shell rendering initialize private selection.
-
-The observer independently executed the non-ignored native inventory trial:
-1 passed, 0 failed, 0 ignored, exit 0. Host/sandbox inventory,
-target/component queries and tool versions agreed; every installed target
-compiled a library; native execution, unit/doc tests and build-script
-compiler/doc selection succeeded across selection forms; installation removal
-failed and host Rust snapshots and lock bytes matched. The fixture requires
-multiple installed versions and a non-host target. Inventory helper internals
-were outside this observer's reading scope; older inventory observations remain
-separate. No general platform or sandbox certification follows.
-
-## Scoped installed-inventory observation - 2026-10-10
-
-Clean-slate `rust-inventory-observer` derived this scoped supplement from
-`src/rust_environment.rs`, `src/rust_environment/inventory.rs`, `src/tools.rs`,
-`src/sandbox.rs`, `tests/rustup_inventory.rs` and
-`tests/rust_build_environment.rs` only. It excluded intent, queues, this record,
-prior reviews, chat and Git history, and executed nothing. These observations
-supersede older single-registration statements below, not unrelated behavior.
-
-- Trusted system rustup queries enumerate and sort 1..128 distinct installed
-  names and require the initial selection to be present. Each standard-layout
-  installation is validated; an invalid additional installation can prevent
-  preparation of an otherwise usable default.
-- Initial selection remains at `/rust/toolchain`; other versions receive
-  disjoint `/rust/toolchains/N` destinations. All installations, generated
-  sandbox-native registration links/settings, wrappers, vendor material and
-  optional user Cargo bin receive read-only grants.
-- Cargo/rustc/rustdoc wrappers consume a leading `+name` or use
-  `RUSTUP_TOOLCHAIN`, then delegate executable selection to trusted rustup.
-  PATH Cargo prepends offline/locked/vendor flags. `RUSTC` and `RUSTDOC` point
-  to selection-aware wrappers. Direct concrete Cargo paths remain unwrapped;
-  no selection-aware wrapper is generated for direct rustfmt or extensions.
-- Inventory runtime files/directories under `bin` and `lib` have bounded
-  recursive fingerprint tracking; native executables/libraries and present
-  companions are also byte-hashed at preparation. Validation checks pin,
-  directory/file fingerprints and registration count/targets before dispatch,
-  without rehashing full toolchain contents. This is not a digest of every
-  subtree of a mounted installation.
-- Private staging remains beside the writable workspace and is removed by
-  shared ownership cleanup. HOME/cache/target defaults use `/tmp` invocation
-  scratch. The source requests denied network and read-only installation
-  mounts; actual tmpfs and enforcement are supplied by the external runner.
-- The ignored native inventory trial defines host/sandbox name/version/
-  target/component comparisons, compilation for all installed targets, native
-  program and Cargo unit/doctest execution, build-script compiler/doc version
-  assertions, denied toolchain/target/settings changes and before/after host
-  snapshots excluding access time. Source inspection is not a passing result.
-
-The observer pass preceded final defensive installation-directory membership
-rechecking and option separation in wrapper dispatch. Those final guards were
-covered by the scoped independent authority audit and executable regressions,
-not represented as an additional clean-slate observation. Optional Cargo-bin
-children remain directory-bound rather than individually inventoried, and
-staged vendor drift is not newly revalidated per dispatch.
-
-## Scoped Rust sandbox observation - 2026-10-10
-
-Clean-slate observer `rust-chain-observer` derived this supplement from the
-current Rust preparation, request/executor source, native tests, manifests,
-runner source and CI definition only. It did not read intent, queues, prior
-records, reviews, chat or Git history. This supplement supersedes older
-observations only for the repaired Rust chain; it is not certification.
-
-- Trusted system rustup queries use cleared environment and disabled automatic
-  installation. A project pin, or the host default resolved once, selects an
-  exact standard-layout installation. Missing selections are not installed.
-- Private outside-workspace staging contains the fixed offline/locked Cargo
-  shim, independent vendor snapshot and generated rustup settings. Exactly one
-  registration links the concrete installed name to sandbox `/rust/toolchain`.
-  Resources receive disjoint read-only `/rust/*` grants; shared RAII ownership
-  removes staging when its final owner drops. HOME/cache/target use private
-  `/tmp` scratch, not host home/Cargo configuration or credentials.
-- Startup hashes tracked compiler/Cargo/rustdoc, available formatter/Clippy
-  companions, native manifest/libcore/libstd, cc/ar/as, shim and settings.
-  Per-call validation checks pin bytes, directory identities, tracked
-  fingerprints and registration target, without rehashing full binaries.
-  Vendor copying/hashing is independently bounded and uses up to eight workers;
-  request preflight separately bounds identity reads and writable-scope scans.
-- The identity is not a digest of the entire installed toolchain tree. Requested
-  targets receive directory checks. Optional user Cargo bin receives directory
-  identity checks, not per-extension content validation. Explicit alternate
-  Cargo executables are not rewritten by the normal PATH shim.
-- Debug/trace records query/preparation timing, counts and identities, grant
-  metadata, environment names, dispatch limits and completion/interruption
-  flags. Inspected chain events exclude command bodies, environment values and
-  output contents; this is not a universal UI/transcript-redaction claim.
-- The observer independently executed the complete selected-toolchain chain and
-  diagnostic trial: 2 passed, exit 0. These exercise rustup queries, formatting,
-  checking, compilation/linking/binary execution, unit/integration/doctests,
-  Clippy, documentation, target isolation, expected test/compiler failures and
-  diagnostic sentinel exclusion. Other native trials were source-observed,
-  not executed by that observer.
-- Stable Linux CI explicitly enables native fixture trials. Optional Cargo
-  extensions, minimal-install and repository-vendor trials are excluded from
-  that job; the ordinary workspace/MSRV runs do not enable ignored trials.
-
-## Observation basis
-
-This replacement record was derived on 2026-10-02 from this package's Rust
-implementation and tests, its Cargo manifest, and the permitted sav
-implementation and tests. No intent documents, previous implementation record,
-reviews, Git history, maerg implementation, or galla implementation
-were read. This is an implementation observation, not an intent review,
-authorization decision, or compliance certification.
-
-Source paths below are repository-relative. Claims about the external sandbox
-are limited to the requests constructed here and the native trials actually
-executed. Mock runners demonstrate construction and supervision, not isolation.
-
-## Scoped source-and-test observations — 2026-10-06
-
-This supplement was derived by clean-slate observer
-`history-observer`, restricted to current `src/run.rs`,
-`src/tui/app.rs` and `src/tui/render.rs`. The observer did not read intent,
-queues, this prior record, reviews or Git history and did not execute tests.
-The remaining sections retain their earlier observation basis. This supplement
-is not compliance certification or component acceptance.
-
-- **Live navigation:** Ctrl+Home sets transcript offset to zero and disables
-  following; Ctrl+End selects the bottom and resumes following. Plain Home/End
-  fall through to the editor. Live shortcuts require exactly CONTROL; replay
-  shortcuts accept modifiers containing CONTROL. Replay intercepts input before
-  the editor. (`skott/src/tui/app.rs:742-755,852-862,887-892,1483-1523`)
-  Tests assert Ctrl+Home preserves the editor cursor and subsequent output does
-  not move the viewport, and Ctrl+End restores following. (`app.rs:3017-3049`)
-- **Replay extents:** `replay_scroll` is `usize`. Navigation uses saturating
-  arithmetic; downward motion clamps to the bottom. Extents count wrapped source
-  lines, wrapped title/hint and separator rows at width-minus-one, minimum one.
-  Bottom subtracts visible rows saturatingly. Resize clamps the existing offset
-  rather than automatically following a newly enlarged extent.
-  (`app.rs:234-239,1483-1523,1292-1301,1570-1591,1643-1650,1718-1721`)
-  Tests exercise offsets beyond `u16::MAX`, boundary navigation, Escape, resize
-  reduction and empty/short histories. (`app.rs:3323-3373`)
-- **Rendering/theme:** Live and replay views share the right-edge scrollbar,
-  styled from the current `app.theme.scrollbar`. Replay reserves its last column,
-  wraps and slices rows using a `usize` offset, and independently clamps the
-  rendered slice. (`skott/src/tui/render.rs:152-214,431-505`)
-  Tests assert dark/light scrollbar colors, unobscured wrapped tail content,
-  reversible top/bottom rendering and scrollbar presence in empty, short and
-  one-column views. (`render.rs:691-751`)
-- **Prompt guidance:** Both execution-scope prompts interpolate one shared
-  instruction allowing Markdown, recommending CommonMark/GFM, and distinguishing
-  presentation from structured tool arguments and trusted metadata. The test
-  checks Markdown feature strings in both prompts.
-  (`skott/src/run.rs:201-235,532-550`)
-
-Only those source/test ranges were inspected. Referenced wrapping/editor/theme
-implementations were not inspected. No concrete logic discrepancy was
-established within that scope.
-
-## Package and public surface
-
-`skott/Cargo.toml` defines package `skott` 0.2.0, edition 2024,
-minimum Rust 1.95, library `skott`, and binaries `skott` and
-`skott-file-tool`. The library forbids unsafe code. Its Unix filesystem
-and process APIs, `/proc` use, and Linux-only sav dependency make the
-observed implementation Linux-specific.
-
-`skott/src/lib.rs` exposes:
-
-- Configuration: `Cli`, `parse_effort`, `resolve_config_path`, `Config`, `Model`,
-  `ModelProvider`, `SandboxPaths`, `ToolPolicy`, `DEFAULT_WRITE_ROOT`;
-  `config::ModelBudgets` and configuration bounds are also publicly accessible.
-- Conversation and execution: `AgentSession`, `Skott`, `Event`,
-  `EventSink`, `ToolExecutor`, `Recorder`, `RunSummary`, `RunLimits`, `MAX_TURNS`,
-  `SandboxExecutor`, `HostExecutor`, `ToolOutcome`, and `system_prompt`.
-- Context: `ContextManager`, `Compaction`, token/message estimates, and
-  `DEFAULT_CONTEXT_TOKENS`; `context::estimate_request` is public.
-- Tool construction: `ExecContext`, `RenderedTool`, `ToolRegistry`,
-  `describe_tool_call`, `ToolProfile`, `ProfileSetting`, `ToolchainProbe`.
-- Native primitives through `file_tools`, sandbox construction/execution
-  through `sandbox`, `RetryPolicy` and its defaults, `SessionLog` and
-  `DEFAULT_LOG_DIR`, history listing/replay through `history`,
-  `headless::run`, and `tui::{Overrides, run}`.
-- Kvist profile import: `KVIST_CONFIG_FILE`, `import_models`,
-  `resolve_kvist_config_path`; Markdown rendering: `MarkdownStyles`,
-  `RenderedLine`, `render_document`; `Error`, `Result`, `init_logging`.
-
-The worker/thread implementation, CLI module, host module, Markdown module,
-and import module are private even when selected items are re-exported.
-`toolchain::rust_environment::RustEnvironment` is publicly reachable through
-the public toolchain module.
-
-## Configuration and startup
-
-`skott/src/config.rs` reads at most 64 KiB of UTF-8 TOML from a regular
-file using `O_NOFOLLOW | O_NONBLOCK`. A second stream bound catches growth.
-Parse/type diagnostics identify the line without echoing TOML contents.
-The raw configuration and its nested model, sandbox, and policy tables reject
-unknown fields.
-
-The accepted input shape is:
-
-- `schema_version = 1`;
-- optional `working_directory`, otherwise current directory; a configured
-  value must be absolute and an existing directory;
-- `default_provider` (llama-server or ollama), which MUST name at least one
-  `[[models]]` entry;
-- optional `default_thinking_effort`, default `medium`;
-- one or more `[[models]]` with `id`, `provider`, `model`, optional `base_url`,
-  `is_default` (at most one per provider), `context_limit`, `response_reserve`,
-  `deadline_secs`, `max_attempts`, `retry_base_delay_secs`,
-  `retry_max_delay_secs`, `cadence_timeout_secs`;
-- optional `[sandbox]` with `runner` and `backend`;
-- optional `[tool_policy]` with `shell_deny_substrings`,
-  `shell_deny_prefixes`, `write_root`;
-- optional `[tool_profiles]`, keyed by generic/python/rust/javascript/go/c,
-  with serde spellings `on`, `auto`, `off`.
-
-IDs must be unique, provider model text nonblank, deadlines 1–600 seconds,
-attempts at least one, backoff delays at most 3600 seconds with base no greater
-than maximum, cadence 0–600 seconds. Context is 2–1,048,576 tokens; reserve is
-1–1,048,576 and must be smaller than an explicitly paired context. There is
-no configured upper bound on `max_attempts`; whole-prompt budgets still apply.
-`ProfileSetting::parse` accepts extra synonyms, but the TOML serde enum uses
-the three canonical spellings. Configuring generic has no gating effect.
-
-Providers are `llama-server` and `ollama`, with default endpoints
-`http://127.0.0.1:9931` and `http://127.0.0.1:11434`. Defaults are deadline
-300 seconds, three attempts, 2-second base/30-second maximum backoff, and
-30-second cadence; zero cadence disables that watchdog. Transport construction
-uses sav's direct transport with an 8 MiB response limit. Loopback
-endpoint validation occurs when constructing that transport, not when parsing
-TOML. Default executables are `/usr/local/bin/galla-runner` and
-`/usr/bin/bwrap`.
-
-`Model::resolve_budgets` selects context and output overrides independently:
-CLI, then model configuration, then provider serving-capacity discovery for
-context or `clamp(context / 4, 1, 8192)` for output reserve. Missing/failed
-discovery asks for explicit capacity; it does not assume 8192 tokens.
-Provenance is recorded as CLI/configuration/provider/automatic.
-`DEFAULT_CONTEXT_TOKENS = 8192` remains a library constant, not the production
-unknown-model fallback. `Config::from_parts` only checks default-model
-membership and fills defaults; it is not equivalent to full TOML validation.
-Startup canonicalizes the chosen working directory, including relative or
-linked CLI overrides, and rejects non-directories.
-
-`skott/src/cli.rs` searches explicit config, current-directory
-`skott.toml`, XDG user config, then XDG system directories. Relative
-`XDG_CONFIG_HOME` falls back to `HOME/.config`; system paths come from
-colon-separated `XDG_CONFIG_DIRS`, default `/etc/xdg`. It does not search
-ancestor projects. `--list-models` loads and prints configured models without a
-terminal. `--import-kvist` does not need an skott configuration:
-`skott/src/kvist_import.rs` extracts `[agent.profiles]`, ignores unrelated
-fields and command templates, and prints sorted `[[models]]` snippets for the
-two supported providers, with escaped TOML strings and a 120-second import
-deadline default. Import is read-only and does not validate a complete target
-configuration or enforce the target's 600-second deadline maximum.
-
-Other flags include model, effort, cwd, profile, logs, context/output budgets,
-initial prompt, `--headless`, `--json`, `--allow-host-execution`, and
-`--host-turns`. Headless requires a prompt and conflicts with host authority,
-disabled logs, listing, and import; JSON requires headless. Whole-prompt CLI
-defaults are 1800 seconds and 1,000,000 estimated tokens, with maxima 24 hours
-and 1,000,000,000 tokens. Error exit codes are normally 1, selection/terminal/
-effort/toolchain/host-turn errors 2, policy errors 3
-(`skott/src/error.rs`, `skott/src/main.rs`).
-
-Evidence includes `skott/tests/component_tests.rs`:
-`loads_a_valid_configuration`, `rejects_unknown_top_level_fields`,
-`rejects_duplicate_model_ids`, `rejects_out_of_bound_cadence`; and
-`skott/tests/model_budgets.rs`:
-`configured_capacity_and_cli_precedence_have_no_8192_fallback`,
-`automatic_generation_reserve_has_room_for_reasoning_but_fits_small_windows`,
-`unavailable_discovery_requests_explicit_capacity_instead_of_assuming_8192`.
-
-## Tool model and authority
-
-`skott/src/tools.rs` renders rather than executes tools. `ExecContext`
-contains host `workdir` and `call_id`; `RenderedTool` contains `argv`, human
-`summary`, optional typed `file_request`, and optional `file_helper`.
-Definitions are offered in stable order: shell, read_file, write_file, list_dir,
-find_files, search_files, edit_file. Language profiles change shell capability
-descriptions/resources, not these tool names.
-
-Shell accepts exactly `{"command": <string>}`: nonblank, NUL-free, at most
-16 KiB. Rendering produces absolute bash, `-c`, the unchanged command, and
-`skott` as argv0. The built-in case-sensitive substring denylist includes
-`rm -rf`, `rm -fr`, `mkfs`, `dd if=`, `dd bs=`, `> /dev/`, `:() {`,
-`exec 9<>`, `reboot`, `shutdown`; trimmed-start prefix `mknod ` is denied.
-Configuration adds denials rather than removing the minimum. This is an
-advisory textual filter, not shell parsing or isolation. Policy identity hashes
-sorted, NUL-delimited write-root/deny entries. Unknown tools or malformed
-arguments fail before executor effects.
-
-`skott/src/toolchain.rs` keeps generic enabled; configurable profiles
-default auto. On/forced requires availability, auto omits unavailable profiles,
-off excludes them. Non-Rust probing searches PATH, fixed system directories,
-and selected home paths, but accepts only executable canonical paths beneath
-the mounted system roots `/usr`, `/lib`, `/lib64`, `/bin`, `/sbin`; rustup
-proxies are not compilers. This is an interpreter probe, not proof that every
-named package manager/build tool works. Manifest-based language detection is
-advisory. Rust workspace resolution is a separate concrete-resource path.
-
-In normal execution `SandboxExecutor` is injected. `HostExecutor` is an
-explicit unconfined alternative, with inherited host environment, privileges,
-and network. It performs string replacement of write-root path occurrences in
-shell argv, not semantic shell-path confinement. Native operations instead
-map the write-root namespace onto the canonical host workdir and retain their
-own mutation checks. Host shell calls allow 120 seconds and 8 KiB combined
-capture; native helper calls allow 7001 captured bytes
-(`skott/src/host.rs`). Neither executor makes operational logs canonical
-task evidence.
-
-## Native filesystem operations
-
-`skott/src/file_tools.rs` defines closed `FileRequest` JSON:
-`write_root` and `operation`, the latter tagged by `tool` with `arguments`.
-Unknown fields/types fail. Request bytes are limited to 256 KiB; paths to
-4096 UTF-8 bytes; absolute lexical paths exclude NUL, empty components, `.`,
-`..`, and trailing slash except `/`. Mutations must be strictly inside the
-write root on a slash boundary. Read operations can address any permitted
-absolute path in the executor's namespace, not only the write root.
-
-- `read_file`: path, optional byte offset (default 0), byte limit (default
-  4096, maximum 16384). Reads/hashes a complete regular file of at most 1 MiB,
-  requires UTF-8 and boundary-aligned offsets, and returns `content`, `sha256`,
-  `offset`, `next_offset`, `total_bytes`. It follows read-path symlinks; unlike
-  mutations/search, this API is not a no-link traversal.
-- `write_file`: path, UTF-8 content up to 64 KiB, optional lowercase
-  `sha256:` plus 64-hex `expected_sha256`. May create or replace; an expected
-  digest requires an existing matching preimage.
-- `edit_file`: path, nonempty `old_text`, `new_text` (each at most 64 KiB),
-  mandatory expected digest. Exactly one occurrence, counting overlapping
-  matches, must exist. It retains unrelated bytes, CRLF, missing final newline,
-  and original mode.
-- `list_dir`: path and entry pagination (offset at most 4096, limit default
-  100/max 256); returns sorted `entries` with `name` and `kind`, pagination,
-  and total count.
-- `find_files`: directory path, literal scoped-path substring `pattern`
-  (empty permitted, at most 1024 bytes), pagination, `include_generated`.
-  Returns sorted `files`, totals, visited/skipped counts, and `complete`.
-- `search_files`: directory or one regular file, nonempty literal `query`
-  up to 1024 bytes, optional literal `file_pattern` of the same bound,
-  pagination, `include_generated`. Filters scoped relative paths, or basename
-  for a file scope. Returns sorted path/line matches with one result per
-  matching starting line, byte match offset, a UTF-8-safe line prefix up to
-  1024 bytes, and truncation/coverage metadata.
-
-All successful helper output, including newline, fits 7000 encoded bytes.
-Pages shrink to fit full JSON escaping and metadata; callers must resume at
-the returned offset, not requested page size. A single item that cannot fit
-fails explicitly. Search/list pagination offsets index results; read offsets
-index bytes. Optional typed strings reject explicit null.
-
-Directory traversal uses held descriptors, no-follow components, and
-`/proc/self/fd` enumeration. Recursive discovery/search skips links and, by
-default, directories named `.git`, `target`, `node_modules`, `vendor`,
-`vendored`, `.skott`; explicit generated opt-in and an explicitly chosen
-scope remain available. Traversal is bounded to depth 32 and 4096 visited
-entries; unsupported ordinary entries or read errors fail rather than silently
-becoming an empty result. Search additionally limits each complete file to
-1 MiB, total scanned bytes to 8 MiB, and results to 4096; binary/NUL-bearing,
-oversized, linked, generated, and filtered exclusions are counted.
-`complete` describes coverage exclusions, independently of remaining pages.
-Scanned size changes are rejected, but equal-size concurrent changes are not
-a snapshot guarantee.
-
-Mutation traverses the write root and parents without links, opens a bounded
-regular preimage, validates it, constructs output metadata before effects,
-creates an exclusive mode-0600 sibling replacement, writes/chmods/syncs it,
-reopens/rechecks bytes/inode/device/mode, renames atomically, and syncs the
-parent. Existing mode is preserved; new files use 0644. RAII unlinks unused
-replacement names. This is not transactional compare-and-swap against arbitrary
-external writers; a race after recheck or an error after rename can leave an
-effect despite a failed result. Parent directories must already exist.
-
-`skott/src/bin/file_tool.rs` requires exactly one payload file, opens it
-no-follow/nonblocking, verifies bounded regular-file type, parses/revalidates
-the request, and emits one JSON line. Failure prints a diagnostic and exits 2.
-The helper is not itself a sandbox.
-
-Executed evidence in `skott/tests/native_file_tools.rs` includes
-`edits_preserve_unrelated_bytes_crlf_missing_newline_and_mode`,
-`stale_zero_multiple_and_overlapping_matches_never_mutate`,
-`mutations_reject_traversal_sibling_prefix_and_symlink_parents_or_targets`,
-`escaped_control_and_cjk_read_pages_are_complete_json_with_lossless_progress`,
-`native_search_generated_sources_are_excluded_and_counted_by_default`,
-`native_search_regular_file_scope_preserves_literal_matching_and_link_denials`,
-and `oversized_mutation_metadata_is_rejected_before_file_effects`.
-
-## Sandbox construction and process ownership
-
-`skott/src/executor.rs` checks cancellation before rendering, staging,
-request construction, and execution. Native argv is `["/context/1",
-"/context/0"]`: helper then payload. The helper defaults beside the running
-executable; configured or default helper must be a regular non-link path with
-non-link ancestors, outside the canonical writable workspace.
-
-Payload staging uses a private mode-0700 generated directory in the workdir's
-canonical parent and a synchronized mode-0600 generated file. The model's
-path/call ID never chooses host staging names. The parent must be writable;
-filesystem-root workspaces cannot stage there. Payload and helper become
-read-only, byte-hashed context files; the RAII payload owner outlives execution
-and cleans up on success, build failure, or spawn failure.
-
-`skott/src/sandbox.rs` constructs a shared protocol request with
-`protocol = kvist-sandbox-request-v1`, version 1, phase Authoring, argv,
-write-root working directory, environment, denied network with empty allowed
-sources, resources, identities, System toolchain rooted at `/usr`, grants, and
-no cache/scratch request objects. It invokes the dependency's local validation;
-the dependency implementation was not inspected.
-
-The workdir is canonicalized and granted read-write at the policy write root
-(default `/workspace`). Independently installed runner must be outside it.
-Runner/backend identities hash regular no-follow files, bounded to 256 MiB.
-Backend is identified as Bubblewrap with canonical path/digest. Declared
-`read_roots` support regular non-link files only, outside the workspace,
-mapped read-only to `/context/N`. Directory authoring identities bind path/
-domain data, not a complete workspace content snapshot. Command identity binds
-NUL-separated argv; mount-plan identity binds destinations/access/purpose.
-
-Workspace preflight checks scope-escaping symlinks, permits links provably
-within scope, follows in-scope directory targets with a visited set, and uses
-lexical containment for unresolved targets. Limits are 30 seconds, 1,000,000
-entries, depth 128, and 32 MiB retained directory-path accounting, with
-cancellation checks throughout. This is a preflight observation, not a
-transactional filesystem freeze or comprehensive hardlink/special-file audit.
-
-Requested default tool limits are 120,000 ms, 1 MiB combined output,
-256 processes, 4096 files, 64 MiB/file, and 1 GiB scratch.
-Environment starts with fixed system PATH and sandbox `/tmp` HOME, accepts
-portable caller names, and excludes `LD_*`, uppercase proxy variables, `GIT_*`,
-selected Cargo source/registry/HTTP names and registry token. Executing the
-request serializes at most 1 MiB JSON to the runner's stdin with
-`--kvist-sandbox-request-v1`. Failure never selects a host fallback.
-
-`skott/src/process.rs` is a private single-threaded pump for both
-executors and bounded rustup queries. It spawns a new process group, uses
-nonblocking stdin/stdout/stderr, 8192-byte chunks and 5-ms idle polls, and shares
-one exact capture budget across streams. It drains output while feeding stdin,
-closes stdin after the request, and treats a successful early exit before
-complete delivery as failure. Ordinary nonzero exits preserve status and partial
-bytes rather than becoming spawn/protocol errors.
-
-Cancellation, timeout, and overflow trigger SIGKILL of the owned group and
-direct child; the direct kill also covers a leader that moved groups.
-`waitid(WNOWAIT)` observes leader exit without recycling its PID before
-signalling. Cleanup is attempted on every owned-child exit, with a 250-ms pipe
-drain window and 1-second reap window. Retained pipes/escaped descendants
-produce explicit errors, not delayed success; escaped descendants and
-uninterruptible kernel work cannot be universally terminated.
-
-Construction evidence includes
-`skott/tests/component_tests.rs::build_request_produces_a_closed_authoring_request`;
-payload evidence includes
-`skott/tests/native_file_tools.rs::private_payload_and_helper_are_readonly_hashed_context_files_and_cleaned_after_failure`.
-Executed `skott/tests/subprocess_supervision.rs` covers
-`sandbox_writes_complete_large_request_without_deadlocking_on_output`,
-`successful_early_stdin_close_is_not_false_success`,
-`sandbox_retained_pipes_are_explicit_failure_not_delayed_success`,
-`independent_calls_do_not_share_cancellation_or_process_groups`, and the
-`moved_direct_child_*` cancellation/timeout/overflow cases.
-
-## Installed Rust and offline resources
-
-`skott/src/rust_environment.rs` resolves an existing installation; it
-does not install dependencies/toolchains or consume maerg toolchain manifests.
-It reads only top-level `rust-toolchain.toml` or `rust-toolchain`; both present
-is an error. Pins are bounded to 64 KiB. TOML permits channel, components,
-targets, profile only. Channel accepts bounded release/version tokens, not
-paths/options/custom linked names; component/target lists have at most 32
-bounded tokens, profiles minimal/default/complete. Requested components are
-checked against a limited supported list and requested target directories.
-
-Trusted `/usr/bin/rustup` is resolved beneath `/usr`, outside the workspace.
-Host HOME must be a canonical non-link directory outside it. Rustup queries run
-from `/` with cleared environment, HOME, fixed PATH, `RUSTUP_AUTO_INSTALL=0`,
-16 KiB output, and remaining preparation time. Absent pin uses host
-active-toolchain selection once; explicit pin never silently falls back.
-Concrete cargo must be exactly beneath
-`HOME/.rustup/toolchains/<selection>/bin/cargo`. Layout, executable cargo/rustc/
-rustdoc, native component manifest/libcore/libstd, and system cc/ar/as are
-checked and hashed; native library ambiguity/absence fails.
-
-Outside-workspace generated resources include a fixed Cargo wrapper and a
-private copy of `.kvist/vendored`, or an empty vendor directory. Snapshot
-rejects linked ancestors, links, special files, multi-link files, and observed
-file/directory drift. Bounds: 256 MiB/file, 1 GiB total file bytes, 100,000
-entries, depth 64, 32 MiB retained paths, 30-second preparation budget. Clone
-ownership is shared via Arc; final owner removes staged resources.
-
-Read-only Toolchain-purpose grants map the installation, wrapper runtime and
-vendor snapshot to `/rust/toolchain`, `/rust/runtime`, `/rust/vendor`.
-PATH prefers the wrapper and concrete installation; RUSTC/RUSTDOC point at the
-concrete binaries. HOME, CARGO_HOME, and CARGO_TARGET_DIR use sandbox scratch;
-CARGO_NET_OFFLINE=true. The wrapper invokes concrete cargo with `--offline`
-and command-line source replacement directed at `/rust/vendor`; it does not
-add `--locked`. Missing dependencies require separate host provisioning.
-Host homes, credentials, ambient Cargo/Rust overrides, and forged workspace
-resource manifests do not become new host grants.
-
-Each tool request rechecks workspace identity, project-pin digest, selected
-directory device/inode identities, and selected executable/library/wrapper
-hashes. Diagnostics expose selection and digests. This is not a digest of every
-toolchain file, nor continuous revalidation of arbitrary host changes. Auto Rust
-reports omission; explicit Rust fails startup on resolution failure. Host
-opt-out uses the simpler profile resolver, not these sandbox Rust resources.
-
-Native executed tests in `skott/tests/rust_build_environment.rs` were
-`native_installed_rust_compiles_links_and_documents_offline`,
-`native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation`,
-and `changing_project_pin_after_resolution_fails_before_effects`.
-They exercise compiler/linker/rustdoc plus Cargo test/doc, offline vendor
-resolution despite misleading project config, snapshot independence,
-read-only resources, absent host credential/home mounts, denied host-loopback
-access, scratch target location, and changed-pin rejection. These specific
-trials do not independently verify all external runner quotas or all platforms.
-
-## Conversation, effects, accounting, and recovery
-
-`skott/src/session.rs` provides the injectable blocking loop.
-`AgentSession` owns model, effort, host system prompt, ordered messages, tool
-definitions and last answer. Pushing a user clears the previous answer.
-Requests prepend the host system prompt, offer Auto tools and configured effort,
-and omit output schema. Only a nonblank Stop turn with no tool intents becomes
-an answer. The low-level assistant helper folds messages; the runner separately
-validates before accepting a turn.
-
-For each prompt, `Skott::run` validates turn count 1–50 and whole-prompt
-limits, starts an owned deadline watcher, starts the recorder, performs request
-preflight, and then charges estimated request plus reserved output before each
-attempt. It never refunds retries based on missing/actual usage. Watcher checks
-interrupts/cancellation at bounded intervals (25 ms) and cancels when wall time
-expires; injected transports/executors must honor cancellation. Run summary
-contains answer, turns, tools_executed, cancelled, exhausted, budget_exhausted,
-failure; disposition precedence is budget_exhausted, cancelled, failed,
-turn_limit, completed, no_work.
-
-Sequence is request record before provider call; returned turn/reasoning and
-usage record before acceptance; whole-turn validation before any tool effects;
-synchronized dispatch record before calling an executor; outcome folded into
-conversation, recorded, and reported afterwards. Recording or sink errors stop
-effects and attempt terminal recording. Unexpected executor errors stop the
-prompt; policy/render errors instead become rejected tool results and notices
-so the model can recover. Interrupted/unexecuted remaining calls get explicit
-rejection results, preserving complete tool groups for later prompts.
-Completed tools are not automatically re-executed by transport retries.
-
-Accepted final shape is Stop with nonblank answer/no tools, or ToolCalls with
-at least one call. Length, filter, unknown or inconsistent endings cannot
-authorize effects. A turn has at most 32 calls; IDs are unique within the turn,
-nonempty, at most 256 bytes/NUL-free; names nonempty, at most 128 bytes/NUL-free;
-arguments objects with at most 1 MiB encoded bytes. Rendering/transport imposes
-additional name/argument restrictions.
-
-Transient sav errors receive deterministic capped exponential
-backoff (default three total attempts). Retries reuse unchanged accepted
-history and announce prior streaming text as provisional. Deadline grows
-linearly by attempt number, capped by total attempts and remaining prompt time.
-Cancellation, malformed responses, bounds and non-transient errors do not
-retry. A Length turn can be regenerated before effects with doubled reserve
-(up to 1,048,576), only if it fits the current context and shared token charge.
-Such partial turns are recorded separately; unsuccessful recovery is not a
-final answer.
-
-An action hash ring blocks repeated non-read arguments before effects and
-eventually trips a four-stall circuit breaker. Native read/list/find/search are
-exempt. Repeated read_file without offset receives a byte-pagination notice.
-Executed non-read actions enter history; successful outcomes reset stalls but
-do not erase repeat history. The runner does not use observation hashing or
-reasoning similarity, and it does not change provider temperature when the
-shared detector returns a temperature-jitter decision. Its notices explicitly
-do not claim filesystem change was observed.
-
-Model tool results include process flags/status and a combined encoded preview
-bounded to 8 KiB, with truncation notice. Binary/NUL/invalid-UTF8 output becomes
-byte count and SHA-256 rather than expanded binary text. This preview is
-separate from raw captured bytes and transcript limits. `ToolOutcome::failed`
-requires an observed zero status without timeout/cancel/overflow.
-
-Events are tagged `{type, data}` snake_case: turn_start, attempt_start,
-reasoning, text, tool_call, tool_result, finished, prompt_end, failed, note,
-progress. Proposals are not execution acknowledgements. Progress reports
-provider/estimated/unavailable provenance; streamed output is provisionally
-estimated from character count, emitted at roughly 250-ms intervals. Accepted
-turn usage accumulates provider totals, with incomplete usage marked unavailable.
-These displayed totals differ from conservative budget charges and context
-estimates. Terminal answer is cleared on failure/cancel/budget exhaustion.
-
-Executed loop evidence includes `skott/tests/loop_integration.rs`:
-`hardening_duplicate_call_ids_reject_the_entire_turn`,
-`hardening_record_failure_precedes_effects_and_closes_unsuccessfully`,
-`cancelled_multicall_turn_is_valid_for_a_subsequent_prompt`,
-`reliability_length_is_regenerated_before_any_tool_effects`,
-`reliability_length_recovery_respects_window_and_shared_token_budgets`,
-`reliability_legitimate_native_rereads_do_not_trip_effect_breakers`,
-`a_follow_up_prompt_carries_the_earlier_prompt_in_context`, and
-`each_retry_grants_a_larger_and_capped_budget`.
-
-## Context and durable records
-
-`skott/src/context.rs` estimates four UTF-8 bytes/token, full serialized
-canonical request including escaping/schema/optional fields, plus fixed
-request/message/tool framing. This is not a tokenizer or guaranteed upper
-bound. Serialization failure estimates usize::MAX.
-
-`ContextManager::prepare` validates complete assistant/tool-result groups even
-for small requests, preserves all system messages, latest genuine user goal,
-outstanding user goals since the latest nonblank text-only assistant completion,
-and newest safe group. Each call has exactly one correctly named result;
-duplicate/orphan/incomplete/interrupted groups fail. Turn-local IDs may recur
-in later complete groups.
-
-Preflight sets the output bound and requires full estimated input plus reserve
-at or below context limit. Warmup is approximately 75%; model-aware retention
-uses available capacity rather than a fixed six-group cap and targets 65%
-after compaction when possible. Older eligible groups become bounded
-lossy/non-authoritative User history, never System instructions. The rolling
-summary is at most 4000 characters and further shrinks/vanishes to fit.
-Irreducible excess errors without changing request/manager state. Legacy
-`compact`, `estimate_messages`, and `AgentSession::maybe_compact` do not provide
-this complete-request/reserve/group guarantee.
-
-Executed `skott/tests/context_preflight.rs` includes
-`serialized_estimate_accounts_for_every_canonical_field_and_framing`,
-`malformed_groups_fail_even_when_the_request_is_small`,
-`an_error_after_a_success_does_not_change_the_rolling_summary`,
-`reliability_continuation_retains_the_complete_outstanding_original_goal`,
-and `reliability_large_window_retains_history_according_to_capacity`.
-
-`skott/src/session_log.rs` opens generated no-clobber 0600 journal/
-transcript files under a private final 0700 directory, traversing all components
-no-follow with held descriptors. It rejects `.`, `..`, links, or nonprivate
-final directory; existing ancestor directory privacy is not universally
-required. Directory creation and effect-boundary writes are synchronized.
-Envelope is schema_version 1, monotonic sequence, event.
-
-Records include session_start (prompt ordinal, IDs, scope, metadata,
-canonical_evidence=false), model_request (attempt, request hash, model, counts,
-tool names, bound, estimate), turn_start (text/reasoning hashes, response/model/
-provider identities), turn_finish (usage/reason), tool_dispatch (call/name,
-argument shape, action hash), tool_result (output hashes, process flags,
-captured bytes, state_mutated=null), notice, session_finish (disposition,
-counts, failure, success, usage completeness, estimated budget charge).
-Argument values and raw output are not in the structured tool record; notices/
-diagnostics and metadata can still contain sensitive text. The transcript
-retains user/answer/reasoning/tool diagnostic text, bounded to 64 KiB per text
-item, not a total-session byte cap. It is potentially sensitive.
-
-Each submitted prompt resets accounting within a worker's shared log.
-Pending/unreported attempt usage makes final provider totals unknown; estimates
-remain separately reported. Dispatch and terminal finish sync both files and
-directory. A dispatch without result is an unknown effect, not a replayable
-checkpoint. Default interactive logs are within the writable workspace and
-explicitly not protected evidence.
-
-`skott/src/history.rs` reads diagnostic transcripts only, newest filename
-first, with 4096 directory-entry and 5 MiB/file limits, no-link descriptor reads,
-growth bounds, and lossy UTF-8 replay. Missing/unusable histories do not block
-the UI. Replay is viewing, not command execution or model-state restoration.
-Unit evidence includes `private_no_clobber_files_and_versioned_records`,
-`argument_values_and_output_are_not_in_journal_and_mutation_is_unknown`
-in `skott/src/session_log.rs`, and
-`history_rejects_link_targets_and_link_ancestors` in
-`skott/src/history.rs`.
-
-## Headless and terminal behavior
-
-`skott/src/headless.rs` accepts one nonblank prompt of at most 64 KiB,
-requires recording, and forbids host execution. It canonicalizes workdir and
-requires log paths outside its writable scope, with no dot traversal and
-SessionLog's no-link/private-directory checks. Default logs use absolute
-XDG_STATE_HOME or HOME/.local/state plus `skott/runs`; unlike config
-discovery, relative state base is an error.
-
-JSON emits ordered flushed NDJSON envelopes with schema_version 1/sequence,
-starting run_start (scope/budgets/provenance/canonical_evidence=false), loop
-events, and final run_summary with disposition. Plain mode writes only a
-successful final answer to stdout; notices/diagnostics go to stderr.
-Returned loop errors are emitted as failed summaries before error propagation;
-startup failures do not manufacture success events. Main returns 0 for success,
-130 for cancellation summaries, otherwise 1; direct startup/errors use error
-mapping. Controls other than newline/tab are visibly escaped in plain output
-and error descriptions; JSON retains original text via JSON escaping and
-private transcripts retain original text.
-`skott/tests/headless_cli.rs::headless_returns_ordered_versioned_events_without_a_terminal`,
-`headless_truncation_has_an_unsuccessful_final_disposition_and_exit`,
-`plain_answer_escapes_terminal_commands_but_private_text_is_preserved`,
-`headless_rejects_agent_writable_logs_before_model_io`, and
-`startup_uses_selected_serving_capacity_without_a_cli_override` were executed.
-
-`skott/src/tui/mod.rs` requires terminal stdin, initializes raw mode,
-alternate screen, mouse capture and Ratatui. Sandboxed prompts permit 50 turns;
-host opt-out defaults to one and accepts explicit 1–50 caps. Scope remains
-visible in UI/record/system prompt; host mode does not claim confinement.
-`skott/src/run.rs` owns a blocking worker, 128-slot event channel,
-unbounded prompt channel, cancellation token, and context across prompts.
-Drop cancels, stops backpressure/waits, and joins. Cancel resets the token for
-later prompts; a fatal recorder/channel error ends the worker. Model/effort
-changes start a fresh worker on next submission.
-
-`skott/src/tui/app.rs` bounds submissions to 16,384 characters, keeps
-up to 5000 visible transcript rows, buffers streamed paragraphs/reasoning,
-shows provisional retry notices, completion/failure/cancellation/cap status,
-spinner, estimated context/ETA, provenance-specific speed, scrolling and
-collapse/reveal reasoning. Streamed reasoning is buffered and flushed on the
-same fence-aware block boundaries as answer text (`next_block_end`), and each
-complete block renders through the shared `MarkdownRenderer` at the content
-width minus the edge; the rendered rows then carry the reasoning overlay — the
-block's first row prepends the thinking edge (▌), continuations the bar (│),
-the row style carries the muted reasoning foreground so unstyled prose reads
-muted while bullets, headings, inline code, and syntax highlights keep their
-own styling, and rows that already paint their own background (code blocks,
-table zebra rows) keep that patch untouched. Reasoning rows retain their
-Markdown source on the first row, so resize, theme switches, and
-collapse/reveal re-render the block at the current width and theme; reasoning
-rows without a Markdown source re-wrap as plain text as a fallback. Tests
-`reasoning_renders_markdown_structure`,
-`reasoning_fence_with_blank_line_is_one_block`,
-`reasoning_collapse_reveal_preserves_markdown`,
-`reasoning_resize_rerenders_markdown`, and
-`reasoning_theme_cycle_rerenders_with_structure` pin this behavior.
-The subsequently observed `App::stats_line` rendering shows the output-only
-generation speed (`N t/s`) alongside the session-wide average (`avg N t/s`),
-marks a provisional streamed speed with a `~` prefix, and renders `? t/s` when
-usage is unavailable rather than presenting zero as an estimate. Cumulative
-processed tokens use short human-readable units (`123.4k tok`); the compaction
-field is shown only while the live context is past the warm-up threshold; and
-every field is padded to a fixed width so the columns stay put as magnitudes
-change. This rendering refinement was observed by reading only that function
-after the test executions recorded below; those executions are not claimed as
-verification of this subsequent rendering change.
-Ctrl+Enter submits; Enter inserts a newline except on a blank line after the
-first; Shift+Enter inserts; Tab/Shift+Tab select model/effort; Ctrl+C cancels
-when running and quits when idle; Ctrl+Q quits; Ctrl+D quits with empty editor.
-Esc opens menu/history/replay, Ctrl+H help, Ctrl+P/N prompt history, Ctrl+L
-clear, Ctrl+T reasoning view, Ctrl+S scrollbar. Explicit copy emits an OSC 52
-base64 clipboard sequence, suppressing duplicate copies.
-
-Menu “New session” currently clears display/status; it does not notify the
-worker to reset conversation/context. Prompt history and queued prompts are not
-globally byte-bounded. Visible-line limits are not a comprehensive cap on
-pending Markdown/reasoning/source buffers. Terminal teardown is explicit on
-the normal setup/run path, not a catch-all restoration guard for every partial
-setup failure. Interactive UI completion is not itself a prompt-success exit
-certification. These are source observations, not terminal trials.
-
-`skott/src/markdown.rs` uses pulldown-cmark/syntect for headings,
-emphasis, code, quotes, lists/task lists, tables, links, strikethrough, and rules,
-wrapping styled rows and code/table tails. Tests use a TestBackend/pure rendering,
-not a real interactive terminal. Worker tests
-`worker_drop_joins_with_a_retained_prompt_sender` and
-`worker_drop_joins_when_the_event_queue_is_full` were executed from
-`skott/src/run.rs`. Logging initializes once, stderr only, using
-SKOTT_LOG then RUST_LOG, default warn (debug in unit tests), ANSI only
-for terminal stderr (`skott/src/logging.rs`).
-
-## Executed verification and limits
-
-All commands used `TMPDIR` pointing to project-local fixture storage; that
-storage and observation-only captured outputs were removed before this record
-was written. No source/test edits were made by this observer.
-
-1. `cargo test -p skott -p sav --offline --locked` initially
-   stopped in runner loop integration: 39 passed, one failed.
-   `reliability_successful_distinct_effect_resets_repeat_stalls` observed three
-   executed calls versus the compiled assertion's expectation of two.
-   A later permitted source read showed that assertion expecting three.
-   The targeted rerun passed (1 passed, 39 filtered). The observation therefore
-   spans a changing workspace, not an immutable source snapshot; the initial
-   failure is retained here rather than retroactively called successful.
-2. `cargo test -p skott --offline --locked --test model_budgets
---test native_file_tools --test rust_build_environment
---test subprocess_supervision` passed: 3, 36, 3, and 26 tests respectively;
-   three native Rust tests remained ignored in that invocation.
-3. `KVIST_GALLA=/opt/proj/kvist/target/rust-environment-runner/debug/galla-runner
-cargo test -p skott --offline --locked --test rust_build_environment
--- --test-threads=1` passed all tests. The executable was used, not inspected.
-4. Final `cargo test -p skott --offline --locked` passed:
-
-   | Test target            | Passed | Ignored |
-   | ---------------------- | -----: | ------: |
-   | Library unit tests     |    190 |       0 |
-   | component_tests        |     35 |       0 |
-   | context_preflight      |     20 |       0 |
-   | headless_cli           |      5 |       0 |
-   | input_boundaries       |      3 |       0 |
-   | live_llama             |      0 |       3 |
-   | loop_integration       |     40 |       0 |
-   | model_budgets          |      3 |       0 |
-   | native_file_tools      |     36 |       0 |
-   | rust_build_environment |      3 |       3 |
-   | subprocess_supervision |     26 |       0 |
-
-   Total 361 passed, six ignored, zero failures; both binary unit targets and
-   doctests ran zero tests. A separate runner doctest invocation also passed
-   with zero tests.
-
-The live llama-server/model-driven sandbox tests in
-`skott/tests/live_llama.rs` were not enabled. Native Rust trials do not
-substitute for those inference workflows. No formatter/linter, other packages'
-tests, real interactive terminal session, or comprehensive external sandbox
-resource-limit assessment was performed. Named coverage above is source/test
-evidence backed by the executions described here, not a compliance conclusion.
-
-## Subsequent observation: native-page encoding and compacted references
-
-This source/test refresh supersedes earlier descriptions of the native output
-size check and the argument prefix retained in compacted summaries. It changes
-no observation about the runtime package and makes no compliance conclusion.
-
-### Native output encoding
-
-In `skott/src/file_tools.rs::output_fits`, `MAX_OUTPUT_BYTES` is 7000.
-The function serializes the complete outcome to a JSON string and rejects a
-raw encoding of 7000 bytes or more. It then serializes that string as a JSON
-string value, including quotes and escaping, and requires this nested encoding
-also to be strictly below 7000 bytes. Either serialization failure returns a
-file-outcome error. `ensure_output_bound` rejects an outcome that fails this
-check; read-page and listing-page sizing also use `output_fits`.
-The limit is therefore not merely a raw-JSON length check, nor a bound on the
-entire enclosing model request.
-
-`skott/tests/loop_integration.rs::reliability_native_page_metadata_survives_outer_model_json_escaping`
-uses repeated quote, backslash, and newline content, generates a native read
-page, records it into a session, and parses the resulting model-facing payload
-as complete JSON. It checks retained digest, byte-based `next_offset`, total
-file size, and a serialized complete tool-result content length at most 8192
-bytes.
-
-### Compacted argument and result references
-
-`skott/src/context.rs::turn_summary` now emits an explicit `path=`
-reference for a string-valued tool argument path before the short serialized
-full-arguments prefix. The path is JSON-string escaped and uses
-`truncate(path, 4096)`; this retains the first 4096 Unicode characters and adds
-a leading `...` when truncated, rather than guaranteeing a final reference of
-at most 4096 characters or bytes. The full-arguments prefix remains
-`truncate(json, 100)`.
-For tool results, the function attempts to parse JSON after the first newline
-and emits available `path`, `offset`, `next_offset`, `total_bytes`, and `sha256`
-fields before a short result preview. These references remain summary text,
-not execution authority. Aggregate summary limits and subsequent shrinking
-still apply; complete retention of every long path is not guaranteed.
-
-`skott/tests/context_preflight.rs::reliability_compacted_native_references_precede_lossy_body_prefixes`
-places a long path after a 200-character argument field and combines an
-8000-character result body with pagination/digest metadata. After compaction,
-it checks retention of the complete fixture path, both offsets, digest, and
-process status despite lossy body/argument previews.
-
-### Additional executed evidence
-
-Using project-local fixture storage via `TMPDIR`, independently executed:
-
-- `cargo test -p skott --offline --locked --test loop_integration reliability_native_page_metadata --quiet`:
-  one passed, zero failed/ignored, 40 filtered out.
-- `cargo test -p skott --offline --locked --test context_preflight reliability_compacted_native_references --quiet`:
-  one passed, zero failed/ignored, 20 filtered out.
-
-These are targeted executions after the two refinements, not reruns of the
-earlier complete runner suite. The local fixture directory was removed.
-
-## Subsequent observation: locked Rust authoring
-
-This refresh supersedes the earlier observation that the generated Cargo
-wrapper does not add `--locked`. Unaffected implementation observations and
-their separately recorded execution evidence remain unchanged.
-
-### Current wrapper and diagnostic
-
-`skott/src/rust_environment.rs:600–611` creates the trusted Cargo shim
-with `create_new`, mode `0500`, synchronizes it, and adds its hash to the
-executables revalidated before execution. The script now executes:
-
-```text
-/rust/toolchain/bin/cargo --offline --locked --config 'source.crates-io.replace-with="vendored-sources"' --config 'source.vendored-sources.directory="/rust/vendor"' "$@"
-```
-
-Thus ordinary calls through this wrapper receive `--locked` even when the
-caller supplies neither `--offline` nor `--locked`. The fixed offline vendor
-replacement is retained. `diagnostic` at
-`skott/src/rust_environment.rs:629–652` now explicitly describes Cargo
-as offline and locked and instructs separate provisioning of a matching
-`Cargo.lock`. The source does not introduce automatic lockfile generation or
-repair. This is a wrapper option, not a read-only filesystem grant for the
-workspace lockfile or proof about every Cargo subcommand or explicit write.
-
-### Current regression coverage
-
-`skott/tests/rust_build_environment.rs::normal_cargo_requires_matching_lock_without_creating_or_updating_it`
-constructs a sandbox executor using an explicitly selected runner and
-`/usr/bin/bwrap`. Without caller-supplied lock flags, it checks:
-
-- `cargo check` fails for a missing lockfile, reports `--locked`, and does not
-  create the lockfile.
-- `cargo build` and `cargo metadata --format-version=1` reject a stale package
-  version, report `--locked`, and leave the stale bytes unchanged.
-- A matching lock permits `cargo --version`, `cargo check`, and
-  `cargo metadata --format-version=1 --no-deps`; lock bytes stay unchanged and
-  no workspace `target` directory appears.
-
-This test is normally ignored because it requires the native runner and
-Bubblewrap. The existing installed-toolchain and vendor-snapshot native
-fixtures now explicitly provide matching lockfiles
-(`skott/tests/rust_build_environment.rs:161,257–261`) before their
-compilation/documentation trials.
-
-### Supplied execution evidence inspected
-
-The following files were explicitly supplied as execution evidence, not
-intent or review material. They were read directly; this refresh did not
-independently rerun their commands.
-
-- `/home/stefan/.copilot/session-state/b6381b27-3338-4699-8a06-e12c43d5ce0e/files/runner-locked-regression-before.txt`:
-  the new lock regression failed at the missing-lock assertion; zero passed,
-  one failed, six filtered out. This is the observed before-result, not a
-  claim that the present source still fails.
-- `/home/stefan/.copilot/session-state/b6381b27-3338-4699-8a06-e12c43d5ce0e/files/runner-locked-native-after.txt`:
-  all seven `rust_build_environment` tests passed, zero failed/ignored/filtered.
-  The names include the new lock regression, installed-toolchain build/doc,
-  vendor-snapshot, pin-drift, invalid-pin, absent-install, and symlink tests.
-  Current source has three ordinary tests and four normally ignored native
-  tests, all represented in that output.
-
-These logs show the specific native regression and target results, not a
-complete assessment of external sandbox enforcement. No result is claimed
-here for the further full affected suite, strict lint, or release rebuild
-reported as in progress.
-<!-- kvist-implementation-record-version: 1 -->
-
-# Component Implementation Record
+## Observed public contract
+
+### Scope and entry points
+
+- `skott/Cargo.toml` declares version 0.3.0, edition 2024, Rust 1.95, a
+  `skott` library, the `skott` executable and `skott-file-tool`. The library
+  forbids unsafe code but uses Unix/Linux filesystem and process facilities.
+- This is a workspace agent frontend, not a protected task broker. Generated
+  system prompts disclaim acceptance, approval, canonical evidence and output
+  promotion authority. Journal and transcript metadata mark
+  `canonical_evidence: false` (`src/run.rs`, `src/session_log.rs`,
+  `src/transcript_writer.rs`, `src/external.rs`).
+- The binary initializes diagnostics, parses arguments and dispatches inspection,
+  shared setup, model listing, external-agent execution, headless execution or
+  the terminal UI. Attachment and setup precede Skott configuration discovery
+  (`src/main.rs:29-70`). Source-derived behavior and supplied executed evidence
+  are distinguished below.
+- Public library surfaces include configuration/model selection, tool rendering,
+  sandbox and explicit host executors, native session/context adapters,
+  synchronous runs, owned session workers, recording/history, independent
+  inspection, external runs, Markdown presentation and TUI configuration
+  (`src/lib.rs`, `src/session.rs`, `src/run.rs`).
+
+### Configuration and shared profiles
+
+- Configuration discovery is explicit `--config`, current-directory
+  `skott.toml`, user XDG configuration, then system XDG configuration. The
+  loader accepts schema version one and bounded UTF-8 TOML from a regular
+  non-link final file, with a 64 KiB encoded/read bound. Unknown top-level and
+  several nested fields fail parsing; generic parse diagnostics identify a line
+  without echoing the offending value (`src/cli.rs`, `src/config.rs`).
+- Configuration includes a working directory, local models/default provider,
+  reasoning effort, tool policy/profiles, sandbox executable paths and theme.
+  Startup resolves the effective working directory canonically and requires a
+  directory. Local model identities and native options are validated through
+  Sav registry calls. Defaults include medium reasoning effort and per-model
+  300-second deadlines, retry settings supplied by the shared retry
+  type/defaults, and a 30-second cadence timeout; exact shared retry
+  defaults are not independently observed here.
+- With a registry section, explicit `--registry`, or no inline models, the
+  loader calls Sav `RegistryPaths::for_project(current_dir).load()` and
+  `resolve(name)`. A configuration-relative registry path is resolved relative
+  to its configuration file; the CLI registry path overrides it. An empty
+  profile selection enumerates enabled resolved profiles. Duplicate
+  local/shared IDs fail. Native profiles become selectable `Model` values;
+  external profiles remain outside the native model list. Resolved profile
+  name/source/digest/backend values are held in memory, rather than reloaded
+  during an ongoing session (`src/config.rs`).
+- `[registry].default_model` is an optional local fallback binding, not a
+  provider/model definition. After retaining/resolving shared profiles, the
+  loader requires this name to match both a native model entry and a retained
+  shared-profile key, with the configured `default_provider`. It then sets
+  that in-memory model's `is_default` flag. A local inline model alone cannot
+  satisfy the binding, and an external profile has no native entry to bind.
+  Unknown, filtered-out and wrong-provider selections return a
+  `registry.default_model` configuration error. Automatic registry enumeration
+  filters disabled profiles; explicit profile-list resolution continues to
+  delegate validity/enablement checks to Sav rather than implementing a new
+  local enabled check (`src/config.rs:439-444,490-551`).
+- The shared fallback does not override another existing native default:
+  ordinary per-provider duplicate-default validation still rejects that
+  combination. This binding changes in-memory selection metadata only; there
+  is no file-write path in the inspected loader, and backend/model/options
+  remain those resolved from the shared profile
+  (`src/config.rs:534-551,644-659`).
+- `--setup` delegates provider discovery/qualification/save to
+  `sav::run_registry_setup`; `--force` is forwarded as a setup option.
+  Registry layering, qualification, persistence and backend argument validation
+  are delegated mechanisms, not independently inspected implementations.
+- Interactive automatic model selection prefers an explicit selection, a sole
+  applicable model, an active match within the default provider, then a marked
+  provider default; otherwise it requests selection. Multiple distinct active
+  matches currently select the first configuration-order match; duplicate
+  matches of the same endpoint/loaded identity are treated as ambiguous.
+  Discovery uses bounded Sav metadata calls, without inference. Headless
+  selection supplies an empty active-model map and therefore uses
+  explicit/configured selection, not mutable provider loading state
+  (`src/config.rs:927-1028`, `src/headless.rs`). A shared registry fallback is
+  an ordinary marked default for this selection function: it remains below
+  explicit selection, sole-applicable-model selection and an active native
+  match; the binding does not make external profiles auto-selected.
+- Context capacity is CLI override, model configuration or selected-provider
+  discovery, with no assumed 8192-token fallback. Accepted resolved windows are
+  2 through 1,048,576 tokens. Output reserve is CLI, model configuration, or
+  one quarter of capacity clamped to 1 through 8192, and must fit below the
+  window and satisfy shared run-limit validation. Provenance is displayed and
+  recorded (`src/config.rs:99-155`).
+
+### Execution modes and presentation
+
+- Native interactive execution is sandboxed and multi-turn by default.
+  `--allow-host-execution` explicitly selects unconfined host commands, with
+  one turn by default; `--host-turns` must be within the shared maximum.
+  Interactive logging may be disabled. The normal interactive log location is
+  `.skott/runs` inside the writable workspace, so private Unix modes do not make
+  these default logs inaccessible to the workspace agent
+  (`src/tui/mod.rs:82-197`, `src/host.rs`).
+- `--headless PROMPT` runs one sandbox-only prompt without a terminal and
+  requires durable logs outside the workspace. It rejects host execution,
+  host-turn overrides, disabled logs, blank prompts and prompts over 64 KiB.
+  Its default log location is under absolute XDG state or HOME state storage.
+  Plain stdout contains only a successful, terminal-escaped answer; JSON mode
+  emits sequence-numbered schema-one NDJSON, including startup metadata and a
+  terminal summary. Runtime failure/cancellation is unsuccessful; the binary
+  maps cancellation to 130. Some startup failures return diagnostics before any
+  summary is emitted (`src/headless.rs`, `src/main.rs`).
+- CLI default whole-prompt limits are 86,400 seconds and 100,000,000 estimated
+  budget tokens; argument parsers bound explicit values. Retry, context,
+  turn/deadline/token accounting and proposal validation run through Sav's
+  native runtime, not through an independently implemented Skott loop.
+- The TUI has an editable multiline prompt, model/effort selection, theme
+  selection/reloading, reasoning collapse/reveal, progress and usage labels,
+  scrollback, help/menu and read-only history replay. Ctrl+Enter or Enter on a
+  blank subsequent line submits; Ctrl+C cancels active work or quits when idle;
+  Ctrl+Q quits from the live view; new session shuts down the previous worker.
+  Modal overlays handle their own keys before live-view bindings
+  (`src/tui/app.rs`, `src/tui/mod.rs`).
+- Markdown is rendered by calls to Blad and locally adapted from ANSI into
+  ratatui spans; its implementation was not inspected. Display reflows with
+  width/theme, and retained live rows are capped at 5000. History reads are
+  regular/non-link, bounded to 5 MiB each and 4096 directory entries.
+  Intentional clipboard copying uses OSC 52; raw diagnostic files may retain
+  sensitive text and terminal control bytes (`src/markdown.rs`,
+  `src/tui/app.rs`, `src/history.rs`).
+
+## Observed requirements and constraints
+
+These are source-enforced conditions and source-visible limits, not statements
+derived from intent documents.
+
+- The model-facing registry exposes stable generic tools: `shell`, `read_file`,
+  `write_file`, `list_dir`, `find_files`, `search_files`, `edit_file`. Language
+  profiles change advertised available toolchains; they do not add a separate
+  language execution authority. Generic is always present. On/auto/off gating
+  and explicit overrides distinguish required unavailable tools from optional
+  omitted tools (`src/tools.rs`, `src/toolchain.rs`).
+- Shell input is exactly one nonblank, NUL-free `command`, at most 16 KiB.
+  Configured deny substrings/prefixes extend a built-in minimum. This string
+  filter is advisory, not shell isolation. Commands up to the protocol's
+  4096-byte scalar bound are inline; longer commands use a staged read-only
+  script in sandbox execution (`src/tools.rs:420-491`, `src/executor.rs`).
+- Native file requests are closed, revalidated typed payloads at most 256 KiB.
+  Paths are absolute, bounded to 4096 bytes and lexically canonical without
+  empty/dot/parent components. Mutations must be strictly below the write root;
+  read authority instead comes from the process filesystem namespace.
+  `skott-file-tool` is not itself a sandbox.
+- Reads hash the complete file, accept UTF-8 byte offsets and return adaptive
+  pages with actual `next_offset`. Complete files are bounded to 1 MiB;
+  read pages have default 4096 and maximum 16384 requested bytes. List/search/
+  discovery pages default to 100 and cap at 256 entries. Success JSON is fitted
+  below the 7000-byte complete encoded-output bound, including outer string
+  escaping (`src/file_tools.rs`, `src/bin/file_tool.rs`).
+- Search/discovery are literal, deterministic and bounded: 4096 traversal/
+  result entries, depth 32, 8 MiB scanned file content, 1024-byte query/filter
+  and line previews. Generated directories are pruned unless opted in, with
+  skip/exclusion counters and a coverage-completeness flag. Unsupported
+  ordinary entries and hard resource overruns fail explicitly.
+- Writes accept at most 64 KiB content and optional preimage SHA-256. Edits
+  require the expected digest and exactly one old-text occurrence, including
+  overlapping occurrences. Descriptor-relative no-follow traversal,
+  exclusive replacement files, mode preservation, sync and rename protect
+  these mutations. A fresh preimage check detects ordinary intervening
+  changes, but is explicitly not transactional compare-and-swap against
+  arbitrary concurrent writers (`src/file_tools.rs:1040-1152`).
+- Sandbox tools always build an Authoring-phase, version-one Galla request:
+  canonical writable workspace at the policy write root, read-only context/
+  toolchain grants, denied network and explicit identities/resources.
+  Defaults per tool are 120 seconds, 1 MiB captured output, 256 processes,
+  4096 files, 64 MiB per file and 1 GiB scratch. The installed runner must be
+  outside the workspace. Request construction calls Galla validation; actual
+  isolation/resource enforcement is delegated to the installed runner/backend,
+  not established merely by constructing the request (`src/sandbox.rs`).
+- Preflight bounds workspace inspection to 30 seconds, one million entries,
+  depth 128 and 32 MiB path storage; identity reads cap each file at 256 MiB.
+  Escaping workspace symlinks, overlapping context roots and unsupported
+  context entries fail closed. Native helper paths must be regular, non-link
+  with non-link ancestors and outside the workspace. Payloads use private
+  host-generated names in the workspace's canonical parent, with RAII cleanup;
+  an unwritable parent fails rather than falling back into the workspace.
+- Rust workspace resolution selects installed resources, validates pins and
+  installed inventories, snapshots `.kvist/vendored` outside the writable
+  workspace and exposes read-only `/rust/*` grants. It does not provision
+  dependencies or installations. Local code stages fixed wrappers obtained
+  from `sav::offline_rust`, private registrations and per-invocation homes/
+  caches, with persistent `/workspace/target`. Wrapper semantics such as
+  offline/locked Cargo and installed-version selection are supported by local
+  test assertions, not independent observation of Sav wrapper source.
+  Snapshot bounds are 1 GiB and 100,000 entries. The actual preparation constant
+  is 180 seconds, despite comments/error text referring to 30 seconds
+  (`src/rust_environment.rs`, `src/rust_environment/inventory.rs`).
+
+## Observed internal design and failure paths
+
+### Shared native runtime and real steering paths
+
+- `AgentSession` wraps/dereferences Sav's session; `ContextManager` similarly
+  wraps Sav's context manager; events, guidance states, mailbox, limits,
+  summaries and retry policy are shared types. `Skott::run_controlled` constructs
+  `sav::runtime::NativeRuntime` and adapts the local executor, sink and recorder.
+  The executor bridge marks native observation tools repeatable and supplies a
+  special repeated-page-zero read notice. No Sav implementation was read
+  (`src/session.rs`, `src/context.rs`, `src/retry.rs`).
+- The worker owns conversation, transport, context and recorder across prompts.
+  It obtains tasks from one shared mailbox, records the prompt before running,
+  invokes the shared controlled runtime, resets cancellation after an ordinary
+  run and terminates on recording/channel/runtime errors. The event channel has
+  128 slots and shutdown-aware backpressure. Prompt-sender lifetime is tracked
+  separately so dropping all senders permits an idle worker to exit
+  (`src/run.rs:29-337`).
+- Submission classification belongs to the mailbox/run owner, not the UI's
+  potentially stale `running` flag. The TUI sends to the current worker's
+  `PromptSender::send`; while active, accepted text is supplemental guidance.
+  If the selected model/effort changed, it first uses guidance-only `steer`;
+  idle rejection permits replacement with the explicitly selected worker,
+  rather than accidentally starting a new task on the former model. Rejected
+  input is restored to the editor. Model/effort changes alone do not replace
+  an active task (`src/tui/mod.rs:809-880`, `src/run.rs:35-53`).
+- The local worker test
+  `real_submission_path_interrupts_active_generation_instead_of_queuing_a_task`
+  asserts cancellation of a quiet generation, a second request containing the
+  original task and guidance, accepted/claimed/delivered notices, idle
+  guidance rejection and no replacement task. This is test SOURCE evidence,
+  not an executed result (`src/run.rs:861-915`).
+- Startup model/tool discovery and model bootstrap use separately owned,
+  cancellable jobs off the UI thread. Pending startup submissions have a
+  32-entry/1 MiB queue bound; failed bootstrap can retry a retained prompt up to
+  three times before provider/tool work begins. Stale bootstrap results are
+  discarded after explicit selection changes. New session and UI teardown
+  shut down workers and cancel discovery, then restore terminal state
+  (`src/tui/mod.rs`, `src/tui/startup.rs`).
+
+### Independent inspection and explicit controls
+
+- `--attach JOURNAL` opens a Sav `JournalFollower` without configuration,
+  model discovery, tool registry or executor. Plain output is a snapshot unless
+  `--follow`; incomplete snapshots and detached followers are labelled
+  explicitly. Terminal inspection follows while allowing scrolling/panning and
+  remains inspectable after terminal disposition. JSON rendering escapes event
+  control bytes; display limits are 4096 bytes per line, 2048 retained lines and
+  1 MiB retained text (`src/inspection.rs`).
+- Attachment alone supplies no execution control. `--control SOCKET` is an
+  explicit independently supplied capability; cancellation/guidance requests
+  use bounded Sav exchanges and report queued/rejected/requested status.
+  A queued acknowledgement is not delivery. Terminal controls compose at most
+  16 KiB guidance; q/Esc/Ctrl+C detach the viewer, not cancel the run. Journal
+  and control paths are not locally cross-validated as belonging to one run.
+- Native IPC is opt-in with `--allow-control`. Both frontends require sandboxed
+  execution and durable logs outside the workspace, validate the actual socket
+  path outside the canonical workspace and disclose the capability only to the
+  operator presentation, not through runtime events or recording. Headless
+  disclosure uses stderr; TUI disclosure is a frontend-only note.
+- `SessionHandle::enable_controls` delegates binding to
+  `sav::observation::bind_runtime_controls` with the same worker mailbox/token.
+  Socket ownership is shared only between worker and handle. Shutdown and
+  natural worker exit remove the listener. The library method checks live
+  worker/recording presence, but leaves sandboxed executor and private-log
+  requirements to its embedding caller (`src/run.rs:77-160`).
+- `cancel` targets the active run; `shutdown` permanently closes submissions,
+  clears execution ownership and cancels work. Dropping the session handle
+  shuts down and joins even if a prompt sender survives. Viewer detachment
+  does not transfer or extend worker ownership. Cancellation never claims to
+  roll back completed or unknown effects.
+
+### Recording lifecycle and confidentiality
+
+- `SessionLog` opens an all-non-link directory chain, requires a private final
+  directory and creates exclusive mode-0600 journal/text files through a held
+  directory descriptor. The first prompt adds a bounded prompt-derived filename
+  slug; filenames therefore disclose some prompt text to anyone able to list
+  that directory. The operational JSONL uses schema/sequence envelopes,
+  request/text/output hashes, argument shapes, action hashes, status flags,
+  budget provenance and explicitly unknown mutation state. Dispatch and finish
+  synchronize journal, text and directory (`src/session_log.rs`).
+- Human-readable text records bounded 64 KiB previews, including reasoning,
+  stdout/stderr and failures. These are diagnostic text, not authenticated
+  effect evidence. Complete provider usage is distinguished from unknown usage
+  and estimated budget charges. The files have no cumulative retention quota.
+- `SessionTranscript` additionally owns a structured Markdown conversation and
+  a separate Sav `RunJournal` for each prompt. The live journal is created on
+  prompt/start, its path is announced, prompt/result text is bounded to 8192
+  bytes per record and streamed text/reasoning is marked provisional.
+  Controls and tool boundaries are checkpointed; dispatch omits argument
+  values and result events omit raw output. Normal finish consumes the live
+  journal and writes disposition; a later prompt gets a distinct live file.
+  An abandoned/unanswered dispatch is not automatically replayed
+  (`src/session_transcript.rs`).
+- Live journals are not hash-only: they contain prompt, model text and
+  reasoning previews. Structured transcript bodies contain full supplied user/
+  reasoning/final text, dispatch arguments and nonempty tool stdout, and can
+  therefore hold secrets even when the operational journal omits values.
+  The structured writer now also uses held non-following directory descriptors,
+  exclusive mode-0600 message files and synchronized atomic manifest replacement.
+  Session identities are bounded single safe components; existing session
+  directories fail rather than being reused. A final answer is recorded once,
+  and a new user message clears the structured completion timestamp and restores
+  streaming status (`src/transcript_writer.rs:63-106,137-181,227-273`,
+  `src/session_transcript.rs:273-291`). These protections prevent the previously
+  observed path-redirection writes, but do not make workspace-local logs
+  inaccessible to the workspace agent or immune to deletion/disruption.
+
+### Process execution and opaque external backends
+
+- Local sandbox/host tool subprocess supervision uses a dedicated process
+  group, nonblocking stdin/stdout/stderr pumping, one combined output cap,
+  cancellation/deadline checks, a 250 ms pipe-drain grace and one-second
+  reap grace. The leader is observed unreaped before group signalling, reducing
+  PID reuse risk; cleanup targets both the owned group and direct child.
+  Partial diagnostics and nonzero status remain outcomes. Successful early
+  stdin closure, retained pipes and cleanup failures are explicit failures.
+  Escaped descendants and uninterruptible kernel work cannot be guaranteed
+  terminated by this mechanism (`src/process.rs`).
+- Explicit native host execution retains real filesystem/network/environment
+  authority. Native helper mutations retain their mapped root restrictions, but
+  shell path substitution is a convenience, not confinement. It uses
+  120-second tool limits and shared result-size bounds (`src/host.rs`).
+- External-agent profiles are explicitly opaque, separate from native model
+  transports/tools. CLI dispatch requires an explicit selected profile,
+  interactive stdin/stdout, an initial prompt, host acknowledgement and logs.
+  It rejects headless execution, no-logs and native tool/context/turn/token
+  overrides. Profile enablement and prompt nonblank/64 KiB bounds are checked.
+- `external::start` calls the resolved backend's `command_spec`, then delegates
+  to `sav::run_supervised_observed` with zero retries, no loop detector,
+  a supplied wall deadline, idle deadline at most 3600 seconds and 4 MiB output
+  bound. It checkpoints dispatch before starting a single owner-held worker.
+  The journal records profile provenance, host-unconfined/opaque/unsupported-
+  steering labels and stdout/stderr text plus raw hex. It does not reinterpret
+  output as native tool authority, provide native token accounting or isolate
+  the external CLI's internal tools (`src/external.rs`).
+- `ExternalRun::wait` joins; dropping an unjoined owner cancels and joins.
+  Its initial viewer has explicit `c` cancellation, while detachment leaves
+  the owner waiting. This is not daemonization or restart/replay. External
+  CLI permissions, internal tools, network use and signal/supervision internals
+  are opaque or delegated; their correctness is not established by this record.
+
+## Evidence and limits
+
+Implementation inspection was restricted to `skott/src/**`, `skott/tests/**`
+and `skott/Cargo.toml`. No intent artifacts, previous implementation record,
+peer implementation, Git metadata/history/diff or prior review was read. The
+previous record was deleted without reading it and this record was freshly
+written.
+
+**Earlier executed evidence, predating recording repairs:** the operator supplied an exit-zero result for
+`CARGO_TARGET_DIR=/opt/target cargo test --offline --locked --workspace
+--no-fail-fast --quiet`. The explicitly supplied
+`/home/stefan/.copilot/session-state/13dd58ac-9d6a-4316-9d9b-bada72cc2b4c/files/workspace-tests-refreshed.log`
+was inspected as test-run evidence only. Aggregating its successful result
+summaries confirms **1687 passed, 0 failed and 14 ignored across 102 target
+summaries**. These are workspace totals, not Skott-only counts. The quiet log
+does not name all individual targets/tests, so its aggregate result is not
+represented as a separate executed result for each source test listed below.
+Skott-labelled diagnostics in the log also show local Rust-resource trials
+running. Ignored live trials remain unexecuted by this command.
+
+For that earlier validation, the operator additionally reported successful workspace all-target Clippy with
+`-D warnings`, ordinary workspace rustdoc, and strict Sav/Skott rustdoc.
+Those validation logs were not inspected. Strict whole-workspace rustdoc was
+reported to encounter unrelated warnings; no peer source was consulted to
+evaluate them. This observer did not execute a build/test/linter, live provider,
+interactive run or exploit reproduction.
+
+**Bounded post-repair refresh:** only the current
+`src/transcript_writer.rs`, relevant `src/session_log.rs` portions,
+`src/session_transcript.rs` and new `tests/transcript_recording.rs` were
+re-inspected. Behavioral reassessment comes from those source/test bodies, not
+repair assertions. The operator reports that the five new transcript-recording
+tests failed before repair and now pass, and that the one live-journal test
+passes. No corresponding fresh test-run log was supplied for this refresh, and
+the observer did not execute them. These are attributed targeted results, not
+an independently observed post-repair whole-component pass. The operator also
+reports a later full-Skott run encountered a repository-scan ENOENT attributed
+to concurrent scratch-directory removal; that diagnosis was not independently
+reproduced. **No fresh whole-Skott/workspace pass is claimed after repair.**
+
+**Final registry/default refresh:** only current `src/config.rs` and
+`tests/shared_registry.rs` were inspected for this follow-up. The source now
+exposes the optional `[registry].default_model` binding described above. The
+operator reports 25 passing tests across shared-registry/model-selection
+targets and mentions targeted Clippy outcomes; no new command was executed or
+result log inspected by this observer. These attributed outcomes do not supersede the
+whole-component/workspace verification limitation above. No parent local
+configuration, intent, Git or peer implementation was inspected.
+
+**Test SOURCE coverage inspected:**
+
+- `tests/transcript_recording.rs`: five new source tests assert that a manifest
+  symlink is replaced without changing its victim and receives mode 0600;
+  an exclusive message symlink is rejected without overwriting its victim;
+  writes stay on the originally held messages directory after pathname
+  replacement; one final answer and a continuing prompt have the proper
+  structured lifecycle; the fourteen-CJK-character slug does not panic; and
+  duplicate/parent-traversing session identities cannot create/reuse a session.
+  These are targeted regression assertions, not exhaustive concurrency or
+  filesystem fault-injection coverage.
+- `tests/shared_registry.rs`: shared native resolution, in-memory pinning across
+  registry edits, external/native separation, setup before config discovery.
+  Five additional default-binding test bodies (`lines 109-203`) exercise
+  retained enumeration and explicit subsets, native options unchanged by the
+  binding, byte-identical configuration/registry files after loading,
+  unknown/filtered/external/disabled-by-enumeration/wrong-provider/empty
+  rejection, local-only model rejection, duplicate-default rejection and
+  precedence below explicit/active selection. They do not independently
+  inspect Sav's explicit-disabled-profile resolution mechanism.
+- `tests/runtime_ipc.rs`: CLI conflicts, actual worker socket guidance into a
+  quiet provider, preserved original task, idle rejection, later-task
+  cancellation reset, natural-exit/shutdown socket removal, required recording,
+  agent-writable socket rejection, and headless binary guidance with capability
+  absence from provider requests, JSON stdout and durable files.
+- `tests/startup_lifecycle.rs:319-540`: PTY-driven interactive socket
+  cancellation and capability confidentiality checks. Other inspected startup
+  tests cover responsive input/quit during blocked discovery, hostile ignore
+  FIFO, discovery-delayed prompts and late-selection races. This is not PTY
+  coverage of every keyboard-guidance/model-switch interleaving.
+- `src/run.rs` unit tests: the real submission-to-worker guidance path, retained
+  senders, active-provider shutdown, full event-channel teardown and recording
+  failure before turns. `tests/steering.rs` additionally asserts conversation
+  preservation/order, but most of those tests inject user messages directly and
+  do not by themselves exercise a live worker or UI steering.
+- `tests/live_journal.rs`: per-prompt live files, bounded text, provisional and
+  control events, argument omission, terminal completion and abandoned input.
+  `tests/inspection_cli.rs`: configuration-free attachment, escaped snapshot
+  text, incomplete/malformed input and explicit queued-control reporting.
+- `tests/external_agent.rs`: one supervised opaque shell fixture, literal prompt
+  argument handling, separate stdout/stderr, acknowledgement refusal,
+  cancellation disposition and CLI batch/nonterminal refusal. These are not
+  qualifications of any real third-party coding agent or its permissions.
+- `tests/headless_cli.rs`, `tests/model_budgets.rs`,
+  `tests/model_selection.rs`, `tests/input_boundaries.rs`: mock-provider
+  protocol/output, serving-capacity selection, failure disposition, private log
+  scope, model precedence and input diagnostics.
+- `tests/loop_integration.rs` and `tests/context_preflight.rs`: local assertions
+  against the shared adapter for proposal rejection before effects, retry/
+  cancellation/budget closure, bounded result encoding, repeat detection,
+  context estimates/compaction and preserved task/tool framing. These do not
+  independently establish the uninspected Sav algorithms.
+- `tests/native_file_tools.rs`, `tests/component_tests.rs`,
+  `tests/subprocess_supervision.rs`: bounded/escaped native pages, exact edits,
+  malformed paths/payloads, helper/staging separation and cleanup, request
+  construction, fail-closed runner errors, process output/deadline/cancellation
+  and moved/escaped-process cases. Fixture runners test local supervision;
+  they are not proof of real sandbox isolation.
+- `tests/rust_build_environment.rs`, `tests/rustup_inventory.rs`,
+  `tests/toolchain_discoverability.rs` contain native-runner/toolchain trials,
+  including offline builds, read-only resources, lock handling, installed
+  versions/targets and host-state comparisons. These require provisioned host
+  resources; one absence trial explicitly returns when system rustup is
+  unavailable. Individual native-trial execution is not separately attributed
+  from the aggregate quiet log.
+- `tests/live_llama.rs` explicitly ignores its three live sandbox/provider
+  trials by default. Their asserted confinement/network and model outcomes are
+  source coverage only. TUI/Markdown/history/theme unit tests were inspected
+  selectively, not exhaustively.
+
+The independent implementation boundary excludes Sav, Galla, Blad, installed
+runner/backend binaries, build script, bundled theme data and real external
+CLIs. Shared type names and calls describe integration, not independent
+verification of registry trust, socket protocol/permissions, transport
+validation, journal framing, offline wrappers or enforcement internals.
+
+## Independent engineering and boundary audit
+
+These are source-derived findings and limits, not approval, certification or
+compliance conclusions. No production/test files were changed.
+
+### Scoped recording repair reassessment
+
+The following three findings are no longer open on the post-repair source paths
+examined. This is a bounded source/test assessment, not a claim of exhaustive
+filesystem-race validation or overall compliance.
+
+**F1 — Formerly High: structured transcript host-write redirection — addressed.**
+
+`src/transcript_writer.rs:63-106` now rejects invalid/multicomponent identities,
+opens the private parent through the existing no-follow directory walker,
+exclusively creates a mode-0700 session and messages directory and retains both
+directory descriptors. `src/session_log.rs:154-193` walks each parent component
+with `O_NOFOLLOW`. Message writes use descriptor-relative
+`O_CREAT | O_EXCL | O_NOFOLLOW`, mode 0600 and file/directory synchronization
+(`src/transcript_writer.rs:227-250`). A preplanted message link now fails rather
+than following or truncating its target.
+
+Manifest publication creates an exclusive no-follow temporary file in the
+pinned directory, synchronizes it, renames it over `session.json` and
+synchronizes the directory (`src/transcript_writer.rs:137-173`). Renaming
+replaces a manifest symlink itself rather than following its target. Writes do
+not reopen the stored display path, so replacing the messages pathname does
+not redirect the retained descriptor. The regression bodies at
+`tests/transcript_recording.rs:9-58,107-115` directly exercise manifest/message
+links, renamed message directories, private manifest mode and session
+no-clobber/identity handling.
+
+The repaired writer removes the source mechanism behind the reported
+outside-workspace overwrite. Workspace-local records remain writable/deletable
+by an agent with that mount's authority; hostile collisions can cause a
+recording error, and a renamed messages directory can make the path-based
+presentation index cease to locate the held record. These are availability/
+presentation limitations, not evidence of retained link-following host writes.
+
+**F2 — Formerly Medium: Unicode prompt-slug panic — addressed.**
+
+`src/session_log.rs:98-123` now lowers the candidate end offset until it is a
+UTF-8 character boundary before truncating. Fourteen three-byte CJK characters
+therefore truncate safely below 40 bytes. The exact prior trigger is exercised
+by `tests/transcript_recording.rs:98-105`. No provider or guidance-path changes
+are involved in this repair.
+
+**F3 — Formerly Medium: duplicate finals, stale lifecycle and in-place manifest
+rewriting — addressed.**
+
+`src/session_transcript.rs:273-291` now makes one fallible final-answer write.
+`src/transcript_writer.rs:176-181` restores streaming status and clears the
+completion timestamp when recording a user message. The continuing-recorder
+test at `tests/transcript_recording.rs:60-96` asserts one final entry and the
+second prompt's active lifecycle. Manifest publication is now the synchronized
+temporary-file/rename sequence described under F1, not in-place truncation.
+
+No additional concrete correctness/authority failure was identified in this
+bounded repair inspection. Atomic publication does not make the entire
+message-plus-manifest sequence transactional: a crash/error can leave an
+unindexed exclusive message file, and failures after namespace effects may
+leave completed artifacts despite an error return. No recovery/rollback,
+crash-injection or arbitrary concurrent-writer guarantee was established.
+
+### Open ancillary findings outside the scoped recording repair
+
+F4 and F5 remain separate ancillary findings. Their previously inspected source
+was not re-read in this bounded recording follow-up, and no historical
+introduction claim is made.
+
+### F4 — Medium: long native host shell commands lose their original script
+
+`src/tools.rs:468-489` renders commands above 4096 bytes as argv referencing
+`/context/0` plus a separate `shell_script`. `src/executor.rs:91-112` stages
+that field for sandbox execution. `src/host.rs:77-116` only handles native
+`file_request` specially and otherwise executes the rendered argv, ignoring
+`shell_script`. Consequently a legal long host command runs the wrapper against
+an unstaged host `/context/0`, failing or consuming unrelated existing content
+instead of executing the submitted command. Inspected long-command tests
+establish rendering/request shape, not this host execution case.
+
+### F5 — Medium: theme loading's advertised byte bound is only a pathname precheck
+
+`src/tui/theme/file.rs:304-322` checks pathname metadata and then separately
+calls unbounded `read_to_string`; it neither pins the checked regular inode nor
+limits bytes read. Custom theme loading checks `is_file` first at lines
+391-399, but replacement/growth can happen between those checks and opening.
+The public loader itself also accepts special-file metadata. A replaced FIFO
+can block, or a growing/replaced file can exceed 64 KiB during startup or
+synchronous UI selection. This differs from the descriptor-based bounded
+configuration/history loaders; no race test was executed.
+
+### Resource, authority and lifecycle limits
+
+- Per-event preview bounds and row counts are not whole-session memory/disk
+  quotas. Structured bodies/manifest entries and retained prompt history grow;
+  rewriting the entire manifest for each added entry causes cumulative
+  quadratic index-write work (`src/transcript_writer.rs:137-160,261-262`,
+  `src/tui/app.rs:1287`). Logs have no local retention/rotation quota.
+- The event channel's full-queue wait checks permanent shutdown, not active
+  cancellation (`src/run.rs:62-74`). A library consumer that stops draining must
+  shut down/drop the owner, not expect `cancel()` alone to unblock presentation
+  backpressure. Worker/startup `join()` also depends on called transport/
+  executor/discovery operations honoring cancellation; arbitrary injected
+  implementations are not forcibly bounded.
+- Process-group ownership is stronger than killing only a leader but not
+  containment of every detached descendant. Local tests explicitly clean up an
+  escaped fixture process (`tests/subprocess_supervision.rs:300-319`).
+  Host execution and opaque external execution must not be advertised as
+  sandboxed merely because they have time/output supervision.
+- CLI IPC/log-scope guards are not enforced by the type of an arbitrary
+  library-supplied recorder/executor. A low-level embedding can enable controls
+  with any recorder present; it owns the documented authority/confidentiality
+  obligations. Socket-server framing, permissions and malformed-client
+  resilience remain delegated, uninspected mechanisms.
+- Diagnostic metadata, hashes, sequence numbers and private modes provide no
+  independent approval, tamper-proof provenance or proof of filesystem effects.
+  Host-unconfined backends themselves retain authority over host-accessible
+  logs. Cancellation, failed recording and absent terminal disposition leave
+  prior/unknown effects unresolved rather than undone or replayable.

@@ -13,6 +13,11 @@ referenced, not copied. Local `[[models]]` remain explicit overrides, parsed and
 validated using Sav's native model representation; duplicate shared/local IDs
 are rejected. `Config.shared_profiles`/`shared_profile` expose pinned native
 and external definitions; only native profiles enter `Config.models`.
+Optional `[registry] default_model = "NAME"` is an application-local fallback
+binding to one retained native shared profile of `default_provider`; it marks
+that entry as the provider default without copying backend facts. Unknown,
+filtered, external or wrong-provider defaults are rejected. It never overrides
+explicit selection or an interactively discovered loaded model.
 External-agent profiles are not native transports.
 `--import-kvist` and `--kvist-config` are retired, without migration.
 
@@ -292,6 +297,12 @@ terminal disposition; starting another prompt does not append after a terminal
 record. Tool dispatch is synchronized before execution. An interrupted process
 without a terminal record remains incomplete. Existing detailed transcript
 formats are not misrepresented as shared journal envelopes.
+
+Structured transcript sessions are private, no-clobber single-component
+directories. Held directory descriptors prevent path substitution from
+redirecting host writes; message files are no-follow/no-clobber and manifests
+are atomically replaced. A subsequent prompt restores streaming status and
+clears the prior completion time. A final answer is recorded once.
 
 `skott --attach JOURNAL` opens the shared version-one live diagnostic journal
 without loading Skott/provider configuration or initializing tools. At a

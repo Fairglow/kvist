@@ -8,6 +8,8 @@ Skott MUST consume shared named profiles without importing provider facts.
 Shared setup MUST work without an existing Skott config. Loaded-model discovery
 MAY only influence implicit interactive defaults, never an explicit selection
 or a headless task profile. Native overrides MUST use Sav's shared validation.
+An application-local default MAY bind a shared native profile by name without
+copying model/provider facts; invalid or incompatible bindings MUST fail closed.
 
 ## RUN-REQ-SHARED-RUNTIME
 
