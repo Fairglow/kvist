@@ -2,6 +2,73 @@
 
 # Sav Contract
 
+## Shared native runtime API (ADR 0015)
+
+`sav::runtime` exposes `AgentSession`, `ModelIdentity { id, model }`,
+`ContextManager`, `RetryPolicy`, `NativeRuntime`, `RunLimits`, `RunSummary`,
+`ToolOutcome`, serializable `Event`, and a narrowly scoped runtime `Error`.
+`ToolExecutor`, `EventSink` and `Recorder` are host interfaces: no executor,
+policy, selected model configuration, terminal or application task type is
+provided. Hosts declare descriptions and repeatable observations; those do not
+authorize effects or permit automatic tool replay. Required recorder errors
+stop execution before subsequent effects.
+
+`NativeRuntime::run_controlled` takes a cloneable `ControlMailbox` capability.
+`steer` requires an active run; `submit` atomically classifies idle submissions
+as tasks and running submissions as guidance. The pending mailbox has at most
+32 messages and 1 MiB of text; tasks are at most 1 MiB and guidance 64 KiB each.
+IDs are monotonically increasing, run-owner-local `GuidanceId`s. `edit` and
+`withdraw` succeed only before claim. Delivery preserves submission order,
+conversation grouping, original goal, observed effects, wall/token charges,
+generation attempt counts and effect-repeat protection. Interrupted provider
+partials are provisional and never executable. Remaining stale calls receive
+explicit not-executed results before guidance is appended.
+
+Correlated `GuidanceNotice` states are accepted, claimed (interrupting),
+delivered, withdrawn or dropped. Delivery means appended to model context,
+not provider acknowledgement or successful task completion. The recorder
+persists delivered state before the next provider request. Shutdown closes the
+capability, discards pending work and prevents subsequent context delivery.
+Guidance never becomes a replacement task when a prompt ends.
+
+Low-level host loops may use `begin_run`, `claim`, `withdrawals`,
+`dispatch_ready`, `deliver_if_open`, `finish_if_idle`, and `end_run`; the host
+then owns recording and delivery obligations. `finish_if_idle` linearizes final
+completion against simultaneous submission. `Operation::start` supplies a fresh
+provider-only cancellation token which mirrors prompt cancellation, shutdown
+and pending guidance within a 10-ms polling interval; it never resets the
+prompt token. Executing effects must use the prompt token instead.
+`validate_turn` checks complete finish classification and bounded, unique tool
+proposals without authorizing them.
+
+## Shared registry configuration (ADR 0015)
+
+`sav::registry` owns the canonical schema-one TOML registry. Its root contains
+`schema_version = 1` and named `[profiles.NAME]` tables. A profile has `enabled`
+(default true), separate `advertised`, `tested`, and `policy_enabled` capability
+lists (default empty), and a `[profiles.NAME.backend]` table. Backend `kind`
+is `native` (shared local provider, `base_url`, `model`, optional native limits)
+or `external-agent` (typed provider, literal `executable`, structured `arguments`,
+and optional `model`). Unknown fields, duplicate names, invalid bounds, inline
+credentials, and non-numeric/non-loopback HTTP endpoints fail closed.
+
+`RegistryPaths` resolves complete named definitions, explicit then project
+then user; missing optional project/user files are ignored, malformed files are
+not. An explicit file must exist. Default user storage is
+`$XDG_CONFIG_HOME/sav/registry.toml` or `$HOME/.config/sav/registry.toml`;
+project storage is `.kvist/providers.toml`. Resolution never probes a process,
+endpoint, loaded model or executable. `ResolvedProfile` pins the selected name,
+complete typed profile, source path and content digest. Disabled profiles cannot
+be selected. Registry parsing and resolution never authorize execution.
+
+`NativeModel` is also the parser/validator for frontend-local explicit native
+overrides. `LocalModelProvider` is the shared local provider identifier.
+`NativeModel::transport` constructs bounded native transport; external agents
+cannot produce one. Persistence validates the complete registry and atomically
+replaces a bounded regular non-link file. Explicit setup shares discovery and
+qualification, discloses host authority and possible billing, and persists no
+credentials. Forced failed qualification does not mark a capability tested.
+
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
 described in BCP 14 (RFC 2119 and RFC 8174) when, and only when, they appear in
@@ -22,6 +89,48 @@ decisions, grants, approved resources or credentials, promotion, or canonical
 compliance evidence.
 
 ## Provided interfaces
+
+### Live diagnostic journals and private controls
+
+`run_supervised_observed` supervises one opaque external-agent command with a
+caller-supplied cancellation token and a fallible per-stream bounded-byte
+observer, retaining bounded captured output. It requires `max_retries = 0`:
+unknown external effects must not be replayed. The existing supervisor still
+owns process-group cleanup, deadlines and output limits. This API is a process
+mechanism, not isolation; the embedding host must explicitly choose an
+acknowledged host command or an approved enforcement command. Observer failure
+terminates and reaps the process and remains an error. External process output
+does not become native tool intent and cannot mint task approval.
+
+`sav::observation` exposes `RunJournal`, `JournalFollower`, `JournalRecord`,
+`ControlServer`, `ControlRequest`, `ControlAction`, `ControlReply` and
+`send_control`. Journals are private no-clobber regular files. Each newline
+delimited JSON record has `schema_version: 1`, one stable `run_id`, a contiguous
+one-based `sequence`, and a JSON object `event` with a string `type`. The writer
+creates `run_start` and explicitly finishes with `run_end`. Records fit 64 KiB,
+the journal fits 64 MiB, and IDs fit 128 ASCII identifier bytes.
+`record` appends; `checkpoint` synchronizes before effects; `finish` synchronizes
+a terminal disposition. Failed writes poison the writer. Dropping it does not
+invent a terminal result or imply absent effects.
+
+Followers hold a non-following regular-file descriptor, retain at most one
+64-KiB partial line and return at most 256 records per poll. An incomplete
+trailing line is pending, not malformed until the caller declares end of input.
+Unknown versions, sequence gaps, mixed run IDs, malformed records and data after
+the terminal event fail explicitly. EOF alone is not successful completion.
+Replaying diagnostics never executes recorded actions.
+
+Controls use a process-owned Unix socket inside a fresh private temporary
+directory. The socket path is an explicit local control capability, separate
+from the journal path. Socket messages are newline-delimited strict version-one
+JSON requests with positive numeric `id` and tagged `action` (`cancel` or
+`guide` with nonblank UTF-8 `text`, at most 16 KiB). Requests/replies fit 20 KiB;
+individual I/O waits and the complete exchange are bounded. The host's handler
+decides whether an operation is allowed and returns an acknowledgement
+(`queued`, `cancellation_requested` or `rejected`), never a claim of delivery.
+Guidance delivery is a later journal event. Socket errors and malformed input
+do not invoke the handler. The owner closes and joins its listener on drop;
+observer/client loss cannot terminate the run.
 
 The shared runtime boundary described in ADR 0015 separates registry,
 native-loop, external-agent and observation interfaces. Registry facts and
