@@ -8,6 +8,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    /// A live diagnostic record or local control message violates its boundary.
+    #[error("invalid runtime observation or control: {reason}")]
+    Observation { reason: String },
+
     /// A command template is empty, malformed, or contains an unusable path.
     #[error("invalid command template: {reason}")]
     InvalidCommandTemplate { reason: String },
