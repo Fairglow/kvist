@@ -117,6 +117,8 @@ model = "auto"
 
 Native profiles cannot run as opaque processes, and external profiles cannot
 be used as model transports. External argv is literal, not a parsed command.
+Typed external profiles never restart automatically; positive process-retry
+requests are rejected before execution.
 Setup discloses inherited host authority and possible billing; `--force` can
 persist failed qualification but does not authorize execution or claim tested
 capabilities. Advertised catalog models and configured capability lists never
