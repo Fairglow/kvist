@@ -23,6 +23,12 @@ pub enum LinkKind {
     File,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum NavigationId {
+    Source(usize),
+    Bare { event: usize, offset: usize },
+}
+
 /// A clickable link found in the document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Link {
@@ -37,6 +43,7 @@ pub struct Link {
     pub source_line: usize,
     /// Parser source offset used by renderer-owned navigation metadata.
     pub source_offset: usize,
+    bare_offset: Option<usize>,
 }
 
 impl Link {
@@ -52,6 +59,7 @@ impl Link {
             kind,
             source_line: 0,
             source_offset: 0,
+            bare_offset: None,
         }
     }
 
@@ -74,6 +82,16 @@ impl Link {
     /// True when the destination is a file path.
     pub fn is_file(&self) -> bool {
         self.kind == LinkKind::File
+    }
+
+    pub(crate) fn navigation_id(&self) -> NavigationId {
+        self.bare_offset
+            .map_or(NavigationId::Source(self.source_offset), |offset| {
+                NavigationId::Bare {
+                    event: self.source_offset,
+                    offset,
+                }
+            })
     }
 }
 
@@ -137,7 +155,7 @@ pub fn extract_links(source: &str) -> Vec<Link> {
     let mut link_line = 0;
     let mut link_offset = 0;
 
-    for (event, range) in parser.into_offset_iter() {
+    for (event, range) in crate::scripts::events(source, parser.into_offset_iter()) {
         match event {
             Event::Start(Tag::Link { dest_url, .. }) => {
                 in_link = true;
@@ -160,22 +178,30 @@ pub fn extract_links(source: &str) -> Vec<Link> {
             Event::End(TagEnd::CodeBlock) => in_code = false,
             // Capture every inline payload inside the label: plain text,
             // inline code and raw inline HTML.
-            Event::Text(text) | Event::Code(text) if in_link => {
+            Event::Text(text)
+            | Event::Code(text)
+            | Event::InlineMath(text)
+            | Event::DisplayMath(text)
+            | Event::FootnoteReference(text)
+                if in_link =>
+            {
                 current_text.push_str(&text);
             }
+            Event::SoftBreak | Event::HardBreak if in_link => current_text.push(' '),
             Event::InlineHtml(html) if in_link => {
                 current_text.push_str(&html);
             }
             // Bare autolinks: a plain-text run that is not already inside a
             // link or a code block may contain a bare `http(s)://` URL.
             Event::Text(text) if !in_link && !in_code => {
+                let projected = crate::scripts::text(&text, source, range.clone());
+                let text = crate::terminal_text::inert_source(&projected);
                 for url in bare_urls(&text) {
-                    if !links.iter().any(|l| l.destination == url) {
-                        let mut link = Link::new(url.clone(), url)
-                            .with_source_line(line_of(source, range.start));
-                        link.source_offset = range.start;
-                        links.push(link);
-                    }
+                    let mut link = Link::new(text[url.clone()].into(), text[url.clone()].into())
+                        .with_source_line(line_of(source, range.start));
+                    link.source_offset = range.start;
+                    link.bare_offset = Some(url.start);
+                    links.push(link);
                 }
             }
             // Emphasis and other inline containers carry their own Text/Code
@@ -194,7 +220,7 @@ fn line_of(source: &str, pos: usize) -> usize {
 
 /// Find bare `http://` and `https://` URLs in a plain-text run, trimming
 /// trailing punctuation that is not part of the URL.
-fn bare_urls(text: &str) -> Vec<String> {
+pub(crate) fn bare_urls(text: &str) -> Vec<std::ops::Range<usize>> {
     let mut urls = Vec::new();
     let mut i = 0;
     while i < text.len() {
@@ -221,7 +247,7 @@ fn bare_urls(text: &str) -> Vec<String> {
                 }
             }
             if end > start {
-                urls.push(text[start..end].to_string());
+                urls.push(start..end);
             }
             i = end;
         } else {

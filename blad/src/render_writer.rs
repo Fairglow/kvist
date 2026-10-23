@@ -1,14 +1,16 @@
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
+use crate::links::NavigationId;
 use crate::{Color, RenderOptions};
 
 #[derive(Default)]
 pub(crate) struct Navigation {
-    pub links: BTreeMap<usize, Vec<LinkSpan>>,
+    pub links: BTreeMap<NavigationId, Vec<LinkSpan>>,
     pub anchors: BTreeMap<String, usize>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LinkSpan {
     pub row: usize,
     pub start: usize,
@@ -16,7 +18,7 @@ pub(crate) struct LinkSpan {
 }
 
 pub(crate) trait InlineOutput: Write {
-    fn mark_link(&mut self, source: usize, text: &str);
+    fn mark_link(&mut self, source: NavigationId, text: &str);
 }
 
 pub(crate) struct RenderWriter<'a, W> {
@@ -66,6 +68,24 @@ impl<'a, W: Write> RenderWriter<'a, W> {
         self.navigation.anchors.entry(anchor).or_insert(self.row);
     }
 
+    pub fn mark_link_columns(&mut self, source: NavigationId, start: usize, end: usize) {
+        let column = crate::terminal_text::TerminalLine::new(&String::from_utf8_lossy(&self.line))
+            .width()
+            + self.border_width();
+        let spans = self.navigation.links.entry(source).or_default();
+        let start = column + start;
+        let end = column + end;
+        if let Some(span) = spans.last_mut().filter(|span| span.row == self.row) {
+            span.end = span.end.max(end);
+        } else {
+            spans.push(LinkSpan {
+                row: self.row,
+                start,
+                end,
+            });
+        }
+    }
+
     fn emit(&mut self, newline: bool) -> io::Result<()> {
         let text = std::str::from_utf8(&self.line)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -103,21 +123,12 @@ impl<'a, W: Write> RenderWriter<'a, W> {
 }
 
 impl<W: Write> InlineOutput for RenderWriter<'_, W> {
-    fn mark_link(&mut self, source: usize, text: &str) {
-        let start = crate::terminal_text::TerminalLine::new(&String::from_utf8_lossy(&self.line))
-            .width()
-            + self.border_width();
-        let end = start + crate::terminal_text::TerminalLine::new(text).width();
-        let spans = self.navigation.links.entry(source).or_default();
-        if let Some(span) = spans.last_mut().filter(|span| span.row == self.row) {
-            span.end = span.end.max(end);
-        } else {
-            spans.push(LinkSpan {
-                row: self.row,
-                start,
-                end,
-            });
-        }
+    fn mark_link(&mut self, source: NavigationId, text: &str) {
+        self.mark_link_columns(
+            source,
+            0,
+            crate::terminal_text::TerminalLine::new(text).width(),
+        );
     }
 }
 

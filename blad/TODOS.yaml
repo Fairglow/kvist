@@ -1,5 +1,5 @@
 schema_version: 1
-# Recorded revisions below predate the table intent change; no acceptance or
+# Recorded revisions below predate the latest viewer intent; no acceptance or
 # independent compliance certification is implied by this implementation work.
 component:
   requirements_revision: "sha256:6685311fdea00a81db0411344216fa36014f93416b9e893f5d29ba8a1400f650"
@@ -11,6 +11,50 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-production-tests
+    title: "write_tests: production viewer interactions"
+    description: "Pin precise spans, search direction/regex, spatial links, tab closure and stable frames."
+    purpose: "Specify requested viewer behavior before code"
+    expected_outcome: "Regressions fail first and then pass"
+    context: "Human requested less-like navigation, exact highlights and flicker reduction."
+    timestamps: {created_at: "2026-10-23T14:30:00Z", updated_at: "2026-10-23T14:42:40Z", completed_at: "2026-10-23T14:42:40Z"}
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-049", "REQUIREMENTS.md#R-050", "REQUIREMENTS.md#R-051", "REQUIREMENTS.md#R-052"]
+  - id: blad-production-code
+    title: "implement_code: production viewer interactions"
+    description: "Implement occurrence search, precise selection, navigation, close-tab and retained painting."
+    purpose: "Deliver predictable keyboard behavior and stable display"
+    expected_outcome: "New and existing viewer coverage passes"
+    context: "Keep established link keys and explicit regex opt-in."
+    timestamps: {created_at: "2026-10-23T14:30:00Z", updated_at: "2026-10-23T14:42:40Z", completed_at: "2026-10-23T14:42:40Z"}
+    kind: implementation
+    status: completed
+    depends_on: [blad-production-tests]
+    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-049", "REQUIREMENTS.md#R-050", "REQUIREMENTS.md#R-051", "REQUIREMENTS.md#R-052"]
+  - id: blad-production-audit
+    title: "security_audit: viewer input and terminal boundaries"
+    description: "Inspect bounded regex work, inert diagnostics, row writes and terminal cleanup."
+    purpose: "Preserve local input and terminal safety"
+    expected_outcome: "Scoped findings and limitations recorded"
+    context: "Scoped inspection and resource/terminal limitations retained in DESIGN.md; not a whole-component security certification."
+    timestamps: {created_at: "2026-10-23T14:30:00Z", updated_at: "2026-10-23T14:42:40Z", completed_at: "2026-10-23T14:42:40Z"}
+    kind: security-audit
+    status: completed
+    depends_on: [blad-production-code]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-051"]
+  - id: blad-production-review
+    title: "compliance_review: production viewer evidence"
+    description: "Derive source-only observations and compare source-blind with intent and test evidence."
+    purpose: "Keep evidence independent of implementation intent"
+    expected_outcome: "Observations and discrepancies retained for human arbitration"
+    context: "Independent observation/comparison and unresolved A-01/A-02 interpretation findings retained in IMPL.md for human arbitration; no automatic acceptance or compliance claim."
+    timestamps: {created_at: "2026-10-23T14:30:00Z", updated_at: "2026-10-23T14:49:00Z", completed_at: "2026-10-23T14:49:00Z"}
+    kind: compliance-review
+    status: completed
+    depends_on: [blad-production-audit]
+    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-049", "REQUIREMENTS.md#R-050", "REQUIREMENTS.md#R-051", "REQUIREMENTS.md#R-052"]
   - id: blad-standalone-tests
     title: "write_tests: standalone feature boundary"
     description: "Pin feature-specific CLI surfaces, version, multi-file tabs and browser diagnostics."

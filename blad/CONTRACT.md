@@ -70,17 +70,42 @@ guessing. Width, palette, math mode and diagram options persist across reflow.
 
 ### Keyboard shortcuts (interactive viewer)
 
-Navigation: `↑`/`k`, `↓`/`j`, `PageUp`/`u`, `PageDown`/`d`/`Space`, `g`/`H` (top), `G`/`L` (bottom), mouse wheel.
-Search: `/` enter search mode, type query, `Enter` exit, `n`/`p` navigate matches, `Esc` cancel.
+Navigation: `↑`/`k`, `↓`/`j`, `PageUp`/`Ctrl+B` (full page up),
+`PageDown`/`Ctrl+F`/`Space` (full page down), `u`/`Ctrl+U` and
+`d`/`Ctrl+D` (half pages), `g`/`H` (top), `G`/`L` (bottom), mouse wheel.
+`[`/`]` jump to the previous/next rendered heading without wrapping.
+Search: `/` forward, `?` backward; type a case-insensitive literal query,
+`Ctrl+R` toggles regex in the same prompt, `Ctrl+U` clears the prompt,
+`Enter` keeps results, `Esc` clears/cancels search. `n` repeats the search
+direction, `N`/`p` reverse it, wrapping at document boundaries. Each nonempty,
+nonoverlapping occurrence counts separately. Search is per rendered line, not
+across soft wraps. Exact matching spans are highlighted; a partial grapheme
+match highlights its whole grapheme. Search begins at/near the viewport;
+navigation reveals horizontal matches too. The footer shows mode, direction,
+current/total, invalid-regex diagnostics or no matches, including after Enter.
+Regex uses Rust `regex` syntax (no lookaround/backreferences), case insensitive
+unless overridden inline; pattern input is limited to 4,096 UTF-8 bytes and
+compiled regex/DFA caches to 2 MiB each. Zero-width matches are ignored.
 Links: `Tab`/`Shift+Tab` select links directly, `Enter` follows the selection
-or the first link at/below the viewport. Left-clicking prose/heading inline/named labels
+or the first link at/below the viewport. Left-clicking rendered labels
 follows their destination. Optional `f` link mode remains.
+Only the active link's rendered spans receive selection emphasis.
+Prose, headings, table cells and repeated bare URLs share renderer-owned
+position metadata for keyboard selection and mouse hit testing.
+`Ctrl+Left`/`Right` select a link to the left/right on the same rendered row;
+`Ctrl+Up`/`Down` select the nearest row above/below, then the nearest column.
+Wrapped spans participate by position; the selected link is excluded.
+With no selection, navigation starts at the viewport's top-left. There is no
+spatial wrap; Tab/Shift+Tab retain source-order wrapping.
 Heading fragments use lowercase heading text, preserve Unicode, hyphens and underscores,
 replace spaces with hyphens, omit punctuation and suffix duplicates with `-1`,
 `-2`, etc.; explicit heading IDs are also supported. Percent-encoded fragments
 and file paths are decoded as UTF-8; malformed encoding is an actionable error.
 Other: `e` hands the whole file to `$EDITOR`, `b` returns to the previous tab,
-`Alt+Left`/`Alt+Right` switch open-file tabs, `q`/`Esc` quit.
+`Alt+Left`/`Alt+Right` switch open-file tabs. Normal-mode `q`/`Esc` closes
+the current tab, selecting the next tab (or previous if last); closing the sole
+tab exits. `Q`/`Ctrl+C` quits all tabs. Modal Esc cancels only that mode.
+`h` opens keyboard help (any key dismisses); `Ctrl+L` forces a repaint.
 The top row lists files in stable opening order with the active tab bracketed.
 Label columns remain fixed when the active marker changes. Opening an existing
 file reuses its tab; switching tabs preserves vertical/horizontal position.
@@ -155,6 +180,10 @@ Home/End retain their current vertical behavior.
 
 Each screen row is positioned and clipped independently, including header/footer
 text. Wide graphemes may extend past the content column into the scrollbar area.
+Frames are buffered, synchronized where the terminal supports it, and only
+changed rows are written. Normal scrolling and tab switching never clear the
+screen or re-enter the alternate screen. Resize/refresh invalidates row state;
+editor handoff releases and restores terminal ownership.
 
 ### Table layout semantics
 

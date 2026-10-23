@@ -94,27 +94,30 @@ Active sessions are snapshots; re-run `session` for newer events.
 ### Navigation
 
 - `↑`/`k` - Up, `↓`/`j` - Down
-- `PageUp`/`u` - Page up, `PageDown`/`d`/`Space` - Page down
+- `PageUp`/`Ctrl+B` - Page up, `PageDown`/`Ctrl+F`/`Space` - Page down
+- `u`/`d` or `Ctrl+U`/`Ctrl+D` - Half page up/down
 - `g`/`H` - Top, `G`/`L` - Bottom
 - Mouse wheel - Scroll
 
 ### Search
 
-- `/` - Enter search
-- `n` - Next match, `p` - Previous match
+- `/` / `?` - Forward / backward literal search; `Ctrl+R` toggles regex
+- `n` - Repeat direction, `N`/`p` - Reverse direction (wraps)
 - `Enter` - Exit search, `Esc` - Cancel
 
 ### Link Navigation
 
 - `f` - Enter optional link navigation mode
 - `Tab` - Next link, `Shift+Tab` - Previous link
+- `Ctrl+Arrows` - Select links by visual position
+- `[` / `]` - Previous / next heading
 - `Enter` - Follow link (open file or URL)
 - `Esc` - Exit link mode
 
 Links can also be followed without link mode: press `Enter` to open the first
 link at or below the top of the viewport. Bare URLs (`https://…`) are
 recognised as links as well as bracketed and named links.
-Tab/Shift+Tab select links directly; inline/named links also accept a left
+Tab/Shift+Tab select links directly; rendered link labels also accept a left
 mouse click. `#heading` and `other.md#heading` jump to their headings.
 
 ### Other
@@ -122,7 +125,9 @@ mouse click. `#heading` and `other.md#heading` jump to their headings.
 - `e` - Edit file
 - `b` - Return to the previous file
 - `Alt+Left` / `Alt+Right` - Switch open-file tabs (top row)
-- `q`/`Esc` - Quit
+- `q`/`Esc` - Close current tab (exit on the last tab)
+- `Q`/`Ctrl+C` - Quit all tabs
+- `h` - Keyboard help, `Ctrl+L` - Repaint
 
 ## Documentation
 

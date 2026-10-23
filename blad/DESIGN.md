@@ -34,8 +34,9 @@ observation confirmed the narrowed boundary. Existing search-navigation offset
 handling is not expanded by this milestone. Search overlay composition and
 editor integration evidence are retained for P5.
 
-P5 composes the configured search overlay after each content SGR transition,
-so syntax resets cannot erase a matching row's indication. Terminal text owns
+P5 originally composed a row-wide search overlay after each content SGR
+transition. The production viewer increment replaces it with exact-span
+overlays while retaining reset resilience. Terminal text owns
 the shared inert-source boundary. Syntax-cache identity is executable evidence,
 not a per-render reload. The viewer edit path returns a typed action to an outer
 loop; previous viewport documents and terminal guards are dropped before the
@@ -212,6 +213,61 @@ rendered-geometry integration regressions and large prepared-text cases.
 
 ## Failure and recovery
 
+### Production viewer increment (2026-10-23)
+
+Keep terminal ownership in the open-file loop rather than each document event
+loop. Release only for editor handoff or exit. A retained painter composes
+complete, padded rows, compares them to the last successful frame, and emits
+changed rows in one buffered synchronized update. Do not clear before writing;
+padding erases stale text. Size changes and Ctrl+L invalidate the cache.
+Commit cached state only after successful output/flush.
+
+Search stores sorted occurrence spans with rendered row and display-column
+intervals. Compile literal queries by regex-escaping them; use the already
+vendored Rust regex engine with explicit input/compiled/cache bounds.
+Find nonempty matches on normalized plain lines, mapping byte ranges to whole
+grapheme display ranges without changing the underlying text. Store direction,
+mode and current index; incremental edits choose the closest occurrence at the
+viewport. Errors are retained, not treated as empty successful queries.
+Span overlays restore accumulated source SGR on every boundary and reassert
+the overlay after source resets, preserving syntax outside the exact spans.
+Link spans use the same overlay path. Selecting links clears search emphasis.
+Spatial navigation compares renderer spans, not label
+text; deterministic row/column/source-order ties and horizontal reveal are
+shared with search reveal. Source-order traversal remains available.
+Table cells retain source-bound byte marks alongside text; the existing
+whole-word wrapper maps those marks to final display columns without changing
+table geometry. Bare URL occurrences get distinct event-relative identities,
+shared by extraction and rendering after script/control projection. Selection
+and mouse hit tests no longer guess from duplicate label text.
+
+Closing a tab removes its history entries and decrements higher indexes.
+Preserve surviving positions and tab order. Help is a separate transient
+rendered document with no link actions; modal cancellation never closes tabs.
+Ignore release events and reserve Ctrl-modified keys before plain-character
+dispatch, so Ctrl+F does not enter link mode.
+
+Tests precede code: styled exact-span cells, Unicode clipping, multiple
+occurrences, search direction/wrap/errors, spatial selection, heading jumps,
+closing tabs/history, no full clears or alternate-screen churn, unchanged-row
+suppression, resize/stale erasure and terminal cleanup. Scoped input/resource
+inspection and independent source-only observation/source-blind comparison
+follow implementation. No acceptance or review receipt is fabricated; this
+human-requested increment proceeds under a deliberate advisory exception while
+the planned review mechanism is unavailable.
+
+Scoped implementer inspection: `regex` reuses the already locked/vendored
+MIT/Apache-2.0 engine without adding registry packages, shells or network work.
+Queries, compiled automata and DFA caches have explicit limits; matching remains
+synchronous and no hard giant-file latency guarantee is claimed. Regex errors
+and queries cross the inert footer boundary. Source and bare-link identities
+are distinct typed variants, avoiding collisions after length-changing text
+projection. Table mark mapping fails explicitly if wrapping loses a token.
+All frame rows are clipped/padded, SGR overlays restore source attributes, and
+writer/flush/terminal-release errors propagate. PTY evidence checks canonical
+mode and echo restoration after exit and editor errors. This scoped inspection
+is not an independent security certification or a compliance determination.
+
 ### Standalone/session boundary increment
 
 Use an empty default feature set and one `sessions` feature. Compile-gate the
@@ -254,7 +310,8 @@ remain separate from implementation and are not acceptance.
 Use renderer-owned navigation metadata, recorded when inline link spans and
 heading prefixes are actually emitted, rather than searching label text (which
 confuses duplicates, prose, code and wrapped labels). Preserve metadata on reflow.
-Bare URL selection retains a text fallback. Share parser options between link
+The later production increment extends that metadata to table cells and bare
+URLs, removing the old text fallback. Share parser options between link
 extraction and rendering. Decode UTF-8 percent escapes before path/fragment
 resolution; do not invoke a shell.
 

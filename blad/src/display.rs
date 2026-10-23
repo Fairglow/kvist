@@ -9,12 +9,13 @@ use std::io::{self, IsTerminal, Write};
 use crate::RenderOptions;
 use crate::links::{Link, extract_links};
 use crate::markdown::{MarkdownRenderer, inert_source};
+use crate::search::Search;
 #[cfg(feature = "sessions")]
 pub use crate::session_display::{
     dump_session, export_session, list_sessions, show_session, show_session_with_options,
 };
-use crate::terminal_text::TerminalLine;
-use crate::viewport::{Document, Frame, paint};
+use crate::viewer_navigation::{HELP, link_spans, reveal, spatial_link};
+use crate::viewport::{Document, Frame, Painter};
 
 /// Check if stdout is a TTY (interactive terminal).
 fn is_tty() -> bool {
@@ -248,6 +249,7 @@ fn follow_link(link: &Link, current_path: Option<&std::path::Path>) -> io::Resul
 
 enum ViewerAction {
     Quit,
+    Close,
     Notice(String),
     Edit(std::path::PathBuf),
     OpenFile(std::path::PathBuf, Option<String>),
@@ -295,6 +297,8 @@ fn run_open_files(
     let mut history = Vec::new();
     let mut status = String::new();
     let mut anchor = None;
+    let mut terminal = TerminalGuard::enter()?;
+    let mut painter = Painter::default();
 
     loop {
         let title = tab_title(&files, active);
@@ -309,13 +313,36 @@ fn run_open_files(
             &mut file.position,
             &mut status,
             anchor.take(),
+            &mut painter,
         )?;
         match action {
-            ViewerAction::Quit => return Ok(()),
+            ViewerAction::Quit => return terminal.restore(),
+            ViewerAction::Close => {
+                if files.len() == 1 {
+                    return terminal.restore();
+                }
+                files.remove(active);
+                history.retain_mut(|index| {
+                    if *index == active {
+                        false
+                    } else {
+                        if *index > active {
+                            *index -= 1;
+                        }
+                        true
+                    }
+                });
+                active = active.min(files.len() - 1);
+                history.retain(|index| *index != active);
+                status.clear();
+            }
             ViewerAction::Notice(message) => status = message,
             ViewerAction::Jump(_) => {}
             ViewerAction::Edit(path) => {
+                terminal.restore()?;
                 files[active].content = edit_file(&path)?;
+                terminal = TerminalGuard::enter()?;
+                painter.invalidate();
             }
             ViewerAction::OpenFile(path, fragment) => match std::fs::canonicalize(&path) {
                 Ok(path) => {
@@ -399,9 +426,11 @@ fn viewer_session(
     position: &mut Position,
     status: &mut String,
     anchor: Option<String>,
+    painter: &mut Painter,
 ) -> io::Result<ViewerAction> {
     use crossterm::event::{
-        self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+        MouseEventKind,
     };
 
     let (mut cols, mut rows) = crossterm::terminal::size()?;
@@ -420,34 +449,21 @@ fn viewer_session(
     }
     let mut visible_lines = usize::from(rows.saturating_sub(2));
 
-    // Search state
-    let mut search_mode = false;
-    let mut search_query = String::new();
-    let mut search_matches: Vec<usize> = Vec::new();
-    let mut search_index = 0;
+    let mut search = Search::default();
+    let mut help = false;
+    let mut help_document = Document::render_with_options(HELP, cols, false, width_limit, options)?;
 
     // Source offsets identify actual rendered link spans, including duplicates.
     let safe_content = inert_source(content);
     let links = extract_links(&safe_content);
-    let mut link_lines = link_rows(&document, &links);
+    let mut spans: Vec<_> = links
+        .iter()
+        .map(|link| link_spans(&document, link))
+        .collect();
     let mut link_mode = false;
     let mut link_index = 0;
     let mut selected_link = None;
-
-    let mut terminal = TerminalGuard::enter()?;
-
-    fn find_matches(lines: &[TerminalLine], query: &str) -> Vec<usize> {
-        if query.is_empty() {
-            return Vec::new();
-        }
-        let mut matches = Vec::new();
-        for (i, line) in lines.iter().enumerate() {
-            if line.plain().to_lowercase().contains(&query.to_lowercase()) {
-                matches.push(i);
-            }
-        }
-        matches
-    }
+    let mut selected_part = 0;
 
     loop {
         let mut pending_follow = None;
@@ -461,9 +477,7 @@ fn viewer_session(
         let end = scroll_offset.saturating_add(visible_lines).min(total_lines);
 
         // Header
-        let context = if search_mode || (!search_query.is_empty() && !search_matches.is_empty()) {
-            format!("=== Search: {} ===", search_query)
-        } else if (link_mode || selected_link.is_some()) && !links.is_empty() {
+        let context = if (link_mode || selected_link.is_some()) && !links.is_empty() {
             format!(
                 "=== Links: {}/{} - {} ===",
                 link_index + 1,
@@ -481,13 +495,8 @@ fn viewer_session(
             100.0
         };
 
-        let search_info = if search_mode && !search_matches.is_empty() {
-            format!(
-                " {}/{}/{} matches ",
-                search_index + 1,
-                search_matches.len(),
-                search_query
-            )
+        let search_info = if search.editing || !search.query.is_empty() {
+            search.footer()
         } else {
             "".to_string()
         };
@@ -500,14 +509,15 @@ fn viewer_session(
         );
         let footer = if !status.is_empty() {
             status.clone()
+        } else if !search_info.is_empty() {
+            search_info
         } else if !context.is_empty() {
             context
         } else {
             format!(
-                "  [{:5.1}%]{}{}{}",
+                "  [{:5.1}%]{}{}  h:help",
                 pct,
                 line_info,
-                search_info,
                 if scroll_offset == 0 {
                     " TOP"
                 } else if end >= total_lines {
@@ -517,31 +527,55 @@ fn viewer_session(
                 }
             )
         };
-        paint(
+        let first_match = search.matches.partition_point(|span| span.row < start);
+        let last_match = search.matches.partition_point(|span| span.row < end);
+        let mut highlights = search.matches[first_match..last_match].to_vec();
+        if let Some(index) = selected_link.or_else(|| link_mode.then_some(link_index)) {
+            highlights.extend(
+                spans[index]
+                    .iter()
+                    .filter(|span| (start..end).contains(&span.row))
+                    .cloned(),
+            );
+        }
+        highlights.sort_by_key(|span| (span.row, span.start, span.end));
+        painter.paint(
             &mut io::stdout().lock(),
-            &document,
+            if help { &help_document } else { &document },
             Frame {
                 columns: cols,
                 rows,
-                y: scroll_offset,
-                x: scroll_x,
-                header: title,
-                footer: &footer,
-                matches: &highlight_rows(
-                    &document,
-                    &links,
-                    selected_link.or_else(|| link_mode.then_some(link_index)),
-                    &search_matches,
-                ),
+                y: if help { 0 } else { scroll_offset },
+                x: if help { 0 } else { scroll_x },
+                header: if help { "Blad help" } else { title },
+                footer: if help {
+                    "Any key returns to the document"
+                } else {
+                    &footer
+                },
+                matches: if help { &[] } else { &highlights },
             },
         )?;
 
         // Event handling
         match event::read() {
             Ok(Event::Key(KeyEvent {
+                kind: KeyEventKind::Release,
+                ..
+            })) => continue,
+            Ok(Event::Key(KeyEvent {
                 code, modifiers, ..
             })) => {
+                if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('c') {
+                    return Ok(ViewerAction::Quit);
+                }
+                if help {
+                    help = false;
+                    continue;
+                }
                 if modifiers.contains(KeyModifiers::ALT)
+                    && !search.editing
+                    && !link_mode
                     && matches!(code, KeyCode::Left | KeyCode::Right)
                 {
                     status.clear();
@@ -554,46 +588,72 @@ fn viewer_session(
                 if !matches!(code, KeyCode::Enter) {
                     status.clear();
                 }
-                if search_mode {
+                if code == KeyCode::Char('Q') && !search.editing {
+                    return Ok(ViewerAction::Quit);
+                }
+                if search.editing {
+                    let mut changed = true;
                     match code {
-                        KeyCode::Char(c) => {
-                            search_query.push(c);
-                            search_matches = find_matches(lines, &search_query);
-                            if !search_matches.is_empty() {
-                                search_index = 0;
-                                scroll_offset = scroll_to_match(
-                                    scroll_offset,
-                                    search_matches[search_index],
-                                    visible_lines,
-                                );
-                            }
+                        KeyCode::Char('r') if modifiers.contains(KeyModifiers::CONTROL) => {
+                            search.regex = !search.regex;
+                        }
+                        KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+                            search.query.clear()
+                        }
+                        KeyCode::Char(c)
+                            if !modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                        {
+                            changed = search.push(c);
                         }
                         KeyCode::Backspace => {
-                            search_query.pop();
-                            search_matches = find_matches(lines, &search_query);
-                            if !search_matches.is_empty() {
-                                search_index = 0;
-                                scroll_offset = scroll_to_match(
-                                    scroll_offset,
-                                    search_matches[search_index],
-                                    visible_lines,
-                                );
-                            }
+                            search.query.pop();
                         }
                         KeyCode::Enter => {
-                            search_mode = false;
-                            if search_matches.is_empty() {
-                                search_query.clear();
-                            }
+                            search.editing = false;
+                            changed = false;
                         }
                         KeyCode::Esc => {
-                            search_mode = false;
-                            search_query.clear();
-                            search_matches.clear();
+                            search = Search::default();
                         }
-                        _ => {}
+                        _ => changed = false,
                     }
-                } else if link_mode {
+                    if changed {
+                        search.update(lines, scroll_offset);
+                        if let Some(span) = search.current() {
+                            reveal(
+                                span,
+                                &mut scroll_offset,
+                                &mut scroll_x,
+                                visible_lines,
+                                document.content_width,
+                            );
+                        }
+                    }
+                } else if modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(
+                        code,
+                        KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right
+                    )
+                {
+                    if let Some((index, part)) = spatial_link(
+                        &spans,
+                        selected_link.map(|index| (index, selected_part)),
+                        (scroll_offset, scroll_x),
+                        code,
+                    ) {
+                        link_index = index;
+                        selected_link = Some(index);
+                        selected_part = part;
+                        search = Search::default();
+                        reveal(
+                            &spans[index][part],
+                            &mut scroll_offset,
+                            &mut scroll_x,
+                            visible_lines,
+                            document.content_width,
+                        );
+                    }
+                } else if link_mode && !modifiers.contains(KeyModifiers::CONTROL) {
                     match code {
                         KeyCode::Tab => {
                             link_index = (link_index + 1) % links.len();
@@ -611,7 +671,38 @@ fn viewer_session(
                         }
                         KeyCode::Esc => {
                             link_mode = false;
+                            selected_link = None;
                         }
+                        _ => {}
+                    }
+                    if link_mode {
+                        selected_link = Some(link_index);
+                        selected_part = 0;
+                        if let Some(span) = spans[link_index].first() {
+                            reveal(
+                                span,
+                                &mut scroll_offset,
+                                &mut scroll_x,
+                                visible_lines,
+                                document.content_width,
+                            );
+                        }
+                    }
+                } else if modifiers.contains(KeyModifiers::CONTROL) {
+                    match code {
+                        KeyCode::Char('f') => {
+                            scroll_offset = scroll_offset.saturating_add(visible_lines)
+                        }
+                        KeyCode::Char('b') => {
+                            scroll_offset = scroll_offset.saturating_sub(visible_lines)
+                        }
+                        KeyCode::Char('d') => {
+                            scroll_offset = scroll_offset.saturating_add((visible_lines / 2).max(1))
+                        }
+                        KeyCode::Char('u') => {
+                            scroll_offset = scroll_offset.saturating_sub((visible_lines / 2).max(1))
+                        }
+                        KeyCode::Char('l') => painter.invalidate(),
                         _ => {}
                     }
                 } else {
@@ -624,12 +715,18 @@ fn viewer_session(
                                 scroll_offset += 1;
                             }
                         }
-                        KeyCode::PageUp | KeyCode::Char('u') => {
+                        KeyCode::PageUp => {
                             scroll_offset = scroll_offset.saturating_sub(visible_lines);
                         }
-                        KeyCode::PageDown | KeyCode::Char('d') | KeyCode::Char(' ') => {
+                        KeyCode::PageDown | KeyCode::Char(' ') => {
                             scroll_offset = (scroll_offset + visible_lines)
                                 .min(total_lines.saturating_sub(visible_lines));
+                        }
+                        KeyCode::Char('u') => {
+                            scroll_offset = scroll_offset.saturating_sub((visible_lines / 2).max(1))
+                        }
+                        KeyCode::Char('d') => {
+                            scroll_offset = scroll_offset.saturating_add((visible_lines / 2).max(1))
                         }
                         KeyCode::Home => {
                             scroll_offset = 0;
@@ -651,54 +748,72 @@ fn viewer_session(
                         KeyCode::Char('G') | KeyCode::Char('L') => {
                             scroll_offset = total_lines.saturating_sub(visible_lines);
                         }
-                        KeyCode::Char('/') => {
-                            search_mode = true;
-                            search_query.clear();
-                            search_matches.clear();
+                        KeyCode::Char('/') | KeyCode::Char('?') => {
+                            search.begin(code == KeyCode::Char('?'));
+                            selected_link = None;
                         }
-                        KeyCode::Char('n') if !search_matches.is_empty() => {
-                            search_index = (search_index + 1).min(search_matches.len() - 1);
-                            scroll_offset = scroll_to_match(
-                                scroll_offset,
-                                search_matches[search_index],
-                                visible_lines,
-                            );
-                        }
-                        KeyCode::Char('p') if !search_matches.is_empty() => {
-                            search_index = search_index.saturating_sub(1);
-                            scroll_offset = scroll_to_match(
-                                scroll_offset,
-                                search_matches[search_index],
-                                visible_lines,
-                            );
+                        KeyCode::Char('n' | 'N' | 'p') if !search.matches.is_empty() => {
+                            search.advance(code != KeyCode::Char('n'));
+                            if let Some(span) = search.current() {
+                                reveal(
+                                    span,
+                                    &mut scroll_offset,
+                                    &mut scroll_x,
+                                    visible_lines,
+                                    document.content_width,
+                                );
+                            }
                         }
                         KeyCode::Char('f') => {
                             if !links.is_empty() {
                                 link_mode = true;
                                 link_index = 0;
+                                selected_link = Some(0);
+                                selected_part = 0;
+                                search = Search::default();
+                                if let Some(span) = spans[0].first() {
+                                    reveal(
+                                        span,
+                                        &mut scroll_offset,
+                                        &mut scroll_x,
+                                        visible_lines,
+                                        document.content_width,
+                                    );
+                                }
                             }
                         }
                         KeyCode::Tab | KeyCode::BackTab if !links.is_empty() => {
                             link_index = match selected_link {
                                 Some(index) if code == KeyCode::Tab => (index + 1) % links.len(),
                                 Some(index) => (index + links.len() - 1) % links.len(),
-                                None if code == KeyCode::BackTab => link_lines
+                                None if code == KeyCode::BackTab => spans
                                     .iter()
-                                    .rposition(|row| row.is_some_and(|row| row <= scroll_offset))
+                                    .rposition(|spans| {
+                                        spans.first().is_some_and(|span| span.row <= scroll_offset)
+                                    })
                                     .unwrap_or(links.len() - 1),
-                                None => link_lines
+                                None => spans
                                     .iter()
-                                    .position(|row| row.is_some_and(|row| row >= scroll_offset))
+                                    .position(|spans| {
+                                        spans.first().is_some_and(|span| span.row >= scroll_offset)
+                                    })
                                     .unwrap_or(0),
                             };
                             selected_link = Some(link_index);
-                            if let Some(row) = link_lines[link_index] {
-                                scroll_offset = scroll_to_match(scroll_offset, row, visible_lines);
+                            selected_part = 0;
+                            search = Search::default();
+                            if let Some(span) = spans[link_index].first() {
+                                reveal(
+                                    span,
+                                    &mut scroll_offset,
+                                    &mut scroll_x,
+                                    visible_lines,
+                                    document.content_width,
+                                );
                             }
                         }
                         KeyCode::Char('e') => {
                             if let Some(path) = path {
-                                terminal.restore()?;
                                 return Ok(ViewerAction::Edit(path.to_path_buf()));
                             }
                         }
@@ -716,20 +831,41 @@ fn viewer_session(
                                         document
                                             .navigation
                                             .links
-                                            .get(&link.source_offset)
+                                            .get(&link.navigation_id())
                                             .is_some_and(|spans| {
                                                 spans.iter().any(|span| span.row >= scroll_offset)
                                             })
                                     })
                                     .or_else(|| {
-                                        link_lines.iter().position(|row| {
-                                            row.is_some_and(|row| row >= scroll_offset)
+                                        spans.iter().position(|spans| {
+                                            spans
+                                                .first()
+                                                .is_some_and(|span| span.row >= scroll_offset)
                                         })
                                     })
                             });
                         }
+                        KeyCode::Char('[' | ']') => {
+                            let mut headings: Vec<_> =
+                                document.navigation.anchors.values().copied().collect();
+                            headings.sort_unstable();
+                            headings.dedup();
+                            let target = if code == KeyCode::Char(']') {
+                                headings.into_iter().find(|row| *row > scroll_offset)
+                            } else {
+                                headings.into_iter().rev().find(|row| *row < scroll_offset)
+                            };
+                            if let Some(row) = target {
+                                scroll_offset = row;
+                                scroll_x = 0;
+                            }
+                            selected_link = None;
+                            search = Search::default();
+                        }
+                        KeyCode::Char('h') => help = true,
+                        KeyCode::Char('Q') => return Ok(ViewerAction::Quit),
                         KeyCode::Char('q') | KeyCode::Esc => {
-                            break;
+                            return Ok(ViewerAction::Close);
                         }
                         _ => {}
                     }
@@ -737,7 +873,7 @@ fn viewer_session(
             }
             Ok(Event::Mouse(MouseEvent {
                 kind, column, row, ..
-            })) => match kind {
+            })) if !help => match kind {
                 MouseEventKind::Down(MouseButton::Left)
                     if row > 0
                         && row < rows.saturating_sub(1)
@@ -749,7 +885,7 @@ fn viewer_session(
                         document
                             .navigation
                             .links
-                            .get(&link.source_offset)
+                            .get(&link.navigation_id())
                             .is_some_and(|spans| {
                                 spans.iter().any(|span| {
                                     span.row == target_row
@@ -779,10 +915,26 @@ fn viewer_session(
                     width_limit,
                     options,
                 )?;
-                search_matches = find_matches(&document.lines, &search_query);
-                search_index = search_index.min(search_matches.len().saturating_sub(1));
-                // Reflow moved links to new rendered lines.
-                link_lines = link_rows(&document, &links);
+                search.update(&document.lines, scroll_offset);
+                spans = links
+                    .iter()
+                    .map(|link| link_spans(&document, link))
+                    .collect();
+                selected_part = 0;
+                if let Some(index) = selected_link
+                    && let Some(span) = spans[index].first()
+                {
+                    reveal(
+                        span,
+                        &mut scroll_offset,
+                        &mut scroll_x,
+                        visible_lines,
+                        document.content_width,
+                    );
+                }
+                help_document =
+                    Document::render_with_options(HELP, cols, false, width_limit, options)?;
+                painter.invalidate();
             }
             Ok(_) => {}
             Err(error) => return Err(error),
@@ -805,22 +957,6 @@ fn viewer_session(
             }
         }
     }
-    terminal.restore()?;
-    Ok(ViewerAction::Quit)
-}
-
-fn link_rows(document: &Document, links: &[Link]) -> Vec<Option<usize>> {
-    links
-        .iter()
-        .map(|link| {
-            document
-                .navigation
-                .links
-                .get(&link.source_offset)
-                .and_then(|spans| spans.first().map(|span| span.row))
-                .or_else(|| rendered_line_of(&document.lines, &link.text))
-        })
-        .collect()
 }
 
 fn anchor_row(document: &Document, anchor: &str) -> Option<usize> {
@@ -828,42 +964,6 @@ fn anchor_row(document: &Document, anchor: &str) -> Option<usize> {
         Some(0)
     } else {
         document.navigation.anchors.get(anchor).copied()
-    }
-}
-
-fn highlight_rows(
-    document: &Document,
-    links: &[Link],
-    selected: Option<usize>,
-    search: &[usize],
-) -> Vec<usize> {
-    let mut rows = search.to_vec();
-    if let Some(link) = selected.and_then(|index| links.get(index))
-        && let Some(spans) = document.navigation.links.get(&link.source_offset)
-    {
-        rows.extend(spans.iter().map(|span| span.row));
-    }
-    rows.sort_unstable();
-    rows.dedup();
-    rows
-}
-/// Find the rendered line a link's display text first appears on, so Enter can
-/// follow the link at the cursor. Returns `None` if the text is not found (for
-/// example when a link label wraps across lines or is clipped).
-fn rendered_line_of(lines: &[TerminalLine], text: &str) -> Option<usize> {
-    if text.is_empty() {
-        return None;
-    }
-    lines.iter().position(|line| line.plain().contains(text))
-}
-
-fn scroll_to_match(current_offset: usize, target_line: usize, visible_lines: usize) -> usize {
-    if target_line < current_offset {
-        target_line
-    } else if target_line >= current_offset + visible_lines {
-        target_line - visible_lines / 2
-    } else {
-        current_offset
     }
 }
 

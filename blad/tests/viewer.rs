@@ -13,6 +13,10 @@ use vte::{Params, Parser, Perform};
 
 struct Screen {
     cells: Vec<Vec<char>>,
+    reversed: Vec<Vec<bool>>,
+    reverse: bool,
+    underlined: Vec<Vec<bool>>,
+    underline: bool,
     x: usize,
     y: usize,
     wrap: bool,
@@ -23,6 +27,10 @@ impl Screen {
     fn new(columns: usize, rows: usize) -> Self {
         Self {
             cells: vec![vec![' '; columns]; rows],
+            reversed: vec![vec![false; columns]; rows],
+            reverse: false,
+            underlined: vec![vec![false; columns]; rows],
+            underline: false,
             x: 0,
             y: 0,
             wrap: false,
@@ -34,6 +42,10 @@ impl Screen {
         if self.y + 1 == self.cells.len() {
             self.cells.rotate_left(1);
             self.cells.last_mut().unwrap().fill(' ');
+            self.reversed.rotate_left(1);
+            self.reversed.last_mut().unwrap().fill(false);
+            self.underlined.rotate_left(1);
+            self.underlined.last_mut().unwrap().fill(false);
             self.scrolls += 1;
         } else {
             self.y += 1;
@@ -61,6 +73,8 @@ impl Perform for Screen {
             self.wrap = false;
         }
         self.cells[self.y][self.x] = c;
+        self.reversed[self.y][self.x] = self.reverse;
+        self.underlined[self.y][self.x] = self.underline;
         if self.x + 1 == self.cells[0].len() {
             self.wrap = true;
         } else {
@@ -103,6 +117,34 @@ impl Perform for Screen {
             'J' if values.first() == Some(&2) => {
                 for row in &mut self.cells {
                     row.fill(' ');
+                }
+                for row in &mut self.reversed {
+                    row.fill(false);
+                }
+                for row in &mut self.underlined {
+                    row.fill(false);
+                }
+            }
+            'm' => {
+                let mut values = values.into_iter();
+                while let Some(value) = values.next() {
+                    match value {
+                        0 => {
+                            self.reverse = false;
+                            self.underline = false;
+                        }
+                        27 => self.reverse = false,
+                        7 => self.reverse = true,
+                        4 => self.underline = true,
+                        24 => self.underline = false,
+                        38 | 48 => {
+                            let count = if values.next() == Some(2) { 3 } else { 1 };
+                            for _ in 0..count {
+                                values.next();
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
             _ => {}
@@ -171,13 +213,17 @@ impl Viewer {
     }
 
     fn read_frame(&mut self) {
+        self.read_update(true);
+    }
+
+    fn read_update(&mut self, required: bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut received = false;
         while Instant::now() < deadline {
             let mut descriptors = [PollFd::new(self.master.as_fd(), PollFlags::POLLIN)];
             let ready = poll(&mut descriptors, 100_u16).unwrap();
             if ready == 0 {
-                if received {
+                if received || !required {
                     return;
                 }
                 continue;
@@ -199,7 +245,7 @@ impl Viewer {
 
     fn keys(&mut self, keys: &[u8]) {
         self.master.write_all(keys).unwrap();
-        self.read_frame();
+        self.read_update(false);
     }
 
     fn resize(&mut self, columns: u16, rows: u16) {
@@ -221,18 +267,237 @@ impl Viewer {
     }
 
     fn quit(&mut self) {
-        self.master.write_all(b"q").unwrap();
+        self.exit_with(b"Q");
+    }
+
+    fn exit_with(&mut self, keys: &[u8]) {
+        self.master.write_all(keys).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {
             if let Some(status) = self.child.try_wait().unwrap() {
                 assert!(status.success(), "viewer exited {status}");
+                let terminal = nix::sys::termios::tcgetattr(&self.slave).unwrap();
+                assert!(terminal.local_flags.contains(
+                    nix::sys::termios::LocalFlags::ICANON | nix::sys::termios::LocalFlags::ECHO
+                ));
                 return;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!("viewer did not quit");
     }
+}
+#[test]
+fn occurrence_search_is_precise_wraps_and_supports_reverse_and_regex() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("search.md");
+    std::fs::write(&path, "before **hit** gap hit after\n\nhit[1] HIT2 hit3").unwrap();
+    let mut viewer = Viewer::start(&path, 80, 12, false);
+    viewer.keys(b"/hit\r");
+    assert!(
+        viewer.screen.line(11).contains("1/5"),
+        "{}",
+        viewer.screen.line(11)
+    );
+    for column in 0..28 {
+        assert_eq!(
+            viewer.screen.reversed[1][column],
+            (7..10).contains(&column) || (15..18).contains(&column),
+            "column {column}"
+        );
+    }
+    viewer.keys(b"N");
+    assert!(viewer.screen.line(11).contains("5/5"));
+    viewer.keys(b"n");
+    assert!(viewer.screen.line(11).contains("1/5"));
+    viewer.keys(b"?hit\r");
+    assert!(viewer.screen.line(11).contains("2/5"));
+    viewer.keys(b"n");
+    assert!(viewer.screen.line(11).contains("1/5"));
+    viewer.keys(b"n");
+    assert!(viewer.screen.line(11).contains("5/5"));
+    viewer.keys(b"/hit[1]\r");
+    assert!(viewer.screen.line(11).contains("1/1"));
+    viewer.keys(b"/\x12hit[0-9]\r");
+    assert!(viewer.screen.line(11).contains("1/2"));
+    assert!(viewer.screen.line(11).contains("regex"));
+    viewer.keys(b"/\x12[\r");
+    assert!(viewer.screen.line(11).contains("Invalid regex"));
+    viewer.keys(b"/absent\r");
+    assert!(viewer.screen.line(11).contains("No matches"));
+    viewer.quit();
+}
+#[test]
+fn monochrome_search_inside_code_is_precise_and_esc_does_not_close_a_tab() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("mono.md");
+    std::fs::write(&path, "before `code needle after` tail").unwrap();
+    let mut viewer = Viewer::start_with(&path, 60, 12, false, &["--color", "never"], &[]);
+    viewer.keys(b"/needle\r");
+    for column in 0..29 {
+        assert_eq!(
+            viewer.screen.underlined[1][column],
+            (12..18).contains(&column),
+            "column {column}"
+        );
+    }
+    viewer.keys(b"/missing\x1b");
+    assert!(viewer.child.try_wait().unwrap().is_none());
+    assert!(viewer.screen.underlined[1].iter().all(|value| !value));
+    viewer.exit_with(b"q");
+}
 
+#[test]
+fn search_and_link_navigation_reveal_horizontal_positions_and_reflow() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("wide.md");
+    std::fs::write(&path, format!("```text\n{} needle\n```\n\n| left | right |\n| --- | --- |\n| [first](#top) | [{} target](#top) |\n\n# Top\n\n{}", "x".repeat(100), "long".repeat(20), "tail\n\n".repeat(20))).unwrap();
+    let mut viewer = Viewer::start(&path, 35, 12, true);
+    viewer.keys(b"/needle\r");
+    assert!((1..11).any(|row| viewer.screen.line(row).contains("needle")));
+    viewer.keys(b"\t\x1b[1;5C");
+    assert!(viewer.screen.line(11).contains("Links: 2/2"));
+    assert!((1..11).any(|row| viewer.screen.line(row).contains("long")));
+    viewer.resize(45, 14);
+    assert!(viewer.screen.line(13).contains("Links: 2/2"));
+    assert!((1..13).any(|row| viewer.screen.line(row).contains("long")));
+    viewer.quit();
+}
+
+#[test]
+fn heading_jumps_and_full_half_pages_have_distinct_distances() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("headings.md");
+    std::fs::write(
+        &path,
+        format!(
+            "# First\n\n{}\n\n## Second\n\n{}",
+            "filler\n\n".repeat(30),
+            "tail\n\n".repeat(30)
+        ),
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 60, 12, false);
+    viewer.keys(b"]");
+    assert_eq!(viewer.screen.content_line(1), "## Second");
+    viewer.keys(b"[");
+    assert_eq!(viewer.screen.content_line(1), "# First");
+    viewer.keys(b"\x06");
+    assert!(viewer.screen.line(11).contains("L11-"));
+    viewer.keys(b"\x02");
+    assert!(viewer.screen.line(11).contains("L1-"));
+    viewer.keys(b"\x04");
+    assert!(viewer.screen.line(11).contains("L6-"));
+    viewer.keys(b"\x15");
+    assert!(viewer.screen.line(11).contains("L1-"));
+    viewer.quit();
+}
+
+#[test]
+fn spatial_links_select_only_the_label_and_heading_keys_are_separate() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("links.md");
+    std::fs::write(
+        &path,
+        "# Top\n\n[left](#top) gap [right](#bottom)\n\n[below](#top)\n\n## Bottom\n\nend",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 60, 12, false);
+    viewer.keys(b"\t");
+    assert!(viewer.screen.line(11).contains("Links: 1/3"));
+    for column in 0..14 {
+        assert_eq!(viewer.screen.reversed[3][column], column < 4);
+    }
+    viewer.keys(b"\x1b[1;5C");
+    assert!(viewer.screen.line(11).contains("Links: 2/3"));
+    for column in 0..14 {
+        assert_eq!(viewer.screen.reversed[3][column], (9..14).contains(&column));
+    }
+    viewer.keys(b"\x1b[1;5B");
+    assert!(viewer.screen.line(11).contains("Links: 3/3"));
+    viewer.keys(b"\x1b[1;5A");
+    assert!(viewer.screen.line(11).contains("Links: 1/3"));
+    viewer.keys(b"]");
+    assert!(viewer.screen.line(11).contains("L"));
+    viewer.keys(b"[");
+    assert_eq!(viewer.screen.content_line(1), "# Top");
+    viewer.quit();
+}
+
+#[test]
+fn closing_tabs_repairs_history_without_terminal_churn() {
+    let temp = tempfile::tempdir().unwrap();
+    let first = temp.path().join("first.md");
+    let second = temp.path().join("second.md");
+    let third = temp.path().join("third.md");
+    for (path, text) in [
+        (&first, "# First"),
+        (&second, "# Second"),
+        (&third, "# Third"),
+    ] {
+        std::fs::write(path, text).unwrap();
+    }
+    let mut viewer = Viewer::start_with(
+        &first,
+        80,
+        12,
+        false,
+        &[second.to_str().unwrap(), third.to_str().unwrap()],
+        &[],
+    );
+    viewer.raw.clear();
+    viewer.keys(b"\x1b[1;3Cq");
+    assert!(viewer.child.try_wait().unwrap().is_none());
+    assert_eq!(viewer.screen.content_line(1), "# Third");
+    assert!(!viewer.screen.line(0).contains("second.md"));
+    viewer.keys(b"b");
+    assert_eq!(viewer.screen.content_line(1), "# First");
+    viewer.keys(b"b");
+    assert_eq!(viewer.screen.content_line(1), "# First");
+    let raw = String::from_utf8_lossy(&viewer.raw);
+    assert!(!raw.contains("\x1b[?1049"), "{raw:?}");
+    viewer.keys(b"\x1b");
+    assert_eq!(viewer.screen.content_line(1), "# Third");
+    viewer.quit();
+}
+
+#[test]
+fn scrolling_uses_changed_rows_without_full_clears_and_help_is_modal() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("scroll.md");
+    std::fs::write(
+        &path,
+        (0..80).map(|i| format!("line {i}\n\n")).collect::<String>(),
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 60, 12, false);
+    viewer.raw.clear();
+    viewer.keys(b"j");
+    let raw = String::from_utf8_lossy(&viewer.raw);
+    assert!(!raw.contains("\x1b[2J"), "{raw:?}");
+    assert!(
+        !raw.contains("=== Blad:"),
+        "unchanged header was repainted: {raw:?}"
+    );
+    viewer.keys(b"g");
+    viewer.keys(b"u");
+    viewer.raw.clear();
+    viewer.keys(b"u");
+    assert!(viewer.raw.is_empty(), "unchanged frame produced output");
+    viewer.keys(b"d");
+    assert!(viewer.screen.line(11).contains("L6-"));
+    let before_help = viewer.screen.content_line(1);
+    viewer.keys(b"h");
+    assert!((1..11).any(|row| viewer.screen.line(row).contains("Ctrl+R")));
+    viewer.keys(b"\x1b");
+    assert!(viewer.child.try_wait().unwrap().is_none());
+    assert_eq!(viewer.screen.content_line(1), before_help);
+    viewer.raw.clear();
+    viewer.keys(b"\x0c");
+    assert!(String::from_utf8_lossy(&viewer.raw).contains("=== Blad:"));
+    viewer.quit();
+}
+impl Viewer {
     fn wait_failure(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {
@@ -849,7 +1114,8 @@ fn browser_output_is_captured_and_retained_without_corrupting_the_screen() {
         std::fs::write(&launcher, script).unwrap();
         std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
         let mut viewer = Viewer::start_with(&path, 100, 12, false, &[], &[("PATH", &tools_path)]);
-        viewer.keys(b"\r");
+        viewer.master.write_all(b"\r").unwrap();
+        viewer.read_frame();
         assert!(
             viewer.screen.line(11).contains(expected),
             "{}",

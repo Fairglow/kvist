@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use crossterm::{
     cursor::MoveTo,
     queue,
-    terminal::{Clear, ClearType},
+    terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate},
 };
 
 use crate::RenderOptions;
@@ -83,7 +83,7 @@ impl Document {
         let mut output = crate::output::Output::new(&mut bytes, options);
         color.write(&mut output, false)?;
         if reverse {
-            write!(output, "\x1b[7m")?;
+            write!(output, "\x1b[7m\x1b[4m")?;
         }
         output.flush()?;
         String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
@@ -94,6 +94,7 @@ impl Document {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct Frame<'a> {
     pub columns: u16,
     pub rows: u16,
@@ -101,78 +102,132 @@ pub(crate) struct Frame<'a> {
     pub x: usize,
     pub header: &'a str,
     pub footer: &'a str,
-    pub matches: &'a [usize],
+    pub matches: &'a [crate::render_writer::LinkSpan],
 }
 
-pub(crate) fn paint(w: &mut impl Write, document: &Document, frame: Frame<'_>) -> io::Result<()> {
-    queue!(w, Clear(ClearType::All))?;
-    if frame.columns == 0 || frame.rows == 0 {
-        return w.flush();
+#[derive(Default)]
+pub(crate) struct Painter {
+    previous: Vec<String>,
+    size: Option<(u16, u16)>,
+}
+
+impl Painter {
+    pub fn invalidate(&mut self) {
+        self.size = None;
     }
-    queue!(w, MoveTo(0, 0))?;
-    write!(w, "{}", document.chrome)?;
-    write!(
-        w,
-        "{}",
+
+    pub fn paint(
+        &mut self,
+        w: &mut impl Write,
+        document: &Document,
+        frame: Frame<'_>,
+    ) -> io::Result<()> {
+        let size = (frame.columns, frame.rows);
+        let rows = compose(document, &frame);
+        let mut output = Vec::new();
+        for (index, row) in rows.iter().enumerate() {
+            if self.size != Some(size) || self.previous.get(index) != Some(row) {
+                if output.is_empty() {
+                    queue!(output, BeginSynchronizedUpdate)?;
+                }
+                queue!(output, MoveTo(0, index as u16))?;
+                write!(output, "{row}")?;
+            }
+        }
+        if !output.is_empty() {
+            queue!(output, EndSynchronizedUpdate)?;
+            w.write_all(&output)?;
+            w.flush()?;
+        }
+        self.previous = rows;
+        self.size = Some(size);
+        Ok(())
+    }
+}
+
+fn pad(row: &mut String, width: usize) {
+    let used = TerminalLine::new(row).width();
+    row.push_str("\x1b[0m");
+    row.extend(std::iter::repeat_n(' ', width.saturating_sub(used)));
+}
+
+fn compose(document: &Document, frame: &Frame<'_>) -> Vec<String> {
+    if frame.columns == 0 || frame.rows == 0 {
+        return Vec::new();
+    }
+    let mut rows = vec![String::new(); usize::from(frame.rows)];
+    rows[0] = format!(
+        "{}{}",
+        document.chrome,
         TerminalLine::new(&crate::markdown::inert_source(frame.header))
             .clip(0, usize::from(frame.columns))
-    )?;
+    );
     let height = usize::from(frame.rows.saturating_sub(2));
+    let mut match_index = frame.matches.partition_point(|span| span.row < frame.y);
     for (index, line) in document.lines.iter().enumerate().skip(frame.y).take(height) {
-        let row = (index - frame.y + 1) as u16;
-        queue!(w, MoveTo(0, row))?;
+        let row = &mut rows[index - frame.y + 1];
         if document.gutter > 0 {
             let prefix = format!("{:>width$} ", index + 1, width = document.gutter - 1);
-            write!(
-                w,
-                "{}",
-                TerminalLine::new(&prefix).clip(0, usize::from(frame.columns.saturating_sub(1)))
-            )?;
+            row.push_str(
+                &TerminalLine::new(&prefix).clip(0, usize::from(frame.columns.saturating_sub(1))),
+            );
         }
-        let overlay = if frame.matches.contains(&index) {
-            document.search.as_str()
-        } else {
-            ""
-        };
-        write!(
-            w,
-            "{}",
-            line.clip_with_overlay(frame.x, document.content_width, overlay)
-        )?;
+        let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+        while let Some(span) = frame
+            .matches
+            .get(match_index)
+            .filter(|span| span.row == index)
+        {
+            if let Some(last) = ranges.last_mut().filter(|last| last.end >= span.start) {
+                last.end = last.end.max(span.end);
+            } else {
+                ranges.push(span.start..span.end);
+            }
+            match_index += 1;
+        }
+        row.push_str(&line.clip_with_spans(
+            frame.x,
+            document.content_width,
+            &ranges,
+            &document.search,
+        ));
     }
     if frame.rows > 1 {
-        queue!(w, MoveTo(0, frame.rows - 1))?;
-        write!(w, "{}", document.chrome)?;
-        write!(
-            w,
-            "{}",
+        rows[usize::from(frame.rows - 1)] = format!(
+            "{}{}",
+            document.chrome,
             TerminalLine::new(&crate::markdown::inert_source(frame.footer))
                 .clip(0, usize::from(frame.columns))
-        )?;
+        );
+    }
+    for row in &mut rows {
+        pad(row, usize::from(frame.columns));
     }
     if height > 0 && document.lines.len() > height {
         let thumb = (height * height / document.lines.len()).max(1).min(height);
-        let top = frame.y * (height - thumb) / (document.lines.len() - height);
+        let y = frame.y.min(document.lines.len() - height);
+        let top = y * (height - thumb) / (document.lines.len() - height);
         for index in 0..height {
-            queue!(w, MoveTo(frame.columns - 1, (index + 1) as u16))?;
-            write!(
-                w,
-                "{}",
-                if (top..top + thumb).contains(&index) {
-                    '█'
-                } else {
-                    '░'
-                }
-            )?;
+            let row = &mut rows[index + 1];
+            // The final column was reserved for the scrollbar.
+            row.pop();
+            row.push(if (top..top + thumb).contains(&index) {
+                '█'
+            } else {
+                '░'
+            });
         }
     }
-    write!(w, "\x1b[0m")?;
-    w.flush()
+    rows
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn paint(w: &mut impl Write, document: &Document, frame: Frame<'_>) -> io::Result<()> {
+        Painter::default().paint(w, document, frame)
+    }
 
     #[test]
     fn code_tabs_do_not_create_padding_only_horizontal_overflow() {
@@ -228,7 +283,11 @@ mod tests {
                     x: 0,
                     header: "title",
                     footer: "footer",
-                    matches: &[0],
+                    matches: &[crate::render_writer::LinkSpan {
+                        row: 0,
+                        start: 2,
+                        end: 7,
+                    }],
                 },
             )
             .unwrap();
@@ -284,5 +343,110 @@ mod tests {
             paint(&mut Failed, &document, frame).unwrap_err().kind(),
             io::ErrorKind::BrokenPipe
         );
+    }
+
+    #[test]
+    fn duplicate_table_and_bare_links_have_source_owned_spans() {
+        let source = "same\n\n| first | second |\n| --- | --- |\n| [same](#a) | [same](#b) |\n\nhttps://example.test https://example.test";
+        let links = crate::links::extract_links(source);
+        let document = Document::render(source, 80, false, None).unwrap();
+        assert_eq!(links.len(), 4);
+        for link in &links {
+            let spans = document
+                .navigation
+                .links
+                .get(&link.navigation_id())
+                .unwrap();
+            assert!(!spans.is_empty());
+            assert!(spans.iter().all(|span| span.row > 0));
+        }
+        let first = &document.navigation.links[&links[0].navigation_id()][0];
+        let second = &document.navigation.links[&links[1].navigation_id()][0];
+        assert_eq!(first.row, second.row);
+        assert!(first.end < second.start);
+    }
+
+    #[test]
+    fn painter_suppresses_identical_frames_and_invalidates_after_failure_or_refresh() {
+        let document = Document::render("long text\n\nsecond row", 20, false, None).unwrap();
+        let frame = Frame {
+            columns: 20,
+            rows: 8,
+            y: 0,
+            x: 0,
+            header: "header",
+            footer: "footer",
+            matches: &[],
+        };
+        let mut painter = Painter::default();
+        let mut output = Vec::new();
+        painter.paint(&mut output, &document, frame).unwrap();
+        assert!(!output.is_empty());
+        output.clear();
+        painter.paint(&mut output, &document, frame).unwrap();
+        assert!(output.is_empty());
+        painter.invalidate();
+        painter.paint(&mut output, &document, frame).unwrap();
+        assert!(String::from_utf8(output).unwrap().contains("header"));
+
+        struct FlushFailure(Vec<u8>);
+        impl Write for FlushFailure {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+        }
+        painter.invalidate();
+        let mut failure = FlushFailure(Vec::new());
+        assert!(painter.paint(&mut failure, &document, frame).is_err());
+        let mut retry = Vec::new();
+        painter.paint(&mut retry, &document, frame).unwrap();
+        assert!(!retry.is_empty());
+        assert!(!String::from_utf8(retry).unwrap().contains("\x1b[2J"));
+    }
+
+    #[test]
+    fn projected_text_and_math_labels_keep_distinct_navigation_identities() {
+        let source = format!(
+            "{} https://example.test [next](#next)\n\n[$x^2$](#math)",
+            "~q~".repeat(40)
+        );
+        let document = Document::render(&source, 80, false, None).unwrap();
+        let links = crate::links::extract_links(&source);
+        assert_eq!(links.len(), 3);
+        assert_eq!(document.navigation.links.len(), 3);
+        for link in links {
+            assert!(!document.navigation.links[&link.navigation_id()].is_empty());
+        }
+    }
+
+    #[test]
+    fn wrapped_unicode_table_links_are_precise_in_quotes_and_after_reflow() {
+        let source = "> | label | other |\n> | --- | --- |\n> | prefix [界 wide label **words**](#target) tail | x |\n\nE=mc^2^ https://example.test";
+        let links = crate::links::extract_links(source);
+        for columns in [25, 80] {
+            let document = Document::render(source, columns, false, None).unwrap();
+            for link in &links {
+                let spans = &document.navigation.links[&link.navigation_id()];
+                let parts: Vec<_> = spans
+                    .iter()
+                    .map(|span| {
+                        TerminalLine::new(
+                            &document.lines[span.row].clip(span.start, span.end - span.start),
+                        )
+                        .plain()
+                        .to_owned()
+                    })
+                    .collect();
+                let joined = parts.join(" ");
+                assert!(
+                    joined == "界 wide label words" || joined == "https://example.test",
+                    "{joined}"
+                );
+            }
+        }
     }
 }

@@ -199,6 +199,7 @@ dependencies = [
  "merman",
  "nix 0.31.3",
  "pulldown-cmark",
+ "regex",
  "serde",
  "serde_json",
  "syntect",

@@ -4,6 +4,150 @@
 
 Date: 2026-10-12
 
+## Production viewer observation - 2026-10-23
+
+A separate clean-slate documenter inspected only Blad source, tests, manifests
+and fresh execution summaries. It excluded intent, queue, this prior record,
+project documents, previous reviews, chat and Git history/diffs. It made no code
+changes, ran no additional tests and made no compliance determination. The
+following retains its source-derived observations.
+
+### Independent observed behavior
+
+`display.rs::viewer_session` ignores key-release events. Ctrl+C quits even
+while help or search is active. Otherwise, help consumes the next key without
+applying its document action. Normal navigation includes j/k or arrows,
+full-page Space/PageDown/Ctrl+F and PageUp/Ctrl+B, half-page d/u or Ctrl+D/U,
+and g/H/Home versus G/L/End. Top commands reset horizontal offset; bottom
+commands do not. Left/Right move one display column. `[`/`]` select the
+previous/next distinct heading row and clear search/link selection.
+
+`h` displays a rendered help document; Ctrl+L invalidates the paint cache.
+Normal q/Esc closes the active tab; Q quits all. Search editing takes
+precedence: Q becomes query text, Enter commits, and Esc clears search without
+closing. After committing, Esc instead follows normal tab-close handling.
+Legacy `f` starts a separate modal link selector: Tab/BackTab cycle, Enter
+follows, Esc leaves; ordinary movement and q are ignored there, while Q and
+Ctrl+C still quit.
+
+`search.rs` searches each rendered `TerminalLine::plain()`, not Markdown
+source. `/` and `?` reset state for forward/backward literal search. Ctrl+R
+toggles regex; Ctrl+U clears input; Backspace removes one Unicode scalar.
+Queries are limited to 4096 UTF-8 bytes; regex compilation and DFA budgets are
+each 2 MiB. Matching is case-insensitive; literal mode escapes regex syntax.
+Empty matches are excluded. Regex byte ranges expand to intersecting
+graphemes and become display-column spans through
+`terminal_text.rs::column_ranges`.
+
+Initial selection uses the first occurrence at/below the viewport top, or
+the last at/above it for backward search, wrapping if necessary. n advances
+in the original direction; N/p reverse it. Every visible occurrence is
+highlighted, not just the selected occurrence. `reveal` adjusts vertical and
+horizontal offsets; resize recomputes matches against reflowed lines. Source
+unit tests cover Unicode columns, invalid/oversized patterns, and zero-width
+exclusion; PTY assertions cover exact highlighted cells and monochrome
+underlining.
+
+`links.rs` extracts inline/reference/autolinks and bare HTTP(S) URLs outside
+code; formatted labels contribute text. Renderer navigation identities use
+parser offsets, with an additional event-local offset for bare URLs. Duplicate
+visible labels therefore remain distinguishable. Normal Tab/BackTab initially
+choose relative to the viewport top, then cycle source-order links. Enter
+follows the selection, otherwise the first source-order link having a span
+at/below the top; this is not restricted to currently visible rows.
+
+`viewer_navigation.rs::spatial_link` excludes the selected link entirely.
+Left/Right require another span on the same row; Up/Down require a different
+row. Candidates rank by row distance, column distance, link index, then span
+index. Mouse clicks use rendered half-open spans after subtracting the gutter
+and adding scroll offsets.
+
+Fragments resolve through renderer-owned heading rows, including generated
+Unicode slugs, duplicate suffixes, and explicit IDs. Empty fragments mean top.
+File links split their fragment before percent-decoding and resolve against
+the current file's directory. Opening canonicalizes paths, reuses existing
+tabs, and reads new files as UTF-8. Missing targets/anchors become footer
+messages. Initial files are deduplicated canonically in argument order before
+terminal entry/output. Alt+Left/Right wraps tabs outside search editing/modal
+link mode; b pops navigation history. Closing repairs history indices. Each
+tab retains numeric x/y offsets, but search and selection are recreated on
+re-entry. Existing tabs reuse stored content; switching does not reread disk.
+
+`markdown.rs` passes link identities through inline styles and table marks.
+`inline.rs` preserves adjacent styled runs, collapses ordinary whitespace into
+separators, wraps prose by words/graphemes, and keeps words containing inline
+code atomic. `render_writer.rs` measures columns already emitted plus quote
+borders; same-link pieces on one row merge into an enclosing span.
+Consequently intervening label whitespace is included. Wrapped rows retain
+separate spans. `table_navigation.rs` projects marked cell byte intervals
+through preserved tokens into display columns; table rendering adds preceding
+cell/separator offsets. `viewport.rs` unit tests explicitly check duplicate,
+quoted, wrapped, Unicode, projected-text, and math-label identities.
+
+Search and selected-link spans share one overlay. They are sorted and
+overlapping or touching intervals merge per row. `TerminalLine` preserves
+SGR separately, expands tabs at eight-column stops, and clips whole graphemes;
+partial wide graphemes become spaces. Overlay exit restores tracked source
+styling. Document layout reserves a scrollbar column and a rendered-line-number
+gutter. Code/table overflow remains horizontally accessible.
+
+`TerminalGuard` owns raw mode, alternate screen, hidden cursor, and mouse
+capture, with explicit restoration and drop cleanup. `Painter` uses absolute
+positioning, synchronized updates, padded changed rows, and no output for
+identical frames. Editing restores the terminal before invoking
+whitespace-split `$EDITOR` (default nvim), rereads after success, then re-enters;
+failures propagate. Browser launching captures bounded diagnostics with null
+stdin, but waits synchronously without a timeout.
+
+### Independent evidence and reservations
+
+The supplied all-feature summaries report 215 passed, 2 ignored; standalone
+reports 203 passed, 2 ignored, including 27 PTY viewer tests in each. The
+observer read assertions and summaries rather than independently executing
+tests. It found no contradictory executable source/test assertion. The
+ignored tests are existing optional native-diagram and repeated-text
+performance characterizations.
+
+The PTY emulator counts printed characters as individual cells; Unicode
+geometry additionally relies on source/unit assertions, not realistic PTY
+grapheme emulation. A synchronous browser launcher can block indefinitely.
+Passing summaries do not establish all untested edge-case behavior.
+
+A separate source-blind comparator read only current requirements, contract,
+design, that observation and execution summaries, excluding source, tests,
+queue, prior records and Git data. It supported the scoped occurrence search,
+localized link spans, spatial/source-order navigation, tabs, retained painting
+and pager keys, without universal compliance certification.
+
+It retained two interpretation findings for **explicit human arbitration**:
+
+- **A-01, committed search Esc:** The implementation closes a tab after Enter
+  commits search, whereas the contract's "Esc clears/cancels search" can also
+  be read as clearing retained results first. Prompt cancellation is separate.
+- **A-02, help and Ctrl+C:** The implementation gives global quit precedence
+  to Ctrl+C; "any key dismisses" help can be read as requiring dismissal only.
+  The competing global-quit clause makes precedence ambiguous.
+
+Neither finding is treated as human-resolved or silently repaired by changing
+intent or code. Current user documentation discloses actual mode precedence.
+No acceptance, advisory receipt or blanket compliance is claimed.
+
+The comparison also retained evidence reservations for exhaustive mode/key
+combinations, inline regex flags, every spatial boundary and resize path,
+exact tab-close selection, every write/flush recovery, help contents and
+user-documentation obligations. Some are directly covered by parent-run
+assertions, but the source-blind reviewer did not inspect source/tests or
+user docs and did not convert absent observations into presumed defects.
+
+Parent verification used `cargo test -p blad --offline --locked --all-features`
+and `--no-default-features`, strict all-target/all-feature Blad Clippy, formatter,
+whitespace checks and an all-feature workspace check. The occurrence-search
+and duplicate-table/bare-URL metadata regressions failed before their
+corresponding fixes. `kvist vendor . --json` successfully refreshed the local
+vendoring metadata after adding the direct edge to already locked `regex`;
+no registry packages were added. The scoped implementer input/terminal
+inspection and limitations are retained separately in `DESIGN.md`.
+
 ## Standalone/session boundary observation - 2026-10-23
 
 An independent clean-slate observer inspected current application source,

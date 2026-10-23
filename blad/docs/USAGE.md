@@ -246,8 +246,11 @@ Code block lines retain their whitespace and do not wrap. Use Left/Right to
 read horizontal overflow; short lines no longer reset the horizontal position.
 Header, footer and content rows are clipped independently so long lines cannot
 scroll the first document lines off the screen. Tabs display at eight-column
-stops. Home/End still move vertically; the planned key change, folding,
-occurrence search and live follow are not part of these layout corrections.
+stops. Home/End move vertically. Frames are buffered and only changed rows are
+written; scrolling and tab changes do not clear the screen or re-enter the
+alternate screen. Synchronized updates further reduce flicker on terminals
+that support them. `Ctrl+L` forces a repaint if another program damages the
+display. Folding and live follow remain deferred.
 
 ### Table sizing
 
@@ -279,14 +282,28 @@ breaks and empty lines. Without a configured width, tables stay unwrapped.
 |-----|--------|
 | `↑` / `k` | Scroll up one line |
 | `↓` / `j` | Scroll down one line |
-| `PageUp` / `u` | Scroll up one page |
-| `PageDown` / `d` / `Space` | Scroll down one page |
+| `PageUp` / `Ctrl+B` | Scroll up one page |
+| `PageDown` / `Ctrl+F` / `Space` | Scroll down one page |
+| `u` / `Ctrl+U`, `d` / `Ctrl+D` | Half page up/down |
 | `g` / `H` | Go to top |
 | `G` / `L` | Go to bottom |
 | Mouse wheel | Scroll |
 | `b` | Return to the previous file |
 | `Alt+Left` / `Alt+Right` | Switch open-file tabs, retaining scroll positions |
-| `q` / `Esc` | Quit viewer |
+| `[` / `]` | Previous/next heading (no wrap) |
+| `q` / `Esc` | Close active tab; exit if it was the last |
+| `Q` / `Ctrl+C` | Quit all tabs |
+| `h` | Keyboard help; any key returns |
+| `Ctrl+L` | Force repaint |
+
+Closing a tab selects the next surviving tab, or the previous one if closing
+the rightmost tab. Surviving tabs keep their order and scroll positions;
+back history no longer refers to closed tabs. Esc cancels search, link mode
+or help without closing a tab. Search cancellation applies while the prompt is
+open: after Enter commits the search, Esc is again the normal close-tab key.
+To clear committed highlights without closing, press `/` then Esc.
+Ctrl+C remains a global quit, including from help; other help keys return to
+the document. These precedence choices are recorded for review in `IMPL.md`.
 
 ### Link Navigation
 
@@ -296,7 +313,13 @@ tabs. Opening an existing file reuses its tab. Search/link status and
 navigation errors appear in the footer.
 
 Use `Tab` to select the next link, `Shift+Tab` for the previous link, without
-entering a special mode. The selected link's rows are highlighted.
+entering a special mode. Only the selected link label is emphasized, including
+its wrapped spans; adjacent links and surrounding prose are not highlighted.
+`Ctrl+Left`/`Right` selects a link to the left/right on the same rendered row;
+`Ctrl+Up`/`Down` selects the nearest row in that direction, then nearest
+column. There is no spatial wrap. Navigation reveals offscreen links both
+vertically and horizontally; resize recomputes their positions.
+Without a selection, the origin is the viewport's top-left.
 Optional `f` link mode remains available.
 Press `Enter` to follow the link:
 
@@ -321,29 +344,60 @@ at most 4,096 bytes and identify truncation; control characters stay inert.
 You do not need link mode to follow a link: pressing `Enter` in normal mode
 opens the first link at or below the top of the viewport. Bare URLs
 (`https://…`) are treated as links in addition to bracketed and named links.
-Left-click inline/named links to follow them directly, including wrapped labels.
-Pointer hit testing currently covers prose/heading labels; table links and bare
-URLs retain keyboard following rather than recorded mouse hit-test spans.
+Left-click link labels to follow them directly, including wrapped labels,
+table cells and bare URLs. Repeated bare URLs are independent occurrences.
 
 Press `Esc` to exit link mode without following.
 
 ### Search
 
-Press `/` to enter search mode. Type your search query, then press `Enter`
+Press `/` for forward or `?` for backward search. Type a query, then press `Enter`
 to exit search mode and keep the matches highlighted.
 
 | Key | Action |
 |-----|--------|
-| `/` | Enter search mode |
+| `/` / `?` | Start forward/backward literal search |
 | Type text | Search query |
+| `Ctrl+R` | Toggle literal/regex in this prompt |
+| `Ctrl+U` | Clear the prompt |
 | `Enter` | Exit search, keep highlights |
-| `n` | Next match |
-| `p` | Previous match |
+| `n` | Next occurrence in the search direction, wrapping |
+| `N` / `p` | Occurrence in the reverse direction, wrapping |
 | `Esc` | Cancel search |
 
-The footer shows match position (e.g., "3/12 matches" for match 3 of 12).
-Matching rows keep their configured search indication across heading, emphasis
-and syntax-highlighting resets, including monochrome reverse-video cues.
+The footer shows mode, direction and occurrence position (e.g., "3/12 matches"),
+or an explicit no-match/invalid-pattern diagnostic, even after Enter. Multiple
+matches on one row count separately. Only matching text is highlighted, across
+heading, emphasis and syntax resets. Reverse video and underline retain a
+non-color cue, including inside inline code and reversed table headers.
+Search starts near the current viewport and reveals horizontally hidden
+matches. Tab or spatial link selection clears search emphasis.
+
+Each new prompt starts in **case-insensitive literal mode**, so `a.b` searches
+for that exact text. Toggle `Ctrl+R` to use Rust regex syntax in the same prompt:
+`hit[0-9]+`, `^heading`, `foo|bar`, Unicode classes and inline flags such as
+`(?-i:ExactCase)`. Lookaround and backreferences are not supported. Searches
+operate on rendered lines, not raw Markdown or across soft wraps. Zero-width
+matches are ignored; a match within a grapheme emphasizes the entire grapheme
+instead of splitting it. Input is limited to 4,096 UTF-8 bytes; compiled
+regex and DFA caches are limited to 2 MiB each.
+
+### Relationship to `less` and future priorities
+
+Blad shares line/page/half-page movement, `/`/`?`, `n`/`N`, `g`/`G`,
+`Ctrl+L` and `h` with familiar pagers. It deliberately keeps `b` for tab
+history and `f` for optional link mode; use `Ctrl+B`/`Ctrl+F` for full pages.
+Tab/Shift+Tab retain conventional link traversal rather than becoming heading
+keys; use `[`/`]` for headings. Unlike `less`, search starts literally and
+regex is explicit, preventing punctuation from unexpectedly becoming syntax.
+Normal `q`/Esc closes one tab rather than always quitting.
+
+Useful next increments are a heading outline, numeric movement and line/percent
+jumps, marks/jump history within a document, reload with position retention,
+per-tab retained searches and visible tab overflow. Real live follow needs
+explicit file-replacement/truncation semantics. Giant-file responsiveness needs
+measured search/reflow budgets before claiming bounded latency. Shell escapes
+and document-triggered external commands are intentionally not pager goals.
 
 ### Edit Mode
 

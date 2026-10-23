@@ -102,17 +102,50 @@ impl TerminalLine {
         self.width
     }
 
-    pub fn clip(&self, start: usize, width: usize) -> String {
-        self.clip_with_overlay(start, width, "")
+    pub fn column_ranges(&self, ranges: &[std::ops::Range<usize>]) -> Vec<std::ops::Range<usize>> {
+        if ranges.is_empty() {
+            return Vec::new();
+        }
+        let mut column = 0;
+        let graphemes: Vec<_> = self
+            .text
+            .grapheme_indices(true)
+            .map(|(offset, text)| {
+                let start = column;
+                column += text.width();
+                (offset, offset + text.len(), start, column)
+            })
+            .collect();
+        ranges
+            .iter()
+            .filter_map(|range| {
+                let first = graphemes.partition_point(|(_, end, _, _)| *end <= range.start);
+                let last = graphemes.partition_point(|(start, _, _, _)| *start < range.end);
+                (first < last).then(|| graphemes[first].2..graphemes[last - 1].3)
+            })
+            .collect()
     }
 
-    pub fn clip_with_overlay(&self, start: usize, width: usize, overlay: &str) -> String {
+    pub fn clip(&self, start: usize, width: usize) -> String {
+        self.clip_with_spans(start, width, &[], "")
+    }
+
+    pub fn clip_with_spans(
+        &self,
+        start: usize,
+        width: usize,
+        ranges: &[std::ops::Range<usize>],
+        overlay: &str,
+    ) -> String {
         if width == 0 {
             return String::new();
         }
         let end = start.saturating_add(width);
-        let mut result = overlay.to_owned();
+        let mut result = String::new();
         let mut styles = self.styles.iter().peekable();
+        let mut source = SgrState::default();
+        let mut active = false;
+        let mut range_index = 0;
         let mut column = 0;
         for (offset, grapheme) in self.text.grapheme_indices(true) {
             let next = column + grapheme.width();
@@ -123,8 +156,27 @@ impl TerminalLine {
                 && *position <= offset
             {
                 result.push_str(style);
-                result.push_str(overlay);
+                source.apply(style);
+                if active {
+                    result.push_str(overlay);
+                }
                 styles.next();
+            }
+            while ranges
+                .get(range_index)
+                .is_some_and(|range| range.end <= column)
+            {
+                range_index += 1;
+            }
+            let highlight = ranges
+                .get(range_index)
+                .is_some_and(|range| range.start < next);
+            if active != highlight {
+                source.restore(&mut result);
+                if highlight {
+                    result.push_str(overlay);
+                }
+                active = highlight;
             }
             if column >= start && next <= end {
                 let mut part = offset;
@@ -133,7 +185,10 @@ impl TerminalLine {
                 {
                     result.push_str(&self.text[part..*position]);
                     result.push_str(style);
-                    result.push_str(overlay);
+                    source.apply(style);
+                    if active {
+                        result.push_str(overlay);
+                    }
                     part = *position;
                     styles.next();
                 }
@@ -143,7 +198,10 @@ impl TerminalLine {
                     && *position < offset + grapheme.len()
                 {
                     result.push_str(style);
-                    result.push_str(overlay);
+                    source.apply(style);
+                    if active {
+                        result.push_str(overlay);
+                    }
                     styles.next();
                 }
                 if next > start {
@@ -154,6 +212,75 @@ impl TerminalLine {
         }
         result.push_str("\x1b[0m");
         result
+    }
+}
+
+#[derive(Default)]
+struct SgrState(std::collections::BTreeMap<u16, String>);
+
+impl SgrState {
+    fn apply(&mut self, sequence: &str) {
+        let parameters = &sequence[2..sequence.len() - 1];
+        let mut parts = parameters.split(';').peekable();
+        while let Some(part) = parts.next() {
+            let Ok(code) = part
+                .parse::<u16>()
+                .or_else(|error| if part.is_empty() { Ok(0) } else { Err(error) })
+            else {
+                continue;
+            };
+            let key = match code {
+                0 => {
+                    self.0.clear();
+                    continue;
+                }
+                22 => {
+                    self.0.remove(&1);
+                    self.0.remove(&2);
+                    continue;
+                }
+                23 => {
+                    self.0.remove(&3);
+                    continue;
+                }
+                24 => {
+                    self.0.remove(&4);
+                    continue;
+                }
+                27 => {
+                    self.0.remove(&7);
+                    continue;
+                }
+                29 => {
+                    self.0.remove(&9);
+                    continue;
+                }
+                30..=39 | 90..=97 => 38,
+                40..=49 | 100..=107 => 48,
+                _ => code,
+            };
+            let mut value = part.to_string();
+            if matches!(code, 38 | 48)
+                && let Some(mode) = parts.next()
+            {
+                value.push(';');
+                value.push_str(mode);
+                for _ in 0..if mode == "2" { 3 } else { 1 } {
+                    if let Some(channel) = parts.next() {
+                        value.push(';');
+                        value.push_str(channel);
+                    }
+                }
+            }
+            self.0.insert(key, format!("\x1b[{value}m"));
+        }
+    }
+
+    fn restore(&self, output: &mut String) {
+        output.push_str("\x1b[0m");
+        for sequence in self.0.values() {
+            output.push_str(sequence);
+        }
     }
 }
 
@@ -196,5 +323,21 @@ mod tests {
     fn styles_inside_a_grapheme_do_not_split_it() {
         assert_eq!(clipped("e\x1b[31m\u{301}x", 0, 1), "e\u{301}");
         assert_eq!(clipped("e\x1b[31m\u{301}x", 1, 1), "x");
+    }
+
+    #[test]
+    fn overlays_are_exact_restore_source_styles_and_preserve_clipped_graphemes() {
+        let line = TerminalLine::new("\x1b[31ma\x1b[1mbc\x1b[0md界e\u{301}z");
+        let output = line.clip_with_spans(0, 20, &[1..2, 4..7], "\x1b[7m");
+        assert!(output.contains("\x1b[7mb"));
+        assert!(output.contains("\x1b[0m\x1b[1m\x1b[31mc"), "{output:?}");
+        assert_eq!(TerminalLine::new(&output).plain(), line.plain());
+        assert_eq!(
+            line.column_ranges(std::slice::from_ref(&(8..10)))
+                .as_slice(),
+            std::slice::from_ref(&(6..7))
+        );
+        let clipped = line.clip_with_spans(5, 3, std::slice::from_ref(&(4..7)), "\x1b[7m");
+        assert_eq!(TerminalLine::new(&clipped).plain(), " e\u{301}z");
     }
 }

@@ -240,6 +240,7 @@ fn render_markdown_theme(
     let mut in_table = false;
     let mut table_rows: Vec<Vec<String>> = Vec::new();
     let mut table_row_cells: Vec<String> = Vec::new();
+    let mut table_links = crate::table_navigation::TableLinks::default();
 
     let mut at_start = true;
     let mut need_blank = false;
@@ -372,7 +373,7 @@ fn render_markdown_theme(
             }
             Event::Start(Tag::Link { .. }) => {
                 links += 1;
-                link_source = Some(range.start);
+                link_source = Some(crate::links::NavigationId::Source(range.start));
             }
             Event::End(TagEnd::Link) => {
                 links = links.saturating_sub(1);
@@ -394,20 +395,68 @@ fn render_markdown_theme(
                 let projected = if in_code_block {
                     std::borrow::Cow::Borrowed(text.as_ref())
                 } else {
-                    crate::scripts::text(&text, md, range)
+                    crate::scripts::text(&text, md, range.clone())
                 };
                 let text = inert_source(&projected);
                 if in_code_block {
                     code_content.push_str(&text);
                 } else if in_table {
                     let cleaned = text.replace('\n', " ").replace('\r', "");
-                    if let Some(cell) = table_row_cells.last_mut()
-                        && !cleaned.is_empty()
-                    {
-                        cell.push_str(&cleaned);
+                    if links > 0 {
+                        table_links.append(
+                            &mut table_row_cells,
+                            table_rows.len(),
+                            link_source,
+                            &cleaned,
+                        );
+                    } else {
+                        let mut end = 0;
+                        for url in crate::links::bare_urls(&cleaned) {
+                            table_links.append(
+                                &mut table_row_cells,
+                                table_rows.len(),
+                                None,
+                                &cleaned[end..url.start],
+                            );
+                            table_links.append(
+                                &mut table_row_cells,
+                                table_rows.len(),
+                                Some(crate::links::NavigationId::Bare {
+                                    event: range.start,
+                                    offset: url.start,
+                                }),
+                                &cleaned[url.clone()],
+                            );
+                            end = url.end;
+                        }
+                        table_links.append(
+                            &mut table_row_cells,
+                            table_rows.len(),
+                            None,
+                            &cleaned[end..],
+                        );
                     }
                 } else {
-                    inline.text(w, &text, style)?;
+                    let mut end = 0;
+                    if links == 0 {
+                        for url in crate::links::bare_urls(&text) {
+                            inline.text(w, &text[end..url.start], style)?;
+                            inline.text(
+                                w,
+                                &text[url.clone()],
+                                Style {
+                                    link: Some(crate::links::NavigationId::Bare {
+                                        event: range.start,
+                                        offset: url.start,
+                                    }),
+                                    color: Some(palette.link),
+                                    ..style
+                                },
+                            )?;
+                            end = url.end;
+                        }
+                    }
+                    inline.text(w, &text[end..], style)?;
                 }
             }
             Event::InlineHtml(html) if in_table => {
@@ -422,9 +471,7 @@ fn render_markdown_theme(
             Event::Code(text) => {
                 let text = inert_source(&text);
                 if in_table {
-                    if let Some(cell) = table_row_cells.last_mut() {
-                        cell.push_str(&text);
-                    }
+                    table_links.append(&mut table_row_cells, table_rows.len(), link_source, &text);
                 } else {
                     inline.code(
                         &text,
@@ -612,10 +659,11 @@ fn render_markdown_theme(
                 in_table = true;
                 table_rows.clear();
                 table_row_cells.clear();
+                table_links = crate::table_navigation::TableLinks::default();
             }
             Event::End(TagEnd::Table) => {
                 in_table = false;
-                render_table(w, &table_rows, terminal_width, settings)?;
+                render_table(w, &table_rows, &table_links, terminal_width, settings)?;
                 writeln!(w)?;
                 need_blank = true;
                 table_rows.clear();
@@ -670,9 +718,12 @@ fn render_markdown_theme(
             Event::FootnoteReference(id) => {
                 let id = inert_source(&id);
                 if in_table {
-                    if let Some(cell) = table_row_cells.last_mut() {
-                        cell.push_str(&footnote_marker(&id));
-                    }
+                    table_links.append(
+                        &mut table_row_cells,
+                        table_rows.len(),
+                        link_source,
+                        &footnote_marker(&id),
+                    );
                     continue;
                 }
                 // A superscript marker, sharing the exact tag of its
@@ -721,9 +772,7 @@ fn render_markdown_theme(
                 let currency = crate::math::currency(&tex, md[range.end..].chars().next());
                 let text = crate::math::present(&tex, original, settings.math, currency);
                 if in_table {
-                    if let Some(cell) = table_row_cells.last_mut() {
-                        cell.push_str(&text);
-                    }
+                    table_links.append(&mut table_row_cells, table_rows.len(), link_source, &text);
                 } else {
                     inline.code(
                         &text,
@@ -743,9 +792,7 @@ fn render_markdown_theme(
                 })?;
                 let text = crate::math::present(&tex, original, settings.math, false);
                 if in_table {
-                    if let Some(cell) = table_row_cells.last_mut() {
-                        cell.push_str(&text);
-                    }
+                    table_links.append(&mut table_row_cells, table_rows.len(), link_source, &text);
                 } else {
                     let had_content = inline.has_content();
                     inline.finish(w)?;
@@ -814,8 +861,9 @@ fn render_markdown_theme(
 /// Styling is independent of the integer width/height solver. Geometry takes
 /// precedence over viewport fit; horizontally overflowing tables remain valid.
 fn render_table(
-    w: &mut impl Write,
+    w: &mut crate::render_writer::RenderWriter<'_, impl Write>,
     rows: &[Vec<String>],
+    links: &crate::table_navigation::TableLinks,
     terminal_width: Option<usize>,
     settings: &RenderOptions,
 ) -> std::io::Result<()> {
@@ -863,6 +911,18 @@ fn render_table(
         for (cell, &width) in row.iter().zip(&col_widths) {
             wrapped_row.push(cell.wrap(width));
         }
+        let wrapped_links: Vec<_> = wrapped_row
+            .iter()
+            .enumerate()
+            .map(|(column, wrapped)| {
+                links.wrapped(
+                    row_idx,
+                    column,
+                    rows[row_idx].get(column).map_or("", String::as_str),
+                    wrapped,
+                )
+            })
+            .collect::<std::io::Result<_>>()?;
 
         // Find the maximum number of wrapped lines in this row
         let max_lines = wrapped_row
@@ -895,6 +955,9 @@ fn render_table(
                     write!(w, " | ")?;
                 }
                 if line_idx < wrapped_lines.len() {
+                    for mark in &wrapped_links[i][line_idx] {
+                        w.mark_link_columns(mark.source, mark.range.start, mark.range.end);
+                    }
                     let padded = pad_cell(&wrapped_lines[line_idx], col_widths[i]);
                     write!(w, "{}", padded)?;
                 } else {

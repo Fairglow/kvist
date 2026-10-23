@@ -13,7 +13,7 @@ pub(crate) struct Style {
     pub reverse: bool,
     pub dim: bool,
     pub color: Option<crate::theme::Color>,
-    pub link: Option<usize>,
+    pub link: Option<crate::links::NavigationId>,
 }
 
 impl Style {

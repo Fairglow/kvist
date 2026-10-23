@@ -31,6 +31,7 @@ pulldown-cmark = "0.13"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 unicode-segmentation = "1.13"
 unicode-width = "0.2"
+regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
 merman = { version = "=0.9.1", default-features = false, features = ["ascii", "diagram-flowchart", "diagram-sequence", "diagram-state", "diagram-class", "diagram-er"] }
 
 [dev-dependencies]

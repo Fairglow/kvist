@@ -24,8 +24,11 @@ mod mermaid;
 mod output;
 mod render_writer;
 mod scripts;
+mod search;
 #[cfg(feature = "sessions")]
 mod session_display;
 mod table;
+mod table_navigation;
 mod terminal_text;
+mod viewer_navigation;
 mod viewport;

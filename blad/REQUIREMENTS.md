@@ -48,7 +48,8 @@ Blad must provide the following capabilities:
 10. **R-010 Mouse wheel:** Users can scroll with mouse wheel in supporting
     terminals.
 11. **R-011 Search:** Users can press `/` to search, type a query, navigate
-    between matches with `n`/`p`, and see match count in the footer.
+    between occurrences with `n`/`N` (`p` also goes backward), and see the
+    current occurrence and total count in the footer.
 12. **R-012 Status bar:** The viewer shows a footer with scroll percentage
     and position (TOP/BOTTOM/SCROLL).
 13. **R-013 Scrollbar:** The viewer shows a scrollbar on the right side for
@@ -226,6 +227,33 @@ The human selected opt-in `sessions`, direct file arguments in both builds,
 and removal of the misleading snapshot-only `stream` command. Future real
 live-follow support needs separately approved behavior rather than another
 feature toggle now.
+
+### Accepted production viewer increment
+
+48. **R-048 Precise search:** Highlight only matching rendered text, including
+    multiple occurrences on one line, through ANSI styles and horizontal
+    clipping. Preserve graphemes. Literal, case-insensitive search is the
+    default; provide an explicit bounded Rust-regex mode in the same prompt.
+    Invalid patterns and no matches remain visible; zero-width matches are
+    excluded. `/` searches forward, `?` backward; `n` repeats that direction
+    and `N`/`p` reverse it, wrapping at either end. Start near the viewport.
+49. **R-049 Precise navigation:** Highlight only the selected link's rendered
+    spans. Support deterministic Ctrl+Arrow navigation by rendered position,
+    reveal offscreen selections vertically and horizontally, and recompute
+    positions after resize. Retain Tab/Shift+Tab link traversal and add
+    next/previous heading navigation without repurposing established keys.
+50. **R-050 Tab lifetime:** Normal-mode `q`/Esc closes the active tab, exiting
+    only when it was the last. Preserve surviving tab order, positions and
+    valid back history. Provide an explicit quit-all key. Search, link and help
+    cancellation must not accidentally close a tab.
+51. **R-051 Stable display:** Scrolling and tab switching must not clear the
+    full screen or leave/re-enter the alternate screen. Buffer frame output,
+    update changed rows only, erase stale content, and repaint on resize or
+    explicit refresh. Ignore key-release events. Retain terminal restoration
+    on success, editor handoff and error.
+52. **R-052 Discoverability:** Provide in-viewer help and familiar full-page,
+    half-page, backward-search and refresh keys. Document deliberate
+    differences from `less`, regex syntax/limits, and deferred capabilities.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).
