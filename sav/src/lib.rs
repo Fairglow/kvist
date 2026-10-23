@@ -60,7 +60,7 @@ pub use supervisor::{
     OBSERVATION_INVARIANT_LIMIT, REASONING_NGRAM_SIZE, REASONING_SIMILARITY_THRESHOLD, RetryCause,
     SupervisionPolicy, WINDOW_IDENTICAL_ACTION_LIMIT, compute_action_hash,
     compute_ngram_jaccard_similarity, compute_observation_hash, normalize_json, run_supervised,
-    run_supervised_capture,
+    run_supervised_capture, run_supervised_observed, OutputStream,
 };
 pub use trajectory::{
     TrajectoryEvent, TrajectoryRecorder, TrajectoryReplayReport, replay_trajectory,

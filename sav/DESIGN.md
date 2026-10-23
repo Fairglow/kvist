@@ -2,6 +2,42 @@
 
 # Sav Design
 
+## Shared native runtime extraction (ADR 0015)
+
+`runtime::session` owns conversation, shared events and host traits;
+`runtime::context` owns atomic preflight/compaction; `runtime::retry` owns
+deterministic backoff; `runtime::driver` owns the bounded loop and owned deadline
+and operation watchers. `runtime::outcome` is data only, and `runtime::error`
+retains typed mechanism failures without application configuration/tool errors.
+There are no Skott, maerg, Galla or terminal imports.
+
+One mutex linearizes mailbox submission, claim, dispatch readiness, short
+in-memory delivery, and completion. Claimed text is owned by the run; edits and
+withdrawals cannot race it back into the queue. Terminal runs discard remaining
+guidance rather than enqueueing it as another objective. A separate bounded
+withdrawal-notice queue avoids retaining an unbounded history.
+
+Each provider attempt uses a fresh operation token and joined 10-ms watcher.
+Only the whole-prompt token reaches the executor. A steering interruption
+rebuilds context, retaining consumed tokens and the next generation attempt
+number/reserve. Backoff polls at most every 25 ms. Before the next tool the
+driver records paired skipped results for remaining proposals. Recording is
+synchronous and delivery is persisted before the next request; failure is
+terminal. Shutdown and delivery mutation share a lock, while blocking provider,
+recorder and effect operations never run under that lock.
+
+## Shared registry realization (ADR 0015)
+
+The registry uses ordered maps and tagged backend variants. TOML is decoded into
+the same serde types used by frontend explicit native overrides. Validation
+runs after decoding and before saving; bounded no-follow reads and atomic
+same-directory writes reuse profile filesystem helpers. Higher-priority named
+profiles replace whole lower-priority definitions, never merge fields.
+Resolution retains immutable profile data and hashes exact source bytes; no
+discovery is performed. Setup alone performs explicit discovery/qualification.
+External executable/argv identity is collected structurally, never recovered
+from a command string. Empty capability lists are conservative defaults.
+
 ## Loaded-model metadata
 
 Detect llama-server router mode explicitly from `/props.role` and query
@@ -53,6 +89,16 @@ supported as opaque processes constrained by an outer execution backend.
 
 ## Internal structure
 
+`observation` separates a held-descriptor journal/follower from private local
+control IPC. Validate full bounded serialization before appending. A writer is
+poisoned on I/O failure, synchronizes dispatch/terminal checkpoints and cannot
+append after finish. Follow the original descriptor without trusting pathname
+replacement; buffer only the bounded incomplete line. The listener owns its
+temporary private socket directory, uses bounded per-client waits and an owned
+joinable thread, validates requests before invoking the host callback, and has
+no tool/model authority. Host callbacks enqueue controls rather than perform
+effects. Shutdown stops acceptance and removes the ephemeral capability.
+
 | Module             | Responsibility                                                                                |
 | ------------------ | --------------------------------------------------------------------------------------------- |
 | `model`            | Canonical messages, turns, tool intent, capability and error types                            |
@@ -73,6 +119,13 @@ typed catalog and broker, host policy interface, selected execution backend,
 and host-owned durable journal.
 
 ## Interactions and state
+
+Opaque external execution reuses the existing supervisor instead of introducing
+another process pump. An optional fallible output callback observes accepted
+bounded stdout/stderr bytes before presentation; an optional cancellation token
+augments process signals. The new single-attempt entry point rejects retries
+before spawning. Cleanup is identical on recording failure, cancellation,
+timeout, output overflow and child failure.
 
 Supervision validates policy, builds an attempt command, spawns a new process
 group, reads stdout/stderr through bounded nonblocking channels, forwards or

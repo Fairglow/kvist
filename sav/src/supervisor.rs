@@ -190,11 +190,15 @@ pub struct CapturedExecutionReport {
     pub stderr: Vec<u8>,
 }
 
-#[derive(Clone, Copy)]
-enum Stream {
+/// An opaque process output stream; bytes are not native model/tool events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputStream {
     Stdout,
     Stderr,
 }
+
+type Stream = OutputStream;
+type OutputObserver<'a> = &'a mut dyn FnMut(OutputStream, &[u8]) -> Result<()>;
 
 enum StreamEvent {
     Data(Stream, Vec<u8>),
@@ -216,18 +220,20 @@ pub(crate) struct SignalCancellation {
     token: Option<CancellationToken>,
 }
 
-struct OutputDestination {
+struct OutputDestination<'a> {
     forward: bool,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+    observer: Option<OutputObserver<'a>>,
 }
 
-impl OutputDestination {
+impl OutputDestination<'_> {
     fn forwarding() -> Self {
         Self {
             forward: true,
             stdout: Vec::new(),
             stderr: Vec::new(),
+            observer: None,
         }
     }
 
@@ -236,6 +242,7 @@ impl OutputDestination {
             forward: false,
             stdout: Vec::new(),
             stderr: Vec::new(),
+            observer: None,
         }
     }
 
@@ -247,6 +254,9 @@ impl OutputDestination {
     }
 
     fn write(&mut self, stream: Stream, bytes: &[u8]) -> Result<()> {
+        if let Some(observer) = &mut self.observer {
+            observer(stream, bytes)?;
+        }
         if self.forward {
             return forward(stream, bytes);
         }
@@ -301,8 +311,12 @@ pub fn run_supervised<F>(
 where
     F: FnMut(&AttemptContext) -> Result<CommandSpec>,
 {
-    let (report, _) =
-        run_supervised_inner(policy, command_for_attempt, OutputDestination::forwarding())?;
+    let (report, _) = run_supervised_inner(
+        policy,
+        command_for_attempt,
+        OutputDestination::forwarding(),
+        None,
+    )?;
     Ok(report)
 }
 
@@ -314,8 +328,12 @@ pub fn run_supervised_capture<F>(
 where
     F: FnMut(&AttemptContext) -> Result<CommandSpec>,
 {
-    let (report, output) =
-        run_supervised_inner(policy, command_for_attempt, OutputDestination::capturing())?;
+    let (report, output) = run_supervised_inner(
+        policy,
+        command_for_attempt,
+        OutputDestination::capturing(),
+        None,
+    )?;
     Ok(CapturedExecutionReport {
         attempts: report.attempts,
         stdout: output.stdout,
@@ -323,16 +341,46 @@ where
     })
 }
 
-fn run_supervised_inner<F>(
+/// Supervises one opaque command with fallible live output and cooperative cancellation.
+///
+/// The caller owns execution authority. This mechanism is not a sandbox, and
+/// refuses retries because opaque earlier effects cannot safely be replayed.
+pub fn run_supervised_observed(
+    policy: &SupervisionPolicy,
+    command: &CommandSpec,
+    cancellation: &CancellationToken,
+    observer: OutputObserver<'_>,
+) -> Result<CapturedExecutionReport> {
+    if policy.max_retries != 0 {
+        return Err(Error::InvalidPolicy {
+            reason: "opaque external-agent effects cannot be automatically retried".into(),
+        });
+    }
+    let mut output = OutputDestination::capturing();
+    output.observer = Some(observer);
+    let (report, output) =
+        run_supervised_inner(policy, |_| Ok(command.clone()), output, Some(cancellation))?;
+    Ok(CapturedExecutionReport {
+        attempts: report.attempts,
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
+}
+
+fn run_supervised_inner<'a, F>(
     policy: &SupervisionPolicy,
     mut command_for_attempt: F,
-    mut output: OutputDestination,
-) -> Result<(ExecutionReport, OutputDestination)>
+    mut output: OutputDestination<'a>,
+    requested: Option<&CancellationToken>,
+) -> Result<(ExecutionReport, OutputDestination<'a>)>
 where
     F: FnMut(&AttemptContext) -> Result<CommandSpec>,
 {
     policy.validate()?;
-    let cancellation = SignalCancellation::new()?;
+    let cancellation = match requested {
+        Some(token) => SignalCancellation::new_with_token(token.clone())?,
+        None => SignalCancellation::new()?,
+    };
     let mut prior_failure = None;
 
     for attempt_number in 1..=policy.max_retries + 1 {
