@@ -40,6 +40,21 @@ complete.
 
 ## Functional requirements
 
+### REQ-SHARED-RUNTIME
+
+Maerg MUST consume shared provider/profile resolution and native runtime
+mechanisms without yielding task policy, context, authorization, acquisition,
+verification, promotion or evidence authority. Explicit run selections MUST be
+resolved once and recorded. External-agent profiles that cannot meet the
+protected broker contract MUST fail before effects without host fallback.
+
+Protected attempts MUST emit bounded versioned diagnostic events during
+execution, not reconstruct their only trajectory after completion. Required
+recording failure MUST prevent later effects. Read-only observers MUST not own
+execution. Optional controls MUST be explicitly authorized, record guidance,
+preserve approved context/grants and accounting, and never promise rollback or
+resume of unknown effects. Diagnostics remain distinct from canonical evidence.
+
 The following stable requirement identifiers define the mandatory behavior of
 the root component.
 

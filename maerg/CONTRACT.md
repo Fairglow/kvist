@@ -323,6 +323,13 @@ require an explicit in-shell confirmation.
 
 ## Required interfaces
 
+ADR 0015 retains maerg as the authority host for shared Sav mechanisms.
+Provider configuration is resolved through the shared registry; role bindings,
+task grants, dependency decisions and canonical evidence remain maerg-owned.
+Live diagnostics may be observed independently without starting Skott workspace
+tools. Control capability does not authorize changes to intent or grants.
+Unsupported external-agent/task combinations fail before execution.
+
 Kvist requires:
 
 - `sav.library/v1` for prompt acquisition, command rendering,

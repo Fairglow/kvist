@@ -4,6 +4,13 @@
 
 ## Design overview
 
+ADR 0015 replaces duplicated provider resolution with Sav's shared registry
+and factors reusable loop state below the authority host. Protected authoring
+still passes every proposal through `authoring` and Galla. Append live
+diagnostic events at actual model/broker/effect boundaries before exposing
+them to observers; retain existing canonical attempt evidence separately.
+Control handoff is explicit, bounded and cannot select the workspace executor.
+
 The root crate separates CLI parsing and dispatch from testable library
 modules. Domain modules own configuration, filesystem safety, artifacts,
 component documents, discovery, project state, queues, task commands, sandbox

@@ -25,6 +25,15 @@ limit; per-field, message/tool count and response bounds remain independent.
 
 ## Design overview
 
+ADR 0015 consolidates mechanisms below the applications. Keep registry parsing
+and atomic persistence separate from discovery/qualification and from runtime
+execution. Extract native conversation, context and retry mechanisms without
+moving workspace tool implementations or maerg policy into Sav. A correlated,
+bounded control queue owns steering handoff; operation interruption cannot
+cancel the whole prompt or reset its accounting. Live event persistence is
+run-owned; observation and optional private control are separate interfaces.
+External agents use process supervision, not the native model/tool loop.
+
 `offline_rust` contains fixed sandbox-only initialization and runtime script
 generation shared by Skott and maerg. Initialization copies generated settings
 into tmpfs and links the read-only registration directory. Wrappers resolve

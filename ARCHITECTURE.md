@@ -75,6 +75,16 @@ when created, are nested directly within their parent component directory.
 
 ## Interactions and dependency rules
 
+The approved consolidation direction is
+[ADR 0015](docs/decisions/0015-shared-runtime-and-run-inspection.md):
+Sav supplies shared provider/profile resolution and native runtime mechanisms;
+Skott supplies interactive/headless presentation and independent run inspection.
+Maerg retains protected task authority and evidence, and Galla enforcement.
+An external-agent backend is not a native model transport. Live observers do
+not own execution, and controls never broaden an approved task grant.
+Implementation status is recorded in local queues and source-derived records,
+not inferred from this architectural decision.
+
 1. The architect approves `VISION.md`, this architecture, and global
    `ROOT_CONTRACT.md`. Advisory review for these project-level artifacts is
    planned but needs a project-level acceptance surface; it is not enforced by

@@ -32,6 +32,31 @@ authority through narrow interfaces.
 
 ## Functional requirements
 
+### AR-REQ-SHARED-RUNTIME
+
+The reusable runtime MUST supply one bounded provider/profile registry and
+resolver for standalone and embedding clients. Native model and external-agent
+backends MUST be distinct. Discovery, configured selection, qualification and
+run authorization MUST remain distinct; unknown capabilities MUST NOT be
+enabled. Explicit task selections MUST not be replaced by loaded-model
+convenience. Persistence MUST be atomic, private, bounded and reject links and
+special files. Credentials MUST be references, never inline secret material.
+
+Native conversation, context fitting, retry, tool-result sequencing and control
+mechanisms MUST remain independent of terminal and maerg types. Hosts inject
+tool/effect authority and recording. Steering MUST be bounded and ordered,
+preserve prompt budgets and retry accounting, discard provisional generations,
+pair skipped tool calls, and never replay effects. Cancellation and shutdown
+remain distinct from steering.
+
+Versioned live journals MUST record sequence and run identity, bound records
+and reads, and expose explicit incomplete/terminal state. Required recording
+failure MUST stop further effects. Read-only observers MUST not control or
+terminate execution. Optional controls MUST require a private local capability,
+validate bounded messages, and acknowledge actual acceptance/delivery.
+External-agent execution MUST require an explicit execution boundary and MUST
+NOT silently become an unconfined native transport.
+
 The requirements below define the mandatory behavior of the reusable runtime
 component and its standalone CLI.
 
