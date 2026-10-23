@@ -2,6 +2,17 @@
 
 # Kvist Maerg Contract
 
+## Shared registry configuration (ADR 0015)
+
+`[agent.registry] path = "..."` selects a shared Sav registry relative to the
+configuration file. `[agent.roles.ROLE] profile = "NAME"` binds a shared named
+profile, with role policy remaining local. No provider/model facts are copied
+by setup. Selection is resolved once while loading configuration; exact registry
+source bytes contribute to the configuration digest. `resolve_role_profile`
+and `resolve_named_profile` expose pinned typed backend data to the execution
+host. External-agent refusal for protected tasks remains mandatory; parsing or
+qualification never grants process authority.
+
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
 described in BCP 14 (RFC 2119 and RFC 8174) when, and only when, they appear in
@@ -21,6 +32,25 @@ approval, and durable evidence. It does not own model-provider wire protocols,
 generic command supervision, or reusable provider profiles.
 
 ## Provided interfaces
+
+### Live task diagnostics and controls
+
+`task run --allow-control` explicitly enables a private ephemeral local control
+capability for each selected protected run. Without it the run has no control
+socket. The command reports the diagnostic `*.events.jsonl` path and, only when
+enabled, the control socket on stderr. These paths do not grant a workspace
+executor. Journals use `sav::observation` version-one envelopes and contain
+redacted model/broker/effect lifecycle events as they occur. A synchronized
+dispatch record precedes every effect, and recording failure aborts later
+effects. Existing canonical attempt evidence remains separate.
+
+`cancel` requests cooperative termination and retains observed/unknown effects.
+`guide` queues bounded supplemental human guidance for the next safe boundary;
+it never edits intent or changes a grant. Only an explicitly enabled run can
+accept controls. Guidance is recorded before it reaches model context, all
+pending assistant calls receive results, and the original wall/token/turn
+accounting is retained. Completion closes the control capability. There is no
+automatic replay/resume. An observer never needs control access.
 
 The `kvist` executable provides (the authoritative design is
 [`docs/command-set.md`](../docs/command-set.md)):
