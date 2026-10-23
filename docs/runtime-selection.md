@@ -1,166 +1,77 @@
-# Runtime Selection for Kvist
+# Runtime selection and ownership
 
-Status: architecture guidance and roadmap, 2026-09-01.
+The approved architecture is [ADR 0015](decisions/0015-shared-runtime-and-run-inspection.md).
+Sav is the shared headless runtime library. Skott is its interactive/headless
+workspace client and independent run inspector. Kvist/maerg owns protected task
+authority, workflow and canonical evidence; Galla enforces approved effects.
+Skott links Sav, not the `sav-run` executable.
 
-> **Update (2026-09-18):** the `rig-core` provider transport was rejected and
-> removed from the mainline (ADR 0009); the direct transport is the sole
-> provider transport. The `rig-run` and `rig-agent-container` loop drivers
-> remain future candidates, not current support.
+## Select a backend, not a different source of truth
 
-## Decision summary
+| Backend | Loop owner | Suitable use | Authority |
+| --- | --- | --- | --- |
+| Native Ollama / llama-server | Shared Sav native runtime with host integration | Interactive/headless workspace work; protected Kvist authoring through its broker | Host-supplied tools and separately enforced grants |
+| External coding agent | Selected CLI owns its internal loop; Sav supervises the complete process | Explicit opaque-agent execution | Explicit outer execution boundary; never inferred from provider flags |
+| One-shot command | No first-party tool loop | Diagnostics and bounded prompt execution | Explicit acknowledged process execution |
 
-Kvist will support several agent-loop implementations behind Kvist-owned
-canonical requests, events, policy decisions, and evidence. Users may
-eventually choose a loop driver per profile or task purpose. Provider
-transport, loop driver, and execution backend are independent choices:
+Model transport, agent driver and effect enforcement are separate choices.
+Copilot/Gemini catalog discovery through ACP does not make those agents native
+model transports. An opaque external agent must not be wrapped inside the
+native model/tool loop. Tool requests, provider output and permission switches
+are never authorization.
 
-```text
-provider transport: direct
-loop driver: external-command | kvist-native | rig-run | rig-agent-container
-execution backend: acknowledged-host | approved-sandbox | disposable-container
-```
+Protected task authoring must reject a backend that cannot satisfy its broker
+contract. Do not replace `kvist task run` with the workspace shell merely because
+both can use a sandbox. Skott's workspace and maerg's protected component grants
+are deliberately different.
 
-Only combinations whose exact capabilities have passed conformance and policy
-checks may run. Selecting a framework never grants authority, broadens context,
-or changes which durable records are canonical.
+## Shared configuration
 
-## Current support
+Sav owns typed provider/profile resolution, bounded discovery, qualification and
+atomic persistence. Skott and Kvist bind the same profiles rather than maintain
+copied model definitions. Application bindings, UI preferences, tool policies
+and task approval remain local to the application.
 
-| Choice                                | Current status                    | Appropriate use                                                                                                                             |
-| ------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| External command                      | Implemented                       | Copilot, Gemini, Claude, Aider, Goose, or another complete coding agent executed as an opaque process through the approved sandbox runner.  |
-| Kvist model transport with `rig-core` | Removed (ADR 0009)                | Was an experiment on the `rig-integration` branch; rejected in favor of the direct transport as the sole provider transport.                |
-| Kvist direct model transport          | Implemented (sole transport)      | Unary or streamed local Ollama and llama-server model calls, structured generation, untrusted tool-intent decoding, and provider reasoning. |
-| Kvist-native loop                     | Planned                           | Compliance-sensitive component work where Kvist must own every context, policy, tool, retry, and evidence transition.                       |
-| `rig-agent` loop                      | Not integrated                    | Candidate for an opaque disposable-container backend and effect-free advisory work; not canonical workflow state.                           |
-| `rig-run` loop                        | Unavailable in the pinned release | Candidate for a future Kvist-driven sans-I/O loop after it is published in an immutable Rig release.                                        |
+A provider instance identifies an endpoint or executable. A profile identifies
+the provider-facing model and supported settings. Discovery is a time-bound
+observation, not an approved configuration or guarantee of future availability.
+Advertised, tested and enabled capabilities remain distinct.
 
-Current `kvist.toml` agent profiles contain shell-free external command
-templates. They do not select `RigModelTransport`, `rig-agent`, or `rig-run`
-as typed runtimes. A command can invoke `sav-run model`, but that command
-returns model output and cannot yet perform a complete component task. A future
-profile schema version must model the three axes above explicitly rather than
-overload command strings.
+Explicit task selections are resolved once per attempt. Loaded-model preference
+is an interactive convenience and must not override a pinned task binding.
+Configuration loading never implicitly starts a provider, performs billable
+qualification, installs tools, or grants process/network authority.
 
-## Selection by purpose
+## Interactive and batch operation
 
-### External coding agent
+The same native mechanisms support both terminal and unattended operation.
+Skott headless workspace execution retains its required private journals and
+does not acquire an unconfined host fallback. Maerg retains its protected broker,
+dependency phases, verification and human finalization.
 
-Use an external command when coding quality and mature agent-specific tools are
-more important than observing its internal loop. This is the current choice for
-implementation work with Copilot, Gemini, Claude, Aider, Goose, or OpenHands.
-Kvist constrains the complete process externally and evaluates its resulting
-artifacts and evidence. Provider permission switches are defense in depth, not
-Kvist authorization.
+`sav-run` remains a small diagnostic/setup/supervision client. Its continued
+existence does not imply a second first-party native engine.
 
-### Kvist-native loop
+## Observation and control
 
-Use the native loop for high-assurance work:
+Run owners append versioned live diagnostic records during execution.
+`skott --attach JOURNAL` inspects those records without loading models or tools.
+Without a terminal it prints a snapshot; `--follow` waits for appended records.
+Closing inspection never terminates execution. EOF without a terminal
+disposition is incomplete, not successful completion.
 
-- contract-sensitive implementation;
-- security or compliance workflows;
-- tasks needing exact component context;
-- effects requiring per-tool authorization;
-- durable retry and uncertain-effect handling; and
-- runs whose evidence must be reconstructed independently.
+Controls are separate private local capabilities. Supply `--control SOCKET`
+with `--cancel-run` or `--guide TEXT` to send an explicitly authorized request.
+Queue acknowledgement is not model-context delivery. Guidance supplements the
+existing task without changing approved intent, grants or accounting; executing
+effects are not interrupted to steer. Cancellation cannot undo partial or
+unknown effects. Neither logs nor a missing process authorize replay/resume.
 
-This is the intended long-term reference behavior. It uses either the reviewed
-Rig transport or a direct transport but retains Kvist's broker, sequential
-effect handling, cancellation, budgets, event journal, and promotion decision.
+## Frameworks and deferred integrations
 
-### Containerized `rig-agent`
-
-Use `rig-agent` only when the whole run can be treated as an opaque,
-disposable job:
-
-- advisory review or brainstorming;
-- bounded structured extraction;
-- summarization and classification;
-- prototypes and low-assurance implementation attempts; or
-- a containerized coding agent whose final workspace diff is accepted or
-  rejected as one result.
-
-The container limits environmental effects, but it does not solve duplicate
-effects, crash recovery, retry safety, context provenance, or evidence
-ordering. Rig tools must either be effect-free or call a Kvist broker. Rig
-memory and serialized runs are non-authoritative attachments and must not
-replace project artifacts or the Kvist journal.
-
-Adopting `rig-agent` directly inside the compliance-sensitive native path would
-move transcript construction, loop sequencing, tool dispatch, and retry policy
-across the wrong authority boundary. Kvist therefore treats it as an optional
-backend, not the default internal runtime.
-
-### Future `rig-run` driver
-
-`rig-run` is the most promising framework reuse because its current design is
-sans-I/O and exposes explicit model-call, tool-call, and done steps. A future
-Kvist driver could:
-
-1. compose a request from approved Kvist context and capabilities;
-2. execute `CallModel` through a selected Kvist transport;
-3. process `CallTools` sequentially through the Kvist broker and container
-   backend;
-4. journal every intent, decision, effect, and result before advancing; and
-5. translate `Done` into a Kvist terminal event and promotion decision.
-
-As of 2026-09-01, `rig-run` is post-0.42 unreleased work. Kvist must not depend
-on Rig `main` or persist Rig run state as authoritative data. Evaluation starts
-only after an immutable published release can be exact-pinned and tested for
-crash, cancellation, replay, schema, and migration behavior.
-
-## Expected configuration
-
-The following illustrates a possible future schema and is not accepted by the
-current parser:
-
-```toml
-[[agent.profiles]]
-name = "controlled-local"
-driver = "kvist-native"
-transport = "rig-core"
-provider = "ollama"
-endpoint = "http://127.0.0.1:11434"
-model = "qwen3-coder"
-execution = "approved-sandbox"
-
-[[agent.profiles]]
-name = "advisory-container"
-driver = "rig-agent-container"
-image = "registry.example/kvist-rig-agent@sha256:<digest>"
-execution = "disposable-container"
-
-[[agent.profiles]]
-name = "copilot"
-driver = "external-command"
-command = "copilot ... '{prompt}'"
-execution = "approved-sandbox"
-```
-
-The eventual schema must use a new explicit version, reject unknown
-combinations, bind container images by digest, record exact Rig and adapter
-versions, and distinguish advertised, conformance-tested, and policy-enabled
-capabilities. No automatic fallback may replay an uncertain model or tool
-request through another driver.
-
-## Promotion criteria
-
-`rig-agent-container` may become supported after container lifecycle,
-cancellation, output, diff capture, and opaque-result evidence are tested.
-It remains unsuitable for canonical compliance-sensitive loop state.
-
-`rig-run` may become a selectable native driver only after:
-
-- an official release is exact-pinned;
-- Kvist can reconstruct runs from its own canonical history;
-- pending effects cannot be duplicated after a crash;
-- multi-call turns are rejected or processed sequentially;
-- automatic framework retries cannot bypass Kvist budgets or policy;
-- Rig state and payloads remain bounded, redacted, and non-authoritative; and
-- the driver passes the same conformance suite as the Kvist-native loop.
-
-The default should remain purpose-based rather than universal: external agents
-for mature coding capability today, Kvist-native for controlled work, optional
-`rig-agent` containers for disposable convenience, and a future `rig-run`
-driver only if it demonstrably removes generic loop code without weakening
-Kvist's differentiating authority and evidence model.
+The `rig-core` experiment was rejected and removed in
+[ADR 0009](decisions/0009-brokered-model-transport-and-isolated-effects.md).
+No Rig transport or agent runtime is part of the current dependency graph.
+MCP, richer ACP execution and other agent frameworks require explicit adapters,
+capability tests and host authority contracts before activation. They do not
+replace canonical Kvist state or evidence.

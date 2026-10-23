@@ -46,9 +46,46 @@ sav-run setup
 ```
 
 The wizard will:
-1. Probe local network loopbacks and standard directories for installed model backends (`llama-server`, `Ollama`, `copilot`, `gemini`).
+1. Discover models from the explicitly selected local endpoint or provider executable (`llama-server`, `Ollama`, `copilot`, `gemini`).
 2. Test connection and model readiness with a qualification prompt.
-3. Persist a reusable profile in `~/.config/sav/config.toml`.
+3. Persist a typed shared profile in `~/.config/sav/registry.toml`.
+
+`skott --setup [--registry PATH]` runs the same wizard without requiring a
+Skott configuration. `kvist agent setup` stores role/profile references, not
+copies. Qualification discloses host authority and possible billing; it never
+authorizes subsequent execution.
+
+The registry distinguishes native transports from external coding agents.
+Copilot/Gemini discovery does not expose them as native inference providers.
+Skott uses shared native runtime mechanisms for interactive/headless work;
+maerg retains its protected broker, approved context and canonical evidence.
+`sav-run` remains a setup, inference and supervision client, not a second
+native agent engine.
+
+### Live inspection and steering
+
+Native Skott prompts and protected Kvist attempts report a private shared
+diagnostic journal path. `skott --attach PATH` follows it in a terminal without
+loading providers/tools; nonterminal attachment prints a bounded snapshot and
+`--follow` waits for more records. Closing the viewer never cancels execution.
+EOF without a terminal record means incomplete, not successful completion.
+
+For explicit controls, start native Skott with `--allow-control` or use
+`kvist task run . TASK_ID --allow-control`. Supply the separately reported
+socket with `skott --attach PATH --control SOCKET`. Viewer `c` requests
+cancellation and `g` composes supplemental guidance. Nonterminal controls use
+`--cancel-run` or `--guide TEXT`. A queued reply is not model-context delivery.
+Guidance interrupts generation/backoff but never an executing effect, preserves
+task budgets and grants, and cannot silently become a replacement task.
+Cancellation cannot undo effects or authorize replay. Protected acquisition and
+verification retain their existing bounded timeout/signal behavior. Protected
+model text deltas require `--stream`; other progress is journaled without it.
+
+An explicitly selected external profile can run through terminal Skott using
+`--model NAME --allow-host-execution "PROMPT"` after acknowledging
+**HOST UNCONFINED** authority. Its CLI owns its loop and Sav supervises it once.
+It supports inspection and owner cancellation, not invented native tools,
+headless/protected execution or external live steering.
 
 ---
 
@@ -115,45 +152,57 @@ sav-run replay --max-turns 3 --json session_run.jsonl
 ### 2.1 Configuration File Location
 
 `sav-run` reads profile configurations from the following location in order of precedence:
-1. Explicit path supplied via the `--config <PATH>` flag.
-2. `$XDG_CONFIG_HOME/sav/config.toml` (typically `~/.config/sav/config.toml`).
-3. Fallback legacy path `~/.config/supervised-agent/config.toml`.
+1. Explicit path supplied via `--registry <PATH>`.
+2. Project `.kvist/providers.toml`.
+3. `$XDG_CONFIG_HOME/sav/registry.toml` or `$HOME/.config/sav/registry.toml`.
+
+Complete definitions override by case-sensitive name; fields are never merged.
+Reads perform no endpoint or process probes. There is no retired-schema fallback.
 
 ---
 
 ### 2.2 Profile Schema
 
-Profiles define named, reusable command templates for specific models or external agent wrappers. The configuration is formatted in standard TOML:
+Profiles distinguish native model transport from whole external agents:
 
 ```toml
 schema_version = 1
 
-[[profiles]]
-name = "local-llama"
+[profiles.local-llama.backend]
+kind = "native"
 provider = "llama-server"
-command = "curl -s http://127.0.0.1:8080/v1/chat/completions -d '{"model":"default","messages":[{"role":"user","content":"{prompt_json}"}]}'"
+base_url = "http://127.0.0.1:9931"
+model = "default"
 
-[[profiles]]
-name = "qwen-coder"
+[profiles.qwen-coder.backend]
+kind = "native"
 provider = "ollama"
-command = "ollama run qwen2.5-coder:7b '{prompt}'"
+model = "qwen2.5-coder:7b"
+context_limit = 32768
 
-[[profiles]]
-name = "copilot-cli"
+[profiles.copilot-cli.backend]
+kind = "external-agent"
 provider = "copilot"
-command = "gh copilot suggest -t shell '{prompt}'"
+executable = "copilot"
+arguments = ["--prompt", "{prompt}", "--silent", "--model", "auto"]
+model = "auto"
 
-[[profiles]]
-name = "gemini-cli"
+[profiles.gemini-cli.backend]
+kind = "external-agent"
 provider = "gemini"
-command = "gemini -p '{prompt}'"
+executable = "gemini"
+arguments = ["--prompt", "{prompt}", "--output-format", "text"]
 ```
 
 ---
 
 ### 2.3 Template Placeholders
 
-When defining command templates, `sav` substitutes values safely without invoking an intermediate shell:
+Explicit `--command` templates retain shell-free command rendering.
+External registry profiles instead use literal `arguments`: `{prompt}`,
+`{model}`, `{cwd}`, and `{reasoning_effort}` substitute once, while an entire
+`"{context_files}"` argument expands into separate path arguments. Inserted
+values are never interpreted as more placeholders or shell syntax.
 
 | Placeholder | Description |
 | :--- | :--- |
