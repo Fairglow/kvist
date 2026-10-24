@@ -38,41 +38,41 @@ tasks:
   - id: shared-runtime-implement-code
     title: "Consolidate reusable agent mechanisms"
     description: "Implement the shared registry/resolver, native mechanisms, external-agent adapter and live diagnostic/control interfaces without terminal or maerg dependencies."
-    context: "Independent source-only findings drove tests-first CLI retry/resource, empty-tool and cumulative timing/accounting repairs, committed as 9372168. The final workspace passed 1743 tests with 14 existing ignores; strict all-target Clippy, formatting, release binaries and documentation gates passed. No receipt or certification is implied."
+    context: "Independent findings drove tests-first CLI retry/resource, empty-tool and accounting repairs in 9372168, then shared native selector validation in 5cb86cb. The final workspace passed 1746 tests with 14 existing ignores; strict all-target Clippy, formatting, release and documentation gates passed. Exact evidence and limits: docs/reviews/0015-validation.md. No receipt or certification."
     purpose: "Remove divergent provider and runtime facts."
     expected_outcome: "Consumers use shared mechanisms and deterministic regression tests pass."
     kind: implementation
     status: completed
     depends_on: [shared-runtime-write-tests]
     requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T23:39:56Z", completed_at: "2026-10-23T23:39:56Z"}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-24T00:00:55Z", completed_at: "2026-10-24T00:00:55Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-security-audit
     title: "Inspect shared runtime authority and bounds"
     description: "Independently inspect registry, control authorization, recording, process cleanup, budgets and absence of effect replay."
-    context: "An independent source-only observer derived and refreshed IMPL.md after tested repairs. The process-global signal-group concurrency limitation remains explicit; per-run controls and supervision are separately observed. This completes scoped audit activity, not blanket certification."
+    context: "An independent source-only observer derived and refreshed IMPL.md, including the final shared selector repair. The process-global signal-group concurrency limitation remains explicit; per-run controls and supervision are separately observed. This completes scoped audit activity, not blanket certification."
     purpose: "Retain independent boundary observations."
     expected_outcome: "Concrete findings and limitations are recorded."
     kind: security-audit
     status: completed
     depends_on: [shared-runtime-implement-code]
     requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T23:39:56Z", completed_at: "2026-10-23T23:39:56Z"}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-24T00:00:55Z", completed_at: "2026-10-24T00:00:55Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-compliance-review
     title: "Compare independent runtime evidence"
     description: "Derive source-only observations then compare with intent in a separate source-blind context."
-    context: "No implementer self-certification, fabricated receipt or automatic acceptance."
+    context: "A separate source-blind diagnostic comparison is persisted at docs/reviews/0015-sav-comparison.md and refreshed after the selector and ownership clarification. It retains broader targets and evidence limits. Formal sign-off is blocked rather than represented as acceptance."
     purpose: "Retain discrepancies for human arbitration."
     expected_outcome: "Observed behavior and comparison limits persist beside the component."
     kind: compliance-review
-    status: pending
+    status: blocked
     depends_on: [shared-runtime-security-audit]
     requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
-    blocked_reason: null
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-24T00:00:55Z", completed_at: null}
+    blocked_reason: "Formal review readiness is blocked by pre-existing project queue/toolchain diagnostics and retained requirement discrepancies requiring human arbitration. Diagnostic comparison is complete; no compliance pass, waiver or receipt."
     recovery_state: null
   - id: active-model-write-tests
     title: "Reproduce router loaded-model discovery"

@@ -26,14 +26,14 @@ tasks:
   - id: shared-runtime-implement-code
     title: "Consume shared mechanisms and inspect live runs"
     description: "Use Sav registry/native mechanisms, retain workspace executors, expose setup and independent observation/control clients."
-    context: "Independent source-only findings drove five initially failing recording regressions and private descriptor-relative, no-clobber, atomic transcript repair. Shared default bindings and duplicate-free catalogue presentation have targeted coverage. Final workspace: 1743 passed, 14 existing ignores; strict Clippy, formatting, release and documentation passed. Ancillary host-script/theme findings remain separate."
+    context: "Independent source-only findings drove five initially failing recording regressions and private descriptor-relative, no-clobber, atomic transcript repair. Shared defaults and duplicate-free listing have targeted coverage. Active steering versus idle/bootstrap replacement is clarified. Final workspace: 1746 passed, 14 existing ignores; strict lint, format, release and documentation passed. See docs/reviews/0015-validation.md; ancillary findings remain separate."
     purpose: "Keep interactive and headless clients consistent."
     expected_outcome: "Shared behavior and attachment tests pass."
     kind: implementation
     status: completed
     depends_on: [shared-runtime-write-tests]
     requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T23:39:56Z", completed_at: "2026-10-23T23:39:56Z"}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-24T00:00:55Z", completed_at: "2026-10-24T00:00:55Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-security-audit
@@ -52,15 +52,15 @@ tasks:
   - id: shared-runtime-compliance-review
     title: "Compare independent client observations"
     description: "Source-only IMPL derivation followed by separate source-blind intent comparison."
-    context: "No automatic acceptance or receipt."
+    context: "A separate source-blind diagnostic comparison is persisted at docs/reviews/0015-skott-comparison.md, including the active-task/bootstrap clarification. It retains broader authority, reliability and review-mode discrepancies. Formal sign-off remains blocked, not automatically accepted."
     purpose: "Prevent implementer self-certification."
     expected_outcome: "Persistent scoped observations and comparison."
     kind: compliance-review
-    status: pending
+    status: blocked
     depends_on: [shared-runtime-security-audit]
     requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
-    blocked_reason: null
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-24T00:00:55Z", completed_at: null}
+    blocked_reason: "Formal readiness is blocked by pre-existing lifecycle task timestamps and managed-toolchain diagnostics, plus retained discrepancies for human arbitration. The diagnostic comparison does not mint a compliance pass or waiver."
     recovery_state: null
   - id: "lifecycle-write-tests"
     title: "Pin responsive startup and router selection"
@@ -189,20 +189,20 @@ tasks:
   - id: "steering-compliance-review"
     title: "Compare independent steering observations"
     description: "Derive source-only IMPL evidence, then compare intent and observed evidence in a separate source-blind context."
-    context: "The steering work needs a source-blind compliance comparison to prevent implementer self-certification of the new control path before acceptance."
+    context: "The separate source-blind comparison in docs/reviews/0015-skott-comparison.md records steering agreement, remaining delegated-evidence limits and resolved active-task/bootstrap wording. Formal acceptance remains gated by project readiness and human arbitration, not this diagnostic activity."
     purpose: "Prevent implementer self-certification."
     expected_outcome: "Discrepancies and evidence limits recorded for human arbitration."
     kind: compliance-review
-    status: pending
+    status: blocked
     depends_on:
       - "steering-security-audit"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"
     timestamps:
       created_at: "2026-10-17T17:30:00Z"
-      updated_at: "2026-10-17T17:30:00Z"
+      updated_at: "2026-10-24T00:00:55Z"
       completed_at: null
-    blocked_reason: null
+    blocked_reason: "Diagnostic comparison completed; formal compliance remains blocked by existing project readiness and retained requirement discrepancies. No automatic acceptance or certification."
     recovery_state: null
   - id: "repository-isolation-write-tests"
     title: "Pin nextest repository trial exclusivity"
