@@ -1161,9 +1161,11 @@ Options:
   connection/load run on a background worker while the transcript is shown in a
   starting state, and the first prompt is held and submitted when the worker is
   ready. A bootstrap failure is a non-fatal notice; the next submission
-  starts a fresh bootstrap. Changing the model or effort and submitting
-  cancels the old worker, discards its stale bootstrap, and starts a new one
-  with the held prompt. The per-turn deadline bounds the whole turn, including
+  starts a fresh bootstrap. With no active task, changing the model or effort
+  and submitting retires the idle worker, discards any stale bootstrap, and
+  holds the prompt for a new one. During an active task, submission is steering;
+  selection changes apply to later work, not worker replacement or cancellation.
+  The per-turn deadline bounds the whole turn, including
   the model load/switch (see Data and schemas), not a short fixed probe.
 - Model selection and activation (see "Model selection and activation") apply
   before any bootstrap: an explicit `--model`/Tab selection always selects its

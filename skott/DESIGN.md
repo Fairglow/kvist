@@ -287,9 +287,11 @@ discovery and journal setup) on a dedicated `agent-bootstrap` thread. The UI sho
 one supplied positionally) is dispatched to the worker as soon as it is
 installed. A failed bootstrap is reported as a failure notice, not fatal: the
 UI stays usable and the next submission or new session starts a fresh
-bootstrap. Submitting with a changed model or effort cancels the old worker,
-cancels and joins a stale in-flight bootstrap, starts a new one, and holds the
-prompt for it. Quit restores the terminal before any joins or resource cleanup.
+bootstrap. When no task is active, submitting with a changed model or effort
+retires the idle worker, cancels and joins a stale bootstrap, and holds the
+prompt for its replacement. During active work, submission is supplemental
+steering and preserves its worker; changed selection settings apply only to
+later tasks. Quit restores the terminal before any joins or resource cleanup.
 The transport watchdogs are part of the turn budget: the
 slot-allocation phase (provider acceptance, including model load/switch) and
 the time-to-first-token phase (long-prompt prefill) are each granted the full
