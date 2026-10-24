@@ -92,7 +92,7 @@ impl NativeModel {
         if self.base_url.is_empty() {
             self.base_url = self.provider.default_endpoint().to_owned();
         }
-        bounded_text(&self.model, 1024, "native model")?;
+        crate::direct_transport::validate_model_selector(&self.model)?;
         if !(1..=600).contains(&self.deadline_secs)
             || self.cadence_timeout_secs > 600
             || !(1..=32).contains(&self.max_attempts)

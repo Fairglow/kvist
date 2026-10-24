@@ -536,6 +536,41 @@ fn direct_transports_encode_output_bounds_and_preserve_absent_defaults() {
 }
 
 #[test]
+fn invalid_model_selectors_fail_before_connect_for_both_providers() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused endpoint");
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking listener");
+    let endpoint = format!("http://{}", listener.local_addr().expect("local address"));
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        let transport = transport(provider, &endpoint);
+        for model in [
+            "x".repeat(257),
+            "model-\u{e9}".into(),
+            "model\nname".into(),
+            "model\0name".into(),
+            " ".into(),
+        ] {
+            let mut request = request(ToolChoice::None);
+            request.model = model;
+            for streaming in [false, true] {
+                let cancellation = CancellationToken::new();
+                let outcome = if streaming {
+                    transport.stream(&request, &cancellation, &mut |_| Ok(()))
+                } else {
+                    transport.complete(&request, &cancellation)
+                };
+                assert!(matches!(outcome, Err(Error::InvalidModelRequest { .. })));
+                assert!(matches!(
+                    listener.accept(),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+                ));
+            }
+        }
+    }
+}
+
+#[test]
 fn invalid_output_bounds_fail_before_connect_for_both_providers() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused endpoint");
     listener

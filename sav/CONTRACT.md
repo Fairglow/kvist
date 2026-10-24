@@ -74,8 +74,9 @@ credentials. Forced failed qualification does not mark a capability tested.
 Registry files are at most 64 KiB and contain at most 128 profiles, including
 the resolved union. Names use 1–128 ASCII letters/digits or `.`, `_`, `-`, `:`.
 Each capability list contains at most 32 unique identifiers with the same
-syntax. Model IDs are nonblank, control-free strings of at most 1024 bytes;
-catalog discovery does not confer authority on them.
+syntax. Native model IDs are nonblank, control-free ASCII strings of at most
+256 bytes, sharing the direct request validator. Catalog discovery does not
+confer authority on them.
 
 Native optional fields are `context_limit` (2–1048576), `response_reserve`
 (1–1048576, less than configured context), `deadline_secs` (1–600, default
@@ -89,7 +90,8 @@ External providers are `copilot`, `gemini`, `claude`, `llama-cli` or
 `custom-script`. Executables are nonblank, control-free strings of at most
 4096 bytes. At most 128 literal arguments, each at most 16384 bytes and
 NUL-free, are stored; credential-bearing flags/values are refused. An optional
-external model uses the same model-ID bounds. `command_spec` substitutes
+external model is a nonblank, control-free UTF-8 string of at most 1024 bytes.
+`command_spec` substitutes
 `{prompt}`, `{model}`, `{cwd}`, and `{reasoning_effort}` once; an entire
 `{context_files}` argument expands into separate paths. Inserted values are
 not interpreted again. Rendered argv is bounded to 256 entries and 2 MiB, with
