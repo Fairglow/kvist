@@ -391,6 +391,16 @@ fn render_markdown_theme(
             Event::End(TagEnd::Strikethrough) => {
                 strikethrough = strikethrough.saturating_sub(1);
             }
+            Event::TaskListMarker(checked) => {
+                inline.text(
+                    w,
+                    if checked { "[x] " } else { "[ ] " },
+                    Style {
+                        color: Some(palette.list_marker),
+                        ..style
+                    },
+                )?;
+            }
             Event::Text(text) => {
                 let projected = if in_code_block {
                     std::borrow::Cow::Borrowed(text.as_ref())

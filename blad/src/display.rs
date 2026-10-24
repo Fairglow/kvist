@@ -638,10 +638,10 @@ fn viewer_session(
                         KeyCode::Up | KeyCode::Char('k') => {
                             scroll_offset = scroll_offset.saturating_sub(1);
                         }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if scroll_offset < total_lines.saturating_sub(visible_lines) {
-                                scroll_offset += 1;
-                            }
+                        KeyCode::Down | KeyCode::Char('j')
+                            if scroll_offset < total_lines.saturating_sub(visible_lines) =>
+                        {
+                            scroll_offset += 1;
                         }
                         KeyCode::PageUp => {
                             scroll_offset = scroll_offset.saturating_sub(visible_lines);
@@ -692,22 +692,20 @@ fn viewer_session(
                                 );
                             }
                         }
-                        KeyCode::Char('f') => {
-                            if !links.is_empty() {
-                                link_mode = true;
-                                link_index = 0;
-                                selected_link = Some(0);
-                                selected_part = 0;
-                                search = Search::default();
-                                if let Some(span) = spans[0].first() {
-                                    reveal(
-                                        span,
-                                        &mut scroll_offset,
-                                        &mut scroll_x,
-                                        visible_lines,
-                                        document.content_width,
-                                    );
-                                }
+                        KeyCode::Char('f') if !links.is_empty() => {
+                            link_mode = true;
+                            link_index = 0;
+                            selected_link = Some(0);
+                            selected_part = 0;
+                            search = Search::default();
+                            if let Some(span) = spans[0].first() {
+                                reveal(
+                                    span,
+                                    &mut scroll_offset,
+                                    &mut scroll_x,
+                                    visible_lines,
+                                    document.content_width,
+                                );
                             }
                         }
                         KeyCode::Tab | KeyCode::BackTab if !links.is_empty() => {

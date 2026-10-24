@@ -8,7 +8,7 @@ pub(crate) const HELP: &str = "\
 # Blad keyboard help
 
 / forward, ? backward; Ctrl+R toggles regex in search
-n repeat, N/p reverse; Esc cancels search
+n repeat, N/p reverse; Esc cancels the active search prompt
 Tab / Shift+Tab: next / previous link; Enter: follow
 Ctrl+Arrows: spatial links; [ / ]: previous / next heading
 j/k or arrows: line; Space / PageDown / Ctrl+F: page down
@@ -17,7 +17,8 @@ g/G or Home/End: top/bottom; Left/Right: horizontal
 Alt+Left/Right: tabs; b: back; e: editor; r: reload
 q/Esc: close tab; Q/Ctrl+C: quit all; Ctrl+L: redraw
 
-Any key returns to the document. No live follow or less shell commands.
+Any key except Ctrl+C returns to the document. Ctrl+C always quits.
+After search Enter, normal-mode Esc closes the tab. No live follow or shell commands.
 ";
 
 pub(crate) fn link_spans(document: &Document, link: &Link) -> Vec<LinkSpan> {

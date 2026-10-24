@@ -31,6 +31,7 @@ pub fn show_session(session: &Session) -> io::Result<()> {
 
 /// Render a session snapshot using explicit host settings.
 pub fn show_session_with_options(session: &Session, options: &RenderOptions) -> io::Result<()> {
+    let messages = load_messages(session)?;
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "Session: {}", inert_source(&session.id))?;
     if let Some(model) = &session.model {
@@ -41,7 +42,7 @@ pub fn show_session_with_options(session: &Session, options: &RenderOptions) -> 
     }
     writeln!(stdout, "Messages: {}\n", session.message_count)?;
     let renderer = MarkdownRenderer::with_options(options.clone());
-    for message in &load_messages(session) {
+    for message in &messages {
         print_message(message, &mut stdout, &renderer)?;
     }
     if !session.completed {
@@ -70,7 +71,7 @@ pub fn export_session(session: &Session, output: Option<&std::path::Path>) -> io
         doc.push_str(&format!("Started: {}\n", created_at));
     }
     doc.push_str("\n---\n\n");
-    for message in load_messages(session) {
+    for message in load_messages(session)? {
         doc.push_str(&format!(
             "## {}\n\n",
             inert_source(message_label(&message.kind))

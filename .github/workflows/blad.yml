@@ -1,0 +1,56 @@
+name: Blad
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["blad/**", "Cargo.toml", "Cargo.lock", "skott/Cargo.toml", "deny.toml", ".github/workflows/blad.yml", ".github/workflows/blad-publish.yml"]
+  pull_request:
+    paths: ["blad/**", "Cargo.toml", "Cargo.lock", "skott/Cargo.toml", "deny.toml", ".github/workflows/blad.yml", ".github/workflows/blad-publish.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Blad (${{ matrix.rust }}, ${{ matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: ["stable", "1.95.0"]
+        features: ["default", "sessions"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format, lint, test and document only Blad
+        env:
+          FEATURE_SET: ${{ matrix.features }}
+          RUSTDOCFLAGS: "-D warnings"
+        run: |
+          set -euo pipefail
+          flags=(--no-default-features)
+          if [ "$FEATURE_SET" = sessions ]; then flags=(--features sessions); fi
+          cargo fmt -p kvist-blad --check
+          cargo clippy --locked -p kvist-blad --all-targets "${flags[@]}" -- -D warnings
+          cargo test --locked -p kvist-blad "${flags[@]}"
+          cargo doc --locked -p kvist-blad --no-deps "${flags[@]}"
+      - name: Verify extracted crate and isolated release installations
+        if: matrix.features == 'default'
+        run: python3 blad/ci/verify_package.py
+
+  dependencies:
+    name: Blad dependency and license policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25
+        with:
+          command: check
+          manifest-path: blad/Cargo.toml
+          arguments: --config deny.toml --all-features --locked
+          command-arguments: advisories bans licenses sources

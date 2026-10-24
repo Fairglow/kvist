@@ -11,6 +11,46 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-publication-tests
+    title: "write_tests: standalone publication boundaries"
+    description: "Pin package payload, local fixtures, task markers and explicit session input failures."
+    purpose: "Make publication readiness measurable before production changes"
+    expected_outcome: "Regression evidence fails before corresponding implementation"
+    context: "Fail-first package/task/session regressions were reproduced; final default/sessions suites and both extracted-package test suites pass. PTY harness now waits for synchronized frames instead of terminal-setup bytes."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-059", "REQUIREMENTS.md#R-060", "REQUIREMENTS.md#R-061"]
+  - id: blad-publication-code
+    title: "implement_code: standalone release preparation"
+    description: "Prepare package identity, docs, payload, semantic markers, session reliability and CI."
+    purpose: "Release only Blad without peer installation"
+    expected_outcome: "Both feature modes and extracted-package checks pass"
+    context: "Package renamed without changing binary/library names; metadata/docs/license/payload, semantic task markers, descriptor-relative sessions and standalone CI prepared. Stable/MSRV, downstream and isolated install gates pass. Unresolved acceptance findings remain."
+    kind: implementation
+    status: completed
+    depends_on: [blad-publication-tests]
+    requirements: ["REQUIREMENTS.md#R-059", "REQUIREMENTS.md#R-060", "REQUIREMENTS.md#R-061", "REQUIREMENTS.md#R-062", "REQUIREMENTS.md#R-063"]
+  - id: blad-publication-audit
+    title: "security_audit: standalone release boundaries"
+    description: "Independently inspect retained session paths, failures, package contents and release authority."
+    purpose: "Find actionable security defects without claiming universal assurance"
+    expected_outcome: "Findings addressed or explicitly retained"
+    context: "Independent security review found tag/branch checkout ambiguity and local Python module spoofing of the accepted-SHA guard. Explicit tag refs and isolated Python before repository-controlled execution fix both; reviewer verified closure. Live publishing authority remains unverified."
+    kind: security-audit
+    status: completed
+    depends_on: [blad-publication-code]
+    requirements: ["REQUIREMENTS.md#R-061", "REQUIREMENTS.md#R-063"]
+  - id: blad-publication-review
+    title: "compliance_review: independent release evidence"
+    description: "Derive a source-only implementation record and compare source-blind against intent and evidence."
+    purpose: "Keep observation, intent and acceptance distinct"
+    expected_outcome: "Independent observations and unresolved release blockers retained"
+    context: "Independent source-only observation and separate source-blind comparison retained in IMPL.md with final source/intent/evidence hashes. Engineering evidence supports the increment; F-01 export authority, F-02 entry-kind intent, I-01 help interpretation and retained input/key decisions need human disposition. No acceptance or publication."
+    kind: compliance-review
+    status: completed
+    depends_on: [blad-publication-audit]
+    requirements: ["REQUIREMENTS.md#R-059", "REQUIREMENTS.md#R-060", "REQUIREMENTS.md#R-061", "REQUIREMENTS.md#R-062", "REQUIREMENTS.md#R-063"]
   - id: blad-file-input-tests
     title: "write_tests: bounded regular-file inputs"
     description: "Pin source/theme limits, descriptor rules and recoverable loading failures."

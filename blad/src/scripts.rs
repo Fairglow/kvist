@@ -90,7 +90,7 @@ pub(crate) fn text<'a>(text: &'a str, source: &str, range: Range<usize>) -> Cow<
         cursor += 1;
         while cursor < bytes.len()
             && !bytes[cursor].is_ascii_whitespace()
-            && !(bytes[cursor] == marker && !escaped(source.as_bytes(), range.start + cursor))
+            && (bytes[cursor] != marker || escaped(source.as_bytes(), range.start + cursor))
         {
             cursor += 1;
         }

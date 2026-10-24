@@ -250,12 +250,17 @@ impl Viewer {
     fn read_with_timeout(&mut self, required: bool, timeout: Duration) {
         let deadline = Instant::now() + timeout;
         let mut received = false;
+        let start = self.raw.len();
+        let mut complete = false;
         while Instant::now() < deadline {
             let mut descriptors = [PollFd::new(self.master.as_fd(), PollFlags::POLLIN)];
             let ready = poll(&mut descriptors, 100_u16).unwrap();
             if ready == 0 {
-                if received || !required {
+                if complete || (!required && !received) {
                     return;
+                }
+                if self.child.try_wait().unwrap().is_some() {
+                    break;
                 }
                 continue;
             }
@@ -266,12 +271,18 @@ impl Viewer {
                     self.raw.extend_from_slice(&bytes[..count]);
                     self.parser.advance(&mut self.screen, &bytes[..count]);
                     received = true;
+                    complete = self.raw[start..]
+                        .windows(b"\x1b[?2026l".len())
+                        .any(|bytes| bytes == b"\x1b[?2026l");
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
                 Err(error) => panic!("PTY read failed: {error}"),
             }
         }
-        assert!(received, "viewer did not produce a frame");
+        assert!(
+            !required || complete,
+            "viewer did not produce a complete synchronized frame"
+        );
     }
 
     fn keys(&mut self, keys: &[u8]) {

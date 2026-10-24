@@ -9,6 +9,10 @@ all capitals.
 
 ## Boundary and ownership
 
+The crates.io package is `kvist-blad`; the installed executable and imported
+Rust library are both `blad`. Rust 1.95 is the supported compiler minimum, not
+an exact toolchain pin. The default installation is a standalone file viewer.
+
 - **Component ID:** `kvist.blad`
 - **Contract IDs:** `blad.cli/v1`
 - **Owner:** Blad component
@@ -103,7 +107,9 @@ Navigation: `↑`/`k`, `↓`/`j`, `PageUp`/`Ctrl+B` (full page up),
 `[`/`]` jump to the previous/next rendered heading without wrapping.
 Search: `/` forward, `?` backward; type a case-insensitive literal query,
 `Ctrl+R` toggles regex in the same prompt, `Ctrl+U` clears the prompt,
-`Enter` keeps results, `Esc` clears/cancels search. `n` repeats the search
+`Enter` keeps results and returns to normal mode; `Esc` cancels an active search
+prompt. After Enter, normal-mode Esc closes the active tab rather than clearing
+retained results. `n` repeats the search
 direction, `N`/`p` reverse it, wrapping at document boundaries. Each nonempty,
 nonoverlapping occurrence counts separately. Search is per rendered line, not
 across soft wraps. Exact matching spans are highlighted; a partial grapheme
@@ -132,7 +138,8 @@ Other: `e` hands the whole file to `$EDITOR`, `b` returns to the previous tab,
 `Alt+Left`/`Alt+Right` switch open-file tabs. Normal-mode `q`/`Esc` closes
 the current tab, selecting the next tab (or previous if last); closing the sole
 tab exits. `Q`/`Ctrl+C` quits all tabs. Modal Esc cancels only that mode.
-`h` opens keyboard help (any key dismisses); `Ctrl+L` forces a repaint.
+`h` opens keyboard help (any key except global quit dismisses);
+`Ctrl+C` always quits, including from help/search. `Ctrl+L` forces a repaint.
 Normal-mode `r` explicitly reloads the active file from its opening canonical
 path. It retains options, tab order/history and numeric viewport offsets,
 clamping offsets to the new layout. Search query/mode/direction persist and
@@ -184,6 +191,45 @@ Blad depends on:
 
 ## Data and schemas
 
+### Terminal Markdown profile
+
+CommonMark parsing and documented extensions are terminal projections, not
+full CommonMark/GFM conformance claims. Raw HTML is omitted; image alternative
+text remains visible without graphics. Task items retain `[x]` or `[ ]`
+markers. Tables retain source column order but do not implement delimiter
+left/center/right alignment. Script, math and alert extensions are Blad's
+documented dialect.
+
+### Optional Kvist/Skott integration reliability
+
+`sessions` is an opt-in published feature, not a private Cargo feature or a
+runtime dependency on Kvist/Skott. Its user reference is `docs/SESSIONS.md`.
+Session APIs return `std::io::Result`; lookup returns `NotFound` for unknown IDs
+and `InvalidInput` for empty/ambiguous prefixes. Lookup has no 1,000-item cutoff.
+Listing a missing runs root succeeds with an empty list; a directory without
+`session.json` is ignored. Other input/parse failures propagate with context,
+not empty message bodies or a successful empty result.
+
+Each UTF-8 manifest/message is limited to 16,777,216 bytes inclusively.
+Required manifest/entry fields are validated; additional producer fields are
+allowed. Manifests require `schema_version: 1`, `kind: "skott-conversation"`,
+nonempty `session_id` and `status` strings, and an `entries` array (which may be
+empty); each entry requires a positive
+`sequence`, nonempty `kind` and `path`. `model` and `created_at` are optional
+strings. Entry paths must have exactly `messages/<filename>` shape with normal
+path components. Opened session roots, candidate directories, manifests,
+message directories and message files reject final symlinks. Descendant reads
+use directory descriptors with no-follow traversal, nonblocking opens and
+regular-file validation. An explicitly selected root's ancestor paths are not
+isolated. Messages load before snapshot/export output; read failure emits no
+successful partial transcript. Export to a named output retains its existing
+explicit overwrite behavior and is not an atomic-save protocol.
+
+These are per-artifact limits, not aggregate-memory bounds, concurrency
+snapshots, hard filesystem deadlines or a sandbox. Listing is newest-first by
+the tuple (creation-time string, session ID), descending; missing timestamps
+sort after present timestamps. IDs break timestamp ties.
+
 Blad reads skott's session format and produces ANSI-colored terminal output.
 
 ### Session format (input)
@@ -199,6 +245,8 @@ Blad reads skott's session format and produces ANSI-colored terminal output.
 ```
 
 The session manifest (`session.json`) contains:
+- `schema_version`: Required integer `1`
+- `kind`: Required string `"skott-conversation"`
 - `session_id`: Unique session identifier
 - `model`: Model identifier used
 - `created_at`: ISO 8601 timestamp

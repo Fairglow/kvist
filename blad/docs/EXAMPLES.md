@@ -1,7 +1,10 @@
 # Blad Feature Showcase
 
-This document demonstrates all Markdown features supported by Blad. Open it
-with `blad docs/EXAMPLES.md` to see rendered output.
+This document exercises Blad's terminal rendering profile. From the repository
+root, open it with `blad blad/docs/EXAMPLES.md`, or use `blad docs/EXAMPLES.md`
+inside `blad/`. See the [user's guide](USAGE.md) for exact profiles and limits.
+This is not a CommonMark/GFM conformance suite: raw HTML is omitted, images
+show alternative text only, and table delimiter alignment is not implemented.
 
 ## Headers
 
@@ -26,7 +29,15 @@ You can also use `inline code` for commands, variables, and identifiers.
 
 This is an autolink: https://example.com
 
+The [user's guide][guide] is a reference-style local link.
+Jump to [task lists](#task-lists) or follow the [math profile](USAGE.md#limited-mathematical-text).
+Following an external URL is an explicit viewer action, not a render-time fetch.
+
+[guide]: USAGE.md
+
 ![Alt text](https://example.com/image.png)
+
+The image contributes its alternative text only; no graphic is downloaded.
 
 ## Code Blocks
 
@@ -68,9 +79,15 @@ fn main() {
 | Headers | ✅ | H1-H6 with color coding |
 | Bold/Italic | ✅ | Combined formatting |
 | Code blocks | ✅ | 50+ languages via syntect |
-| Tables | ✅ | Column alignment |
-| Math | ✅ | Inline and display |
-| Mermaid | ✅ | Text-only rendering |
+| Tables | ✅ | Whole-word wrapping; delimiter alignment ignored |
+| Math | ✅ | Bounded inline/display text subset |
+| Mermaid | ✅ | Admitted spatial text subset |
+
+Left/center/right delimiter markers below do not change cell alignment:
+
+| Left marker | Center marker | Right marker |
+|:------------|:-------------:|-------------:|
+| First | Second | Third |
 
 ### Complex Table
 
@@ -104,6 +121,9 @@ fn main() {
 
 ## Task Lists
 
+Checked and unchecked state remains visible as `[x]` and `[ ]`, including
+with `--dump` or monochrome output.
+
 - [x] Complete initial setup
 - [x] Write documentation
 - [ ] Add more examples
@@ -123,6 +143,9 @@ Chemical formula: H~2~O
 Mathematical notation: x^2^ + y^2^ = z^2^
 
 Combined: E=mc^2^
+
+Unsupported script characters fall back as a complete span: x^2q^ → x^(2q).
+Code stays literal: `H~2~O`, and `~~strikethrough~~` is not subscript syntax.
 
 ## Math Expressions
 
@@ -148,7 +171,21 @@ $\pi$ $\rho$ $\sigma$ $\tau$ $\phi$ $\chi$ $\psi$ $\omega$
 
 $\le$ $\ge$ $\ne$ $\approx$ $\equiv$ $\infty$ $\in$ $\notin$ $\subset$ $\supset$
 
+### Source fallback
+
+Unsupported commands preserve the whole expression with an explanation:
+$\unknown{x}$.
+
+Optional root indices are outside the admitted grammar: $\sqrt[3]{x}$.
+Use `--math source` to preserve all original expressions instead of projecting.
+
 ## Mermaid Diagrams
+
+These five families use a bounded native text renderer, not a browser or
+external Mermaid executable. Some syntax/topologies fall back to visible
+source; see the [complete Mermaid profile](USAGE.md#mermaid-diagrams).
+Use Left/Right for overflow, `--diagram-charset ascii` for structural ASCII,
+or `--mermaid source` to inspect authored source.
 
 ### Flowchart
 
@@ -208,20 +245,18 @@ classDiagram
 
 ```mermaid
 erDiagram
-    SESSION ||--o{ MESSAGE : contains
-    SESSION {
+    DOCUMENT ||--o{ SECTION : contains
+    DOCUMENT {
         string id
-        string model
-        datetime started
-        string status
+        string title
     }
-    MESSAGE {
+    SECTION {
         int id
-        string role
         string content
-        datetime timestamp
     }
 ```
+
+The `||` and `o{` cardinalities remain explicit text, not crow's-foot graphics.
 
 ## Horizontal Rules
 
@@ -255,7 +290,8 @@ A stronger rule, rendered as a heavy line. `~~~` is a code fence, not a rule.
 
 \*Not italic\* but **this is bold**.
 
-\$5.00 is not math, but $5$ is.
+\$5.00 is literal currency; numeric-only inline `$5$` also remains literal.
+Explicit display mathematics is different: $$5$$
 
 Use backslashes to escape: \# not a heading
 

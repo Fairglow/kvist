@@ -8,6 +8,13 @@ pub(crate) fn read_regular_file(path: &Path, max_bytes: usize) -> io::Result<Vec
         .read(true)
         .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
         .open(path)?;
+    read_regular_descriptor(file, max_bytes)
+}
+
+pub(crate) fn read_regular_descriptor(
+    file: std::fs::File,
+    max_bytes: usize,
+) -> io::Result<Vec<u8>> {
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(
