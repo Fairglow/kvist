@@ -41,7 +41,7 @@ pub fn view_markdown_file(path: Option<&std::path::Path>, content: &str, line_nu
         RenderOptions::plain()
     };
     if let Err(error) = view_markdown_file_with_options(path, content, line_numbers, &options) {
-        eprintln!("Failed to display Markdown: {error}");
+        tracing::error!("Failed to display Markdown: {error}");
     }
 }
 
@@ -123,7 +123,7 @@ pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, termin
             Some(terminal_width),
             &RenderOptions::default(),
         ) {
-            eprintln!("Failed to display Markdown: {error}");
+            tracing::error!("Failed to display Markdown: {error}");
         }
     } else {
         let mut output = Vec::new();
@@ -133,7 +133,7 @@ pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, termin
             .render_markdown(content, &mut output)
             .and_then(|()| io::stdout().write_all(&output))
         {
-            eprintln!("Failed to display Markdown: {error}");
+            tracing::error!("Failed to display Markdown: {error}");
         }
     }
 }

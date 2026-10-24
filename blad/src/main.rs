@@ -164,6 +164,7 @@ fn fail(message: &str) -> ! {
 }
 
 fn main() {
+    blad::logging::init_logging();
     let cli = Cli::parse();
     #[cfg(feature = "sessions")]
     if cli.command.is_some() && !cli.files.is_empty() {

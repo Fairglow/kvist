@@ -67,7 +67,7 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         if let Err(error) = self.restore() {
-            eprintln!("Failed to restore terminal: {error}");
+            tracing::error!("Failed to restore terminal: {error}");
         }
     }
 }
