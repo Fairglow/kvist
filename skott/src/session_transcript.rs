@@ -118,10 +118,6 @@ impl SessionTranscript {
                 reason: error.to_string(),
             })?,
         );
-        eprintln!(
-            "live run journal: {}",
-            crate::error::terminal_text(&path.display().to_string())
-        );
         Ok(())
     }
 
