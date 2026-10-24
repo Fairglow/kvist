@@ -295,3 +295,144 @@ fn file_arguments_preserve_non_utf8_paths() {
         "# Non-UTF-8 filename"
     );
 }
+
+#[cfg(feature = "sessions")]
+fn session_fixture(root: &std::path::Path, id: &str) -> std::path::PathBuf {
+    let session = root.join(id);
+    std::fs::create_dir_all(session.join("messages")).unwrap();
+    std::fs::write(session.join("messages/one.md"), "message body").unwrap();
+    let manifest = serde_json::json!({
+        "schema_version": 1,
+        "kind": "skott-conversation",
+        "session_id": id,
+        "status": "completed",
+        "created_at": "2026-10-24T10:00:00Z",
+        "entries": [{"sequence": 1, "kind": "user", "path": "messages/one.md"}]
+    });
+    std::fs::write(
+        session.join("session.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    session
+}
+
+#[cfg(feature = "sessions")]
+#[test]
+fn malformed_session_artifacts_fail_explicitly_before_output() {
+    for invalid in [b"invalid json".as_slice(), b"{}".as_slice()] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = session_fixture(temp.path(), "session");
+        std::fs::write(path.join("session.json"), invalid).unwrap();
+        for args in [["list", ""], ["session", "session"], ["export", "session"]] {
+            let mut command = blad();
+            command
+                .arg("--log-dir")
+                .arg(temp.path())
+                .arg("--dump")
+                .arg(args[0]);
+            if !args[1].is_empty() {
+                command.arg(args[1]);
+            }
+            let output = output_before_deadline(&mut command);
+            assert_eq!(output.status.code(), Some(1), "{:?}", output.stdout);
+            assert!(output.stdout.is_empty());
+            assert!(!output.stderr.is_empty());
+        }
+    }
+}
+
+#[cfg(feature = "sessions")]
+#[test]
+fn failed_message_reads_do_not_become_empty_successful_transcripts() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = session_fixture(temp.path(), "session");
+    std::fs::remove_file(path.join("messages/one.md")).unwrap();
+    for command in ["session", "export"] {
+        let output = output_before_deadline(
+            blad()
+                .arg("--log-dir")
+                .arg(temp.path())
+                .args(["--dump", command, "session"]),
+        );
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("one.md"));
+    }
+}
+
+#[cfg(feature = "sessions")]
+#[test]
+fn session_artifact_symlinks_and_nonregular_inputs_are_rejected() {
+    for target in ["session", "session.json", "messages", "messages/one.md"] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = session_fixture(temp.path(), "session");
+        let candidate = if target == "session" {
+            path.clone()
+        } else {
+            path.join(target)
+        };
+        let saved = temp.path().join("saved");
+        std::fs::rename(&candidate, &saved).unwrap();
+        std::os::unix::fs::symlink(&saved, &candidate).unwrap();
+        let output = output_before_deadline(blad().arg("--dump").arg("session").arg(&path));
+        assert_eq!(output.status.code(), Some(1), "followed {target}");
+        assert!(output.stdout.is_empty(), "{target}: {:?}", output.stdout);
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let path = session_fixture(temp.path(), "session");
+    std::fs::remove_file(path.join("messages/one.md")).unwrap();
+    nix::unistd::mkfifo(&path.join("messages/one.md"), nix::sys::stat::Mode::S_IRUSR).unwrap();
+    let output = output_before_deadline(blad().args(["--dump", "session"]).arg(&path));
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+}
+
+#[cfg(feature = "sessions")]
+#[test]
+fn session_paths_and_ambiguous_prefixes_fail_explicitly() {
+    for entry in [
+        "../outside.md",
+        "/etc/passwd",
+        "messages/../outside.md",
+        "messages/nested/file.md",
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = session_fixture(temp.path(), "session");
+        let manifest_path = path.join("session.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["entries"][0]["path"] = entry.into();
+        std::fs::write(manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let output = output_before_deadline(blad().args(["--dump", "session"]).arg(&path));
+        assert_eq!(output.status.code(), Some(1), "{entry}");
+        assert!(output.stdout.is_empty());
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    session_fixture(temp.path(), "prefix-a");
+    session_fixture(temp.path(), "prefix-b");
+    for id in ["prefix", ""] {
+        let output = output_before_deadline(
+            blad()
+                .arg("--log-dir")
+                .arg(temp.path())
+                .args(["--dump", "session", id]),
+        );
+        assert_eq!(output.status.code(), Some(1), "{id:?}");
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[cfg(feature = "sessions")]
+#[test]
+fn session_roots_reject_symlinks_even_with_a_trailing_slash() {
+    let temp = tempfile::tempdir().unwrap();
+    let session = session_fixture(temp.path(), "session");
+    let link = temp.path().join("link");
+    std::os::unix::fs::symlink(&session, &link).unwrap();
+    let target = format!("{}/", link.display());
+    let output = output_before_deadline(blad().args(["--dump", "session", &target]));
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+}

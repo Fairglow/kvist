@@ -9,6 +9,47 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+### Publication preparation (2026-10-24)
+
+Publish only `kvist-blad` from the existing workspace, preserving `blad` binary
+and library targets and the downstream dependency alias. Keep Rust 1.95:
+the admitted Merman/Dugong graph requires it too. Package an explicit set of
+source, tests/fixtures, README, changelog, unchanged AGPL license and user docs.
+Move the architecture-table regression to a local fixture rather than removing
+its assertions. Standalone documentation excludes session instructions; the
+opt-in Kvist/Skott integration lives in `docs/SESSIONS.md`.
+
+Task-list parser events emit literal `[x] ` or `[ ] ` through the inline
+writer using list-marker styling. Plain rendering preserves the same text.
+Clarify existing Markdown projection limitations rather than claiming full
+conformance. Document current search/help precedence without claiming that
+earlier human-arbitration findings have been accepted.
+
+Replace session Option/empty-result failure erasure with `io::Result`.
+Use safe rustix descriptor-relative opens for session candidates and
+`messages/<filename>`, with NOFOLLOW/NONBLOCK/CLOEXEC and regularity validation.
+The direct rustix edge reuses the already locked package, not a new runtime
+process or service. Require the session root directory without following its
+final link; do not claim isolation of explicitly supplied root ancestors.
+Read a maximum 16 MiB plus one byte from each opened regular artifact before
+UTF-8/JSON decoding. Deserialize required typed fields while allowing extra
+producer metadata, retaining the public manifest value for existing callers.
+Listing skips only directories without a manifest, returns empty for a missing
+runs root, and otherwise reports errors. Sort a total descending tuple of
+optional creation time and ID. Lookup scans all sessions, prefers an exact ID,
+and rejects ambiguous/empty prefixes. Load messages before writing snapshot or
+export bytes. No error branch returns successful missing content.
+
+Standalone CI covers both feature modes on stable/MSRV, lint/docs, actual
+archive extraction, full archive tests and isolated release installs. A
+separate explicitly invoked publication surface must bind an accepted clean
+revision and version and publish only this package, never the workspace.
+Registry/account approval cannot be inferred from a local successful build.
+
+This increment uses a deliberate advisory-review exception while the planned
+receipt mechanism is unavailable. The exception is not human acceptance, a
+Kvist receipt or compliance evidence. Independent reviews follow implementation.
+
 Blad is a CLI terminal application built on Rust with clap for argument
 parsing, crossterm for interactive terminal I/O, pulldown-cmark for Markdown
 parsing, and syntect for syntax highlighting. It reads skott session files

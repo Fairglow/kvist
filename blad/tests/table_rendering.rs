@@ -338,14 +338,7 @@ fn explicit_cell_breaks_preserve_empty_lines_without_inflating_widths() {
 
 #[test]
 fn component_model_columns_are_capped_at_their_text_widths() {
-    let architecture = include_str!("../../ARCHITECTURE.md");
-    let markdown = architecture
-        .split("## Component model\n\n")
-        .nth(1)
-        .unwrap()
-        .split("\n\n")
-        .next()
-        .unwrap();
+    let markdown = include_str!("fixtures/component_model.md");
     let mut natural = vec![0; 5];
     for (row, line) in markdown.lines().enumerate() {
         if row == 1 {

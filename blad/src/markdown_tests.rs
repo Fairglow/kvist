@@ -186,8 +186,6 @@ fn test_strikethrough_is_styled() {
 
 #[test]
 fn test_tasklist_items_are_bulleted() {
-    // Task-list items render as bullets; the checkbox state is not a separate
-    // glyph in this renderer, but the item text is preserved.
     let output = render("- [x] done\n- [ ] todo");
     assert_eq!(
         output.matches('•').count(),
@@ -196,6 +194,17 @@ fn test_tasklist_items_are_bulleted() {
     );
     assert!(output.contains("done"));
     assert!(output.contains("todo"));
+    let text = strip_ansi(&output);
+    assert!(text.contains("[x] done"), "{text}");
+    assert!(text.contains("[ ] todo"), "{text}");
+    let mut plain = Vec::new();
+    MarkdownRenderer::with_options(crate::RenderOptions::plain())
+        .render_markdown("- [X] done\n- [ ] todo", &mut plain)
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(plain).unwrap(),
+        "• [x] done\n• [ ] todo\n"
+    );
 }
 
 #[test]

@@ -1,170 +1,155 @@
 # Blad
 
-First-class terminal Markdown viewer with interactive navigation, search, and
-rich rendering. Blad reads standalone Markdown files and, with optional
-session support, skott agent transcripts, using CommonMark and GitHub-Flavored
-Markdown support.
+A standalone terminal Markdown viewer and reusable Rust renderer. Open local
+documents in tabs, follow links, search rendered text, and hand a file to your
+editor without needing a project configuration, service, credentials or network.
 
-Blad is a standalone binary (`blad`) that is independent of the `kvist` CLI:
-it needs no Kvist project and no skott configuration. The default build
-opens files directly; the `sessions` Cargo feature adds transcript commands
-and `.skott/runs/` discovery (or a `--log-dir` override). It is also the
-Markdown rendering library that `skott`
-uses for its live TUI transcript, so the rendering you see in skott is the same
-rendering blad uses to display sessions afterwards.
+The planned registry package is **`kvist-blad` 0.3.0**; the executable and Rust
+library are both **`blad`**. **This release is not yet published.**
+Linux x86_64 is the verified executable target. Rust **1.95 or newer** is required
+to build it: 1.95 is the minimum supported version, not an exact toolchain pin.
 
-## Features
+## Install
 
-- **Full CommonMark + GFM rendering:** Headers, bold, italic, strikethrough,
-  links, images, code blocks, tables, blockquotes, task lists and footnotes
-- **Text notation:** Curated Unicode sub/superscripts and bounded mathematical
-  text, with whole-expression source fallback for unsupported TeX
-- **Syntax highlighting:** 50+ languages via syntect
-- **Appearance:** Dark, light, or terminal-native palettes and `--theme-file`
-  JSON overrides; explicit color
-  capabilities for embedding applications and escape-free rendered dumps
-- **Interactive viewer:** Keyboard navigation, mouse wheel, search with
-  highlight, scrollbar, link navigation (Tab/Shift+Tab), Space for page down
-- **Edit mode:** Press `e` to edit files in your preferred editor
-- **Link following:** Tab/Shift+Tab and Enter without a special mode, or click
-  inline/named links; local/cross-file heading jumps and open-file tabs
-- **Optional sessions:** List and read skott transcript snapshots, or export
-  them to combined Markdown documents (`sessions` feature)
-- **Text-only Mermaid:** Spatial Unicode/ASCII boxes, connectors and labels for
-  admitted flowchart, sequence, state, class and ER diagrams; no graphics/tools
-- **GFM alerts:** Color-coded [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]
-
-## Prerequisites
-
-**Building.** Rust **1.95** (MSRV) on Linux. Blad is a workspace member, so
-`cargo build -p blad` at the repository root builds the standalone viewer;
-`cargo build -p blad --features sessions` includes session integration.
-Neither needs the other workspace components at runtime.
-The Linux viewer tests need `setsid` and `stty` from util-linux/coreutils; they
-attach each child to its own controlling PTY, so they run unchanged from an
-interactive terminal or a noninteractive CI runner.
-
-**Running.** A terminal. No network access, no skott configuration, and no Kvist
-project are required. Edit mode requires `$EDITOR`. Markdown rendering never
-queries stdin or launches document-selected commands.
-
-## Usage
+Install the current checkout from the repository root:
 
 ```bash
-# Open files in tabs, preserving argument order
-blad README.md GUIDE.md
-blad --version
+cargo install --locked --path blad
+```
 
-# A filename matching an enabled command
-blad -- session
+Or run `cargo install --locked --path .` from the `blad/` directory.
+For the planned registry release, once published:
 
-# These commands require a build with --features sessions
-blad list
-blad session <session-id-or-directory>
-blad export <session-id> --output output.md
+```bash
+cargo install --locked kvist-blad --version 0.3.0
+```
 
-# Plain text output (no interactive viewer)
-blad session <session-id> --dump
+## Use
 
-# Show rendered-line numbers in the interactive viewer
-blad --line-numbers README.md
-
-# Choose appearance independently of terminal color capability
+```bash
+blad README.md GUIDE.md                   # Files in opening-order tabs
+blad --line-numbers README.md             # Rendered-line numbers
 blad --theme light README.md
 blad --theme terminal --color never README.md
 blad --theme-file blad/docs/theme.example.json README.md
-
-# Plain rendered text, even when color is explicitly requested
-blad --color always --dump README.md
-
-# Text boxes/arrows, with ASCII structural glyphs
+blad --dump README.md > readme.txt        # Escape-free rendered text
 blad --diagram-charset ascii diagrams.md
-
-# Inspect unprojected expressions and diagram source
 blad --math source --mermaid source document.md
+blad --version
+blad --help
 ```
 
-General viewer options, including `--help` and `--version`, remain available
-without session support. Only session commands and `--log-dir` are gated.
-There is no `view`, `show`, or `stream` command, nor session autodetection.
-Active sessions are snapshots; re-run `session` for newer events.
+Paths above assume the repository root. Filenames need no particular extension;
+use `--` before filenames beginning with `-`. There is **no stdin/piped-input
+mode**: provide file paths. When stdin or stdout is not a terminal, Blad renders
+the supplied files without opening the interactive viewer. Use `--dump` when
+the output must contain no terminal escapes; `--color never` can retain emphasis.
 
-Standalone files must be regular UTF-8 files of at most **16 MiB each**,
-including new link targets, reloads and editor rereads. Oversized files fail
-explicitly rather than being truncated. Selected file/theme symlinks still
-resolve normally; substituted final symlinks are rejected on reload/reread.
-This bounds source input, not total tab memory or rendering time.
+## Rendering
 
-## Keyboard Shortcuts
+- Headings, emphasis, strikethrough, inline/fenced code, lists, blockquotes,
+  links, footnotes, tables and `[x]`/`[ ]` task markers.
+- Syntax highlighting through syntect; unknown languages remain readable text.
+- Dark, light and terminal-native appearances; strict explicit JSON theme
+  overrides, automatic color capability detection and typed library options.
+- Curated Unicode scripts and bounded mathematical text, with whole-expression
+  source fallback for unsupported TeX.
+- Spatial text-only Mermaid flowchart, sequence, state, class and ER subsets,
+  with Unicode or ASCII structure and source fallback.
+- Alert labels and edges for NOTE, TIP, IMPORTANT, WARNING and CAUTION.
 
-### Navigation
+This is a terminal projection using CommonMark parsing and selected extensions,
+**not full CommonMark or GFM conformance**. Raw HTML is omitted (table-cell
+`<br>` is a line-break exception), images show alternative text only, and table
+delimiter left/center/right alignment is not implemented. Math and Mermaid are
+bounded subsets, not full TeX or Mermaid compatibility; see the
+[complete profiles and limits](https://github.com/Fairglow/kvist/blob/main/blad/docs/USAGE.md#text-rendering).
 
-- `↑`/`k` - Up, `↓`/`j` - Down
-- `PageUp`/`Ctrl+B` - Page up, `PageDown`/`Ctrl+F`/`Space` - Page down
-- `u`/`d` or `Ctrl+U`/`Ctrl+D` - Half page up/down
-- `g`/`H` - Top, `G`/`L` - Bottom
-- Mouse wheel - Scroll
+## Viewer keys
 
-### Search
+| Keys | Action in normal mode |
+|------|-----------------------|
+| `↑`/`k`, `↓`/`j` | One line up/down |
+| `PageUp`/`Ctrl+B`, `PageDown`/`Ctrl+F`/`Space` | Full pages |
+| `u`/`Ctrl+U`, `d`/`Ctrl+D` | Half pages |
+| `Home`/`g`/`H`, `End`/`G`/`L` | Top (also resets horizontal offset), bottom (retains it) |
+| `Left`/`Right` | Horizontal scrolling |
+| `/`, `?` | Forward/backward literal search; `Ctrl+R` toggles regex in prompt |
+| `n`, `N`/`p` | Repeat search direction, reverse direction |
+| `Tab`/`Shift+Tab`, `Enter` | Select links, follow selection or first link at/below viewport |
+| `Ctrl+Arrows`, `[`/`]` | Spatial link selection, previous/next heading |
+| `Alt+Left`/`Alt+Right`, `b` | Switch tabs, return through tab history |
+| `e`, `r`, `Ctrl+L`, `h` | External editor, reload, repaint, help |
+| `q`/`Esc`, `Q`/`Ctrl+C` | Close one tab, quit all tabs |
 
-- `/` / `?` - Forward / backward literal search; `Ctrl+R` toggles regex
-- `n` - Repeat direction, `N`/`p` - Reverse direction (wraps)
-- `Enter` - Exit search, `Esc` - Cancel
+The mouse wheel scrolls; left-click a rendered link label to follow it.
+Optional `f` link mode uses Tab/Shift+Tab, Enter and Esc. Modes take precedence:
+Esc cancels an open search prompt or link mode; **after Enter commits a search,
+Esc closes the tab**. Help consumes the next key, including `Q`; **Ctrl+C quits
+globally**, even from help/search. See the
+[exact key and modal behavior](https://github.com/Fairglow/kvist/blob/main/blad/docs/USAGE.md#keyboard-precedence).
 
-### Link Navigation
+`e` runs whitespace-split `$EDITOR` directly (unset: `nvim`), without shell
+expansion, then rereads after a successful editor exit. Explicitly following
+an external URL runs `xdg-open`, with a five-second launcher wait and bounded
+captured diagnostics. Neither action occurs merely by rendering a document.
 
-- `f` - Enter optional link navigation mode
-- `Tab` - Next link, `Shift+Tab` - Previous link
-- `Ctrl+Arrows` - Select links by visual position
-- `[` / `]` - Previous / next heading
-- `Enter` - Follow link (open file or URL)
-- `Esc` - Exit link mode
+## Input and resource boundaries
 
-Links can also be followed without link mode: press `Enter` to open the first
-link at or below the top of the viewport. Bare URLs (`https://…`) are
-recognised as links as well as bracketed and named links.
-Tab/Shift+Tab select links directly; rendered link labels also accept a left
-mouse click. `#heading` and `other.md#heading` jump to their headings.
+Documents must be regular UTF-8 files, at most **16 MiB (16,777,216 bytes) each**.
+All initial files validate before terminal entry or dump output. Newly followed
+files, reloads and editor rereads use the same limit. Explicitly selected
+initial/link/theme symlinks resolve normally; rereads reject a substituted
+final symlink at the opening canonical path. This is not ancestor-path isolation.
 
-### Other
+Limits are per-file source bounds, **not streaming, aggregate-memory, rendering
+latency or hard I/O-time guarantees**. Rendering can expand input. There is no
+live follow, folding, embedded editor or `less`-style shell escape.
 
-- `e` - Edit file
-- `b` - Return to the previous file
-- `Alt+Left` / `Alt+Right` - Switch open-file tabs (top row)
-- `q`/`Esc` - Close current tab (exit on the last tab)
-- `Q`/`Ctrl+C` - Quit all tabs
-- `h` - Keyboard help, `Ctrl+L` - Repaint
-- `r` - Reload the active file, retaining position and options
+## Embed the renderer
 
-Browser launches time out after five seconds without closing the document;
-only the directly owned launcher is stopped, not an independent browser.
+For the planned registry release:
 
-## Documentation
+```toml
+[dependencies]
+blad = { package = "kvist-blad", version = "0.3.0" }
+```
 
-- [User's Guide](docs/USAGE.md) - Complete usage documentation
-- [Text-Only Rendering Plan](docs/TEXT_RENDERING_PLAN.md) - Accepted themes,
-  Unicode scripts, limited math, and text-box Mermaid support
-- [Design](DESIGN.md) - Component design
-- [Requirements](REQUIREMENTS.md) - Functional and non-functional requirements
-- [Contract](CONTRACT.md) - CLI interface specification
+```rust
+use blad::{MarkdownRenderer, RenderOptions};
 
-## Development
+fn main() -> std::io::Result<()> {
+    let mut renderer = MarkdownRenderer::with_options(RenderOptions::plain());
+    renderer.set_width(Some(80));
+    let mut output = Vec::new();
+    renderer.render_markdown("# Hello\n\nReadable **Markdown**.\n", &mut output)?;
+    assert!(!output.contains(&0x1b));
+    Ok(())
+}
+```
+
+Renderer defaults are deterministic: dark appearance, truecolor, styling,
+Unicode math, text diagrams and Unicode diagram structure, without a width
+limit. Hosts explicitly choose palette, width, plain output and color depth
+(`None`, `Ansi16`, `Ansi256`, `TrueColor`). The renderer does not query
+`is_terminal()`, environment variables or terminal input, or launch processes.
+Interactive helpers in `blad::display` have separate terminal/process behavior.
+
+## Documentation and development
+
+- [User's guide](https://github.com/Fairglow/kvist/blob/main/blad/docs/USAGE.md): options, themes, keys and complete rendering profiles.
+- [Examples](https://github.com/Fairglow/kvist/blob/main/blad/docs/EXAMPLES.md): documents to open in the viewer.
+- [Theme example](https://github.com/Fairglow/kvist/blob/main/blad/docs/theme.example.json): all semantic palette roles.
+- [Optional Kvist/Skott integration reference](https://github.com/Fairglow/kvist/blob/main/blad/docs/SESSIONS.md).
+
+From the repository root:
 
 ```bash
-# Build
-cargo build -p blad
-
-# Run tests
-cargo test -p blad
+cargo build --locked -p kvist-blad
+cargo test --locked -p kvist-blad
 ```
 
-Blad is the single source of truth for Markdown parsing and rendering in the
-workspace. `skott` depends on the `blad` library and converts blad's ANSI output
-to ratatui-compatible styled lines for its TUI. See
-[`skott/README.md`](../skott/README.md) for the consumer side.
-
-The supported script, math and Mermaid profiles and their explicit fallback/
-resource behavior are documented in the [User's Guide](docs/USAGE.md).
-These are bounded text projections, not full TeX or full Mermaid compatibility.
-Library hosts can supply their own palette/capabilities and cooperative
-cancellation without inheriting CLI environment detection.
+The Linux viewer tests use `setsid` and `stty` to give children controlling PTYs.
+Blad is licensed under AGPL-3.0-or-later; the source distribution includes the
+[license text](https://github.com/Fairglow/kvist/blob/main/blad/LICENSE).
+Separate commercial licensing is described by the project.

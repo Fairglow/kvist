@@ -57,10 +57,12 @@ Blad must provide the following capabilities:
 
 ### Markdown Rendering
 
-14. **R-014 CommonMark:** Support full CommonMark spec.
-15. **R-015 GitHub Flavored Markdown:** Support GFM extensions including
+14. **R-014 CommonMark:** Parse CommonMark and document its terminal projection:
+    raw HTML is omitted and images display alternative text, not graphics.
+15. **R-015 GitHub Flavored Markdown:** Support documented extensions including
     tables, strikethrough, task lists, autolinks, footnotes, superscript,
-    subscript, and alert blockquotes ([!NOTE], [!TIP], etc.).
+    subscript, and alert blockquotes ([!NOTE], [!TIP], etc.). This is not a
+    full GFM conformance claim; table delimiter alignment is not implemented.
 16. **R-016 Syntax highlighting:** Highlight fenced code blocks using
     syntect (50+ languages).
 17. **R-017 Mermaid support:** Render the admitted Mermaid subset as terminal
@@ -306,6 +308,38 @@ feature toggle now.
     retained link/reload usability and post-editor terminal restoration.
     Document that per-file byte bounds do not establish render/search latency,
     aggregate tab memory, ancestor isolation or hard kernel-I/O deadlines.
+
+### Standalone publication preparation
+
+59. **R-059 Independent package:** Publishable package identity is `kvist-blad`;
+    executable and Rust library remain `blad`. Its archive must contain license
+    text, user documentation and self-contained tests/fixtures, without peer
+    component source or root-artifact build dependencies. Declare Rust 1.95 as
+    the supported minimum and verify it and stable in both feature modes.
+60. **R-060 Task semantics:** Preserve checked/unchecked task state as `[x]`
+    and `[ ]` in styled and plain rendering without depending on color.
+61. **R-061 Session input reliability:** Optional Kvist/Skott integration must
+    propagate malformed, unreadable, nonregular and oversized artifact errors.
+    Bound each manifest/message to an inclusive 16 MiB. Reject symlink session
+    roots/candidates, manifests, message directories and message files; open
+    message entries relative to the opened session descriptor. Admit only
+    `messages/<filename>` entry paths. Missing runs roots mean no sessions;
+    directories without a manifest are not sessions. Reject empty/ambiguous
+    ID prefixes and do not limit lookup to the first 1,000 sessions.
+62. **R-062 Accurate documentation:** Public standalone documentation must cover
+    implemented options, key/modal precedence, themes, every palette role,
+    color capability/policy precedence and resource/platform limits. Session
+    instructions belong in a separate Kvist/Skott integration guide.
+63. **R-063 Release evidence:** Verify the extracted archive's complete tests,
+    isolated release installation, dependency/license policy, and downstream
+    compilation. Retain independent source observation and source-blind
+    comparison without claiming automatic acceptance or security certification.
+
+The session bounds above are a conservative release-hardening policy for the
+retained optional integration. Selected-root ancestors, aggregate retained
+memory, concurrent snapshots and hard I/O/rendering deadlines are not isolated.
+This increment preserves existing search-Esc/help-Ctrl+C precedence and the
+standalone source ceiling; earlier explicit-acceptance findings remain retained.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).

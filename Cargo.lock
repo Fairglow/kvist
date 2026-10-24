@@ -191,27 +191,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blad"
-version = "0.3.0"
-dependencies = [
- "clap",
- "crossterm",
- "libc",
- "merman",
- "nix 0.31.3",
- "pulldown-cmark",
- "regex",
- "serde",
- "serde_json",
- "syntect",
- "tempfile",
- "thiserror 2.0.21",
- "unicode-segmentation",
- "unicode-width",
- "vte 0.15.0",
-]
-
-[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1237,6 +1216,28 @@ dependencies = [
  "toml_edit",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "kvist-blad"
+version = "0.3.0"
+dependencies = [
+ "clap",
+ "crossterm",
+ "libc",
+ "merman",
+ "nix 0.31.3",
+ "pulldown-cmark",
+ "regex",
+ "rustix",
+ "serde",
+ "serde_json",
+ "syntect",
+ "tempfile",
+ "thiserror 2.0.21",
+ "unicode-segmentation",
+ "unicode-width",
+ "vte 0.15.0",
 ]
 
 [[package]]
@@ -2536,12 +2537,12 @@ checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 name = "skott"
 version = "0.3.0"
 dependencies = [
- "blad",
  "clap",
  "crossterm",
  "csscolorparser 0.9.0",
  "galla",
  "hex",
+ "kvist-blad",
  "nix 0.31.3",
  "pulldown-cmark",
  "ratatui",

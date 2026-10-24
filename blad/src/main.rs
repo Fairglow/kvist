@@ -178,7 +178,7 @@ fn main() {
 
     #[cfg(feature = "sessions")]
     if let Some(command) = &cli.command {
-        run_session_command(command, &cli, &options);
+        report_io("read session", run_session_command(command, &cli, &options));
         return;
     }
     report_io(
@@ -188,45 +188,38 @@ fn main() {
 }
 
 #[cfg(feature = "sessions")]
-fn run_session_command(command: &Command, cli: &Cli, options: &RenderOptions) {
+fn run_session_command(
+    command: &Command,
+    cli: &Cli,
+    options: &RenderOptions,
+) -> std::io::Result<()> {
     let log_dir = cli
         .log_dir
         .as_deref()
         .unwrap_or_else(|| std::path::Path::new(".skott/runs"));
     match command {
         Command::List { limit } => {
-            let sessions = session::list_sessions(log_dir, *limit);
+            let sessions = session::list_sessions(log_dir, *limit)?;
             if sessions.is_empty() {
                 println!(
                     "No sessions found in {}",
                     log_dir.display().to_string().escape_debug()
                 );
-                return;
+                return Ok(());
             }
-            report_io("list sessions", display::list_sessions(&sessions));
+            display::list_sessions(&sessions)
         }
         Command::Session { session_id } => {
             let loaded = if std::path::Path::new(session_id).is_dir() {
                 session::load_session_by_path(std::path::Path::new(session_id))
             } else {
                 session::load_session(log_dir, session_id)
-            };
-            match loaded {
-                Some(session) => report_io(
-                    "display session",
-                    display::show_session_with_options(&session, options),
-                ),
-                None => fail(&format!("Session not found: {}", session_id.escape_debug())),
-            }
+            }?;
+            display::show_session_with_options(&loaded, options)
         }
         Command::Export { session_id, output } => {
-            match session::load_session(log_dir, session_id) {
-                Some(s) => report_io(
-                    "export session",
-                    display::export_session(&s, output.as_deref()),
-                ),
-                None => fail(&format!("Session not found: {}", session_id.escape_debug())),
-            }
+            let loaded = session::load_session(log_dir, session_id)?;
+            display::export_session(&loaded, output.as_deref())
         }
     }
 }

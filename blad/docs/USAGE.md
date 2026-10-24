@@ -1,89 +1,60 @@
 # Blad User's Guide
 
 Blad is a terminal Markdown viewer for files, with rich formatting,
-interactive navigation, and search. The default build has no session commands.
-Build with `cargo build -p blad --features sessions` to add skott transcript
-support; Kvist's all-feature build recipes include it.
+interactive navigation, search and external-editor handoff. It runs locally
+without project configuration, credentials or a service. Linux x86_64 is the
+verified executable target.
 
-## Quick Start
+## Installation
 
-### View a recent session (`sessions` feature)
+The registry package is **`kvist-blad`**, while the executable and Rust library
+are **`blad`**. Version **0.3.0 is not yet published**. To install the current
+checkout, run from the repository root:
 
 ```bash
-# List recent sessions
-blad list
-
-# View a specific session by ID or prefix
-blad session 20261012T120000
+cargo install --locked --path blad
 ```
 
-### View a Markdown file
+Inside the component directory, use `cargo install --locked --path .`.
+Rust **1.95 or newer** is required; the MSRV is a minimum, not a toolchain pin.
+Once the planned release is published:
 
 ```bash
-# View any markdown file
+cargo install --locked kvist-blad --version 0.3.0
+```
+
+## Quick start
+
+```bash
 blad README.md
-
-# Open several files as tabs
 blad README.md GUIDE.md
-
-# Print the installed version
+blad --dump README.md > readme.txt
 blad --version
+blad --help
 ```
 
-### Export a session (`sessions` feature)
-
-```bash
-# Export to stdout
-blad export 20261012T120000
-
-# Export to file
-blad export 20261012T120000 --output transcript.md
-```
-
-## Commands and files
-
-`list`, `session`, and `export` require the `sessions` Cargo feature.
-Without it, only filenames and general options are accepted. The old `show`,
-`view`, and `stream` command spellings are not aliases.
-
-### `blad list [--limit N]`
-
-List recent skott sessions with metadata (ID, model, message count, status).
-
-```bash
-blad list            # List 20 most recent
-blad list --limit 5  # List 5 most recent
-```
-
-### `blad session <session-id>`
-
-Print a session transcript snapshot. Accepts full session ID, ID prefix, or
-full path to session directory. Active sessions include a snapshot notice;
-re-run the command for newer events. This is not a live-following viewer.
-
-```bash
-blad session 20261012T120000Z-12345
-blad session 20261012T120000        # Prefix match
-blad session /path/to/session-dir   # Path
-```
-
-### `blad FILE...`
+## Files: `blad [OPTIONS] FILE...`
 
 Open standalone files in tabs, in argument order, with the first active.
 Canonical duplicates reuse one tab. All initial files must be readable before
 the viewer starts or any dump output is emitted. With redirected output or
-`--dump`, render each unique input once in order.
+`--dump`, render each unique input once in order. Filename extensions do not
+matter. Empty invocation displays usage.
 
 ```bash
 blad document.md
 blad /path/to/file.md
 blad README.md GUIDE.md
-blad -- session  # A filename matching an enabled command
+blad -- -notes.md
 ```
 
-Session IDs are never autodetected from positional filenames.
+There is **no stdin-piping mode**: `cat document.md | blad` does not read a
+document. Supply file paths. If stdin or stdout is not a terminal, the supplied
+files render to stdout without the viewer. `--dump` also bypasses the viewer
+and guarantees escape-free output. Redirected output without `--dump` may
+retain non-color emphasis escapes.
 
-#### File input limits
+### File input limits
 
 Standalone files must be regular UTF-8 files of at most **16 MiB (16,777,216
 bytes) each**, inclusively. The same fixed ceiling applies to initial files,
@@ -106,51 +77,54 @@ are not isolated; file contents are not snapshots.
 
 These are per-file source limits, not bounds on total tab memory, rendered
 expansion, search/rendering time or kernel/FUSE I/O latency. This is not a
-streaming pager. Session artifact loading and strings supplied directly to
-the rendering library are outside these standalone-file limits.
-
-### `blad export <session-id> [--output OUTPUT.md]`
-
-Export a session to a combined Markdown document suitable for sharing or
-archival.
-
-```bash
-blad export 20261012T120000 > transcript.md
-blad export 20261012T120000 --output transcript.md
-```
+streaming pager. Strings supplied directly to the rendering library are outside
+these file-read limits.
 
 ## Global Options
 
 | Option | Description |
 |--------|-------------|
-| `--log-dir PATH` | Session-only: directory containing skott sessions (default: `.skott/runs`) |
 | `--version`, `-V` | Print version without opening files or loading themes |
-| `--help`, `-h` | Print available options and, when enabled, commands |
+| `--help`, `-h` | Print usage and available options |
 | `--dump` | Output plain text without interactive viewer |
 | `--line-numbers` | Show rendered-line numbers in the interactive viewer |
-| `--theme auto\|dark\|light\|terminal` | Appearance; auto uses `COLORFGBG`, otherwise dark |
+| `--theme auto\|dark\|light\|terminal` | Appearance; default auto uses file appearance, then `COLORFGBG`, otherwise dark |
 | `--theme-file PATH` | Explicit JSON appearance/palette overrides, up to 64 KiB |
 | `--color auto\|always\|never` | Color independently of appearance; auto honors TTY, `NO_COLOR`, `TERM=dumb` |
-| `--math unicode\|source` | Mathematical projection policy |
-| `--mermaid text\|source` | Diagram projection policy |
-| `--diagram-charset unicode\|ascii` | Diagram structural glyphs, not authored labels |
+| `--math unicode\|source` | Mathematical projection policy; default `unicode` |
+| `--mermaid text\|source` | Diagram projection policy; default `text` |
+| `--diagram-charset unicode\|ascii` | Structural glyphs, not authored labels; default `unicode` |
 
 ```bash
-# Render escape-free session text
-blad session 20261012T120000 --dump
-
-# Specify custom log directory
-blad list --log-dir /path/to/logs
+blad --theme light --line-numbers document.md
+blad --color always --dump document.md > document.txt
 ```
 
 Dark and light appearances choose matching syntax highlighting and subtle panel
-fills. Terminal-native appearance leaves code, table and quote backgrounds unchanged.
+fills. Terminal-native defaults leave code, table and quote backgrounds unchanged;
+explicit theme-file background overrides can still add fills.
 Automatic color uses `COLORTERM=truecolor`/`24bit`, then `TERM=*256color*`, then
 the standard sixteen colors. A nonempty `NO_COLOR` disables automatic colors;
 explicit `--color always` overrides it. Monochrome retains emphasis.
-`--dump` removes **all** styling, including authored terminal escapes, and
-renders message bodies consistently for files and session snapshots.
-`export` instead preserves the original Markdown.
+`--dump` removes **all renderer styling**. Authored terminal controls remain
+visible and inert rather than becoming executable escape sequences.
+
+Appearance and color policy resolve independently:
+
+1. An explicit `--theme dark`, `light` or `terminal` selects appearance.
+   With `--theme auto` (the default), the theme file's `theme` wins if present;
+   otherwise `COLORFGBG`'s last semicolon-separated value of `7` or `15` selects
+   light; any other/missing hint selects dark. No terminal query is sent.
+2. Missing palette roles inherit that appearance; explicit file roles override
+   it, even when `--theme` overrides the file's appearance.
+3. `--color never` removes added foreground/background colors, not all SGR
+   emphasis. `--color auto` (default) does the same when stdout is not a terminal,
+   `TERM=dumb`, or `NO_COLOR` is nonempty. `--color always` bypasses those
+   automatic disabling conditions.
+4. When colors are enabled, `COLORTERM` (case-insensitive `truecolor` or `24bit`)
+   selects truecolor, otherwise a `TERM` containing `256color` selects ANSI256,
+   otherwise ANSI16. The CLI has no explicit depth selector.
+5. `--dump` overrides every color/style choice with escape-free rendered text.
 
 ### Theme files
 
@@ -164,23 +138,48 @@ appearance. Explicit non-auto `--theme` overrides the file's appearance, while
 its palette overrides remain in force. Color policy, `NO_COLOR` and `--dump`
 still apply independently. There is no implicit file discovery.
 
-Palette roles: `heading`, `link`, `muted`, `list_marker`, `math`, `chrome`,
-`search`, `alerts` (five colors in NOTE/TIP/IMPORTANT/WARNING/CAUTION order),
-`code_background`, `table_background`, `quote_background`. A color is an ANSI
-index 0–255 or `"#RRGGBB"`. Backgrounds also accept `null` for no fixed fill.
+| Palette key | Semantic role |
+|-------------|---------------|
+| `heading` | Heading text |
+| `link` | Link labels and bare URLs |
+| `muted` | Secondary text and rules |
+| `list_marker` | List and task markers |
+| `math` | Mathematical notation |
+| `chrome` | Viewer header/footer text |
+| `search` | Viewer match/selection indication |
+| `alerts` | Exactly five colors, in NOTE, TIP, IMPORTANT, WARNING, CAUTION order |
+| `code_background` | Code-panel fill |
+| `table_background` | Alternating table-row fill |
+| `quote_background` | Blockquote fill |
+
+A color is an integer ANSI index **0–255** or an RGB string **`"#RRGGBB"`**.
+Only the three background roles also accept `null`, meaning no fixed fill.
 Unknown keys, invalid values/JSON, files above 65,536 bytes and read errors
 are reported as failures, never silently ignored.
 Theme inputs use the same nonblocking regular-descriptor checks as document
 files, after resolving explicitly selected symlinks. Their separate 64 KiB
 limit is inclusive and is also enforced against actual bytes read.
 
-Library callers use `MarkdownRenderer::with_options(RenderOptions { .. })`.
-The options contain a host-provided semantic `Palette`, `ColorDepth`, appearance,
-and projection choices. Library defaults never inspect environment variables,
-read stdin, issue OSC queries, or launch subprocesses. Existing width, syntax
-theme and panel-background setters remain available; unknown explicit syntax
-themes return `InvalidInput`. Syntax definitions and built-in themes are reused
-across renders.
+The [complete example file](theme.example.json) demonstrates every role.
+The file controls appearance only, not commands, color depth or projection.
+
+### Library policy
+
+`MarkdownRenderer::with_options(RenderOptions { .. })` accepts typed settings,
+including a host-provided `Palette`. `ColorDepth::None`, `Ansi16`, `Ansi256` and
+`TrueColor` are all explicitly available to library hosts. Unlike the CLI,
+`RenderOptions::default()` is deterministic: dark appearance, truecolor,
+`plain: false`, Unicode math, text Mermaid and Unicode diagram structure.
+The default renderer has no width limit. `RenderOptions::plain()` suppresses
+all styling; choosing only `ColorDepth::None` can retain emphasis.
+
+The renderer never calls `is_terminal()`, inspects environment variables, reads
+stdin, issues terminal queries or launches subprocesses. This does not describe
+the separate interactive helpers in `blad::display`.
+`set_width`, `set_options`, `set_syntax_theme` and `set_background` configure
+the renderer; an unknown explicit syntax theme returns `InvalidInput` during
+rendering. Syntax definitions and built-in themes are reused across renders.
+See the [basic library example](../README.md#embed-the-renderer).
 
 ## Text Rendering
 
@@ -224,7 +223,8 @@ balanced literal braces and escaped punctuation, not nested commands.
 `\left`/`\right` accept matching `()`, `[]`, `\{\}`, `||`,
 `\langle`/`\rangle`, and `\lVert`/`\rVert` (also `\Vert` or `\|`).
 Delimiter size is not graphical. Escaped `\{ \} \$ \% \_ \# \&` are literal.
-Spacing `\, \; \: \quad \qquad \space` produces a space; `\!` is omitted.
+Spacing `\, \; \: \quad \qquad \space` and an escaped space produce a space;
+`\!` is omitted.
 
 The complete admitted command vocabulary, beyond structural commands above:
 
@@ -275,7 +275,8 @@ Code block lines retain their whitespace and do not wrap. Use Left/Right to
 read horizontal overflow; short lines no longer reset the horizontal position.
 Header, footer and content rows are clipped independently so long lines cannot
 scroll the first document lines off the screen. Tabs display at eight-column
-stops. Home/End move vertically. Frames are buffered and only changed rows are
+stops. Home goes to the top and resets the horizontal offset; End goes to the
+bottom without resetting it. Frames are buffered and only changed rows are
 written; scrolling and tab changes do not clear the screen or re-enter the
 alternate screen. Synchronized updates further reduce flicker on terminals
 that support them. `Ctrl+L` forces a repaint if another program damages the
@@ -314,26 +315,60 @@ breaks and empty lines. Without a configured width, tables stay unwrapped.
 | `PageUp` / `Ctrl+B` | Scroll up one page |
 | `PageDown` / `Ctrl+F` / `Space` | Scroll down one page |
 | `u` / `Ctrl+U`, `d` / `Ctrl+D` | Half page up/down |
-| `g` / `H` | Go to top |
-| `G` / `L` | Go to bottom |
-| Mouse wheel | Scroll |
+| `Home` / `g` / `H` | Top of document; reset horizontal offset |
+| `End` / `G` / `L` | Bottom of document; retain horizontal offset |
+| `Left` / `Right` | Scroll horizontally one column |
+| Mouse wheel | Scroll one line per wheel event |
 | `b` | Return to the previous file |
 | `Alt+Left` / `Alt+Right` | Switch open-file tabs, retaining scroll positions |
 | `[` / `]` | Previous/next heading (no wrap) |
 | `q` / `Esc` | Close active tab; exit if it was the last |
 | `Q` / `Ctrl+C` | Quit all tabs |
-| `h` | Keyboard help; any key returns |
+| `h` | Keyboard help; any key except global Ctrl+C returns |
 | `Ctrl+L` | Force repaint |
 | `r` | Reload the active file, retaining viewport position |
 
 Closing a tab selects the next surviving tab, or the previous one if closing
 the rightmost tab. Surviving tabs keep their order and scroll positions;
-back history no longer refers to closed tabs. Esc cancels search, link mode
-or help without closing a tab. Search cancellation applies while the prompt is
-open: after Enter commits the search, Esc is again the normal close-tab key.
-To clear committed highlights without closing, press `/` then Esc.
-Ctrl+C remains a global quit, including from help; other help keys return to
-the document. These precedence choices are recorded for review in `IMPL.md`.
+back history no longer refers to closed tabs. Tab switching wraps at the first
+and last tab; `b` pops previous-tab history (it is not a previous-heading or
+within-document jump). Vertical/horizontal offsets are per-tab; searches and
+link selections are not retained across switching, back navigation or editor
+re-entry.
+
+### Keyboard precedence
+
+The following order describes actual dispatch, not just the normal-mode key
+table. Key-release events are ignored.
+
+1. **Ctrl+C always quits all tabs**, including from help, search and link mode.
+2. **Help consumes any other key to dismiss itself**, without performing that
+   key's normal action. In particular `Q`, `q`, Esc, arrows and Ctrl+L only
+   dismiss help; it is not a scrollable modal pager.
+3. **Alt+Left/Right switches tabs only outside an open search prompt or `f`
+   link mode.** A normal selected link or committed search does not block it.
+4. **`Q` quits all tabs outside the search prompt**, including from `f` mode.
+   In the search prompt it is literal query text.
+5. **An open search prompt consumes keys.** Printable characters without
+   Ctrl/Alt append; Backspace deletes; Ctrl+R toggles regex; Ctrl+U clears;
+   Enter keeps results and returns to normal mode; Esc clears the query/results
+   and returns to normal mode. Other keys are ignored (apart from global Ctrl+C).
+   `q`, `h`, `r`, `n`, `p`, `?` and `/` are query text there.
+6. Outside search, **Ctrl+Arrows selects spatial links**, even in `f` mode.
+7. **`f` link mode consumes non-Ctrl keys**: Tab/Shift+Tab cycle, Enter follows
+   and leaves the mode, Esc leaves it and clears selection. Other non-Ctrl keys,
+   including `q`, `h`, arrows, `r`, `b` and Alt+Arrows, do nothing (except `Q`
+   handled above). Ctrl+B/F, Ctrl+U/D and Ctrl+L still scroll/repaint in this mode.
+8. Remaining Ctrl keys use the page/half-page/repaint bindings; remaining keys
+   use normal-mode bindings.
+
+Thus normal-mode `q`/Esc closes a tab even with a directly selected link or
+committed search. **After Enter commits a search, Esc closes the active tab**;
+to clear committed highlights without closing, press `/` then Esc.
+
+Mouse wheel and left-click link handling are independent of search/link
+keyboard modes; they remain active in both. Help ignores mouse input. Resize
+reflows the underlying document and help layout without dismissing a mode.
 
 ### Link Navigation
 
@@ -349,15 +384,22 @@ its wrapped spans; adjacent links and surrounding prose are not highlighted.
 `Ctrl+Up`/`Down` selects the nearest row in that direction, then nearest
 column. There is no spatial wrap. Navigation reveals offscreen links both
 vertically and horizontally; resize recomputes their positions.
-Without a selection, the origin is the viewport's top-left.
-Optional `f` link mode remains available.
+For spatial navigation without a selection, the origin is the viewport's top-left;
+the selected link itself is excluded from spatial candidates.
+Without a selection, Tab starts at the first link whose first rendered span is
+at/below the viewport top (or wraps to the first); Shift+Tab starts with the last
+at/above it (or the last link). Subsequent Tab/Shift+Tab steps in source order
+and wraps. Optional `f` link mode starts at the document's first link, using
+Tab/Shift+Tab to cycle, Enter to follow and leave the mode, and Esc to leave
+without following and clear selection. The other key exceptions are listed
+under [keyboard precedence](#keyboard-precedence).
 Press `Enter` to follow the link:
 
 - **File links** (relative or absolute paths) open the linked file in Blad.
   A relative path is resolved against the directory of the file you are
   viewing. Press `b` to return to the previous file.
-- **URL links** (`http://`, `https://`, `mailto:`, `tel:`) open in your
-  default browser via `xdg-open`.
+- **URL links** (URI schemes followed by `://`, plus `mailto:` and `tel:`)
+  are handed to `xdg-open` only when explicitly followed.
 
 - **Anchor links** (`#heading`) jump to local headings; `other.md#heading`
   opens the file and jumps there. Heading slugs are lowercase, replace spaces
@@ -366,7 +408,8 @@ Press `Enter` to follow the link:
   Percent-encoded UTF-8 paths/fragments are decoded; missing headings and
   invalid escapes produce visible diagnostics without discarding the document.
 
-Browser-launch output is captured rather than written over the viewer.
+Browser launches run `xdg-open` directly without a shell, with null stdin and
+captured stdout/stderr, never inheriting the viewer's streams.
 Success warnings or launch errors remain in the footer across redraws and
 resize until another user action replaces them. Captured diagnostics retain
 at most 4,096 bytes and identify truncation; control characters stay inert.
@@ -378,8 +421,9 @@ synchronous, so input waits during those five seconds; process creation,
 kernel scheduling and termination calls are not hard real-time bounded.
 
 You do not need link mode to follow a link: pressing `Enter` in normal mode
-opens the first link at or below the top of the viewport. Bare URLs
-(`https://…`) are treated as links in addition to bracketed and named links.
+follows the selected link, or the first link at/below the top of the viewport
+if nothing is selected. That fallback does not wrap when no link remains.
+Bare URLs (`https://…`) are treated as links in addition to bracketed and named links.
 Left-click link labels to follow them directly, including wrapped labels,
 table cells and bare URLs. Repeated bare URLs are independent occurrences.
 
@@ -393,21 +437,26 @@ to exit search mode and keep the matches highlighted.
 | Key | Action |
 |-----|--------|
 | `/` / `?` | Start forward/backward literal search |
-| Type text | Search query |
+| Type text / `Backspace` | Append to / delete from query |
 | `Ctrl+R` | Toggle literal/regex in this prompt |
 | `Ctrl+U` | Clear the prompt |
 | `Enter` | Exit search, keep highlights |
 | `n` | Next occurrence in the search direction, wrapping |
 | `N` / `p` | Occurrence in the reverse direction, wrapping |
-| `Esc` | Cancel search |
+| `Esc` | Cancel only an open prompt; after Enter this closes the tab |
 
 The footer shows mode, direction and occurrence position (e.g., "3/12 matches"),
 or an explicit no-match/invalid-pattern diagnostic, even after Enter. Multiple
 matches on one row count separately. Only matching text is highlighted, across
 heading, emphasis and syntax resets. Reverse video and underline retain a
 non-color cue, including inside inline code and reversed table headers.
-Search starts near the current viewport and reveals horizontally hidden
-matches. Tab or spatial link selection clears search emphasis.
+Forward search starts at the first occurrence at/below the viewport top,
+wrapping to the first if necessary. Backward search starts at the last
+occurrence at/above that row, wrapping to the last if necessary; it does not
+start from the viewport bottom or current horizontal position. Subsequent
+`n`/`N`/`p` movement is occurrence-based and reveals horizontal matches.
+For a backward `?` search, `n` moves backward and `N`/`p` move forward.
+Tab, spatial link selection, `f`, and heading-jump keys clear search emphasis.
 
 Each new prompt starts in **case-insensitive literal mode**, so `a.b` searches
 for that exact text. Toggle `Ctrl+R` to use Rust regex syntax in the same prompt:
@@ -428,12 +477,10 @@ keys; use `[`/`]` for headings. Unlike `less`, search starts literally and
 regex is explicit, preventing punctuation from unexpectedly becoming syntax.
 Normal `q`/Esc closes one tab rather than always quitting.
 
-Useful next increments are a heading outline, numeric movement and line/percent
-jumps, marks/jump history within a document,
-per-tab retained searches and visible tab overflow. Real live follow needs
-explicit file-replacement/truncation semantics. Giant-file responsiveness needs
-measured search/reflow budgets before claiming bounded latency. Shell escapes
-and document-triggered external commands are intentionally not pager goals.
+Folding, live follow, a heading outline, numeric movement/line/percent jumps,
+marks, within-document jump history and per-tab retained searches are not
+implemented. Giant-file responsiveness is not guaranteed by the byte limits.
+There are no shell escapes or document-triggered external commands.
 
 ### Reloading changed files
 
@@ -461,7 +508,7 @@ Unicode version, ambiguous-width setting or font.
 
 ### Edit Mode
 
-In the viewer for a file (not a session), press `e` to open the file in
+In the viewer for a file, press `e` to open the file in
 your configured editor. After saving and closing the editor, Blad
 re-renders the file with your changes.
 Appearance, color capability and projection options persist across editing
@@ -477,8 +524,15 @@ superscript tags, with `[name]` fallback for nonnumeric tags. Ordered lists resu
 the parent's numbering after nested lists. `***` is a heavy rule; `---`/`___`
 are thin rules, and `~~~` remains a CommonMark code fence.
 
-Blad uses the `$EDITOR` environment variable. If not set, it defaults to
-`nvim`.
+Blad uses `$EDITOR`, defaulting to `nvim` only when the variable is unset or
+cannot be read as Unicode. It splits the value on whitespace into a program
+and arguments, appends the file path, and executes directly: there is no shell,
+quoting interpretation, variable expansion or glob expansion. Use a wrapper
+executable for complex commands; an empty value is an error. The editor receives
+the restored terminal and Blad waits for it to exit. Launch failure, nonzero exit
+and failed UTF-8/size/regular-file rereads propagate as errors after terminal
+restoration rather than resuming with a falsely successful edit.
+An embedded document without a file path cannot be edited (`e` has no action).
 
 ```bash
 # Set your preferred editor
@@ -489,33 +543,35 @@ blad document.md
 
 ## Markdown Features
 
-Blad renders full CommonMark and GitHub Flavored Markdown (GFM):
+Blad uses CommonMark parsing with selected extensions and a terminal-specific
+projection, **not full CommonMark/GFM conformance**:
 
 - **Headers** (H1-H6) with color coding
 - **Bold**, *italic*, ~~strikethrough~~ text
-- Links and autolinks (URLs are clickable in supporting terminals)
+- Inline/reference links, autolinks and bare HTTP(S) URLs, followed by viewer actions
 - Images (shown as alt text in terminal)
 - Code blocks with syntax highlighting (50+ languages)
 - Inline code with inverted video
-- Tables with column alignment
+- Tables with width-aware whole-word wrapping, but no delimiter left/center/right alignment
 - Blockquotes, including GFM alert styles:
-  - [!NOTE] - Blue
-  - [!TIP] - Green
-  - [!IMPORTANT] - Purple
-  - [!WARNING] - Yellow
-  - [!CAUTION] - Red
-- Task lists
+  - [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]
+  - Labels/edges preserve meaning without color; colors follow the palette
+- Task lists with distinct `[x]` / `[ ]` markers in styled and plain output
 - Footnotes (references are superscripted and the definition is prefixed with
   the same marker)
 - Superscript and subscript
 - Math expressions (inline `$...$` and display `$$...$$`)
 - Horizontal rules (`***` renders as a stronger double line than `---`)
 
+Raw HTML is omitted rather than rendered or executed; inline `<br>` variants
+in table cells are the line-break exception. Images are alternative text only,
+not downloaded graphics or terminal image protocols.
+
 ### Rendering appearance
 
-- **Code blocks** are framed with a full-width panel line above and below so
-  the block reads as a closed rectangle, and are syntax-highlighted (the
-  highlighting theme is chosen to stay legible at the terminal's color depth).
+- **Code blocks** have cap rows above/below when a width budget is configured
+  (as in the viewer), and syntax highlighting when the language is recognized.
+  Without a width budget, there are no panel cap rows.
 - **Blockquotes** carry a left-edge bar so they stand out from surrounding
   prose; GFM alerts use the same bar tinted with the alert's color.
 - **Lists** are enumerated for ordered lists, and unordered lists alternate
@@ -538,7 +594,7 @@ not authored Unicode. `--mermaid source` skips the engine and shows source.
 
 ER cardinalities deliberately use textual Mermaid endpoint tags, not graphical
 crow's-foot glyphs: `||` means exactly one, `o|` zero or one, `|{` one or more,
-and `o{` zero or more. Thus `SESSION ||--o{ MESSAGE : contains` retains both
+and `o{` zero or more. Thus `DOCUMENT ||--o{ SECTION : contains` retains both
 endpoint tags around the routed connector. The literal `o{` is intentional,
 not an unparsed fragment. Attribute rows currently use the backend's verbose
 text representation rather than graphical ER notation.
@@ -557,7 +613,7 @@ overflow. Unsupported syntax, invalid syntax and resource limits each show
 distinct explanations plus source, with explicit byte omissions if source
 exceeds the 65,536-byte fallback ceiling.
 
-Rejection ceilings are 65,536 source bytes, 8,192 lexical units, 256
+Text-projection rejection ceilings are 65,536 source bytes, 8,192 lexical units, 256
 nodes/participants/containers, 512 edges/messages, nesting 32, 32,768 model
 items, 262,144 model-text bytes, 262,144 grid/document cells, 2,097,152 output
 bytes, 256 bytes/grapheme and 2,000,000 layout-work units. A 500 ms cooperative
@@ -576,19 +632,6 @@ itself creates no worker thread.
 
 ## Examples
 
-### Review a coding session
-
-```bash
-# List recent sessions
-blad list
-
-# Find the session about the bug fix
-blad session 20261012T140000
-
-# Save a plain snapshot for inspection or sharing
-blad --dump session 20261012T140000 > snapshot.txt
-```
-
 ### View and edit documentation
 
 ```bash
@@ -600,12 +643,16 @@ blad README.md
 # Blad re-renders automatically
 ```
 
-### Export for sharing
+### Render text for sharing
 
 ```bash
-# Export a session for a team member
-blad export 20261012T140000 --output session-transcript.md
+blad --dump README.md > readme.txt
+blad --math source --mermaid source README.md
 ```
+
+Open the [feature showcase](EXAMPLES.md) to exercise the rendering profile.
+The [optional Kvist/Skott integration reference](SESSIONS.md) is separate from
+standalone file viewing.
 
 ## Troubleshooting
 
@@ -633,6 +680,3 @@ Automatic color is disabled for redirected stdout, nonempty `NO_COLOR` and
 `TERM=dumb`. Use `--color always` for intentional colored redirection, or
 `--color never` for monochrome emphasis. `--dump` always overrides color and
 removes styling. `--theme` changes appearance, not color capability.
-
-Exports remain raw source Markdown, not sanitized rendered terminal text.
-Treat authored terminal controls in exported files as untrusted source.

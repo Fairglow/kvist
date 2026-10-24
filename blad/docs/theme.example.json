@@ -3,7 +3,14 @@
   "palette": {
     "heading": "#82AAFF",
     "link": "#89DDFF",
-    "quote_background": 235,
-    "alerts": [14, 10, 13, 11, 9]
+    "muted": "#A6ACCD",
+    "list_marker": "#FFCB6B",
+    "math": "#C792EA",
+    "alerts": ["#89DDFF", "#C3E88D", "#C792EA", "#FFCB6B", "#F07178"],
+    "chrome": "#89DDFF",
+    "search": "#FFCB6B",
+    "code_background": "#20242F",
+    "table_background": 235,
+    "quote_background": null
   }
 }

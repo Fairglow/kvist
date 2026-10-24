@@ -4,6 +4,187 @@
 
 Date: 2026-10-12
 
+## Standalone publication observation - 2026-10-24
+
+The following record was independently derived in a source-only context.
+Its heading levels are normalized here; the observer did not read prior
+records, intent, queues, user documents, history or reviews.
+
+Observed 2026-10-24 from permitted Blad production/test source, manifests, verifier, and workflows only.
+No intent artifacts, queue, existing implementation record, user documentation, history, or other reports were consulted.
+This is a source observation, not a review, certification, acceptance, or publication authorization.
+Final display/script source was reread; no executing/overwritten log was read and no test command was run in this refresh.
+Earlier observed execution results do not establish results for these fingerprints; later final execution is separate reviewer input.
+
+### Package and API
+- Registry declaration: `kvist-blad` 0.3.0; library crate and sole declared executable: `blad`; edition 2024; declared MSRV 1.95; AGPL-3.0-or-later.
+- Default features are empty; optional `sessions` enables rustix plus session APIs/CLI; neither mode depends on a Kvist peer runtime.
+- Skott consumes the version-pinned package through alias `blad` and a local path without enabling sessions; workspace default member is maerg.
+- Public modules: display, links, markdown, theme, optional session; reexports include MarkdownRenderer, render options/palette/color enums and RenderCancellation.
+- Renderer accepts caller strings and Write, propagates write/flush errors, shares syntax assets, and performs no environment/TTY/stdin/subprocess discovery.
+- Options replacement retains width and syntax-theme selection; invalid explicit syntax themes error; some older void display wrappers print errors instead of returning them.
+
+### CLI, appearance, and viewer
+- Files are extension-independent and retain first-argument order after canonical deduplication; all initial files load before document output or terminal entry.
+- CLI options: --dump, --line-numbers, --theme auto|dark|light|terminal, --theme-file, --color auto|always|never, --math unicode|source, --mermaid text|source, --diagram-charset unicode|ascii, help/version.
+- No stdin-document route; no arguments produce non-success usage; -- disambiguates command-like filenames; session commands and files cannot be combined.
+- CLI uses the viewer only with both TTYs and no dump; otherwise files render sequentially. Single-document library display selects by both TTYs even with plain options.
+- Library defaults: dark/truecolor/styled, Unicode math and diagram structure, Mermaid text, unbounded width; plain suppresses all SGR, not Unicode or Markdown projection.
+- CLI auto theme prefers an explicit file theme, else final COLORFGBG item 7/15 means light; explicit theme overrides file theme, retaining palette overrides.
+- Auto color is off for nonempty NO_COLOR, non-TTY stdout or TERM=dumb; otherwise COLORTERM truecolor/24bit, TERM containing 256color, then ANSI16 select depth.
+- Always overrides auto suppressors; never removes added colors but can retain emphasis/reset SGR; dump overrides all styling.
+- Theme JSON is explicit, strict, regular-file bounded to 65,536 bytes; palette colors are 0..255 or #RRGGBB, alerts require five values, fills may be null.
+- Built-in terminal theme has no fixed code/table/quote fill but retains semantic/syntax foreground styling; explicit palette overrides can add fills.
+- j/k or arrows scroll lines; Space/PageDown/Ctrl+F and PageUp/Ctrl+B scroll pages; d/u or Ctrl+D/U half-pages; g/H/Home top; G/L/End bottom; Left/Right horizontal.
+- Down/j has a match guard requiring offset below total_lines.saturating_sub(visible_lines); f has a !links.is_empty() guard before entering dedicated link mode.
+- / and ? start forward/backward search; Ctrl+R toggles regex, Ctrl+U clears, Backspace edits, Enter commits, Esc cancels the prompt; n repeats, N/p reverse.
+- Search is case-insensitive; input is bounded to 4,096 UTF-8 bytes, regex/DFA compilation to 2 MiB each; zero-width matches are omitted, total matches unbounded.
+- Tab/BackTab select links; Ctrl+arrows select spatially; Enter follows selected or first link at/below viewport top; `[`/`]` jump headings; Alt+Left/Right cycle tabs; b goes back.
+- h shows modal help; r reloads; e edits; Ctrl+L redraws; normal q/Esc closes a tab, Q quits all; Ctrl+C precedes all modes and always quits.
+- Help consumes every non-Ctrl+C key only to dismiss; prompt q/Q are text; dedicated link mode consumes ordinary keys except Tab/BackTab/Enter/Esc, while Q quits.
+- Alt-tab switching is disabled in prompt/dedicated link mode; normal Esc after search Enter closes the tab. Key-release events are ignored.
+- Tabs retain both offsets but search/link state is reconstructed on viewer-session changes; reload failure retains old content/state, success rebuilds navigation/search and clamps offsets.
+- Renderer-owned source identities distinguish duplicate/wrapped/table links; anchors include generated Unicode slugs, duplicate suffixes and explicit IDs; percent decoding rejects malformed UTF-8/escapes.
+- Viewer reserves gutter/scrollbar width, clips whole graphemes/display columns, paints changed rows in synchronized updates, and owns/restores raw/alternate/cursor/mouse state.
+- Explicit URL follow runs xdg-open without a shell or terminal stdin, captures 4,096 diagnostic bytes and kills/reaps its owned launcher after five seconds; descendants are not managed.
+- Editor uses whitespace-split EDITOR or nvim, no shell interpretation/timeout; launch/status/reread errors propagate after terminal restoration.
+
+### Rendering and input boundaries
+- Bounded file reads require descriptor-verified regular files, nonblocking/no-follow final opens, inclusive size admission plus one growth-probe byte, and valid UTF-8.
+- CLI documents/reload/editor rereads have a 16 MiB per-file bound; initial/file-link/theme canonicalization permits authored symlinks; later substituted final symlinks on reread are rejected.
+- Authored controls except LF/tab and selected bidi embedding/isolate ranges become visible escapes; CRLF normalizes; standalone CR is escaped; decoded text is also made inert.
+- Headings, lists, emphasis, quotes/alerts, rules, footnotes, code, links and selected GFM extensions are terminal projections, not full Markdown conformance.
+- Task items retain bullets and explicit [x]/[ ] markers, normalizing [X] to [x]; there is no checkbox mutation/persistence command.
+- Raw HTML is omitted except recognized table-cell br tags; images have text alternatives only; table alignment delimiters and independent inline cell styling are not implemented.
+- Prose wraps by display-width/graphemes; inline code/math and fenced code may overflow. Tables preserve whole words/explicit breaks, natural-width caps, aspect floors and deterministic integer geometry.
+- Script spans project wholly to Unicode or ^(...)/_(...) fallback; escapes, encoded delimiters and markup boundaries prevent arbitrary span reinterpretation.
+- Script scanning checks bounds and ASCII whitespace before `bytes[cursor] != marker || escaped(...)`; escaped means an odd preceding backslash run.
+- Math is a nonexecuting Greek/operator/script/fraction/root/group/limited-text/paired-delimiter subset; unsupported/invalid source remains visible with distinct annotations.
+- Math projection limits: 16,384 input bytes, 32 nesting levels, 65,536 output bytes; oversize fallback bounds retained source; source mode bypasses projection.
+- Native Merman 0.9.1 admits spatial flowchart, sequence, state, class and ER subsets; width never reflows finished rows; ASCII changes structure, not authored Unicode.
+- Mermaid rejects unsupported semantics/nonspatial fallbacks and bounds source/lexical/model/layout/grid/output/graphemes; invalid/resource/unsupported failures visibly retain bounded source.
+- Mermaid limits include 64 KiB source, 256 nodes, 512 edges, 32 nesting, 262,144 cells, 2,000,000 work units, 2 MiB output and a cooperative 500 ms deadline.
+- Cancellation clones share state; cancellation/deadlines return Interrupted rather than successful fallback; errors may follow partial output. No hard total-time or aggregate-memory bound exists.
+
+### Optional session consumer
+- CLI: --log-dir defaults .skott/runs; list --limit defaults 20; session accepts ID/prefix or an existing directory; export accepts ID/prefix with optional output path.
+- Manifest requires schema_version 1, kind skott-conversation, nonblank session_id/status and entries; model/created_at are optional strings; unknown fields are retained/ignored, not fully producer-validated.
+- Entries require positive sequence, nonblank kind, normalized messages/<one filename> path and optional disposition; sequence uniqueness/order, byte declarations and timestamp syntax are not checked.
+- Root/child directories and artifacts use no-follow/nonblocking descriptor opens; manifest/messages are regular UTF-8 files bounded individually to 16 MiB.
+- Session retains Arc<File> for its directory; messages are opened relative to that descriptor and a held messages descriptor, not the display path; renamed/replaced root paths do not redirect reads.
+- Missing runs root is empty; manifestless directories are skipped; malformed artifacts, encountered session symlinks, nonregular content and message read errors propagate.
+- Listing parses all candidates before descending lexical optional-time/ID sorting and truncation; exact/unique nonblank prefix lookup has no thousand-session cutoff and rejects ambiguity.
+- Message manifest is revalidated and order preserved; all bodies load before transcript output; exactly completed marks completion; other statuses print an active snapshot notice, not live follow.
+- Session display applies rendering/dump settings and inert labels/metadata; export preserves raw source, adds separated headings/rules, and can overwrite through non-atomic File::create.
+- Descriptor roots do not isolate ancestors or freeze contents; there is no aggregate session/message/descriptor cap, ownership check or hard-link exclusion; export is not an inert terminal dump.
+
+### Test and packaging source evidence; limits
+- Inspected assertions cover checked/unchecked tasks, input limits/UTF-8/FIFO/symlinks, session path/error/retained-directory behavior, export source preservation and lookup beyond 1,000 sessions.
+- Linux PTY tests assert search/link/modal/tab/reload/editor/resize/clipping/terminal restoration/browser behavior; rendering tests cover colors/controls/math/diagram limits and a small-table exhaustive oracle.
+- Ignored text/diagram timing characterizations are not execution evidence. Source assertions alone do not demonstrate current tests passing, conformance, platform portability, race freedom or publication.
+- Package include selects ci/verify_package.py rather than arbitrary ci/**; verifier requires Python 3.12+, hashes the archive into its build target, extracts it and excludes peer packages from its lock.
+- Verifier source runs extracted full tests and release installations in default/sessions modes, asserts one blad binary/version/feature help, then empty-PATH plain task-state rendering; it is not a hermetic sandbox.
+- Quality workflow declares stable/1.95 default/sessions lint/test/docs and extracted verification, plus dependency policy; path filters include both Blad workflows.
+- Both final cargo-deny steps set manifest-path: blad/Cargo.toml separately; arguments are only --config deny.toml --all-features --locked. This is source configuration, not execution evidence.
+- Publish workflow checks tag/version/supplied revision/clean tree, declares source/archive/policy gates, requires a publishing secret and dry-run, then publishes and registry-smokes default mode.
+- Workflow identity inputs are not independent-acceptance receipts; actual runs, environment approvals, credentials, compiler identity and registry results need separate evidence.
+
+### SHA-256 provenance (paths relative to repository root; source snapshots only)
+```text
+22c23184815ba564b976f140fd8222c2a0c3b4288300b8c6d5bc29bd6c8a4a45  blad/src/display.rs
+327285a32e4e7a4019b0457613f27566e72a87dae00a786b9398338f973d3882  blad/src/scripts.rs
+6eb1edea2d59c3235ccdc28f95034f437126cfeb409e1628707508b9d4e38d31  blad/src/session.rs
+8bfb0a0b8f59b23e86a8609964c05cce0cd4fdefb6f82bcd02f3bc9325667bd3  blad/src/file_input.rs
+195615776350a4ff4c18100eb458d1aa6cb710c234e603d04bab231a4b91d712  blad/src/markdown.rs
+9fe2611cc99a5fc99d4de32af78b2955b4d4546bb38991cd50405f8c09a7b045  blad/src/main.rs
+a60c3c5fbac5fece061d53128d731a90cfb013bd1c58a621a5fa6e384f8f9c32  blad/src/viewer_navigation.rs
+fa03798602ad779f282590c01ce606d8520a72fc9b8439211191789dcd73e859  blad/src/lib.rs
+e32da87846d3501a86cb7593a39c94c7f95bb2a0146455596c87eda0822865db  blad/Cargo.toml
+e353783baae15d4f6389751848f48cad3afdc870f5b218716192d9c1cb5f4685  Cargo.toml
+f09a6e8865223a09e2349228cacbf9d14785f0098d705f7fb371546c0f233684  Cargo.lock
+68637c8bfd330dd947e9a8f12e8ada2df3cfeb0493f720097bed60c4a7b12e12  skott/Cargo.toml
+cf2e216b9d16475afbf65ec4cc622ff001b868bc2cddd0dc3e45785c334eee96  blad/ci/verify_package.py
+6241e8740f91deeba7eed7b47620a6fc32773d53339bed21beed9b7abba60775  .github/workflows/blad.yml
+2a944c34a8cb2dbde321821140d501308144f75d41ed41c040db51d6fe7438b3  .github/workflows/blad-publish.yml
+```
+
+### Independent source-blind publication comparison - 2026-10-24
+
+Comparator read only local Blad intent, allowed consumer docs, independent
+source observations and final supplied execution evidence; no implementation,
+tests, manifests, workflows, queue, prior IMPL/reviews, history or root intent.
+No acceptance or security certification is given.
+
+Exact intent SHA-256 (computed directly and rechecked):
+- REQUIREMENTS.md: eb3866b223a0ff144420d7df860d55495d53649349cbef13e1feb6da31191d64
+- CONTRACT.md: c91b30a644c82ccb385515a8cd0ef6436ffa4a3ce4db681441b021336b629700
+- DESIGN.md: a48a26838d5ea55a4b1280b0eca9e46f506d3139fda54270a4a4bd0c449d4e7c
+
+Evidence: BLAD_IMPL_SUPPLEMENT.md (independent source observation), permitted
+BLAD_SOURCE_OBSERVATION.md precision sections, BLAD_VALIDATION.md and final
+allowed logs. Historical execution sections were not used for final results.
+Refreshed observation/evidence SHA-256:
+- BLAD_IMPL_SUPPLEMENT.md: face5bfb77066325d99ef3ae3c1e91694158fd77ac4111bb9ab7ca63dc968df1
+- BLAD_SOURCE_OBSERVATION.md: f0d9dfc0acf1febe25a33df23a72a615f40f67367d80a8f4236a8707266eca01
+- BLAD_VALIDATION.md: 75cfdc7b6d970c21d63cffcbbe1ac6eb6f82cf835c890f1ab40ec89ff626762e
+Consumer SESSIONS.md: 2376447b2b603a4e0315c3282283fc1ed18b860065101c81a0ab4e6bbd6f1190
+The provider identifies rustc 1.99.1/stable and 1.95.0/MSRV.
+Source suites: 237 default / 257 sessions passes per toolchain, zero failures.
+Each mode includes 38 Linux PTY cases and two ignored characterizations.
+Final archive suites: 494 passes per toolchain across both modes, zero failures;
+both isolated release installations pass. Both logs identify the same archive:
+4e0c437b4888f60a617558ab02fc08d6814c55906674fe10d2b8cf0e29c7975a
+(kvist-blad-0.3.0.crate). Archive preparation used --allow-dirty.
+The two ignored characterization cases were separately executed successfully.
+Offline policy reports advisories/bans/licenses/sources ok with seven duplicate
+warnings. New raw quality/guard logs show fmt/strict lint/docs, downstream
+compilation, license comparison and wrong revision/version/dirty-source
+rejections with no untrusted Python import. Local action-policy output passes;
+its corrected-invocation mapping is provider-attested, not a remote action run.
+Source-observed workflow-input correction alone is not execution evidence.
+
+R-059..R-063 engineering substance is supported by the bounded evidence:
+independent kvist-blad identity with blad targets and optional sessions, local
+package fixtures/docs/license, exact task state, bounded descriptor-relative
+session reads, accurate standalone/integration guides, archive tests/installs.
+No new publication-feature functional failure is demonstrated.
+Markdown projection, full palette/color policy and documented modal dispatch
+agree with observation; they are not full conformance or platform certification.
+
+Unresolved findings:
+- F-01: CONTRACT 378 forbids writes outside edit mode, but R-004,
+  CONTRACT 225-226, SESSIONS 84-89 and observation permit named export overwrite.
+  This is a concrete intent-authority conflict, not unexpected export behavior.
+- F-02: Originally both contract/guide said nonempty kind, versus observed
+  nonblank validation. SESSIONS 135-141 now explicitly rejects empty/whitespace
+  kinds, correcting the consumer omission. Unchanged CONTRACT 217-219 still
+  says nonempty; contract/validation-strength disposition remains human.
+  No execution of that exact whitespace-only case is established.
+- I-01: CONTRACT 140-142's help/global-quit wording is ambiguous about Q.
+  Actual/documented Q dismisses help; Ctrl+C always quits. Current CONTRACT
+  110-112 expressly makes post-search-Enter Esc close the tab, matching behavior.
+  Do not infer human disposition of retained input-policy/key findings.
+- G-01: All routes, permission errors and mutation schedules are not exhaustively
+  executed. CONTRACT 368's available-IDs error payload is not established.
+- G-02/G-03: Raw gate logs address the earlier summary-only granularity gap.
+  No real-terminal manual smoke, near-limit interactive search, fresh registry
+  resolution or hermetic sandbox is established.
+
+Limits: byte bounds are per artifact, not aggregate memory/descriptor/search
+caps, ancestor isolation, snapshots or hard I/O/rendering deadlines.
+Math/diagram limits are bounded subsets and cooperative, not hard preemption.
+Export is raw source and non-atomic; input no-follow does not protect output.
+
+Human/external prerequisites remain: exact-revision acceptance and retained
+input/key arbitration, findings disposition, accepted clean commit/tag, registry
+ownership/account and legal/notice checks, fresh advisories, protected publishing
+approval/credentials, actual remote gates/publish, and registry installs in both
+modes plus unlocked/docs.rs/public-link/terminal checks. Local passes and workflow
+identity inputs are not acceptance receipts, publication or security certification.
+
+Detailed external report: BLAD_COMPLIANCE_COMPARISON.md in the supplied session
+files directory. Intent was not modified to fit implementation.
+
 ## File-input reliability observation - 2026-10-23
 
 This supplement maps observed file-input behavior to R-056 through R-058.

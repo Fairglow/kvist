@@ -1,13 +1,18 @@
 [package]
-name = "blad"
+name = "kvist-blad"
 version = "0.3.0"
 edition = "2024"
 rust-version = "1.95"
 authors = ["Stefan Lindblad"]
-description = "Terminal Markdown viewer with optional Skott session support"
+description = "A standalone terminal Markdown viewer with syntax highlighting, search, and text diagrams"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/Fairglow/kvist"
-homepage = "https://github.com/Fairglow/kvist"
+homepage = "https://github.com/Fairglow/kvist/tree/main/blad"
+documentation = "https://docs.rs/kvist-blad"
+readme = "README.md"
+keywords = ["markdown", "terminal", "viewer", "tui", "cli"]
+categories = ["command-line-utilities", "text-processing"]
+include = ["src/**", "tests/**", "docs/**", "ci/verify_package.py", "README.md", "CHANGELOG.md", "LICENSE"]
 
 [[bin]]
 name = "blad"
@@ -19,7 +24,10 @@ path = "src/lib.rs"
 
 [features]
 default = []
-sessions = []
+sessions = ["dep:rustix"]
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
@@ -28,6 +36,7 @@ serde_json = "1.0"
 thiserror = "2.0"
 crossterm = "0.29"
 libc = "0.2"
+rustix = { version = "1.1", features = ["fs"], optional = true }
 pulldown-cmark = "0.13"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 unicode-segmentation = "1.13"

@@ -77,7 +77,7 @@ fn blad_reads_skott_structured_transcript() {
     create_test_session(&log_dir, session_id, "2026-10-09T10:00:00Z");
 
     // Test listing
-    let sessions = blad::session::list_sessions(&log_dir, 10);
+    let sessions = blad::session::list_sessions(&log_dir, 10).unwrap();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, session_id);
     assert_eq!(sessions[0].message_count, 2);
@@ -89,7 +89,7 @@ fn blad_reads_skott_structured_transcript() {
     assert_eq!(loaded.id, session_id);
 
     // Test message loading
-    let messages = blad::session::load_messages(&loaded);
+    let messages = blad::session::load_messages(&loaded).unwrap();
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].kind, "user");
     assert_eq!(messages[0].content, "Please help me with this task.");
@@ -151,7 +151,7 @@ fn blad_lists_sessions_newest_first() {
         "2026-10-09T10:00:00Z",
     );
 
-    let sessions = blad::session::list_sessions(&log_dir, 10);
+    let sessions = blad::session::list_sessions(&log_dir, 10).unwrap();
     assert_eq!(sessions.len(), 3);
     // Newest first (equal timestamps tie-break by id descending)
     assert!(sessions[0].id.starts_with("2026-10-09T12"));
@@ -183,7 +183,7 @@ fn blad_lists_sessions_by_created_at_when_distinct() {
         "2026-10-09T07:00:00Z",
     );
 
-    let sessions = blad::session::list_sessions(&log_dir, 10);
+    let sessions = blad::session::list_sessions(&log_dir, 10).unwrap();
     assert_eq!(sessions.len(), 3);
     // Newest created_at first, regardless of id order
     assert!(sessions[0].id.starts_with("2026-10-09T11"));
@@ -395,4 +395,73 @@ fn dump_shows_interim_disposition_and_sanitises_unknown_kinds() {
         "control codes in an unknown kind must be sanitised:\n{text:?}"
     );
     assert!(text.contains("tool\\u{1b}[2J\\u{7}result"), "{text:?}");
+}
+
+#[test]
+fn lookup_has_no_thousand_session_cutoff_and_order_is_total() {
+    let temp = tempfile::tempdir().unwrap();
+    for number in 0..=1000 {
+        create_test_session(
+            temp.path(),
+            &format!("id-{number:04}"),
+            "2026-10-09T10:00:00Z",
+        );
+    }
+    let loaded = blad::session::load_session(temp.path(), "id-0000").unwrap();
+    assert_eq!(loaded.id, "id-0000");
+    let manifest_path = temp.path().join("id-1000/session.json");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    value["created_at"] = serde_json::Value::Null;
+    fs::write(&manifest_path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let listed = blad::session::list_sessions(temp.path(), usize::MAX).unwrap();
+    assert_eq!(listed.first().unwrap().id, "id-0999");
+    assert_eq!(listed.last().unwrap().id, "id-1000");
+}
+
+#[test]
+fn message_reads_retain_the_opened_session_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    create_test_session(temp.path(), "original", "2026-10-09T10:00:00Z");
+    create_test_session(temp.path(), "other", "2026-10-09T11:00:00Z");
+    let original = temp.path().join("original");
+    let session = blad::session::load_session_by_path(&original).unwrap();
+    fs::rename(&original, temp.path().join("moved")).unwrap();
+    fs::write(temp.path().join("other/messages/000001.md"), "replacement").unwrap();
+    std::os::unix::fs::symlink(temp.path().join("other"), &original).unwrap();
+    let messages = blad::session::load_messages(&session).unwrap();
+    assert_eq!(messages[0].content, "Please help me with this task.");
+}
+
+#[test]
+fn session_artifact_byte_limits_are_inclusive() {
+    const LIMIT: u64 = 16 * 1024 * 1024;
+    let temp = tempfile::tempdir().unwrap();
+    create_test_session(temp.path(), "session", "2026-10-09T10:00:00Z");
+    let path = temp.path().join("session");
+    let manifest_path = path.join("session.json");
+    let mut source = fs::read(&manifest_path).unwrap();
+    source.resize(LIMIT as usize, b' ');
+    fs::write(&manifest_path, &source).unwrap();
+    let session = blad::session::load_session_by_path(&path).unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&manifest_path)
+        .unwrap()
+        .set_len(LIMIT + 1)
+        .unwrap();
+    let error = blad::session::load_session_by_path(&path).err().unwrap();
+    assert_eq!(error.kind(), std::io::ErrorKind::FileTooLarge);
+    let message = path.join("messages/000001.md");
+    let file = fs::OpenOptions::new().write(true).open(&message).unwrap();
+    file.set_len(LIMIT).unwrap();
+    assert_eq!(
+        blad::session::load_messages(&session).unwrap()[0]
+            .content
+            .len(),
+        LIMIT as usize
+    );
+    file.set_len(LIMIT + 1).unwrap();
+    let error = blad::session::load_messages(&session).err().unwrap();
+    assert_eq!(error.kind(), std::io::ErrorKind::FileTooLarge);
 }
