@@ -22,6 +22,12 @@ test sections. Other component descriptions retain the original direct-source
 observation; this was not an exhaustive second audit. The inspected workspace
 execution log predates these repairs and is not post-repair validation.
 
+The final bounded follow-up inspected only current `src/registry.rs`,
+`src/direct_transport.rs`, `tests/registry.rs`, and `tests/model_transport.rs`.
+It independently traced native model-selector validation and relevant new test
+assertions without reading the existing record or expanding into peer sources.
+Unrelated observations and limits below were not re-audited in this follow-up.
+
 ## Observed public contract
 
 ### Package, CLI, and authority
@@ -78,7 +84,11 @@ It checks deadline 1–600 seconds, attempts 1–32, cadence at most 600 seconds
 (zero disables it), ordered retry delays capped at 3600 seconds, and optional
 context/reserve bounds up to 1,048,576 with context greater than reserve when
 both are supplied. This validates a transport without contacting it. Native model
-text validation here is broader than the direct request validator.
+selectors now use the same validator as direct inference requests: nonblank,
+control-free ASCII, at most 256 bytes. This check is applied by registry parsing,
+explicit `NativeModel::validate`, and direct request validation before connection;
+it does not trim or otherwise rewrite the selector
+(`src/registry.rs:91-96`, `src/direct_transport.rs:710-724`).
 
 External definitions bound executable text to 4096 bytes, arguments to 128
 entries of at most 16,384 bytes, and optional model text to 1024 bytes.
@@ -228,8 +238,8 @@ comparison with external intent.
 - Direct model requests bound messages to 1024, tools to 128, aggregate message
   text and encoded request to 8 MiB, tool descriptions to 16 KiB, and response
   bytes to a configured maximum at most 16 MiB. Output tokens, when present,
-  must be 1–1,048,576. Model selectors must be nonblank ASCII and at most 256
-  bytes. Output schemas require object nodes, a supported keyword subset,
+  must be 1–1,048,576. Model selectors must be nonblank, control-free ASCII
+  and at most 256 bytes. Output schemas require object nodes, a supported keyword subset,
   at most 256 KiB, depth 32, and 4096 nodes; callable tool choice cannot be
   combined with an output schema (`src/direct_transport.rs`).
 - Requests/streaming have overall deadlines, slot/first-token watchdogs, and
@@ -434,7 +444,7 @@ or reproduced test runs. No statement determines compliance with external intent
   ignored-bound mechanism is absent from the re-inspected path.
 - **Tool-free native composition:** `src/runtime/session.rs:316-320` selects
   `None` for an empty tool list, satisfying the direct validator's condition at
-  `src/direct_transport.rs:764-765`. Tests assert both choice branches and invoke
+  `src/direct_transport.rs::validate_request`. Tests assert both choice branches and invoke
   that production validator with a no-tool session request
   (`src/runtime/accounting_tests.rs:45-71`). That directly covers validation
   composition, not an end-to-end runtime/network session.
@@ -447,6 +457,18 @@ or reproduced test runs. No statement determines compliance with external intent
   presentation exclusion, and retry-time tests are present at
   `src/runtime/accounting_tests.rs:90-400`. The previously observed counter
   conflation and retry-local timing reset are absent from these paths.
+- **Native selector consistency:** `NativeModel::validate` and inference
+  `validate_request` now call the same `validate_model_selector` helper
+  (`src/registry.rs:96`, `src/direct_transport.rs:710-724`). The helper rejects
+  blank, over-256-byte, non-ASCII, or control-bearing values before inference
+  I/O. Registry tests reject 257-byte/non-ASCII values through both parsing
+  and explicit native validation, and accept exactly 256 bytes
+  (`tests/registry.rs:39-55`). Direct-transport tests reject those values plus
+  newline, NUL, and whitespace-only selectors without connecting, for both
+  providers and unary/streaming paths (`tests/model_transport.rs:539-571`).
+  Capacity discovery retains its separately scoped bounded/control-free
+  model-ID check (`src/direct_transport.rs:222-234`); this observation does
+  not imply all provider discovery identities use the inference selector rule.
 
 No new concrete failure was identified in this bounded inspection of those
 repairs. This is not an assertion that every timing, authority, or lifecycle
@@ -477,14 +499,14 @@ not by itself map each source assertion to a named executed test:
 
 | Source | Observed test cases |
 | --- | --- |
-| `tests/registry.rs` | Whole-profile precedence, source/digest snapshot stability after file change, schema/type/endpoint/credential/bounds refusal, disabled profiles, malformed/missing sources, symlink upsert refusal, literal one-pass argv, read-only inspection, and one profile-selected native CLI request. |
+| `tests/registry.rs` | Whole-profile precedence, source/digest snapshot stability after file change, schema/type/endpoint/credential/bounds refusal, native selector rejection at 257 bytes/non-ASCII through parsing and explicit validation, exact 256-byte acceptance, disabled profiles, malformed/missing sources, symlink upsert refusal, literal one-pass argv, read-only inspection, and one profile-selected native CLI request. |
 | `tests/registry_cli_policy.rs` | External-profile one-attempt/default/explicit-zero semantics, positive retry refusal before spawn, preserved explicit-command retry choices, unary/streaming caller response/deadline bounds, and pre-contact rejection of inapplicable watchdogs/invalid limits. |
 | `src/runtime/accounting_tests.rs` | No-tool/with-tool request shape, production direct-validation composition, deterministic decode-clock arithmetic, cumulative live input/output/provider totals, first-token/presentation/backoff exclusion, retry decode accumulation, two-turn production-loop counters/rates, and initial-recording inclusion in elapsed time. |
 | `tests/runtime_controls.rs` | Quiet-generation interruption, provisional-output exclusion, edit/withdraw/queue bounds, retained active-effect result and rejected later calls, shutdown, backoff attempt preservation, recording failure before presentation/dispatch, dispatch-recording guidance race, withdrawal after interruption, final-answer/submission classification, retained token charge, attempt cap, and shared wall deadline. |
 | `tests/observation.rs` | Live checkpoint/tail following, held-descriptor replacement behavior, 256-record batches, sequence/version/run/link/special-file rejection, atomic bounded serialization, private socket modes/drop cleanup, bounded idle client/malformed request handling, late-guidance rejection, and total journal capacity refusal. |
 | `tests/external_supervision.rs` | Opaque byte delivery, cancellation/observer-failure termination, retry refusal, and pre-cancel refusal before spawn for the observed library API. |
 | `tests/supervisor.rs` | General retry uncertainty, nonzero no-retry, idle/attempt/output limits, process-group descendant cleanup, and escaped retained-pipe termination of the supervisor wait. |
-| `tests/model_transport.rs`, `tests/model_capacity.rs`, `tests/loaded_model.rs` | Provider wire mapping, explicit/non-success finish handling, output bounds/schema fields, reasoning separation, malformed/duplicate/truncated response refusal, streaming/chunking, cancellation/deadlines/cadence, selected-model serving capacity, and loaded/router model identification. |
+| `tests/model_transport.rs`, `tests/model_capacity.rs`, `tests/loaded_model.rs` | Provider wire mapping, explicit/non-success finish handling, output bounds/schema fields, native selector rejection before connection for both providers and unary/streaming paths, reasoning separation, malformed/duplicate/truncated response refusal, streaming/chunking, cancellation/deadlines/cadence, selected-model serving capacity, and loaded/router model identification. |
 | `tests/command.rs`, `tests/profiles.rs`, `tests/setup.rs`, `tests/catalog.rs`, `tests/cli.rs` | Representative argv/JSON rendering, command-profile persistence, setup qualification/force/selection and acknowledgment paths, HTTP/ACP discovery correlation, and CLI acknowledgment/output/profile-store behavior. Some CLI/catalog cases were indexed by test name rather than fully traced. |
 | `tests/gbnf.rs`, `tests/trajectory.rs`, `tests/loop_detection.rs`; source-local unit tests | Grammar string-shape/error cases, trajectory roundtrip/error cases, hash/repeat-detector cases, retry arithmetic, assistant final-answer helper, legacy context compaction, signal forwarding, and wrapper-script content assertions. |
 
@@ -524,10 +546,22 @@ inspected.
 Implementers reported **41 targeted CLI/registry tests** and **103 runtime tests**
 passing, together with strict Sav Clippy and formatting. No corresponding output
 was supplied for inspection in this refresh, so these remain reported results,
-not observer-run or independently log-verified results. Full post-repair
-workspace validation had not yet been run according to the caller. No test
+not observer-run or independently log-verified results. At that refresh full
+post-repair workspace validation had not yet been run according to the caller;
+a subsequent reported run is distinguished below. No test
 selection, coverage percentage, or current workspace-wide gate is inferred from
 those counts.
+
+### Reported execution before the final selector follow-up
+
+The orchestrator reported **1743 passed, 0 failed, 14 existing ignored tests,
+and 104 successful target summaries**, plus successful strict workspace all-target
+Clippy, formatting, release build, ordinary documentation, and strict Sav/Skott
+documentation gates. No corresponding logs were inspected in this follow-up.
+These are reported pre-follow-up results, not execution evidence for the latest
+selector changes. The fresh package gate and final integrated rerun were still
+pending when supplied; neither is recorded as completed. The observer ran no
+additional checks.
 
 This execution evidence does not resolve the source-based findings or establish
 coverage of real provider accounts, installed external agents, filesystem faults,

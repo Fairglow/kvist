@@ -36,6 +36,25 @@ fn registry_resolution_is_ordered_pinned_and_does_not_probe() {
 }
 
 #[test]
+fn native_model_selector_rejects_values_the_transport_cannot_use() {
+    for model in ["x".repeat(257), "model-\u{e9}".to_owned()] {
+        assert!(
+            Registry::parse(Path::new("fixture"), &native(&model)).is_err(),
+            "unusable native model selector was accepted: {model:?}"
+        );
+        let mut explicit =
+            sav::registry::NativeModel::new(sav::LocalModelProvider::Ollama, String::new(), model);
+        assert!(explicit.validate().is_err());
+    }
+}
+
+#[test]
+fn native_model_selector_accepts_the_exact_transport_boundary() {
+    let registry = Registry::parse(Path::new("fixture"), &native(&"x".repeat(256))).unwrap();
+    assert!(registry.resolve("coder").unwrap().native().is_ok());
+}
+
+#[test]
 fn rejects_unknown_fields_credentials_bounds_and_retired_command_schema() {
     for contents in [
         native("model") + "typo = true\n",

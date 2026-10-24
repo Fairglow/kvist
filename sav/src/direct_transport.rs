@@ -707,10 +707,21 @@ fn invalid_endpoint<T>(reason: &str) -> Result<T> {
     })
 }
 
-pub(crate) fn validate_request(request: &ModelRequest) -> Result<()> {
-    if request.model.trim().is_empty() || request.model.len() > 256 || !request.model.is_ascii() {
-        return invalid_request("model must be nonblank ASCII no longer than 256 bytes");
+pub(crate) fn validate_model_selector(model: &str) -> Result<()> {
+    if model.trim().is_empty()
+        || model.len() > 256
+        || !model.is_ascii()
+        || model.chars().any(char::is_control)
+    {
+        return invalid_request(
+            "model must be nonblank, control-free ASCII no longer than 256 bytes",
+        );
     }
+    Ok(())
+}
+
+pub(crate) fn validate_request(request: &ModelRequest) -> Result<()> {
+    validate_model_selector(&request.model)?;
     if request.messages.is_empty() || request.messages.len() > MAX_MESSAGES {
         return invalid_request("message count must be between 1 and 1024");
     }

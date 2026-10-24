@@ -142,6 +142,11 @@ after allow, validates/redacts results, and returns them to the loop.
 
 ## Algorithms and decisions
 
+Native registry fields and frontend overrides reuse the direct request's
+model-selector validator, so configured native identities cannot exceed the
+transport's 256-byte, nonblank, control-free ASCII boundary. External model
+identities retain their separate literal-argument bounds.
+
 Command parsing supports quoting and literal placeholders without shell
 evaluation. `{prompt_json}` uses complete JSON string encoding. Prompt source
 selection rejects conflicts before any provider starts. Reasoning effort uses a
@@ -292,12 +297,13 @@ The broker cannot broaden host grants. Capability states distinguish
 advertised, conformance-tested, and policy-enabled behavior. Provider
 permission flags are defense in depth rather than proof of isolation.
 
-Tool effects are delegated to the installed `galla-runner` through a
-replaceable execution-backend interface. The runner binary and its verified
-backend capabilities are resolved and bound before any effect is delegated.
-Unavailability of the runner, its backend, or its prerequisites fails closed;
-this crate constructs no isolation namespaces of its own and never falls back
-to unconstrained host execution.
+Under ADR 0015, the native runtime delegates effects only to the executor
+injected by its embedding host; Sav neither selects a runner nor owns grants.
+Protected hosts must bind the installed `galla-runner` and its verified
+capabilities before dispatch, failing closed when prerequisites are absent.
+An explicitly acknowledged opaque host command is a distinct authority mode,
+not a protected-runtime fallback. Sav constructs no isolation namespaces and
+never substitutes an unconstrained executor when a host executor fails.
 
 ## Verification strategy
 

@@ -65,6 +65,8 @@ run authorization MUST remain distinct; unknown capabilities MUST NOT be
 enabled. Explicit task selections MUST not be replaced by loaded-model
 convenience. Persistence MUST be atomic, private, bounded and reject links and
 special files. Credentials MUST be references, never inline secret material.
+Native registry selections and frontend overrides MUST satisfy the direct
+transport's model-selector bounds before they are advertised as usable.
 
 Native conversation, context fitting, retry, tool-result sequencing and control
 mechanisms MUST remain independent of terminal and maerg types. Hosts inject
