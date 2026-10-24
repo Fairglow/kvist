@@ -7,18 +7,22 @@ use crate::viewport::Document;
 pub(crate) const HELP: &str = "\
 # Blad keyboard help
 
-/ forward, ? backward; Ctrl+R toggles regex in search
-n repeat, N/p reverse; Esc cancels the active search prompt
+/ start or refine forward search; Ctrl+R toggles regex while editing
+n next match, N previous; > and < also work
+Esc cancels search; Enter confirms
+
 Tab / Shift+Tab: next / previous link; Enter: follow
 Ctrl+Arrows: spatial links; [ / ]: previous / next heading
+
 j/k or arrows: line; Space / PageDown / Ctrl+F: page down
 PageUp / Ctrl+B: page up; d/u or Ctrl+D/U: half page
 g/G or Home/End: top/bottom; Left/Right: horizontal
-Alt+Left/Right: tabs; b: back; e: editor; r: reload
-q/Esc: close tab; Q/Ctrl+C: quit all; Ctrl+L: redraw
 
-Any key except Ctrl+C returns to the document. Ctrl+C always quits.
-After search Enter, normal-mode Esc closes the tab. No live follow or shell commands.
+Alt+Left/Right: tabs; Ctrl+PageUp/Down also work
+b: back; e: editor; Ctrl+R or F5: reload
+
+q/Esc: close tab; Ctrl+Q or Ctrl+C: quit all; Ctrl+L: redraw
+F1 or ? or h: this help
 ";
 
 pub(crate) fn link_spans(document: &Document, link: &Link) -> Vec<LinkSpan> {
