@@ -207,10 +207,6 @@ pub fn run_profile(
     eprintln!(
         "HOST UNCONFINED external agent; internal tools and token accounting belong to the selected CLI."
     );
-    eprintln!(
-        "live run journal: {}",
-        crate::error::terminal_text(&run.journal_path().display().to_string())
-    );
     crate::inspection::inspect_owned(run.journal_path(), run.cancellation())?;
     if run
         .worker
