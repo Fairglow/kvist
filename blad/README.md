@@ -71,16 +71,17 @@ bounded subsets, not full TeX or Mermaid compatibility; see the
 |------|-----------------------|
 | `↑`/`k`, `↓`/`j` | One line up/down |
 | `PageUp`/`Ctrl+B`, `PageDown`/`Ctrl+F`/`Space` | Full pages |
-| `u`/`Ctrl+U`, `d`/`Ctrl+D` | Half pages |
-| `Home`/`g`/`H`, `End`/`G`/`L` | Top (also resets horizontal offset), bottom (retains it) |
+| `Shift+PageUp`/`u`/`Ctrl+U`, `Shift+PageDown`/`d`/`Ctrl+D` | Half pages |
+| `Home`, `End` | Horizontal beginning/end of line |
+| `Ctrl+Home`/`g`/`H`, `Ctrl+End`/`G`/`L` | Document top/bottom |
 | `Left`/`Right` | Horizontal scrolling |
-| `/`, `?` | Forward/backward literal search; `Ctrl+R` toggles regex in prompt |
-| `n`, `N`/`p` | Repeat search direction, reverse direction |
+| `/` | Start or refine forward search; `Ctrl+R` toggles regex in prompt |
+| `n`/`>`, `N`/`<` | Next/previous search match |
 | `Tab`/`Shift+Tab`, `Enter` | Select links, follow selection or first link at/below viewport |
 | `Ctrl+Arrows`, `[`/`]` | Spatial link selection, previous/next heading |
-| `Alt+Left`/`Alt+Right`, `b` | Switch tabs, return through tab history |
-| `e`, `r`, `Ctrl+L`, `h` | External editor, reload, repaint, help |
-| `q`/`Esc`, `Q`/`Ctrl+C` | Close one tab, quit all tabs |
+| `Alt+Left`/`Alt+Right`/`Ctrl+PageUp`/`Ctrl+PageDown`, `b` | Switch tabs, return through tab history |
+| `e`, `Ctrl+R`/`F5`, `Ctrl+L`, `F1`/`?`/`h` | External editor, reload, repaint, help |
+| `q`/`Esc`, `Ctrl+Q`/`Ctrl+C` | Close one tab, quit all tabs |
 
 The mouse wheel scrolls; left-click a rendered link label to follow it.
 Optional `f` link mode uses Tab/Shift+Tab, Enter and Esc. Modes take precedence:

@@ -513,10 +513,22 @@ fn viewer_session(
                         1
                     }));
                 }
+                if modifiers.contains(KeyModifiers::CONTROL)
+                    && !search.editing
+                    && !link_mode
+                    && matches!(code, KeyCode::PageUp | KeyCode::PageDown)
+                {
+                    status.clear();
+                    return Ok(ViewerAction::Switch(if code == KeyCode::PageUp {
+                        -1
+                    } else {
+                        1
+                    }));
+                }
                 if !matches!(code, KeyCode::Enter) {
                     status.clear();
                 }
-                if code == KeyCode::Char('Q') && !search.editing {
+                if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('q') && !search.editing {
                     return Ok(ViewerAction::Quit);
                 }
                 if search.editing {
@@ -524,6 +536,8 @@ fn viewer_session(
                     match code {
                         KeyCode::Char('r') if modifiers.contains(KeyModifiers::CONTROL) => {
                             search.regex = !search.regex;
+                            // Re-run search with toggled regex mode
+                            changed = false;
                         }
                         KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
                             search.query.clear()
@@ -643,8 +657,14 @@ fn viewer_session(
                         {
                             scroll_offset += 1;
                         }
+                        KeyCode::PageUp if modifiers.contains(KeyModifiers::SHIFT) => {
+                            scroll_offset = scroll_offset.saturating_sub((visible_lines / 2).max(1));
+                        }
                         KeyCode::PageUp => {
                             scroll_offset = scroll_offset.saturating_sub(visible_lines);
+                        }
+                        KeyCode::PageDown if modifiers.contains(KeyModifiers::SHIFT) => {
+                            scroll_offset = scroll_offset.saturating_add((visible_lines / 2).max(1));
                         }
                         KeyCode::PageDown | KeyCode::Char(' ') => {
                             scroll_offset = (scroll_offset + visible_lines)
@@ -656,12 +676,18 @@ fn viewer_session(
                         KeyCode::Char('d') => {
                             scroll_offset = scroll_offset.saturating_add((visible_lines / 2).max(1))
                         }
-                        KeyCode::Home => {
+                        KeyCode::Home if modifiers.contains(KeyModifiers::CONTROL) => {
                             scroll_offset = 0;
                             scroll_x = 0;
                         }
-                        KeyCode::End => {
+                        KeyCode::Home => {
+                            scroll_x = 0;
+                        }
+                        KeyCode::End if modifiers.contains(KeyModifiers::CONTROL) => {
                             scroll_offset = total_lines.saturating_sub(visible_lines);
+                        }
+                        KeyCode::End => {
+                            scroll_x = document.max_x();
                         }
                         KeyCode::Left => {
                             scroll_x = scroll_x.saturating_sub(1);
@@ -676,12 +702,29 @@ fn viewer_session(
                         KeyCode::Char('G') | KeyCode::Char('L') => {
                             scroll_offset = total_lines.saturating_sub(visible_lines);
                         }
-                        KeyCode::Char('/') | KeyCode::Char('?') => {
-                            search.begin(code == KeyCode::Char('?'));
+                        KeyCode::Char('/') => {
+                            // If search is active, refine it; otherwise start new
+                            if !search.query.is_empty() {
+                                search.editing = true;
+                            } else {
+                                search.begin(false);
+                            }
                             selected_link = None;
                         }
-                        KeyCode::Char('n' | 'N' | 'p') if !search.matches.is_empty() => {
-                            search.advance(code != KeyCode::Char('n'));
+                        KeyCode::Char('n') | KeyCode::Char('>') if !search.matches.is_empty() => {
+                            search.advance(false);
+                            if let Some(span) = search.current() {
+                                reveal(
+                                    span,
+                                    &mut scroll_offset,
+                                    &mut scroll_x,
+                                    visible_lines,
+                                    document.content_width,
+                                );
+                            }
+                        }
+                        KeyCode::Char('N') | KeyCode::Char('<') if !search.matches.is_empty() => {
+                            search.advance(true);
                             if let Some(span) = search.current() {
                                 reveal(
                                     span,
@@ -743,7 +786,7 @@ fn viewer_session(
                                 return Ok(ViewerAction::Edit(path.to_path_buf()));
                             }
                         }
-                        KeyCode::Char('r') => {
+                        KeyCode::Char('r') if modifiers.contains(KeyModifiers::CONTROL) => {
                             let candidate = read_reload_source(path).and_then(|source| {
                                 let document = Document::render_with_options(
                                     &source,
@@ -776,6 +819,37 @@ fn viewer_session(
                         }
                         KeyCode::Char('b') => {
                             return Ok(ViewerAction::Back);
+                        }
+                        KeyCode::F(5) => {
+                            let candidate = read_reload_source(path).and_then(|source| {
+                                let document = Document::render_with_options(
+                                    &source,
+                                    cols,
+                                    line_numbers,
+                                    width_limit,
+                                    options,
+                                )?;
+                                Ok((source, document))
+                            });
+                            match candidate {
+                                Ok((source, updated)) => {
+                                    *content = source;
+                                    document = updated;
+                                    scroll_offset = scroll_offset
+                                        .min(document.lines.len().saturating_sub(visible_lines));
+                                    scroll_x = scroll_x.min(document.max_x());
+                                    links = extract_links(&inert_source(content));
+                                    spans = links
+                                        .iter()
+                                        .map(|link| link_spans(&document, link))
+                                        .collect();
+                                    selected_link = None;
+                                    selected_part = 0;
+                                    search.update(&document.lines, scroll_offset);
+                                    *status = "Reloaded file".into();
+                                }
+                                Err(error) => *status = format!("Error reloading file: {error}"),
+                            }
                         }
                         // Enter follows the first link at or below the top of
                         // the viewport, so links can be jumped to without
@@ -819,7 +893,7 @@ fn viewer_session(
                             selected_link = None;
                             search = Search::default();
                         }
-                        KeyCode::Char('h') => help = true,
+                        KeyCode::Char('h') | KeyCode::Char('?') | KeyCode::F(1) => help = true,
                         KeyCode::Char('Q') => return Ok(ViewerAction::Quit),
                         KeyCode::Char('q') | KeyCode::Esc => {
                             return Ok(ViewerAction::Close);
