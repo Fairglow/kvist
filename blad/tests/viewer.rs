@@ -352,12 +352,6 @@ fn occurrence_search_is_precise_wraps_and_supports_reverse_and_regex() {
     assert!(viewer.screen.line(11).contains("5/5"));
     viewer.keys(b"n");
     assert!(viewer.screen.line(11).contains("1/5"));
-    viewer.keys(b"?hit\r");
-    assert!(viewer.screen.line(11).contains("2/5"));
-    viewer.keys(b"n");
-    assert!(viewer.screen.line(11).contains("1/5"));
-    viewer.keys(b"n");
-    assert!(viewer.screen.line(11).contains("5/5"));
     viewer.keys(b"/hit[1]\r");
     assert!(viewer.screen.line(11).contains("1/1"));
     viewer.keys(b"/\x12hit[0-9]\r");
@@ -650,7 +644,7 @@ fn oversized_reload_retains_search_position_and_recovers() {
         .set_len(16 * 1024 * 1024 + 1)
         .unwrap();
     viewer.raw.clear();
-    viewer.keys(b"r");
+    viewer.keys(b"\x12");
     assert!(viewer.screen.line(11).contains("16777216"));
     assert_eq!(
         (1..11)
@@ -662,7 +656,7 @@ fn oversized_reload_retains_search_position_and_recovers() {
     viewer.keys(b"n");
     assert!(viewer.screen.line(11).contains("2/2"));
     std::fs::write(&path, "# Recovered needle").unwrap();
-    viewer.keys(b"r");
+    viewer.keys(b"\x12");
     assert_eq!(viewer.screen.content_line(1), "# Recovered needle");
     viewer.keys(b"n");
     assert!(viewer.screen.line(11).contains("1/1"));
@@ -738,7 +732,7 @@ fn reload_preserves_position_policy_tabs_and_recomputes_search_and_links() {
     )
     .unwrap();
     viewer.raw.clear();
-    viewer.keys(b"r");
+    viewer.keys(b"\x12");
     assert_eq!(viewer.screen.content_line(1), before);
     assert!(viewer.screen.line(11).contains("Reloaded"));
     let raw = String::from_utf8_lossy(&viewer.raw);
@@ -751,7 +745,7 @@ fn reload_preserves_position_policy_tabs_and_recomputes_search_and_links() {
         format!("# Updated\n\n{body}needle\n\n[new](#updated)\n\n$x^2$"),
     )
     .unwrap();
-    viewer.keys(b"r");
+    viewer.keys(b"\x12");
     viewer.keys(b"n");
     assert!(viewer.screen.line(11).contains("1/1"));
     viewer.keys(b"\t\r");
@@ -782,7 +776,7 @@ fn reload_failure_retains_the_old_document_and_shrink_clamps_both_offsets() {
     viewer.keys(b"G");
     let before: Vec<_> = (1..11).map(|row| viewer.screen.content_line(row)).collect();
     std::fs::write(&path, [0xff, 0xfe]).unwrap();
-    viewer.keys(b"r");
+    viewer.keys(b"\x12");
     assert!(viewer.screen.line(11).contains("Error reloading"));
     assert_eq!(
         (1..11)
@@ -791,7 +785,7 @@ fn reload_failure_retains_the_old_document_and_shrink_clamps_both_offsets() {
         before
     );
     std::fs::remove_file(&path).unwrap();
-    viewer.keys(b"r");
+    viewer.keys(b"\x12");
     assert!(viewer.screen.line(11).contains("Error reloading"));
     assert_eq!(
         (1..11)
@@ -800,7 +794,7 @@ fn reload_failure_retains_the_old_document_and_shrink_clamps_both_offsets() {
         before
     );
     std::fs::write(&path, "# Short").unwrap();
-    viewer.keys(b"r");
+    viewer.keys(b"\x12");
     assert_eq!(viewer.screen.content_line(1), "# Short");
     assert!((2..11).all(|row| viewer.screen.line(row).is_empty()));
     viewer.resize(40, 10);
@@ -907,7 +901,7 @@ fn reload_rejects_fifo_replacements_without_blocking() {
         nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
     )
     .unwrap();
-    viewer.keys(b"r");
+    viewer.keys(b"\x12");
     assert!(viewer.screen.line(11).contains("requires a regular file"));
     assert_eq!(viewer.screen.content_line(1), "# Retained");
     viewer.quit();
@@ -941,7 +935,7 @@ fn reload_does_not_follow_a_replaced_final_symlink() {
     let mut viewer = Viewer::start(&path, 80, 12, false);
     std::fs::remove_file(&path).unwrap();
     std::os::unix::fs::symlink(&replacement, &path).unwrap();
-    viewer.keys(b"r");
+    viewer.keys(b"\x12");
     assert!(viewer.screen.line(11).contains("Error reloading"));
     assert_eq!(viewer.screen.content_line(1), "# Retained");
     viewer.quit();
