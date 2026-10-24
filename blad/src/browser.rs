@@ -40,7 +40,7 @@ impl Drop for Launcher {
         if !self.finished
             && let Err(error) = self.stop()
         {
-            eprintln!("Failed to clean up browser launcher: {error}");
+            tracing::error!("Failed to clean up browser launcher: {error}");
         }
     }
 }

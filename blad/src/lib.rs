@@ -73,6 +73,7 @@ mod browser;
 mod diagram;
 mod file_input;
 mod inline;
+pub mod logging;
 mod math;
 mod mermaid;
 mod output;

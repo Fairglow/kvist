@@ -1235,6 +1235,8 @@ dependencies = [
  "syntect",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
+ "tracing-subscriber",
  "unicode-segmentation",
  "unicode-width",
  "vte 0.15.0",
