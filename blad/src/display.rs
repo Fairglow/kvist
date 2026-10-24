@@ -528,7 +528,10 @@ fn viewer_session(
                 if !matches!(code, KeyCode::Enter) {
                     status.clear();
                 }
-                if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('q') && !search.editing {
+                if modifiers.contains(KeyModifiers::CONTROL)
+                    && code == KeyCode::Char('q')
+                    && !search.editing
+                {
                     return Ok(ViewerAction::Quit);
                 }
                 if search.editing {
@@ -645,6 +648,44 @@ fn viewer_session(
                             scroll_offset = scroll_offset.saturating_sub((visible_lines / 2).max(1))
                         }
                         KeyCode::Char('l') => painter.invalidate(),
+                        KeyCode::Home => {
+                            scroll_offset = 0;
+                            scroll_x = 0;
+                        }
+                        KeyCode::End => {
+                            scroll_offset = total_lines.saturating_sub(visible_lines);
+                        }
+                        KeyCode::Char('r') => {
+                            let candidate = read_reload_source(path).and_then(|source| {
+                                let document = Document::render_with_options(
+                                    &source,
+                                    cols,
+                                    line_numbers,
+                                    width_limit,
+                                    options,
+                                )?;
+                                Ok((source, document))
+                            });
+                            match candidate {
+                                Ok((source, updated)) => {
+                                    *content = source;
+                                    document = updated;
+                                    scroll_offset = scroll_offset
+                                        .min(document.lines.len().saturating_sub(visible_lines));
+                                    scroll_x = scroll_x.min(document.max_x());
+                                    links = extract_links(&inert_source(content));
+                                    spans = links
+                                        .iter()
+                                        .map(|link| link_spans(&document, link))
+                                        .collect();
+                                    selected_link = None;
+                                    selected_part = 0;
+                                    search.update(&document.lines, scroll_offset);
+                                    *status = "Reloaded file".into();
+                                }
+                                Err(error) => *status = format!("Error reloading file: {error}"),
+                            }
+                        }
                         _ => {}
                     }
                 } else {
@@ -658,13 +699,15 @@ fn viewer_session(
                             scroll_offset += 1;
                         }
                         KeyCode::PageUp if modifiers.contains(KeyModifiers::SHIFT) => {
-                            scroll_offset = scroll_offset.saturating_sub((visible_lines / 2).max(1));
+                            scroll_offset =
+                                scroll_offset.saturating_sub((visible_lines / 2).max(1));
                         }
                         KeyCode::PageUp => {
                             scroll_offset = scroll_offset.saturating_sub(visible_lines);
                         }
                         KeyCode::PageDown if modifiers.contains(KeyModifiers::SHIFT) => {
-                            scroll_offset = scroll_offset.saturating_add((visible_lines / 2).max(1));
+                            scroll_offset =
+                                scroll_offset.saturating_add((visible_lines / 2).max(1));
                         }
                         KeyCode::PageDown | KeyCode::Char(' ') => {
                             scroll_offset = (scroll_offset + visible_lines)
@@ -676,15 +719,8 @@ fn viewer_session(
                         KeyCode::Char('d') => {
                             scroll_offset = scroll_offset.saturating_add((visible_lines / 2).max(1))
                         }
-                        KeyCode::Home if modifiers.contains(KeyModifiers::CONTROL) => {
-                            scroll_offset = 0;
-                            scroll_x = 0;
-                        }
                         KeyCode::Home => {
                             scroll_x = 0;
-                        }
-                        KeyCode::End if modifiers.contains(KeyModifiers::CONTROL) => {
-                            scroll_offset = total_lines.saturating_sub(visible_lines);
                         }
                         KeyCode::End => {
                             scroll_x = document.max_x();
@@ -703,12 +739,10 @@ fn viewer_session(
                             scroll_offset = total_lines.saturating_sub(visible_lines);
                         }
                         KeyCode::Char('/') => {
-                            // If search is active, refine it; otherwise start new
-                            if !search.query.is_empty() {
-                                search.editing = true;
-                            } else {
-                                search.begin(false);
-                            }
+                            // Always open a fresh forward search, replacing any
+                            // existing query. The previous query is not carried
+                            // over, so re-running a search is a new prompt.
+                            search.begin(false);
                             selected_link = None;
                         }
                         KeyCode::Char('n') | KeyCode::Char('>') if !search.matches.is_empty() => {
@@ -784,37 +818,6 @@ fn viewer_session(
                         KeyCode::Char('e') => {
                             if let Some(path) = path {
                                 return Ok(ViewerAction::Edit(path.to_path_buf()));
-                            }
-                        }
-                        KeyCode::Char('r') if modifiers.contains(KeyModifiers::CONTROL) => {
-                            let candidate = read_reload_source(path).and_then(|source| {
-                                let document = Document::render_with_options(
-                                    &source,
-                                    cols,
-                                    line_numbers,
-                                    width_limit,
-                                    options,
-                                )?;
-                                Ok((source, document))
-                            });
-                            match candidate {
-                                Ok((source, updated)) => {
-                                    *content = source;
-                                    document = updated;
-                                    scroll_offset = scroll_offset
-                                        .min(document.lines.len().saturating_sub(visible_lines));
-                                    scroll_x = scroll_x.min(document.max_x());
-                                    links = extract_links(&inert_source(content));
-                                    spans = links
-                                        .iter()
-                                        .map(|link| link_spans(&document, link))
-                                        .collect();
-                                    selected_link = None;
-                                    selected_part = 0;
-                                    search.update(&document.lines, scroll_offset);
-                                    *status = "Reloaded file".into();
-                                }
-                                Err(error) => *status = format!("Error reloading file: {error}"),
                             }
                         }
                         KeyCode::Char('b') => {

@@ -73,9 +73,33 @@ fn protected_run_is_observable_before_provider_completion_and_is_redacted() {
             stream
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .expect("deadline");
-            let mut request = [0_u8; 8192];
-            let count = stream.read(&mut request).expect("read");
-            if count == 0 {
+            // Read the full request (head plus the Content-Length body) before
+            // treating the request as received. The client writes the head and
+            // the body in separate writes, so a single read can return only the
+            // head; blocking on the release gate while the body is still in
+            // flight would close the connection mid-write and time out the turn.
+            let mut bytes = Vec::new();
+            let mut chunk = [0_u8; 8192];
+            loop {
+                let count = stream.read(&mut chunk).expect("read");
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&chunk[..count]);
+                if let Some(split) = bytes.windows(4).position(|tail| tail == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&bytes[..split]).to_ascii_lowercase();
+                    let length = header
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:").map(str::trim))
+                        .expect("length")
+                        .parse::<usize>()
+                        .expect("number");
+                    if bytes.len() >= split + 4 + length {
+                        break;
+                    }
+                }
+            }
+            if bytes.is_empty() {
                 continue;
             }
 
