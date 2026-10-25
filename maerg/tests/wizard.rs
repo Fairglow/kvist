@@ -1,7 +1,7 @@
 use std::{
     fs,
     io::{Cursor, Read, Write},
-    net::TcpListener,
+    net::{Shutdown, TcpListener},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
@@ -215,6 +215,11 @@ fn wizard_reuses_ollama_catalog_and_qualifies_native_transport() {
                 body.len()
             )
             .unwrap();
+            // Close the write half so the client sees EOF and reads the body to
+            // completion instead of a connection reset. The mock drops the
+            // socket here, which on some runs tears down the connection before
+            // the client finishes reading, producing a spurious ECONNRESET.
+            let _ = stream.shutdown(Shutdown::Both);
         }
     });
     let output = run(
