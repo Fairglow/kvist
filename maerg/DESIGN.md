@@ -175,7 +175,13 @@ result, no intent was dropped, and every authorized effect applied.
 The model phase runs under one shared wall-clock budget equal to the configured
 profile timeout, covering the liveness probe, every turn attempt, and every retry
 backoff; the per-attempt transport deadline is the remaining budget, so the model
-phase never exceeds the configured timeout by more than scheduling slack. Only
+phase never exceeds the configured timeout by more than scheduling slack.
+Before constructing each transport, check cancellation and then require a
+nonzero remaining model budget. Expiry is a transport timeout, not an invalid
+endpoint/deadline configuration error; cancellation takes precedence.
+Native accounting/cancellation fixtures allow scheduling and durable-recording
+slack within their run budget and bound provider accepts, so an early client
+failure cannot strand the test waiting for a nonexistent next request. Only
 transient availability failures — a socket connection refused, timed out,
 interrupted, or reset error, a slot-allocation timeout, or the overall transport
 timeout — are retried, up to three attempts with a short fixed backoff, to ride

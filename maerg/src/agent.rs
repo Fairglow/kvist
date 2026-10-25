@@ -443,6 +443,17 @@ impl TurnBudget {
     fn remaining(&self) -> Duration {
         self.total.saturating_sub(self.started.elapsed())
     }
+
+    fn model_deadline(&self, cancellation: &CancellationToken) -> Result<Duration> {
+        if cancellation.is_cancelled() {
+            return Err(KvistError::Sav(ModelError::ModelTransportCancelled));
+        }
+        let remaining = self.remaining();
+        if remaining.is_zero() {
+            return Err(KvistError::Sav(ModelError::ModelTransportTimedOut));
+        }
+        Ok(remaining)
+    }
 }
 
 /// Proves a loopback model gateway is accepting connections before a turn runs,
@@ -738,15 +749,11 @@ fn execute_host_turn(
     // shifts a model slot.
     // Construction validates native endpoint authority without network I/O.
     // This must precede even a TCP liveness probe.
+    let deadline = budget.model_deadline(cancellation)?;
     if let Some(native) = native {
-        native.transport_bounded(budget.remaining(), profile.max_output_bytes)?;
+        native.transport_bounded(deadline, profile.max_output_bytes)?;
     } else {
-        DirectModelTransport::new(
-            provider,
-            &endpoint,
-            budget.remaining(),
-            profile.max_output_bytes,
-        )?;
+        DirectModelTransport::new(provider, &endpoint, deadline, profile.max_output_bytes)?;
     }
     probe_gateway_reachable(&endpoint, budget, cancellation)?;
 
@@ -756,15 +763,11 @@ fn execute_host_turn(
     // carries no such identifier.
     complete_turn_counted(
         || {
+            let deadline = budget.model_deadline(cancellation)?;
             let transport = if let Some(native) = native {
-                native.transport_bounded(budget.remaining(), profile.max_output_bytes)?
+                native.transport_bounded(deadline, profile.max_output_bytes)?
             } else {
-                DirectModelTransport::new(
-                    provider,
-                    &endpoint,
-                    budget.remaining(),
-                    profile.max_output_bytes,
-                )?
+                DirectModelTransport::new(provider, &endpoint, deadline, profile.max_output_bytes)?
             };
             Ok(ObservedTransport {
                 transport,
@@ -1277,7 +1280,7 @@ fn execute_agent_inner(
         let mut context = if let Some(native) = &mut choice.native {
             let limit = match native.context_limit {
                 Some(limit) => limit,
-                None => native.transport_bounded(budget.remaining(),profile.max_output_bytes)?
+                None => native.transport_bounded(budget.model_deadline(cancellation)?,profile.max_output_bytes)?
                     .context_limit(&native.model,cancellation)?
                     .ok_or_else(||KvistError::Runtime(sav::runtime::Error::Config{
                         path:None,reason:"shared native serving capacity is unavailable; configure context_limit in the selected registry profile".into(),

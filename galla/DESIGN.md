@@ -21,6 +21,11 @@ confinement from environment, generic containers or namespace IDs. This
 user-requested increment uses a deliberate advisory exception while review
 receipts are unavailable; it claims neither acceptance nor certification.
 
+Native nesting regression checks run probe and request in separate outer
+sandbox invocations and aggregate failures, so a probe failure cannot hide a
+request blocked on stdin. Each inner process has a cleared environment and an
+open, empty stdin pipe, and must exit 3 promptly without stdout.
+
 `enforcement/system_layout.rs` constructs a namespace-only filtered `/usr`
 view, binding its immediate children read-only except `sbin` and handling
 `local` with the same bounded, sorted one-level enumeration. This avoids

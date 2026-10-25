@@ -1,6 +1,52 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped nesting regression repair - 2026-10-25
+
+Independent clean-slate `nesting-source-observer` inspected only the current
+marker-related source and executable tests, excluding intent, queues, prior
+records, reviews and history. It ran no tests and made no compliance judgment.
+The following observations are transcribed from its source-only report:
+
+- `context.rs` uses `symlink_metadata` on `/.galla-sandbox`; any existing
+  entry rejects, only `NotFound` permits continuation, and other inspection
+  errors reject explicitly.
+- Request mode checks before locking or reading stdin, parsing, validation or
+  enforcement. Public `probe()` checks before backend discovery, hashing or
+  namespace inspection. The CLI maps either rejection to status 3 with a
+  diagnostic and no stdout. Public `enforcement::run()` retains its own guard.
+  CLI argument-count/mode errors still return 2 before either mode runs.
+- Enforcement constructs a mode-0555 read-only tmpfs marker after grants and
+  vendor masking. Validation rejects grant destinations covering or below the
+  marker. These source observations do not establish runtime mount behavior.
+- The native conformance test runs the two modes in separate outer sandboxes.
+  Each inner process has `env={}`, piped output and an open unwritten stdin
+  pipe. It must exit 3 within two seconds, produce no stdout and emit both
+  nesting-message substrings. Timeout kills/reaps the inner process.
+  Unsuccessful outer runs collect mode-labelled diagnostics before one final
+  assertion, so an ordinary probe failure cannot hide the request failure.
+- The assertions exercise CLI subprocesses, not direct library rejection.
+  Other metadata errors and every possible grant-overlap/error-precedence
+  case are not directly exercised. The native fixture returns early if its
+  own marker existence check reports a marked environment.
+
+Implementer-attributed execution, separate from that source observation:
+before the repair, the strengthened native test reported both probe status 0
+and request stdin timeout. After restoring the early guards, all 80 default
+Galla tests pass, with two existing opt-in inventory trials ignored. Strict
+all-target, all-feature workspace Clippy and formatting pass. This is scoped
+regression evidence, not component acceptance or runner-wide certification.
+
+The separate source-blind `nesting-intent-comparator` compared this supplement
+and attributed execution with local intent and the root contract, without
+reading implementation/test source or running tests. It found no concrete
+post-repair scoped discrepancy. Pre-repair probe success and request timeout
+violated the nesting requirement. All-phase runtime marker immutability, full
+diagnostic wording, direct-library rejection, metadata-error handling and
+exhaustive grant/error precedence remain unverified by that comparison.
+The native test's marked-environment early return remains a coverage limit.
+Comparison completion is not acceptance or whole-runner certification.
+
 ## Scoped nesting observation - 2026-10-25
 
 Independent clean-slate `source-observer` inspected only marker-related Galla
