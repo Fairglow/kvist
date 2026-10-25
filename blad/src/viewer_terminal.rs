@@ -1,10 +1,53 @@
 use std::io;
 
+pub(crate) fn require_controlling_terminal() -> io::Result<std::fs::File> {
+    use std::io::IsTerminal;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let terminal = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOCTTY)
+        .open("/dev/tty")
+        .and_then(|terminal| {
+            if terminal.is_terminal() {
+                Ok(terminal)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "not a terminal",
+                ))
+            }
+        });
+    terminal.map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("automatic paging requires a controlling terminal: {error}; use --dump for noninteractive output"),
+        )
+    })
+}
+
 pub(crate) struct TerminalGuard {
     raw: bool,
     alternate: bool,
     hidden: bool,
     mouse: bool,
+}
+
+pub(crate) fn wait_event(
+    stream: Option<&crate::stream_input::StdinStream>,
+    timeout: std::time::Duration,
+) -> io::Result<bool> {
+    use crossterm::event;
+    if event::poll(std::time::Duration::ZERO)? {
+        return Ok(true);
+    }
+    if let Some(stream) = stream.filter(|stream| stream.live()) {
+        stream.wait(&io::stdin(), timeout)?;
+        event::poll(std::time::Duration::ZERO)
+    } else {
+        event::poll(timeout)
+    }
 }
 
 impl TerminalGuard {

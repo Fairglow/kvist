@@ -1,6 +1,6 @@
 # Blad User's Guide
 
-Blad is a terminal Markdown viewer for files, with rich formatting,
+Blad is a terminal Markdown viewer and bounded live stdin pager, with rich formatting,
 interactive navigation, search and external-editor handoff. It runs locally
 without project configuration, credentials or a service. Linux x86_64 is the
 verified executable target.
@@ -55,16 +55,113 @@ With no files, redirected stdin supplies a UTF-8 Markdown document. Explicit
 `-` reads stdin among named files in argument order; repeated `-` reuses it.
 Use `./-` to open a literal file named `-`. Named files otherwise leave stdin
 unread. Explicit `-` with terminal stdin fails rather than waiting for input.
-Empty redirected input succeeds. Input must end (EOF) before rendering: this
-is a finite snapshot, not streaming or an interactive stdin pager.
+Empty redirected input succeeds.
 
-If stdin or stdout is not a terminal, inputs render to stdout without the
-viewer or automatic reload. Output is escape-free by default; `--color always`
-explicitly opts into styles for a pipe. `--dump` always suppresses all styling.
+**Breaking routing change:** terminal stdout now automatically starts the viewer,
+even when stdin is a pipe or redirected file. Previously both stdin and stdout
+had to be terminals. Use `--dump` for noninteractive output; separate `--pager`
+and `--no-pager` options are unnecessary and are not provided. `--color never`,
+`NO_COLOR` and `TERM=dumb` affect appearance, not whether paging starts.
+Redirected-stdin paging requires a controlling terminal (`/dev/tty`) for
+keyboard input. If unavailable, Blad fails before consuming stdin and recommends
+`--dump`; it never reads the Markdown stream as keystrokes.
+
+With redirected stdout or `--dump`, inputs still render as finite snapshots
+after EOF, without the viewer or automatic reload. Output is escape-free by
+default; `--color always` explicitly opts into styles for redirected output.
+`--dump` always suppresses all styling.
 Closing the downstream pipe (for example, `head -n 30`) exits quietly with
 success. Other read/write failures remain errors. Stdin shares the inclusive
 16 MiB input ceiling and single overflow probe; invalid UTF-8 or oversized
-input fails before output from any initial source.
+input fails before output from any initial source in these finite routes.
+
+### Streaming Markdown pager
+
+```bash
+cat README.md | blad
+tail -f generated.md | blad
+cat generated.md | blad README.md - GUIDE.md
+cat generated.md | blad --dump
+```
+
+The stdin tab displays valid incoming text before EOF, without requiring a
+newline, complete paragraph or closed code fence. Split UTF-8 characters wait
+for their remaining bytes; authored CR/LF bytes are retained. Markdown is
+re-rendered from retained source, so incomplete syntax and later reference or
+footnote definitions may change earlier output. The final EOF rendering uses
+the same renderer, width and options as a complete document.
+
+The footer shows **LIVE FOLLOW**, **LIVE PAUSED**, **EOF**, or **stdin error**,
+alongside ordinary search/navigation feedback. Initially the view follows the
+newest text. Upward scrolling, search, link selection and heading browsing pause
+following without losing numeric offsets. `G`/`L`/`Ctrl+End` resumes following;
+scrolling downward to the bottom also resumes it. Resize and tab switches keep
+the follow state. Source updates refresh matches without replacing the query
+and clear obsolete link selection. Per-tab retained searches remain unimplemented.
+
+Input continues while help or another tab is visible; the inactive stdin tab
+renders when revisited. Closing the stdin tab stops ingestion and closes its
+document descriptor, allowing upstream pipe closure instead of an abandoned
+reader blocking the producer. EOF/input errors also release that descriptor.
+EOF, including empty input, keeps the viewer open until you close it.
+`q` closes a tab; `Q`/`Ctrl+C` quits all tabs. Quit never waits for producer EOF, drains input or
+kills the producer. Normal pipe closure/backpressure applies; Blad does not
+supervise upstream processes. Use shell `pipefail` when upstream exit status
+matters: EOF alone cannot distinguish producer success from failure.
+
+Interactive stdin paging takes exclusive ownership of the document input:
+Blad keeps one close-on-exec duplicate and replaces process fd 0 with the
+controlling terminal. Editors receive terminal keyboard input, never the
+Markdown pipe. Embedders invoking the interactive file-list helper must not
+concurrently read or pre-buffer stdin; fd 0 remains the keyboard terminal on
+return. Rendering-only APIs and finite routes do not perform this replacement.
+
+Invalid UTF-8, incomplete UTF-8 at EOF, a read failure or overflow beyond
+**16 MiB (16,777,216 bytes)** stops ingestion. The valid retained document stays
+browsable with a persistent footer error. Closing/quitting then exits with
+status 1 and a diagnostic after terminal restoration. Rendering/terminal errors
+also fail explicitly. There is no silent replacement, truncation or limit override.
+An unrelated fatal viewer/restoration error can take diagnostic precedence over
+a stored input failure; preservation of every simultaneous failure is not guaranteed.
+Relative stdin links resolve from the current directory; stdin has no backing
+file, editor handoff or file-save watcher.
+
+The event loop waits on both keyboard and document readiness, so short reads
+do not impose a fixed input-draining delay. Updates are coalesced on a timed
+cadence, not a quiet-period debounce; a continuously writing producer cannot
+indefinitely defer them. Input pumps read
+at most 256 KiB in four 64 KiB reads before checking keyboard events. Normal
+refreshes wait at least 50 ms between completed renders, extended by the prior
+refresh cost when that is larger. EOF/error finalization can refresh immediately.
+There is no worker, unbounded input queue or disk spool. The source ceiling
+does not bound total rendered memory or guarantee hard rendering/search/I/O
+latency. Browser/editor handoffs retain their existing synchronous waits, with
+kernel pipe backpressure while Blad is busy.
+
+This supports **raw Markdown stdin**, not Skott JSONL/events or automatic
+session-directory following. `tail -f FILE | blad` supplies a live pipe;
+`blad FILE` remains the ordinary debounced save-reloading viewer.
+Tools that emit Markdown and honor `PAGER` may use `PAGER=blad`; do not assume
+that arbitrary tools emit Markdown or that ANSI/roff output is passed through.
+
+#### Streaming characterization
+
+On Linux x86_64 with Rust 1.99.1 and the optimized development profile,
+`live_stdin_sustained_input_characterization` fed 36,419 UTF-8 source bytes
+(200 mixed heading/list/code/table/math/reference sections) in 1,024-byte
+batches with 10 ms PTY reads between batches. The harness observed the first
+text after 101 ms and the final EOF document after 557 ms, with seven painted
+frames, 17,002 terminal bytes including cleanup and 18,216 KiB peak resident
+memory. Observed quit/cleanup took 110 ms. These include producer pacing and
+test-harness polling; they are characterization of this workload, not throughput,
+memory ceilings or universal latency guarantees.
+
+Reproduce explicitly with:
+
+```bash
+cargo test --offline --locked -p kvist-blad --test viewer \
+  live_stdin_sustained_input_characterization -- --ignored --nocapture --test-threads=1
+```
 
 ### File input limits
 
@@ -85,7 +182,9 @@ truncation or size-limit override: split oversized documents into smaller files.
 Reported file size is checked before decoding/rendering, and actual reading
 stops after at most the limit plus one probe byte if metadata understates content.
 
-Initial validation fails before terminal entry or any dump output. Failed
+Initial named-file validation fails before terminal entry; all finite-route
+inputs validate before any output. Interactive stdin validates incrementally
+as described above. Failed
 links/reloads leave the previous document usable without adding tabs/history.
 Post-editor reread errors retain the existing failure policy: report an error
 and exit after restoring the terminal.
@@ -98,8 +197,8 @@ canonical path. Ancestor traversal, device-open effects and concurrent writes
 are not isolated; file contents are not snapshots.
 
 These are per-file source limits, not bounds on total tab memory, rendered
-expansion, search/rendering time or kernel/FUSE I/O latency. This is not a
-streaming pager. Strings supplied directly to the rendering library are outside
+expansion, search/rendering time or kernel/FUSE I/O latency. This is not an
+unlimited-stream or giant-file pager. Strings supplied directly to the rendering library are outside
 these file-read limits.
 
 ## Global Options

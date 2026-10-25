@@ -1,4 +1,4 @@
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::links::Link;
 use crate::render_writer::LinkSpan;
@@ -21,9 +21,47 @@ g/G or Ctrl+Home/End: top/bottom; Home/End: horizontal start/end
 Alt+Left/Right: tabs; Ctrl+PageUp/Down also work
 b: back; e: editor; file saves reload automatically
 
+stdin streams automatically; scrolling up/search pauses following
+G / Ctrl+End resumes following; EOF keeps the document open
+
 q/Esc: close tab; Ctrl+Q or Ctrl+C: quit all; Ctrl+L: redraw
 ? / F1 / h: this help; Ctrl+C quits from any mode
 ";
+
+/// Update the live pin, returning whether downward navigation can re-pin it.
+pub(crate) fn follow_key(code: KeyCode, modifiers: KeyModifiers, following: &mut bool) -> bool {
+    let control = modifiers.contains(KeyModifiers::CONTROL);
+    if (modifiers.contains(KeyModifiers::ALT) && matches!(code, KeyCode::Left | KeyCode::Right))
+        || (control && matches!(code, KeyCode::PageUp | KeyCode::PageDown))
+    {
+        return false;
+    }
+    if matches!(code, KeyCode::Char('G' | 'L')) || (control && code == KeyCode::End) {
+        *following = true;
+    } else if matches!(
+        code,
+        KeyCode::Up
+            | KeyCode::PageUp
+            | KeyCode::Tab
+            | KeyCode::BackTab
+            | KeyCode::Char('k' | 'g' | 'H' | 'u' | '/' | '[' | ']' | 'n' | 'N' | '<' | '>')
+    ) || (control
+        && matches!(
+            code,
+            KeyCode::Home
+                | KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Char('b' | 'u' | 'r')
+        ))
+    {
+        *following = false;
+    }
+    matches!(code, KeyCode::PageDown | KeyCode::Char('j' | ' ' | 'd'))
+        || (code == KeyCode::Down && !control)
+        || (code == KeyCode::Char('f') && control)
+}
 
 pub(crate) fn link_spans(document: &Document, link: &Link) -> Vec<LinkSpan> {
     document
@@ -87,6 +125,35 @@ pub(crate) fn reveal(span: &LinkSpan, y: &mut usize, x: &mut usize, height: usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn follow_keys_pause_browsing_resume_bottom_and_leave_tab_switches_alone() {
+        for (code, modifiers) in [
+            (KeyCode::Up, KeyModifiers::NONE),
+            (KeyCode::Home, KeyModifiers::CONTROL),
+            (KeyCode::Right, KeyModifiers::CONTROL),
+            (KeyCode::Char('/'), KeyModifiers::NONE),
+            (KeyCode::Char('n'), KeyModifiers::NONE),
+            (KeyCode::Tab, KeyModifiers::NONE),
+        ] {
+            let mut following = true;
+            assert!(!follow_key(code, modifiers, &mut following));
+            assert!(!following);
+        }
+        for code in [KeyCode::PageUp, KeyCode::PageDown] {
+            let mut following = true;
+            assert!(!follow_key(code, KeyModifiers::CONTROL, &mut following));
+            assert!(following);
+        }
+        let mut following = false;
+        follow_key(KeyCode::End, KeyModifiers::CONTROL, &mut following);
+        assert!(following);
+        assert!(follow_key(
+            KeyCode::Down,
+            KeyModifiers::NONE,
+            &mut following
+        ));
+    }
 
     fn span(row: usize, start: usize) -> LinkSpan {
         LinkSpan {

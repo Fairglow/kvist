@@ -12,6 +12,14 @@
 //! query terminal capabilities or launch processes. Interactive helpers in
 //! [`display`] have separate terminal, filesystem and explicit editor/browser
 //! behavior.
+//! [`display::view_markdown_files_with_options`] automatically pages redirected
+//! stdin when stdout is a terminal and settings are not plain. It requires a
+//! controlling terminal for keyboard input, retains at most 16 MiB of source,
+//! and leaves the viewer open at EOF. Plain or nonterminal output remains a
+//! finite snapshot. This does not make the renderer a stateful streaming parser.
+//! The interactive stdin helper exclusively takes over input and replaces
+//! process fd 0 with the controlling terminal; callers must not concurrently
+//! read or pre-buffer stdin. Closing its tab releases the document descriptor.
 //!
 //! ```
 //! use blad::{MarkdownRenderer, RenderOptions};
@@ -82,6 +90,7 @@ mod scripts;
 mod search;
 #[cfg(feature = "sessions")]
 mod session_display;
+mod stream_input;
 mod table;
 mod table_navigation;
 mod terminal_text;

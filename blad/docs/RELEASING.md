@@ -50,11 +50,16 @@ arbitration findings explicitly; do not rewrite historical evidence as accepted.
 ### Candidate assessment (2026-10-25)
 
 Blad has useful first-release scope for ordinary local Markdown on Linux:
-tabbed reading, precise search/links, text math/diagrams, automatic save reload
-and finite Unix pipelines. Do not market it as a giant-file/streaming pager,
+tabbed reading, precise search/links, text math/diagrams, automatic save reload,
+bounded live stdin paging and finite dump/redirected-output pipelines.
+Do not market it as an unlimited-stream or giant-file pager,
 a full Markdown/TeX/Mermaid implementation or a cross-platform viewer.
 Automatic reload retains numeric rendered offsets, not source paragraphs;
-inactive tabs refresh when revisited. Stdin snapshots wait for producer EOF.
+inactive file tabs refresh when revisited. Terminal stdout automatically pages
+stdin through a separate controlling terminal; `--dump` opts out. Finite
+snapshots still wait for EOF. The live source ceiling is 16 MiB, and EOF leaves
+the viewer open. Release evidence must include real pipe/PTY streaming tests
+in both feature modes, including exact limits, cancellation and final fidelity.
 
 The keybinding follow-up reserves `?` for help, removes `p` and link mode,
 and relies solely on automatic reload; normal-mode Ctrl+R starts regex search,

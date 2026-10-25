@@ -11,6 +11,38 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-pager-tests
+    title: "write_tests: automatic bounded streaming pager"
+    description: "Pin live stdin through a separate controlling PTY, bounded decoder/pump behavior, follow/search/resize/tabs, errors and finite-route preservation."
+    kind: test
+    status: completed
+    context: "Idle-producer startup and missing-controlling-terminal regressions failed before production changes. Independent review later reproduced editor pipe theft and an abandoned fd-0 reader; dedicated regressions failed before ownership repairs. Final stable/MSRV default+sessions suites and actual extracted-package suites/installations pass; precise evidence and limits are in IMPL.md."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066", "REQUIREMENTS.md#R-069", "REQUIREMENTS.md#R-070", "REQUIREMENTS.md#R-071", "REQUIREMENTS.md#R-072"]
+  - id: blad-pager-code
+    title: "implement_code: automatic stdin paging"
+    description: "Add readiness-driven bounded ingestion and coalesced complete-source refresh to the existing viewer; document automatic routing and dump opt-out."
+    kind: implementation
+    status: completed
+    context: "Automatic terminal-stdout paging, separate keyboard terminal, bounded safe input pump, coalesced complete-source refresh, sticky input errors and dump opt-out implemented/documented. Independent findings drove owned close-on-exec document input, keyboard fd 0 and explicit editor stdin; extracted debug-package evidence drove multiplexed readiness waiting instead of a fixed drain delay. Final characterization is in docs/USAGE.md."
+    depends_on: [blad-pager-tests]
+    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066", "REQUIREMENTS.md#R-069", "REQUIREMENTS.md#R-070", "REQUIREMENTS.md#R-071", "REQUIREMENTS.md#R-072"]
+  - id: blad-pager-audit
+    title: "security_audit: stream and terminal ownership"
+    description: "Inspect bounded bytes/work, inert controls, exclusive keyboard/document descriptors, sticky failures and terminal/process cleanup."
+    kind: security-audit
+    status: completed
+    context: "Scoped input/terminal audit and independent source-only observations retained in IMPL.md. Editor pipe theft and an abandoned reader were reproduced and repaired; independent focused reruns pass. Bounds, inert controls, sticky failures, source ownership and tested cleanup covered; no failure-injection, fatal-signal or blanket security certification."
+    depends_on: [blad-pager-code]
+    requirements: ["REQUIREMENTS.md#R-069", "REQUIREMENTS.md#R-071", "REQUIREMENTS.md#R-072"]
+  - id: blad-pager-review
+    title: "compliance_review: independent streaming pager evidence"
+    description: "Derive source-only IMPL observations, compare source-blind against intent and test evidence, and retain limits/discrepancies explicitly."
+    kind: compliance-review
+    status: completed
+    context: "Independent source-only observations and separate source-blind comparison are in IMPL.md. Initial traceability gaps have explicit supplemental execution/documentation evidence; concurrent-failure diagnostic preservation remains an identified policy/evidence reservation for human disposition. No intent rewritten to conceal findings, acceptance or blanket certification."
+    depends_on: [blad-pager-audit]
+    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066", "REQUIREMENTS.md#R-069", "REQUIREMENTS.md#R-070", "REQUIREMENTS.md#R-071", "REQUIREMENTS.md#R-072"]
   - id: blad-keybindings-tests
     title: "write_tests: simplified viewer keys"
     description: "Pin help-only question mark, inert p/f/F5, direct Ctrl+R regex search, modeless navigation and save-driven reload."

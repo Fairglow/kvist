@@ -2,12 +2,78 @@
 
 # Blad Design
 
-Blad is an interactive Markdown file viewer with syntax highlighting,
+Blad is an interactive Markdown file viewer and bounded live stdin pager with syntax highlighting,
 search/navigation, tabs, and optional external editing. The opt-in `sessions`
 feature reads skott's structured format from `.skott/runs/`, adding session
 listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
+
+### Automatic bounded stdin pager (2026-10-25)
+
+The user explicitly approves replacing both-TTY routing with automatic paging
+when stdout is a terminal. `--dump` already expresses noninteractive plain
+output, so do not add redundant pager flags. Keep nonterminal stdout and dump
+routes finite, fully validated snapshots. Require `/dev/tty` before entering a
+redirected-stdin viewer so Crossterm cannot fall back to reading the document
+pipe as keyboard input. Named files validate before terminal entry; defer the
+single stdin slot only for the interactive route. Mixed inputs retain order
+and canonical/stdin deduplication.
+
+Use one private live-input owner with bounded source, a small UTF-8 carry,
+revision and terminal state (live, EOF, stopped or failed). Reuse the locked
+Rustix dependency as a default safe readiness/read adapter, without changing
+stdin's shared descriptor flags or introducing unsafe code. The event loop
+polls readiness and reads bounded batches, checking terminal events between
+batches. It never performs an unconditional blocking stdin read or starts a
+worker that might be stranded on an idle producer. Exclusive stdin reading is
+an invariant of the viewer; kernel/filesystem stalls are not isolated.
+
+Independent source observation exposed editor stdin inheritance and an
+abandoned fd-0 reader after closing the stdin tab. Give the live adapter an
+owned close-on-exec duplicate of the document descriptor and atomically replace
+fd 0 with the controlling terminal through safe Rustix stdio APIs. This is an
+explicit process-global effect of the interactive helper, not the renderer.
+Release the owned document on EOF, failure or tab close. Editor subprocesses
+also receive an explicit terminal descriptor. Do not retain another pipe
+duplicate for restoration: returning from/closing the viewer abandons input.
+
+The extracted-package debug suite exposed slow draining when a short pump was
+followed by an unconditional 50 ms keyboard wait. Check Crossterm's buffered
+events first, then poll both keyboard and document readiness within the existing
+refresh/watch deadline. Recheck Crossterm after waking, including signal
+interrupts for resize. Producer readiness must wake input draining immediately
+without increasing the render cadence or adding a worker.
+
+Store retained source in the live-input owner, not duplicate per-tab buffers.
+Pump even when another tab/help is active. The stdin document renders from
+the complete retained UTF-8 source, using existing Document/navigation/search
+and changed-row Painter paths. Coalesce renders at a minimum 50 ms interval,
+extending the interval by the previous refresh cost when needed; bound input
+work per pump to 256 KiB in 64 KiB reads and never wait for producer silence.
+Keep at most three incomplete UTF-8 bytes between reads. Read no more than the
+remaining source allowance plus one probe; terminal input failures stop
+reading, retain valid content and are returned after terminal restoration
+when the operator closes the viewer. Errors remain in stream chrome even when
+ordinary notices are cleared. At EOF flush the decoder and leave browsing
+open. Closing stdin stops reading without draining or killing upstream.
+
+Keep a per-tab following bit with the existing numeric positions. Only stdin
+uses it: initially pin bottom, pause for upward navigation/search/link/heading
+browsing, resume on explicit bottom or downward arrival at bottom. Resize and
+activation reapply the bit. Retain source across provisional parses so late
+definitions can change earlier output; do not treat blank lines as immutable
+Markdown boundaries. Update search and navigation on successful refresh.
+Named-file save reload remains debounced and position-retaining, not following.
+The library renderer and optional session snapshots keep their boundaries.
+
+Write fail-first PTY tests using a controlling terminal separate from a real
+stdin pipe, plus decoder/pump/refresh unit tests and finite-route regressions.
+Measure a representative sustained-input workload and document the results
+as characterization, not a hard deadline or aggregate-memory guarantee.
+This user-directed bundle uses a deliberate advisory exception while receipt
+enforcement is unavailable. Independent source-only observation and a separate
+source-blind comparison follow implementation; neither constitutes acceptance.
 
 ### Simplified viewer keybindings (2026-10-25)
 

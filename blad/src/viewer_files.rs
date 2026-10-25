@@ -13,9 +13,10 @@ pub(crate) struct OpenFile {
 pub(crate) struct Position {
     pub y: usize,
     pub x: usize,
+    pub following: bool,
 }
 
-pub(crate) fn load_files(paths: &[PathBuf]) -> io::Result<Vec<OpenFile>> {
+pub(crate) fn load_files(paths: &[PathBuf], live_stdin: bool) -> io::Result<Vec<OpenFile>> {
     let mut files: Vec<OpenFile> = Vec::new();
     for path in paths {
         let canonical = if path == Path::new("-") {
@@ -38,6 +39,8 @@ pub(crate) fn load_files(paths: &[PathBuf]) -> io::Result<Vec<OpenFile>> {
                 io::ErrorKind::InvalidInput,
                 "'-' requires redirected stdin; supply a file path instead",
             ))
+        } else if live_stdin {
+            Ok(String::new())
         } else {
             crate::file_input::read_bounded(io::stdin().lock(), 16 * 1024 * 1024).and_then(
                 |bytes| {
@@ -52,10 +55,14 @@ pub(crate) fn load_files(paths: &[PathBuf]) -> io::Result<Vec<OpenFile>> {
                 format!("cannot read {}: {error}", path.display()),
             )
         })?;
+        let following = canonical.is_none() && live_stdin;
         files.push(OpenFile {
             path: canonical,
             content,
-            position: Position::default(),
+            position: Position {
+                following,
+                ..Position::default()
+            },
         });
     }
     if files.is_empty() {
@@ -98,6 +105,7 @@ pub(crate) fn edit_file(path: &Path) -> io::Result<String> {
     let status = std::process::Command::new(program)
         .args(&args[1..])
         .arg(path)
+        .stdin(crate::viewer_terminal::require_controlling_terminal()?)
         .status()?;
     if !status.success() {
         return Err(io::Error::other(format!(
