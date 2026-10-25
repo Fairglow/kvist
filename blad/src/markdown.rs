@@ -11,7 +11,7 @@
 //! - Fenced code blocks with language tags
 //! - Autolinks
 
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
 use std::io::Write;
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
@@ -238,6 +238,7 @@ fn render_markdown_theme(
     let mut in_heading = false;
 
     let mut in_table = false;
+    let mut table_alignments = Vec::new();
     let mut table_rows: Vec<Vec<String>> = Vec::new();
     let mut table_row_cells: Vec<String> = Vec::new();
     let mut table_links = crate::table_navigation::TableLinks::default();
@@ -656,7 +657,7 @@ fn render_markdown_theme(
                 writeln!(w)?;
                 need_blank = true;
             }
-            Event::Start(Tag::Table(_)) => {
+            Event::Start(Tag::Table(alignments)) => {
                 inline.finish(w)?;
                 inline.reset(0, 0);
                 if need_blank {
@@ -667,15 +668,24 @@ fn render_markdown_theme(
                 }
                 at_start = false;
                 in_table = true;
+                table_alignments = alignments;
                 table_rows.clear();
                 table_row_cells.clear();
                 table_links = crate::table_navigation::TableLinks::default();
             }
             Event::End(TagEnd::Table) => {
                 in_table = false;
-                render_table(w, &table_rows, &table_links, terminal_width, settings)?;
+                render_table(
+                    w,
+                    &table_rows,
+                    &table_alignments,
+                    &table_links,
+                    terminal_width,
+                    settings,
+                )?;
                 writeln!(w)?;
                 need_blank = true;
+                table_alignments.clear();
                 table_rows.clear();
                 table_row_cells.clear();
                 inline.reset(0, 0);
@@ -873,6 +883,7 @@ fn render_markdown_theme(
 fn render_table(
     w: &mut crate::render_writer::RenderWriter<'_, impl Write>,
     rows: &[Vec<String>],
+    alignments: &[Alignment],
     links: &crate::table_navigation::TableLinks,
     terminal_width: Option<usize>,
     settings: &RenderOptions,
@@ -965,11 +976,17 @@ fn render_table(
                     write!(w, " | ")?;
                 }
                 if line_idx < wrapped_lines.len() {
+                    let cell = &wrapped_lines[line_idx];
+                    let (leading, trailing) = cell_padding(
+                        cell,
+                        col_widths[i],
+                        alignments.get(i).copied().unwrap_or(Alignment::None),
+                    );
+                    write!(w, "{}", " ".repeat(leading))?;
                     for mark in &wrapped_links[i][line_idx] {
                         w.mark_link_columns(mark.source, mark.range.start, mark.range.end);
                     }
-                    let padded = pad_cell(&wrapped_lines[line_idx], col_widths[i]);
-                    write!(w, "{}", padded)?;
+                    write!(w, "{cell}{}", " ".repeat(trailing))?;
                 } else {
                     // Pad with spaces for shorter cells
                     write!(w, "{}", " ".repeat(col_widths[i]))?;
@@ -985,14 +1002,15 @@ fn render_table(
     Ok(())
 }
 
-/// Pad a cell to the right width.
-fn pad_cell(cell: &str, width: usize) -> String {
+fn cell_padding(cell: &str, width: usize, alignment: Alignment) -> (usize, usize) {
     let cell_width = unicode_width::UnicodeWidthStr::width(cell);
-    if cell_width >= width {
-        cell.to_string()
-    } else {
-        format!("{}{}", cell, " ".repeat(width - cell_width))
-    }
+    let spare = width.saturating_sub(cell_width);
+    let leading = match alignment {
+        Alignment::None | Alignment::Left => 0,
+        Alignment::Center => spare / 2,
+        Alignment::Right => spare,
+    };
+    (leading, spare - leading)
 }
 
 fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> Option<&'a syntect::parsing::SyntaxReference> {

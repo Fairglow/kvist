@@ -2131,6 +2131,45 @@ fn mouse_follows_named_links_and_does_not_activate_plain_duplicates() {
 }
 
 #[test]
+fn aligned_table_links_keep_selection_and_mouse_hitboxes_after_resize() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.md");
+    std::fs::write(temp.path().join("target.md"), "# Target").unwrap();
+    for (delimiter, leading) in [(":---:", 9), ("---:", 18)] {
+        std::fs::write(
+            &source,
+            format!(
+                "| Alignment |\n| {delimiter} |\n| [界](target.md) |\n| 01234567890123456789 |"
+            ),
+        )
+        .unwrap();
+        for numbers in [false, true] {
+            let mut viewer = Viewer::start(&source, 40, 10, numbers);
+            let column = leading + if numbers { 2 } else { 0 };
+            assert_eq!(viewer.screen.cells[2][column], "界");
+            viewer.keys(format!("\x1b[<0;{};3M", column).as_bytes());
+            assert!(viewer.screen.line(0).contains("source.md"));
+            viewer.keys_with_frame(b"\t");
+            assert!(
+                viewer.screen.underlined[2]
+                    .iter()
+                    .enumerate()
+                    .all(|(index, &value)| value == (column..column + 2).contains(&index))
+            );
+            viewer.resize(50, 12);
+            assert_eq!(viewer.screen.cells[2][column], "界");
+            viewer.keys(format!("\x1b[<0;{};3M", column + 1).as_bytes());
+            assert_eq!(
+                viewer.screen.line(1),
+                if numbers { "1 # Target" } else { "# Target" }
+            );
+            assert_eq!(viewer.screen.scrolls, 0);
+            viewer.quit();
+        }
+    }
+}
+
+#[test]
 fn theme_file_settings_survive_tabs_edit_and_resize() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("source.md");

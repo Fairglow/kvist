@@ -281,9 +281,10 @@ Blad depends on:
 CommonMark parsing and documented extensions are terminal projections, not
 full CommonMark/GFM conformance claims. Raw HTML is omitted; image alternative
 text remains visible without graphics. Task items retain `[x]` or `[ ]`
-markers. Tables retain source column order but do not implement delimiter
-left/center/right alignment. Script, math and alert extensions are Blad's
-documented dialect.
+markers. Tables retain source column order and honor delimiter left/center/right
+alignment as specified below. Inline cell emphasis and code retain their text,
+but not their individual styling. HTML tables and merged cells are outside this
+profile. Script, math and alert extensions are Blad's documented dialect.
 
 ### Optional Kvist/Skott integration reliability
 
@@ -372,6 +373,15 @@ columns. Terminal-native/monochrome/plain output MAY omit fixed backgrounds
 without changing geometry. The width budget
 includes these separators. A row's height is the maximum wrapped cell height;
 shorter cells are padded to that height.
+
+Delimiter markers `:---`, `:---:` and `---:` MUST select left, center and right
+alignment respectively, for the header and every rendered body-cell line.
+Unspecified alignment MUST remain left. Padding MUST use Unicode display
+columns; an odd extra center-padding space MUST go on the right. Alignment
+MUST NOT alter column widths, wrapping, row heights or row styling. Empty
+lines/cells retain the full column width. Link spans MUST cover their rendered
+labels after leading alignment padding, never that padding, including after
+resize and inside quotes or numbered viewports.
 
 Under the fixed terminal geometry model (display-column width : line height =
 1:2), each cell's width floor MUST come from its own nonempty wrapped text

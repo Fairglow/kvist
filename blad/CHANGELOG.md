@@ -29,6 +29,9 @@ First standalone crates.io release candidate, not yet published.
   explicit color policy and escape-free rendered dumps.
 - Syntax highlighting, wrapped tables, task completion markers, bounded
   mathematical text and five-family text-only Mermaid diagrams.
+- Table delimiter left/center/right alignment in headers and wrapped cells,
+  with Unicode-aware padding and precise aligned link selection/hitboxes.
+  Inline cell emphasis/code styling remains flattened.
 - Self-contained package fixtures, unchanged AGPL license text and standalone
   package/installation verification.
 - Separate opt-in Kvist/Skott snapshot/export integration with explicit

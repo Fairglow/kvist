@@ -1,6 +1,6 @@
 //! Integration tests for table rendering with wrapping and column width adaptation.
 
-use blad::MarkdownRenderer;
+use blad::{MarkdownRenderer, RenderOptions};
 use unicode_width::UnicodeWidthStr;
 
 /// Strip ANSI escape codes for easier testing.
@@ -57,6 +57,114 @@ fn test_table_basic_alignment() {
         "Table lines should be aligned, got widths: {:?}",
         widths
     );
+}
+
+#[test]
+fn delimiter_alignment_applies_to_headers_and_body_in_styled_and_plain_output() {
+    let markdown = "| L | C | R | U |\n| :--- | :---: | ---: | --- |\n| x | y | 7 | z |\n| 123456 | 123456 | 123456 | 123456 |\n| | y |";
+    let expected = [
+        ["L     ", "  C   ", "     R", "U     "].join(" | "),
+        ["x     ", "  y   ", "     7", "z     "].join(" | "),
+        ["123456"; 4].join(" | "),
+        ["      ", "  y   ", "      ", "      "].join(" | "),
+    ]
+    .join("\n")
+        + "\n\n";
+    for width in [None, Some(0), Some(1), Some(80)] {
+        for options in [RenderOptions::default(), RenderOptions::plain()] {
+            let plain = options.plain;
+            let mut renderer = MarkdownRenderer::with_options(options);
+            renderer.set_width(width);
+            let mut output = Vec::new();
+            renderer.render_markdown(markdown, &mut output).unwrap();
+            let output = String::from_utf8(output).unwrap();
+            assert_eq!(strip_ansi(&output), expected, "width {width:?}");
+            if plain {
+                assert!(!output.contains('\x1b'));
+            } else {
+                assert!(output.starts_with("\x1b[7m"));
+            }
+        }
+    }
+}
+
+#[test]
+fn delimiter_alignment_measures_unicode_display_columns() {
+    let output = strip_ansi(&render_width(
+        "| L | C | R |\n| :--- | :---: | ---: |\n| 界 | e\u{301} | 👩‍💻 |\n| 123456 | 123456 | 123456 |",
+        80,
+    ));
+    let row: Vec<_> = output.lines().nth(1).unwrap().split(" | ").collect();
+    assert_eq!(row, ["界    ", "  e\u{301}   ", "    👩‍💻"]);
+    assert!(
+        output
+            .lines()
+            .filter(|line| !line.is_empty())
+            .all(|line| line.width() == 24)
+    );
+}
+
+#[test]
+fn delimiter_alignment_preserves_explicit_and_empty_cell_lines() {
+    let output = strip_ansi(&render_width(
+        "| L | C | R |\n| :--- | :---: | ---: |\n| a<br><br/>b | c<br><br />d | e<br><BR>f |\n| 123456 | 123456 | 123456 |",
+        80,
+    ));
+    let rows: Vec<_> = output.lines().collect();
+    assert_eq!(rows[1], ["a     ", "  c   ", "     e"].join(" | "));
+    assert_eq!(rows[2], ["      "; 3].join(" | "));
+    assert_eq!(rows[3], ["b     ", "  d   ", "     f"].join(" | "));
+    assert_eq!(rows[4], ["123456"; 3].join(" | "));
+}
+
+#[test]
+fn delimiter_alignment_pads_each_wrapped_line_without_changing_geometry() {
+    let markdown = "| Left | Center | Right |\n| :--- | :---: | ---: |\n| a b c d e f g h i j | one two three four five six seven eight | alpha beta gamma delta epsilon zeta |\n| x | y<br><br>z | 7 |";
+    let unaligned = markdown
+        .replace(":---:", "---")
+        .replace(":---", "---")
+        .replace("---:", "---");
+    let natural_rows = strip_ansi(&render_width(markdown, 1000)).lines().count();
+    for width in [0, 1, 30, 45, 80, 1000] {
+        let baseline = strip_ansi(&render_width(&unaligned, width));
+        let output = strip_ansi(&render_width(markdown, width));
+        assert_eq!(output.lines().count(), baseline.lines().count());
+        if width == 30 {
+            assert!(output.lines().count() > natural_rows);
+        }
+        for (actual, reference) in output.lines().zip(baseline.lines()) {
+            let expected = reference
+                .split(" | ")
+                .enumerate()
+                .map(|(column, cell)| {
+                    let text = cell.trim();
+                    let spare = cell.width() - text.width();
+                    let leading = match column {
+                        1 => spare / 2,
+                        2 => spare,
+                        _ => 0,
+                    };
+                    format!(
+                        "{}{text}{}",
+                        " ".repeat(leading),
+                        " ".repeat(spare - leading)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" | ");
+            assert_eq!(actual, expected, "viewport {width}");
+            assert_eq!(actual.width(), reference.width());
+        }
+    }
+}
+
+#[test]
+fn delimiter_alignment_is_local_to_each_table() {
+    let output = strip_ansi(&render_width(
+        "| First |\n| ---: |\n| x |\n\n| Second |\n| --- |\n| y |",
+        80,
+    ));
+    assert_eq!(output, "First\n    x\n\n\nSecond\ny     \n\n");
 }
 
 #[test]

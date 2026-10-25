@@ -155,7 +155,14 @@ Blad renders:
 - Mermaid diagrams (text-only rendering)
 - Alert callouts (NOTE, TIP, IMPORTANT, WARNING, CAUTION)
 
-Blad uses CommonMark parsing with selected extensions. It is not a full CommonMark or GFM implementation — raw HTML is omitted, images show alt text only, and some table features are not supported.
+Blad uses CommonMark parsing with selected extensions, not full CommonMark or
+GFM conformance. Tables support width-aware whole-word wrapping and delimiter
+alignment: `:---` left, `:---:` center, `---:` right; unspecified alignment is
+left. Long tokens or minimum column widths can require horizontal scrolling.
+Inline bold, italic, strikethrough and code in table cells retain their text,
+but not their individual styling; links remain navigable. HTML tables and
+merged cells are not supported. Raw HTML is omitted, except table-cell `<br>`
+line breaks, and images show alt text only.
 
 ## Architecture
 
