@@ -4,6 +4,74 @@
 
 Date: 2026-10-12
 
+## Extracted-package PTY synchronization evidence - 2026-10-25
+
+PR #9's stable and Rust 1.95.0 archive jobs failed only
+`theme_file_settings_survive_tabs_edit_and_resize`, with an empty raw-output
+assertion. The test's optional input helper could return after a single idle
+100 ms poll without receiving the action's redraw. A new delayed-input test
+first reproduced that early return with a stale normal footer.
+
+An independent clean-slate `pty-source-observer` read only `tests/viewer.rs`,
+without intent, prior records/reviews, history or execution evidence. It observed:
+
+- `keys_with_frame` writes input and requires an end-of-synchronized-update
+  marker within the existing five-second read deadline. `keys` retains optional
+  output for other callers. Startup and resize also require frame completion.
+- The delayed-input test stops the retained child, resumes it after 300 ms in
+  a scoped thread, sends `/hit`, checks the rendered literal-search count and
+  exits with Ctrl+C. The thread joins before Viewer destruction, even when
+  the scope body panics, keeping the owned PID alive until signaling completes.
+- Successful editor tests require redraws. Theme checks observe editing and
+  each tab switch separately, asserting custom heading color and, on the
+  target document, the light code background. Resize retains its color check.
+- Existing exit helpers check terminal restoration; Drop kills and waits for
+  the directly owned child. No explicit descendant-group cleanup is added.
+
+Observed source SHA-256:
+`e7e0998f92368f0fa3e87dd1c44b755cd0bf258975ac23fe5dd4bbee266cf461`.
+
+A separate `pty-intent-comparator` read only local intent, that observation and
+the two archive execution logs, without source, queues, previous records or
+history. It found evidence supporting the narrow R-063 repair, not complete
+component compliance or release approval. It retained these limitations:
+
+- Frame completion detects an end marker received during the call, not a
+  matched start/end transaction or action acknowledgement.
+- The new design's blanket wording about redraw actions is broader than the
+  actual scoped migration: unrelated ordinary-key callers remain optional.
+- Pre-existing editor-failure tests can wait for exit without draining a late
+  diagnostic into their raw buffer. Those exit-only routes were not changed.
+
+These observations remain explicit review limitations for maintainer
+disposition; they are not silently resolved by altering intent or claiming
+all timing races are eliminated.
+
+Compared intent SHA-256, in REQUIREMENTS/CONTRACT/DESIGN order:
+
+```text
+7137dccf6845d5d8117dd257752368baef24d9bf47fa7db791419154e6b70abc
+9900a45d051037a7b6932722337add9278e860834b4bb5956835f342317fa65d
+c6e6a6807e540749e763fa667fe15433f9317bc287941cc6d83c91d2aa8d0c13
+```
+
+Implementer execution: source PTY suites pass on stable and 1.95.0; formatting,
+strict all-feature Clippy and patch hygiene pass. The actual archive verifier
+passes on both toolchains with default and sessions tests and isolated release
+installations, including stdin/redirected smoke checks: 44 PTY tests per cell,
+254 total default and 275 sessions passing executions per compiler; two opt-in
+characterizations remain ignored in each feature suite. Local candidate runs
+used `--offline --allow-dirty`; no runtime source or dependency changed.
+Explicit toolchain probes identify rustc 1.99.1 and rustc 1.95.0. The comparator
+correctly notes the archive logs themselves did not print compiler identities.
+
+Archive execution-log SHA-256, stable then MSRV:
+
+```text
+d52c7ef120656fdc0019c0ff66426c096b237298ae72c30226d3a530a3467701
+a63f28db62d48bcaef65703982e6ab47c3cbd92c07983a74d70e2a77f13bab30
+```
+
 ## Source-only release-readiness observation - 2026-10-25
 
 Independent clean-slate `source-observer` inspected Blad source/tests, package
