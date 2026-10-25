@@ -1,6 +1,132 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Repository scheduling configuration relocation (2026-10-25)
+
+### Independent source-only observation
+
+The following observation preceded the recipe-assertion refinement below.
+Its scope was `tools/nextest.toml`, the `test` recipe, and the manifest-directory,
+native repository trial and scheduling regression source excerpts. The observer
+did not read intent, prior records, reviews or Git history, or execute tests.
+
+The `test` recipe runs `kvist vendor`, then invokes
+`cargo nextest run --config-file tools/nextest.toml --locked --workspace --all-features --test-threads num-cpus`.
+Configuration selection is explicit; profile selection is not.
+
+The configuration contains one default-profile override selecting
+`package(=skott) & binary(=rust_build_environment) & test(=native_repository_tests_execute_inside_the_workspace_sandbox)`
+with `threads-required = "num-test-threads"`. This declares whole-pool thread
+reservation for that exact package, binary, and test combination, rather than
+merely assigning a serial group. An empty `profile.ci` table is also present.
+These are configuration declarations, not observed scheduler execution or
+evidence of exclusivity across separate invocations.
+
+The native test carries `#[serial]`, checks that `.kvist/vendored` exists,
+constructs a sandbox executor using `/usr/bin/bwrap`, and requests Cargo metadata
+followed by `cargo test -p galla --lib -- --test-threads=2`. Its visible success
+assertion checks whether returned output contains `test result: ok`; helper
+behavior is outside this observation.
+
+Two additional tests assert that parsed TOML contains the exact filter with the
+required reservation string, and that the first nextest command found in
+`justfile` includes the explicit configuration argument. The initial observer
+identified that the latter could match an unrelated recipe. That finding
+prompted the refinement independently observed next.
+
+### Independent observation of the refined recipe assertion
+
+A separate clean-slate context read only the refined test excerpt:
+
+The test selects the repository Just recipe beginning with the exact header
+`test:`, then searches its initial contiguous indented lines for the first
+command whose trimmed text starts with `cargo nextest run `. It splits that
+command on whitespace and asserts that adjacent arguments are exactly
+`--config-file` and `tools/nextest.toml`. It fails if the justfile cannot be read,
+the exact recipe header is absent, no matching command is found, or that
+argument pair is missing. This is a static text check: it does not execute Just
+or nextest, parse shell syntax, verify the configuration file's existence or
+contents, or demonstrate actual scheduling behavior.
+
+### Implementer-executed evidence
+
+- A tracked-only archive of `38be501` reproduced the CI missing-file panic
+  without moving or modifying the ignored local configuration.
+- Before adding the shared configuration and recipe flag, both scheduling
+  regressions failed. The original full-pool assertion remains unchanged.
+- Stable and Rust 1.95.0 each passed both regressions with all features. The
+  same binaries each passed against a staged tracked-only archive containing no
+  `.config/nextest.toml`.
+- In that isolated archive, removing the flag from `test` while adding a
+  correctly configured unrelated recipe made the refined assertion fail.
+  Restoring the archive made both toolchains pass both checks again.
+- Explicit nextest default and CI profile runs each passed both checks, using
+  four and three threads respectively. `just --dry-run test` showed the explicit
+  configuration argument. Formatting, strict all-feature targeted Clippy and
+  patch whitespace checks passed.
+
+These initial executions cover the configuration relocation and recipe
+selection, not native repository-trial overlap or the whole workspace.
+The existing exact selector and full-pool setting are retained. No production sandbox
+behavior or ignored local configuration was changed. Custom overrides, separate
+invocations, external writers and stale fixtures remain outside the guarantee.
+
+### Initial independent source-blind comparison
+
+Independent source-only observations match the relocation intent:
+`tools/nextest.toml` declares the exact package/binary/test selector and full-pool
+reservation in the default profile; `just test` explicitly selects that file.
+The refined recipe assertion targets `test:` rather than potentially accepting
+an unrelated recipe. These are finite static observations, not
+scheduler-execution proof.
+
+Implementer-executed evidence reports passing regressions on two toolchains,
+tracked-only archives without `.config/nextest.toml`, a negative recipe-selection
+check, and explicit default/CI-profile runs with different thread counts. This
+supports checkout independence and configuration selection, but those runs
+exercised the regressions, not native-trial exclusivity or ordinary-test
+concurrency.
+
+No concrete implementation contradiction is established. However, the scoped
+requirement and design demand runtime demonstration of both exclusivity and
+retained parallelism; that demonstration was absent from the permitted new
+evidence. The reviewer requested arbitration on fresh event-based verification,
+without relying on historical evidence or claiming formal acceptance.
+
+### Additional implementer-executed native scheduling evidence
+
+Fresh native verification was performed rather than relaxing the requirement.
+The complete `rust_build_environment` integration binary passed all 16 tests
+under both the default profile with four threads and the inherited CI profile
+with three threads. Both runs used the tracked configuration, all features,
+offline locked builds and `KVIST_GALLA=/opt/target/debug/galla-runner`.
+Structured events were captured using
+`--message-format libtest-json-plus --message-format-version 0.1` and
+`NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1` for independent examination. The nextest run
+IDs were `c087798b-9fd9-41da-8b3c-1710c3bc52e3` and
+`3a92d26b-0913-4a25-a24a-d7fe117586d4`, respectively.
+
+### Independent source-blind runtime evidence comparison
+
+A separate context parsed only the two fresh event streams and scoped
+scheduling intent with a standard-library script:
+
+| Metric | Default (4 threads) | CI (3 threads) |
+| --- | ---: | ---: |
+| Starts / completions / passes | 16 / 16 / 16 | 16 / 16 / 16 |
+| Native trial runs / passes | 1 / 1 | 1 / 1 |
+| Active peers at native start | 0 | 0 |
+| Peer starts during native trial | 0 | 0 |
+| Overlap violations | 0 | 0 |
+| Peak ordinary concurrency | 4 | 3 |
+| Unfinished / ignored / ambiguous events | 0 / 0 / 0 | 0 / 0 / 0 |
+
+Suite totals reconcile. No observed scheduling discrepancy. These streams
+demonstrate isolation and ordinary parallelism, not configuration implementation,
+recipe wiring, or clean-checkout independence. This fresh evidence addresses the
+initial comparison's runtime-evidence gap; neither comparison is formal
+acceptance or blanket certification.
+
 ## Observed public contract
 
 ### Scope and entry points

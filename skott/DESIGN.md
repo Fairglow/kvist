@@ -586,12 +586,16 @@ Libtest fixtures in that test binary use process-local `#[serial]` locks.
 Nextest launches each test in a separate process, so those locks cannot
 coordinate its tests. The repository-wide trial inspects the same live tree
 in which fixtures from multiple binaries temporarily create sandbox-only
-links. `.config/nextest.toml` selects its exact package, binary and test and
+links. The tracked `tools/nextest.toml` selects its exact package, binary and test and
 sets `threads-required = "num-test-threads"` in a default-profile override.
+The repository's `just test` recipe explicitly selects this file; it does not
+depend on nextest's discovery of the ignored sandbox-local `.config/nextest.toml`.
 It reserves the entire current nextest pool, including when `-j` changes its
 size, without serializing unrelated tests. A one-member serial group would
 not exclude tests outside that group. The configuration regression pins the
-exact selector and full-pool requirement; actual nextest start/finish events
+exact selector and full-pool requirement. A recipe regression pins explicit
+configuration selection, and tracked-only checkout verification demonstrates
+that neither check requires sandbox-local files. Actual nextest start/finish events
 verify exclusivity and retained ordinary parallelism. Separate invocations and
 unrelated writers remain uncoordinated. Interrupted-test scratch must be
 removed before rerunning; no scope-validation exception is introduced.
