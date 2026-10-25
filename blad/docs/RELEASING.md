@@ -56,7 +56,10 @@ a full Markdown/TeX/Mermaid implementation or a cross-platform viewer.
 Automatic reload retains numeric rendered offsets, not source paragraphs;
 inactive tabs refresh when revisited. Stdin snapshots wait for producer EOF.
 
-This follow-up fixes documented backward-search dispatch, stale key references,
+The keybinding follow-up reserves `?` for help, removes `p` and link mode,
+and relies solely on automatic reload; normal-mode Ctrl+R starts regex search,
+and search-prompt Ctrl+R still toggles regex.
+Earlier readiness work fixed stale key references,
 the rustdoc logging link, and diagnostic initialization that could silently
 lose an error or block on a FIFO. Earlier export-authority, nonblank-kind and
 help-key findings have candidate documentation clarifications, not retroactive

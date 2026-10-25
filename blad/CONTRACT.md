@@ -121,12 +121,13 @@ Navigation: `↑`/`k`, `↓`/`j`, `PageUp`/`Ctrl+B` (full page up),
 `PageDown`/`Ctrl+F`/`Space` (full page down), `u`/`Ctrl+U` and
 `d`/`Ctrl+D` (half pages), `g`/`H` (top), `G`/`L` (bottom), mouse wheel.
 `[`/`]` jump to the previous/next rendered heading without wrapping.
-Search: `/` forward, `?` backward; type a case-insensitive literal query,
-`Ctrl+R` toggles regex in the same prompt, `Ctrl+U` clears the prompt,
+Search: `/` starts a fresh forward literal search; normal-mode `Ctrl+R` starts
+a fresh forward regex search. Both are case insensitive. `Ctrl+R` toggles
+literal/regex in either prompt, `Ctrl+U` clears the prompt,
 `Enter` keeps results and returns to normal mode; `Esc` cancels an active search
 prompt. After Enter, normal-mode Esc closes the active tab rather than clearing
-retained results. `n` repeats the search
-direction, `N`/`p` reverse it, wrapping at document boundaries. Each nonempty,
+retained results. `n`/`>` move forward and `N`/`<` move backward, wrapping at
+document boundaries. Plain `p` has no search action. Each nonempty,
 nonoverlapping occurrence counts separately. Search is per rendered line, not
 across soft wraps. Exact matching spans are highlighted; a partial grapheme
 match highlights its whole grapheme. Search begins at/near the viewport;
@@ -137,7 +138,7 @@ unless overridden inline; pattern input is limited to 4,096 UTF-8 bytes and
 compiled regex/DFA caches to 2 MiB each. Zero-width matches are ignored.
 Links: `Tab`/`Shift+Tab` select links directly, `Enter` follows the selection
 or the first link at/below the viewport. Left-clicking rendered labels
-follows their destination. Optional `f` link mode remains.
+follows their destination. There is no link mode; plain `f` has no action.
 Only the active link's rendered spans receive selection emphasis.
 Prose, headings, table cells and repeated bare URLs share renderer-owned
 position metadata for keyboard selection and mouse hit testing.
@@ -154,10 +155,10 @@ Other: `e` hands the whole file to `$EDITOR`, `b` returns to the previous tab,
 `Alt+Left`/`Alt+Right` switch open-file tabs. Normal-mode `q`/`Esc` closes
 the current tab, selecting the next tab (or previous if last); closing the sole
 tab exits. Normal-mode `Q`/`Ctrl+Q` quits all tabs. Modal Esc cancels only that mode.
-`h`/`F1` opens keyboard help (any key except Ctrl+C dismisses);
+`?`/`h`/`F1` opens keyboard help (any key except Ctrl+C dismisses);
 `Ctrl+C` always quits, including from help/search. `Ctrl+L` forces a repaint.
-Normal-mode `Ctrl+R` or `F5` explicitly reloads the active file from its opening canonical
-path. It retains options, tab order/history and numeric viewport offsets,
+Interactive file tabs reload automatically from their opening canonical path.
+Reload retains options, tab order/history and numeric viewport offsets,
 clamping offsets to the new layout. Search query/mode/direction persist and
 results are recalculated near the retained viewport; link selection is cleared.
 Reload opens the candidate nonblockingly without following a final symlink,
@@ -165,16 +166,17 @@ then requires the opened descriptor to be a regular file before reading.
 Replacing the final path with a FIFO or symlink therefore fails visibly.
 This is not ancestor-path isolation or an atomic snapshot of concurrent writes.
 New contents replace the current document only after successful UTF-8 read and
-render. Errors retain the previous document and appear in the footer. An
-embedded document without a file path reports that reload is unavailable.
-Interactive file tabs also reload automatically: the active path is polled
+render. Errors retain the previous document and appear in the footer.
+The active path is polled
 every 250 ms, with changes debounced until metadata is stable for at least
 250 ms. Inactive tabs refresh when revisited. In-place saves and atomic
 replacements are detected; no worker, network service or watch flag is needed.
-Automatic reload shares the transactional read/render and input limits above,
+Automatic reload uses the transactional read/render and input limits above,
 retains the search prompt and numeric viewport offsets, and cancels obsolete
-link mode/selection. Failures are shown once per observed metadata state and
-retried after a subsequent change or explicit reload. Successful automatic
+link selection. Failures are shown once per observed metadata state and
+retried after a subsequent change. `F5` has no action; `Ctrl+R` starts regex
+search in normal mode and toggles regex inside the prompt, never reloads.
+Successful automatic
 reload does not hide search feedback with a success notice. Pathless documents,
 session snapshots and noninteractive output do not watch.
 This is not tail-following, conflict detection, a source-anchor-based position

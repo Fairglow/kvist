@@ -40,6 +40,6 @@ as described in `docs/USAGE.md`, rather than graphical crow's-foot glyphs.
 - Unit tests for link extraction, classification and path resolution
   (`src/links.rs`).
 - PTY-driven integration tests that follow a file link and navigate back, and
-  that verify link mode is inert without links and that `Esc` exits it
+  that verify `f` is inert with or without links and navigation stays modeless
   (`tests/viewer.rs`).
 - Browser errors remain visible in the viewer; rendering never launches a process.

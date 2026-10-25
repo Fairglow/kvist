@@ -73,7 +73,7 @@ every 250 ms and waits for metadata to remain stable for at least another
 250 ms, including rename-based editor saves. Inactive tabs refresh when
 revisited. Scroll offsets, search and rendering settings are retained;
 offsets clamp if the document shrinks. Read/render failure keeps the previous
-document and shows a footer error; another save or `Ctrl+R`/`F5` retries.
+document and shows a footer error; another save retries.
 No watch flag, worker or service is required. This is not tail-following or
 a guarantee of source-anchored position after arbitrary edits. Session snapshots,
 pathless documents and noninteractive output do not watch.
@@ -349,9 +349,8 @@ breaks and empty lines. Without a configured width, tables stay unwrapped.
 | `q` / `Esc` | Close active tab; exit if it was the last |
 | `Q` / `Ctrl+Q` | Quit all tabs in normal mode |
 | `Ctrl+C` | Quit all tabs from any mode |
-| `h` / `F1` | Keyboard help; any key except Ctrl+C returns |
+| `?` / `h` / `F1` | Keyboard help; any key except Ctrl+C returns |
 | `Ctrl+L` | Force repaint |
-| `Ctrl+R` / `F5` | Reload the active file, retaining viewport position |
 
 Closing a tab selects the next surviving tab, or the previous one if closing
 the rightmost tab. Surviving tabs keep their order and scroll positions;
@@ -366,34 +365,31 @@ re-entry.
 The following order describes actual dispatch, not just the normal-mode key
 table. Key-release events are ignored.
 
-1. **Ctrl+C always quits all tabs**, including from help, search and link mode.
+1. **Ctrl+C always quits all tabs**, including from help and search.
 2. **Help consumes any other key to dismiss itself**, without performing that
    key's normal action. In particular `Q`, `q`, Esc, arrows and Ctrl+L only
    dismiss help; it is not a scrollable modal pager.
-3. **Alt+Left/Right switches tabs only outside an open search prompt or `f`
-   link mode.** A normal selected link or committed search does not block it.
+3. **Alt+Left/Right and Ctrl+PageUp/PageDown switch tabs only outside an open
+   search prompt.** A selected link or committed search does not block them.
 4. **Ctrl+Q quits outside the search prompt** (after help dismissal takes
-   precedence). Plain `Q` quits in normal mode, is query text in a search prompt,
-   and is ignored by `f` link mode. Ctrl+C is the unambiguous global quit.
+   precedence). Plain `Q` quits in normal mode and is query text in a search
+   prompt. Ctrl+C is the unambiguous global quit.
 5. **An open search prompt consumes keys.** Printable characters without
    Ctrl/Alt append; Backspace deletes; Ctrl+R toggles regex; Ctrl+U clears;
    Enter keeps results and returns to normal mode; Esc clears the query/results
    and returns to normal mode. Other keys are ignored (apart from global Ctrl+C).
    `q`, `h`, `r`, `n`, `p`, `?` and `/` are query text there.
-6. Outside search, **Ctrl+Arrows selects spatial links**, even in `f` mode.
-7. **`f` link mode consumes non-Ctrl keys**: Tab/Shift+Tab cycle, Enter follows
-   and leaves the mode, Esc leaves it and clears selection. Other non-Ctrl keys,
-   including `Q`, `q`, `h`, arrows, `r`, `b` and Alt+Arrows, do nothing.
-   Ctrl+B/F, Ctrl+U/D, Ctrl+L and Ctrl+R still scroll/repaint/reload in this mode.
-8. Remaining Ctrl keys use the page/half-page/repaint bindings; remaining keys
-   use normal-mode bindings.
+6. Outside search, **Ctrl+Arrows selects spatial links**.
+7. Remaining Ctrl keys use the page/half-page/repaint bindings; remaining keys
+   use normal-mode bindings. Ctrl+R starts regex search; plain `p`, `f` and
+   F5 have no action. There is no link mode.
 
 Thus normal-mode `q`/Esc closes a tab even with a directly selected link or
 committed search. **After Enter commits a search, Esc closes the active tab**;
 to clear committed highlights without closing, press `/` then Esc.
 
-Mouse wheel and left-click link handling are independent of search/link
-keyboard modes; they remain active in both. Help ignores mouse input. Resize
+Mouse wheel and left-click link handling remain active during search as well
+as normal navigation. Help ignores mouse input. Resize
 reflows the underlying document and help layout without dismissing a mode.
 
 ### Link Navigation
@@ -415,10 +411,7 @@ the selected link itself is excluded from spatial candidates.
 Without a selection, Tab starts at the first link whose first rendered span is
 at/below the viewport top (or wraps to the first); Shift+Tab starts with the last
 at/above it (or the last link). Subsequent Tab/Shift+Tab steps in source order
-and wraps. Optional `f` link mode starts at the document's first link, using
-Tab/Shift+Tab to cycle, Enter to follow and leave the mode, and Esc to leave
-without following and clear selection. The other key exceptions are listed
-under [keyboard precedence](#keyboard-precedence).
+and wraps.
 Press `Enter` to follow the link:
 
 - **File links** (relative or absolute paths) open the linked file in Blad.
@@ -446,29 +439,29 @@ still open: Blad does not terminate independent browsers. Launch remains
 synchronous, so input waits during those five seconds; process creation,
 kernel scheduling and termination calls are not hard real-time bounded.
 
-You do not need link mode to follow a link: pressing `Enter` in normal mode
+Pressing `Enter` in normal mode
 follows the selected link, or the first link at/below the top of the viewport
 if nothing is selected. That fallback does not wrap when no link remains.
 Bare URLs (`https://…`) are treated as links in addition to bracketed and named links.
 Left-click link labels to follow them directly, including wrapped labels,
 table cells and bare URLs. Repeated bare URLs are independent occurrences.
 
-Press `Esc` to exit link mode without following.
-
 ### Search
 
-Press `/` for forward or `?` for backward search. Type a query, then press `Enter`
+Press `/` for forward literal search or `Ctrl+R` for forward regex search.
+Type a query, then press `Enter`
 to exit search mode and keep the matches highlighted.
 
 | Key | Action |
 |-----|--------|
-| `/` / `?` | Start forward/backward literal search |
+| `/` | Start or refine forward literal search |
+| `Ctrl+R` (normal mode) | Start forward regex search |
 | Type text / `Backspace` | Append to / delete from query |
 | `Ctrl+R` | Toggle literal/regex in this prompt |
 | `Ctrl+U` | Clear the prompt |
 | `Enter` | Exit search, keep highlights |
 | `n` / `>` | Next occurrence in the search direction, wrapping |
-| `N` / `p` / `<` | Occurrence in the reverse direction, wrapping |
+| `N` / `<` | Previous occurrence, wrapping |
 | `Esc` | Cancel only an open prompt; after Enter this closes the tab |
 
 The footer shows mode, direction and occurrence position (e.g., "3/12 matches"),
@@ -477,15 +470,15 @@ matches on one row count separately. Only matching text is highlighted, across
 heading, emphasis and syntax resets. Reverse video and underline retain a
 non-color cue, including inside inline code and reversed table headers.
 Forward search starts at the first occurrence at/below the viewport top,
-wrapping to the first if necessary. Backward search starts at the last
-occurrence at/above that row, wrapping to the last if necessary; it does not
-start from the viewport bottom or current horizontal position. Subsequent
-`n`/`N`/`p` movement is occurrence-based and reveals horizontal matches.
-For a backward `?` search, `n` moves backward and `N`/`p` move forward.
-Tab, spatial link selection, `f`, and heading-jump keys clear search emphasis.
+wrapping to the first if necessary. Subsequent `n`/`>` and `N`/`<` movement is
+occurrence-based and reveals horizontal matches. `?` opens help in normal
+mode, not backward search. Tab, spatial link selection and heading-jump keys
+clear search emphasis.
 
-Each new prompt starts in **case-insensitive literal mode**, so `a.b` searches
-for that exact text. Toggle `Ctrl+R` to use Rust regex syntax in the same prompt:
+Each new prompt clears the previous query. `/` starts in **case-insensitive
+literal mode**, so `a.b` searches for that exact text. `Ctrl+R` from normal
+mode starts in **case-insensitive regex mode**. Within either prompt, `Ctrl+R`
+toggles literal/regex. Rust regex syntax includes:
 `hit[0-9]+`, `^heading`, `foo|bar`, Unicode classes and inline flags such as
 `(?-i:ExactCase)`. Lookaround and backreferences are not supported. Searches
 operate on rendered lines, not raw Markdown or across soft wraps. Zero-width
@@ -495,12 +488,12 @@ regex and DFA caches are limited to 2 MiB each.
 
 ### Relationship to `less` and future priorities
 
-Blad shares line/page/half-page movement, `/`/`?`, `n`/`N`, `g`/`G`,
+Blad shares line/page/half-page movement, `/`, `n`/`N`, `g`/`G`,
 `Ctrl+L` and `h` with familiar pagers. It deliberately keeps `b` for tab
-history and `f` for optional link mode; use `Ctrl+B`/`Ctrl+F` for full pages.
+history and `?` for help; use `Ctrl+B`/`Ctrl+F` for full pages.
 Tab/Shift+Tab retain conventional link traversal rather than becoming heading
-keys; use `[`/`]` for headings. Unlike `less`, search starts literally and
-regex is explicit, preventing punctuation from unexpectedly becoming syntax.
+keys; use `[`/`]` for headings. Unlike `less`, `/` starts literally and
+regex requires an explicit Ctrl+R, preventing punctuation from unexpectedly becoming syntax.
 Normal `q`/Esc closes one tab rather than always quitting.
 
 Folding, session live follow, a heading outline, numeric movement/line/percent jumps,
@@ -510,8 +503,9 @@ There are no shell escapes or document-triggered external commands.
 
 ### Reloading changed files
 
-Press `Ctrl+R` or `F5` in normal mode to reread the active file from its opening canonical
-path. A successful reload preserves render/theme options, tab history and
+File saves automatically reload the active file from its opening canonical
+path after debounced change detection. A successful reload preserves
+render/theme options, tab history and
 numeric vertical/horizontal positions, clamped to the new document.
 Search query, direction and literal/regex mode persist; results and link
 positions are rebuilt, and obsolete link selection is cleared. It does not
@@ -522,11 +516,11 @@ error, including oversized replacements above the 16 MiB source limit.
 A shorter replacement erases stale rows and clamps scroll offsets.
 Reload opens nonblockingly, refuses final symlinks and validates the opened
 descriptor before reading; FIFO/symlink replacement therefore fails safely.
-This is not ancestor-path isolation or a snapshot of concurrent writes. Embedded
-documents without a file path report that reload is unavailable.
-File tabs also reload automatically after debounced save detection, as described
-above; this is not tail-following. While entering a search, `Ctrl+R` toggles
-regex and `r` remains ordinary query text.
+This is not ancestor-path isolation or a snapshot of concurrent writes.
+Documents without a file path do not reload. There is no manual reload key;
+`F5` does nothing and normal-mode `Ctrl+R` starts regex search. This is not
+tail-following. While entering a search, `Ctrl+R` toggles regex and `r` remains
+ordinary query text.
 
 ### Diagnostics
 

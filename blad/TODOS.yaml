@@ -11,6 +11,38 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-keybindings-tests
+    title: "write_tests: simplified viewer keys"
+    description: "Pin help-only question mark, inert p/f/F5, direct Ctrl+R regex search, modeless navigation and save-driven reload."
+    kind: test
+    status: completed
+    context: "Help-only question mark, inert reload/f and direct Ctrl+R regex entry regressions failed before their fixes; both final feature configurations pass all 46 PTY cases."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-064", "REQUIREMENTS.md#R-068"]
+  - id: blad-keybindings-code
+    title: "implement_code: modeless navigation and automatic-only reload"
+    description: "Remove retired dispatch/state and align README, help and user guide with the approved keybindings."
+    kind: implementation
+    status: completed
+    context: "Removed backward-search entry, p alias, f mode and manual reload state; Ctrl+R now enters regex search or toggles inside a prompt. README/help/user guide aligned; default and sessions suites pass."
+    depends_on: [blad-keybindings-tests]
+    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-052", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-064", "REQUIREMENTS.md#R-068"]
+  - id: blad-keybindings-audit
+    title: "security_audit: key dispatch and reload preservation"
+    description: "Inspect mode removal and retained bounded descriptor reads, visible errors and terminal ownership; no new authority."
+    kind: security-audit
+    status: completed
+    context: "Scoped implementer inspection and independent source observation: no new process, dependency, write authority or reload reader. Watcher-driven transactions, visible errors and terminal ownership retained. No whole-component independent security certification claimed."
+    depends_on: [blad-keybindings-code]
+    requirements: ["REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-064", "REQUIREMENTS.md#R-068"]
+  - id: blad-keybindings-review
+    title: "compliance_review: independent scoped keybinding evidence"
+    description: "Derive a source-only implementation supplement and compare source-blind against revised intent and execution evidence."
+    kind: compliance-review
+    status: completed
+    context: "Independent source-only observations and a separate source-blind comparison retained in IMPL.md; no concrete scoped discrepancy identified. Finite PTY/render-failure/modifier coverage limits remain explicit; no human acceptance or whole-component certification."
+    depends_on: [blad-keybindings-audit]
+    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-052", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-064", "REQUIREMENTS.md#R-068"]
   - id: blad-package-pty-tests
     title: "write_tests: delayed PTY input processing"
     description: "Reproduce the idle-poll race with a temporarily stopped viewer before changing frame synchronization."
