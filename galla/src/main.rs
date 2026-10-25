@@ -61,10 +61,6 @@ fn run_probe() -> ExitCode {
 }
 
 fn run_request() -> ExitCode {
-    if let Err(reason) = context::require_host() {
-        eprintln!("galla-runner: {reason}");
-        return ExitCode::from(3);
-    }
     let mut buffer = Vec::new();
     let mut handle = io::stdin().lock().take((MAX_REQUEST_BYTES as u64) + 1);
     if let Err(error) = handle.read_to_end(&mut buffer) {
@@ -73,7 +69,13 @@ fn run_request() -> ExitCode {
     }
 
     match validation::parse_and_validate(&buffer) {
-        Ok(request) => galla::enforcement::run(request),
+        Ok(request) => {
+            if let Err(reason) = context::require_host() {
+                eprintln!("galla-runner: {reason}");
+                return ExitCode::from(3);
+            }
+            galla::enforcement::run(request)
+        }
         Err(error) => {
             eprintln!("galla-runner: {error}");
             ExitCode::from(2)
