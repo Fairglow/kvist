@@ -140,7 +140,7 @@ the current tab, selecting the next tab (or previous if last); closing the sole
 tab exits. `Q`/`Ctrl+C` quits all tabs. Modal Esc cancels only that mode.
 `h` opens keyboard help (any key except global quit dismisses);
 `Ctrl+C` always quits, including from help/search. `Ctrl+L` forces a repaint.
-Normal-mode `r` explicitly reloads the active file from its opening canonical
+Normal-mode `Ctrl+R` or `F5` explicitly reloads the active file from its opening canonical
 path. It retains options, tab order/history and numeric viewport offsets,
 clamping offsets to the new layout. Search query/mode/direction persist and
 results are recalculated near the retained viewport; link selection is cleared.
@@ -151,8 +151,18 @@ This is not ancestor-path isolation or an atomic snapshot of concurrent writes.
 New contents replace the current document only after successful UTF-8 read and
 render. Errors retain the previous document and appear in the footer. An
 embedded document without a file path reports that reload is unavailable.
-Reload is not automatic following, conflict detection, or a source-anchor-based
-position guarantee across arbitrary file edits.
+Interactive file tabs also reload automatically: the active path is polled
+every 250 ms, with changes debounced until metadata is stable for at least
+250 ms. Inactive tabs refresh when revisited. In-place saves and atomic
+replacements are detected; no worker, network service or watch flag is needed.
+Automatic reload shares the transactional read/render and input limits above,
+retains the search prompt and numeric viewport offsets, and cancels obsolete
+link mode/selection. Failures are shown once per observed metadata state and
+retried after a subsequent change or explicit reload. Successful automatic
+reload does not hide search feedback with a success notice. Pathless documents,
+session snapshots and noninteractive output do not watch.
+This is not tail-following, conflict detection, a source-anchor-based position
+guarantee, or a hard filesystem/rendering deadline.
 The top row lists files in stable opening order with the active tab bracketed.
 Label columns remain fixed when the active marker changes. Opening an existing
 file reuses its tab; switching tabs preserves vertical/horizontal position.

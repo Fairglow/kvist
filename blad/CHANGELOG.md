@@ -7,6 +7,8 @@ First standalone crates.io release candidate, not yet published.
 - Package name `kvist-blad`; executable and Rust library remain `blad`.
 - Local Markdown viewing, stable tabs, literal/regex search, precise links,
   heading navigation, explicit reload and external editing.
+- Debounced automatic file reload with retained viewport/search and recovery
+  after failed reads; inactive tabs refresh when revisited.
 - Dark, light and terminal-native palettes; strict JSON palette overrides;
   explicit color policy and escape-free rendered dumps.
 - Syntax highlighting, wrapped tables, task completion markers, bounded

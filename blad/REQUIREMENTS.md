@@ -265,7 +265,7 @@ feature toggle now.
     timeout with bounded diagnostics, and retain the document and terminal.
     Do not wait for descendant-held output EOF or kill an independent browser.
     Test ordinary completion, failure, timeout, diagnostic floods and cleanup.
-54. **R-054 Explicit reload:** Normal-mode `r` reloads the active file without
+54. **R-054 Explicit reload:** Normal-mode `Ctrl+R` or `F5` reloads the active file without
     terminal teardown, retaining rendering policy, tab order/history and
     numeric vertical/horizontal offsets, clamped to the new layout. Recompute
     search results and navigation metadata; clear obsolete link selection.
@@ -340,6 +340,21 @@ retained optional integration. Selected-root ancestors, aggregate retained
 memory, concurrent snapshots and hard I/O/rendering deadlines are not isolated.
 This increment preserves existing search-Esc/help-Ctrl+C precedence and the
 standalone source ceiling; earlier explicit-acceptance findings remain retained.
+
+### Seamless file reload
+
+64. **R-064 Automatic reload:** Interactive file tabs must detect in-place
+    writes and atomic replacements automatically, without a flag. Refresh the
+    active tab after a short stable-metadata debounce; inactive tabs refresh
+    when revisited. Retain numeric vertical/horizontal offsets (clamping only
+    to the new layout), rendering options, tab order/history and search prompt,
+    query/mode/direction. Recompute search and link/heading metadata; cancel
+    obsolete link selection/mode. Read/render errors retain the old document
+    and report a footer error without repeated notices for unchanged failures.
+    Recover on the next change. Preserve explicit reload, terminal ownership
+    and changed-row painting. Pathless documents and noninteractive output
+    must not watch. Polling is local and bounded in frequency, not a hard
+    latency guarantee or snapshot of concurrent writes.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).
