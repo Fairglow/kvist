@@ -330,6 +330,51 @@ impl Viewer {
     }
 }
 #[test]
+fn toggling_regex_recomputes_an_existing_query_without_an_extra_keystroke() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("toggle.md");
+    std::fs::write(&path, "hit[1] hit1 hit1").unwrap();
+    let mut viewer = Viewer::start(&path, 80, 12, false);
+    viewer.keys(b"/hit[1]");
+    assert!(viewer.screen.line(11).contains("[literal] 1/1"));
+    viewer.keys(b"\x12");
+    assert!(
+        viewer.screen.line(11).contains("[regex] 1/2"),
+        "{}",
+        viewer.screen.line(11)
+    );
+    viewer.keys(b"\x12");
+    assert!(viewer.screen.line(11).contains("[literal] 1/1"));
+    viewer.keys(b"\r");
+    viewer.quit();
+}
+
+#[test]
+fn documented_backward_search_and_reverse_alias_work_from_the_viewport() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("backward.md");
+    std::fs::write(&path, "hit one\n\nhit two\n\nhit three").unwrap();
+    let mut viewer = Viewer::start(&path, 80, 12, false);
+    viewer.keys(b"?hit\r");
+    assert!(
+        viewer.screen.line(11).starts_with("? [literal] 1/3"),
+        "{}",
+        viewer.screen.line(11)
+    );
+    viewer.keys(b"n");
+    assert!(viewer.screen.line(11).contains("3/3"));
+    viewer.keys(b"p");
+    assert!(viewer.screen.line(11).contains("1/3"));
+    viewer.keys(b"<");
+    assert!(viewer.screen.line(11).contains("2/3"));
+    viewer.keys(b"\x1bOP");
+    assert!(viewer.screen.line(0).contains("help"));
+    viewer.keys(b"Q");
+    assert!(viewer.child.try_wait().unwrap().is_none());
+    viewer.exit_with(b"\x03");
+}
+
+#[test]
 fn occurrence_search_is_precise_wraps_and_supports_reverse_and_regex() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("search.md");

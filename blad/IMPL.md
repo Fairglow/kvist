@@ -4,6 +4,173 @@
 
 Date: 2026-10-12
 
+## Source-only release-readiness observation - 2026-10-25
+
+Independent clean-slate `source-observer` inspected Blad source/tests, package
+metadata, verifier and workflows, excluding intent, queues, prior records,
+user docs, reviews and history. It ran no tests and received no execution
+claims. A separate clean-slate `final-source-supplement` observed the final
+regex-toggle source and test. Selected observations are transcribed below;
+the reports are not compliance or security certification.
+
+### Inputs, output and file reload
+
+- `kvist-blad` 0.3.0 declares library/binary `blad`, edition 2024, Rust 1.95,
+  empty default features and optional `sessions`, without peer path dependencies.
+- Canonical duplicate files reuse their initial order. All initial inputs load
+  before document output/terminal entry. `-` reads redirected stdin once as a
+  finite UTF-8 snapshot; terminal stdin is rejected. With no files/command,
+  redirected stdin supplies `-`; terminal stdin prints usage and exits 2.
+- File/stdin sources have an inclusive 16 MiB bound and one overflow probe.
+  Files open nonblockingly/no-follow and require regular opened descriptors.
+  Initial canonicalization accepts authored symlinks; later final-path symlink
+  replacement fails on reload/editor reread. Ancestors are not isolated.
+- Interactive entry requires both standard streams to be terminals and
+  non-plain options. Otherwise documents render sequentially without tab
+  headings. Noninteractive CLI output is normally plain; explicit always-color
+  retains styling, but dump overrides it. CLI render/final-flush BrokenPipe
+  is quiet success; other I/O errors are escaped stderr failures with status 1.
+- Only the active path is polled at 250 ms intervals. A candidate must remain
+  unchanged for another interval. Observations include device/inode, size,
+  mode, nanosecond mtime/ctime, or explicit inspection errors. Each stable
+  observation is attempted once, including failures. New viewer sessions start
+  fresh watchers, refreshing inactive tabs after activation.
+- Reload reads/renders a candidate before replacing live content. Success
+  preserves/clamps x/y, rebuilds links, clears selection and recomputes search.
+  Unchanged automatic content skips rendering; failure retains the old usable
+  document and reports a footer error. Automatic success clears prior reload
+  errors, without a success notice. Metadata polling is not a content hash,
+  concurrent snapshot or hard I/O/render deadline.
+- Painting uses changed rows/synchronized updates, not terminal reentry.
+  Editor handoff restores/reenters the terminal and uses whitespace-split
+  EDITOR/default nvim without shell evaluation or a timeout.
+
+### Keys, diagnostics and independently observed correction
+
+- Ctrl+C precedes all modes; help consumes the next other key. Ctrl+Q quits
+  outside search editing; normal Q quits. Tab switching is disabled during
+  search editing/link mode. Normal q/Esc closes a tab; prompt Esc clears search.
+- `/` and `?` begin forward/backward literal search. `n`/`>` repeat direction;
+  `N`/`p`/`<` reverse. Query/regex caches are bounded, total retained matches
+  are not. Home/End move horizontally, Ctrl+Home/End vertically. Ctrl+R/F5
+  reloads in normal mode; h/F1 opens help.
+- The first observer identified stale matches when toggling an existing query:
+  dispatch flipped regex mode but skipped search recomputation. Its original
+  source snapshot was `b66e6c5a460c2dae1d333eb0fa406296862aff08a64d57ef05fb2c04596c75ec`.
+  The independent final supplement observes `changed` remaining true on Ctrl+R,
+  immediate `search.update`, and a PTY assertion using `hit[1] hit1 hit1`:
+  literal 1/1 → regex 1/2 → literal 1/1 before Enter. Observers executed no tests.
+- Logging uses a process-global Once, BLAD_LOG then RUST_LOG, default warn.
+  A log file opens append/create once, nonblockingly/no-follow, validates a
+  regular descriptor, and retains it across pathname changes. New files use
+  0600 subject to umask; existing modes remain. Invalid destinations emit an
+  escaped warning and fall back to stderr. Footer notices are not automatically
+  tracing events; fatal CLI errors remain unconditional stderr.
+- Renderer strings/Write have explicit deterministic host options; no renderer
+  terminal/process discovery. Controls are inert, styling respects plain mode,
+  writer/flush errors propagate. Math/diagrams are bounded text subsets with
+  visible fallbacks and cooperative cancellation, not hard preemption.
+- Optional session reads are descriptor-relative and individually bounded.
+  Snapshot output is not interactive. Named exports preserve raw Markdown,
+  create/truncate the selected output and are not atomic or inert terminal dumps.
+- The verifier defines extracted default/sessions suites, isolated release
+  installs, package payload/target checks and stdin/redirected/plain smoke
+  comparisons. Workflow declarations do not prove execution, registry ownership,
+  protected environment approval or human acceptance. Sources use Unix APIs.
+
+### Final observed source fingerprints
+
+SHA-256, relative to this component. Final supplement supersedes the earlier
+display/test fingerprints; all other listed sources remained unchanged.
+
+```text
+47cb324341a8a8333a756f095e4368adfb0e9c690699bdb2e002fc4ff8d717f3  src/main.rs
+24812ade905665a093bdd75f502f6f3d0dea9a1d4669ea34008c2f0e985fb6b1  src/display.rs
+16b463bb4cd2fbeaa8756d8866421f33a06e11bb7c86956d1fe4afb7cc823c26  src/viewer_files.rs
+a0e4bf2cf9050f4b7180920b2dcfb51cb146fe84ce4d47b73298ad9fa9d3df76  src/viewer_reload.rs
+ddd2b61e53fae814d6e28ace22fbb9685f939fe84e3a6e8bbc2cf8978bc92066  src/logging.rs
+13fd59165af523e5b298e75b92e6645e783c1a4ef3869c29c558c7236358dbb3  src/search.rs
+f08a4e9fbc4351e6bd5101b46ce109bdbd619a32ae8e06c3801769b3e6b77d59  tests/cli.rs
+c1a7e86d8c9b974c8ea1d64f09b196e9278902ad93aaa725fd1efff477352c8b  tests/viewer.rs
+d5566d67feb079a039e3cf4ee8951a01744af36996a3e79e9ede57d729bab4d2  ci/verify_package.py
+```
+
+### Independent source-blind comparison and final execution
+
+Separate `intent-comparator` read only local intent, the independent source
+reports and final execution logs. It did not inspect source/tests, manifests,
+workflows, queues, earlier records/reviews or history. It found scoped agreement
+for automatic reload, stdin/pipelines, logging and the repaired search behavior,
+not wholesale compliance or publication authority. The independently found
+regex-toggle defect was reproduced before repair and the final PTY regression
+passes in both archive feature modes.
+
+Two residual **intent wording discrepancies remain for human arbitration**:
+
+1. Historical DESIGN security prose says no writes without edit mode, whereas
+   current CONTRACT/source explicitly permit named export and configured logs.
+2. Historical DESIGN says help/version need no file/theme I/O, but explicitly
+   configured logging initializes before argument parsing. Current requirements
+   instead guarantee visible fallback without blocking help/version.
+
+These findings are retained rather than silently rewriting intent to certify
+the implementation. Candidate export/nonblank-kind/help clarifications and
+the conservative 16 MiB policy still require maintainer disposition; this
+review does not retroactively accept earlier findings or fabricate receipts.
+The comparator also retained coverage/provenance limits for exact public-doc
+accuracy, styled/plain task clauses, nonblank-kind cases, matrix attribution
+and Galla runtime evidence. Unverified scope is not a demonstrated test failure.
+
+Actual final execution, separately supplied by the implementing context:
+
+- Stable rustc 1.99.1 and MSRV 1.95.0 each pass default (253) and sessions (274)
+  suites, including 43 PTY cases per mode; each suite normally ignores the two
+  opt-in characterizations. Both characterizations were separately run.
+- Formatter, strict default/all-feature lint, warnings-as-errors rustdoc and
+  downstream Skott/Kvist compilation pass. Offline dependency/advisory/license/
+  source policy passes; seven duplicate-version warnings were observed. This
+  uses cached advisories, not a fresh release-time database.
+- The actual extracted archive passes 527 executions across both feature modes;
+  both isolated release installations and installed stdin/redirected/dump
+  comparisons pass. This candidate preparation used `--allow-dirty`, not an
+  accepted clean release/tag or registry publication.
+- Corpus observations: 14,900-byte mixed text cold 33.34 ms, warm means
+  6.24–6.55 ms across depths; admitted diagram means 0.225–0.831 ms. Larger
+  chain fixtures explicitly hit their work ceiling. These are measured fixtures,
+  not giant-file or hard responsiveness guarantees.
+- After comparison, an additional labelled rerun identifies every compiler/
+  feature command and the native Galla nesting test explicitly, all successful.
+  This supplies attribution missing in the original quiet log; it is additional
+  implementer execution evidence, not an independently rerun comparison.
+
+Compared intent SHA-256:
+
+```text
+7137dccf6845d5d8117dd257752368baef24d9bf47fa7db791419154e6b70abc  REQUIREMENTS.md
+9900a45d051037a7b6932722337add9278e860834b4bb5956835f342317fa65d  CONTRACT.md
+b570aef7ae2027b95e1f156ff3f1755a897dac57b8f32f310a3e9a48d17d1366  DESIGN.md
+```
+
+Evidence SHA-256 (session-local files; source observations above are persisted
+here so interpretation does not depend solely on the session):
+
+```text
+5e501b3c939ad72de36c51974390af9e962d6df17fa268745be2aeb5053697f2  source-observation.txt
+0dc41e075697002a7d9dbb0a2b17ef40f8a8bdb7aa35e81a1af73d267110cb43  source-supplement.txt
+792841f99ed0e912336afe021947c1acabc3baf74ddf5c631750ccaab5baf240  source-blind-comparison.txt
+bfc8410ec9f3bf996b39b91a1a85f81a791da6472ff8d805ecc1944a27293e4d  blad-source-validation-final.log
+7429d511cc49b99eaf6c8167a36ae73b980cf48521fa8c0714408b401f2f1234  blad-package-validation-final.log
+ff97c832d95b635a9f6046e3146f50876ccc899e0caf8022db4b29ed62b4fd6d  blad-labelled-validation.log
+6b89b71a81813c727d353b610a26f2ed94767245d118c4f2b50bf0e8bf2e4440  kvist-blad-0.3.0.crate
+```
+
+Assessment: a locally verified **Linux release candidate**, not unconditional
+release approval. Maintainer arbitration/exact-revision acceptance, fresh
+advisories, registry/account/legal-notice verification, protected publication
+approval and real-terminal/font smoke remain external release gates.
+Per-source bounds do not prove aggregate memory, latency, ancestor isolation,
+atomic snapshots, all-terminal behavior or other-platform support.
+
 ## Standalone publication observation - 2026-10-24
 
 The following record was independently derived in a source-only context.

@@ -42,7 +42,8 @@ tasks:
     title: "compliance_review: independent nesting evidence"
     description: "Derive source-only observations and compare source-blind with local intent."
     kind: compliance-review
-    status: pending
+    status: completed
+    context: "Independent source observations/supplement and separate source-blind comparison retained in IMPL.md. Later explicitly labelled native execution confirms both inner protocol modes return 3 with cleared environment and open stdin. No whole-runner certification or acceptance."
     depends_on: [nested-sandbox-security-audit]
     requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
   - id: "portable-toolchain-write-tests"

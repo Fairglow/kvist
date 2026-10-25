@@ -29,6 +29,34 @@ fn output_before_deadline(command: &mut Command) -> std::process::Output {
 }
 
 #[test]
+fn invalid_diagnostic_log_destinations_are_visible_and_never_block_startup() {
+    let temp = tempfile::tempdir().unwrap();
+    let fifo = temp.path().join("log-\x1b[2J");
+    let link = temp.path().join("log-link");
+    let target = temp.path().join("unchanged");
+    std::fs::write(&target, "unchanged").unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    for path in [
+        &temp.path().join("missing/log"),
+        &fifo,
+        &link,
+        &temp.path().to_path_buf(),
+    ] {
+        let output = output_before_deadline(blad().arg("--version").env("BLAD_LOG_FILE", path));
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("cannot open diagnostic log") && error.contains("using stderr"),
+            "{error}"
+        );
+        assert!(!output.stderr.contains(&0x1b));
+        assert!(String::from_utf8_lossy(&output.stdout).starts_with("blad "));
+    }
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "unchanged");
+}
+
+#[test]
 fn oversized_initial_files_fail_before_output_and_before_utf8_decoding() {
     let temp = tempfile::tempdir().unwrap();
     let first = temp.path().join("first.md");

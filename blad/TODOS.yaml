@@ -11,6 +11,38 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-readiness-tests
+    title: "write_tests: release-readiness regressions"
+    description: "Pin documented reverse search and nonblocking visible log-destination failures."
+    kind: test
+    status: completed
+    context: "Logging fallback, backward search and independently found stale regex-toggle regressions failed first; final source and extracted feature suites pass."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-067"]
+  - id: blad-readiness-code
+    title: "implement_code: release-readiness repairs"
+    description: "Repair key dispatch/log initialization, align public docs and extend archive smoke gates."
+    kind: implementation
+    status: completed
+    context: "Key dispatch, retained nonblocking log descriptors, public docs/rustdoc and installed stdin/redirected smoke gates repaired; final stable/MSRV feature matrix, strict lint/docs, downstream checks and standalone archive installs pass."
+    depends_on: [blad-readiness-tests]
+    requirements: ["REQUIREMENTS.md#R-062", "REQUIREMENTS.md#R-063", "REQUIREMENTS.md#R-067"]
+  - id: blad-readiness-audit
+    title: "security_audit: publication boundaries"
+    description: "Inspect retained log descriptors, explicit failures and package authority; retain limitations."
+    kind: security-audit
+    status: completed
+    context: "Scoped implementer inspection plus independent source observation retained. Logging uses one regular no-follow descriptor with direct escaped fallback and no recursive writer/mutex. Offline dependency/license policy passes; no fresh advisory or whole-component independent security certification claimed."
+    depends_on: [blad-readiness-code]
+    requirements: ["REQUIREMENTS.md#R-063", "REQUIREMENTS.md#R-067"]
+  - id: blad-readiness-review
+    title: "compliance_review: independent release-readiness evidence"
+    description: "Derive source-only observations, compare source-blind with intent and retain publication prerequisites."
+    kind: compliance-review
+    status: completed
+    context: "Independent source observer, final narrow supplement and separate source-blind comparison recorded in IMPL.md. Two historical design wording discrepancies and maintainer/external publication gates remain explicit; no acceptance or blanket compliance. Additional labelled matrix/native runs address original quiet-log attribution limits."
+    depends_on: [blad-readiness-audit]
+    requirements: ["REQUIREMENTS.md#R-063", "REQUIREMENTS.md#R-064", "REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066", "REQUIREMENTS.md#R-067"]
   - id: blad-pipe-tests
     title: "write_tests: Unix pipelines"
     description: "Pin implicit/explicit stdin, limits, ordered mixed sources, TTY routing and head/closed-pipe behavior."
@@ -39,7 +71,8 @@ tasks:
     title: "compliance_review: independent pipeline evidence"
     description: "Derive source-only observations and compare source-blind against local intent."
     kind: compliance-review
-    status: pending
+    status: completed
+    context: "Independent source observation and separate source-blind comparison find scoped agreement for finite bounded stdin/plain defaults/BrokenPipe; final archive CLI suites and both installed feature modes pass. EOF/latency/memory and publication limits retained in IMPL.md."
     depends_on: [blad-pipe-audit]
     requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066"]
   - id: blad-watch-tests
@@ -70,7 +103,8 @@ tasks:
     title: "compliance_review: independent reload evidence"
     description: "Derive source-only observations and compare source-blind against intent."
     kind: compliance-review
-    status: pending
+    status: completed
+    context: "Independent source observation and separate source-blind comparison find scoped agreement; final archive PTY suites include automatic saves, offsets/search, atomic replacement/inactive tabs and recovery. No snapshot, source-anchor or hard deadline claim."
     depends_on: [blad-watch-audit]
     requirements: ["REQUIREMENTS.md#R-064"]
   - id: blad-publication-tests

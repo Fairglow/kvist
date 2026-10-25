@@ -1,6 +1,77 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped nesting observation - 2026-10-25
+
+Independent clean-slate `source-observer` inspected only marker-related Galla
+source/tests, excluding all intent, queues, prior records/reviews and history.
+It ran no tests. A separate clean-slate `final-source-supplement` corrected its
+initial incomplete test-source observation; assertions are not execution proof.
+The selected observations below are transcribed from those source-only reports.
+
+- The private marker is `/.galla-sandbox`. `require_host()` uses
+  `symlink_metadata`: any existing entry rejects, including a dangling link;
+  only `NotFound` permits execution. Other inspection errors reject explicitly.
+- Request mode checks before reading stdin and exits 3 on rejection.
+  Probe checks before backend discovery; the CLI maps unavailability to 3.
+  The public enforcement entry point independently checks before backend lookup.
+- Grant validation checks both containment directions against the reserved
+  marker using slash-delimited path containment, not arbitrary string prefixes.
+  After grants, enforcement adds `--perms 0555 --tmpfs /.galla-sandbox
+  --remount-ro /.galla-sandbox` to Bubblewrap.
+- The native conformance test grants the runner at `/tooling/galla-runner`
+  and runs Python inside the outer sandbox. Its script loops over probe and
+  request, uses `env={}` and `stdin=subprocess.PIPE`, and waits two seconds
+  before writing/closing stdin. It asserts inner status 3, empty stdout and
+  the "already inside" / "unnecessary" diagnostic; timeout kills/reaps the
+  inner child, and Rust asserts outer success.
+- The detector recognizes filesystem state, not process ancestry or marker
+  contents. An unrelated host entry at that fixed pathname also rejects.
+  Inspection permission failures are not directly exercised. This scoped
+  observation does not assess or certify the rest of enforcement.
+
+Final source SHA-256:
+
+```text
+6d0c394f2846a3813d8286b0cbaf0b2b01b974a45de16cd804260b387275a6e1  src/context.rs
+8af33a76e052b2045e5527da93b294e0bd1a485396d94ac44daa1e3f670c7efc  src/main.rs
+c68662e6bc8f1e29e1c4da53f377ec309283735e6ca6810b656eed2bdcc11e34  src/probe.rs
+eedacfa2057e728fe53f5d2abda1e5987e4d09a5ceee94ce12a8db988f27e54f  src/enforcement.rs
+63a364c580b2683afcc107d8af9ef400bec50f8d0614fae924a44b17d04c0309  src/validation.rs
+f75de4433e679748db96d64412e3cba301448cf61e127a7943b9d95c0ceebfbc  tests/conformance.rs
+```
+
+### Independent comparison and execution evidence
+
+The separate source-blind `intent-comparator` found no concrete scoped
+no-nesting mismatch between current intent and independent observations.
+It did not inspect implementation/test source or run tests. Its original
+quiet-log input did not attribute the native conformance run; that is an
+evidence-provenance limitation, not a demonstrated runtime failure.
+
+The implementing context's subsequent labelled execution explicitly runs
+`nested_sandbox_marker_destinations_are_reserved` and
+`executable_executes_successfully_on_valid_request`, both passing. The latter
+executes the source-observed inner probe/request checks with cleared
+environment and open stdin under real Bubblewrap. All default Galla tests
+also pass (80 executions, two opt-in inventory trials ignored), and strict
+lint passes. This is bounded native evidence, not all-phase/mutation-schedule
+proof or certification of the rest of enforcement.
+
+Compared intent SHA-256:
+
+```text
+ba6a99fa4d8e8d3ded6260538342c6c78670314388678aac3338727de0260978  REQUIREMENTS.md
+ac446c07f06f127e854760044b7c7595a8c512ab13a060451f4c9fa4961e47c7  CONTRACT.md
+52c05e957b39f3ce1d09f4070d3f7ab344aa262c81c934bb1f4846b01450fda6  DESIGN.md
+792841f99ed0e912336afe021947c1acabc3baf74ddf5c631750ccaab5baf240  source-blind-comparison.txt
+ff97c832d95b635a9f6046e3146f50876ccc899e0caf8022db4b29ed62b4fd6d  blad-labelled-validation.log
+```
+
+The comparison and labelled log are session-local; the source observations and
+execution scope are persisted above. No component acceptance or receipt is
+implied, and earlier runner-wide review tasks remain untouched.
+
 ## Scoped portable native runtime observation - 2026-10-14
 
 Independent clean-slate `portable-runtime-observer` inspected the native

@@ -9,6 +9,27 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+### Release-readiness follow-up (2026-10-25)
+
+Restore the existing contracted backward-search `?` and reverse-occurrence `p`
+bindings; keep F1/h for help. Pin them in a PTY before repair and document actual
+Home/End, Ctrl+Home/End and modal quit precedence. Reconcile documentation of
+explicit export/log writes and nonblank session kinds, retaining historical
+findings rather than claiming human acceptance of those clarifications.
+The independent source observer also identified stale matches when toggling an
+already-entered regex query. A failing PTY regression pins recomputation on
+both literal-to-regex and regex-to-literal transitions before the dispatch fix.
+
+Replace diagnostic writer lazy reopening/mutex caching with one retained File
+and a borrowed MakeWriter. Opening logging must not wait on FIFOs or report
+errors through tracing before initialization (or recursively inside MakeWriter).
+Use append/create, NONBLOCK/NOFOLLOW, mode 0600 for new files and descriptor
+regularity validation. Report escaped initialization failures directly to
+stderr, then keep stderr as the destination. No new thread, dependency or
+filesystem discovery. Extend the actual extracted-package verifier with stdin
+and pipeline smoke behavior. Use the existing deliberate advisory exception;
+independent observation/comparison are evidence, not release acceptance.
+
 ### Unix pipeline behavior (2026-10-25)
 
 Resolve empty invocation after argument parsing: terminal stdin shows usage;

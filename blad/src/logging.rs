@@ -1,16 +1,10 @@
 //! Diagnostic logging for Blad.
 //!
-//! Structured, level-filtered logging over `tracing`. Diagnostic events are
-//! directed exclusively to standard error so they never interfere with the
-//! viewer screen or any structured output on standard output.
+//! Structured, level-filtered logging over `tracing`, directed to stderr or
+//! an explicitly selected file, never document stdout.
 //!
-//! The interactive viewer uses this for soft, recoverable failures — a link
-//! that cannot be opened, a reload that fails, a terminal that will not
-//! restore — where the user already sees the problem in the status line and
-//! does not need it repeated on stderr. The two fatal entry points in
-//! [`crate::main`] (`report_io` and `fail`) stay on unconditional stderr: an
-//! exit status of 1 must always carry a message, even when logging is
-//! filtered to a level that would suppress the event.
+//! Footer notices are not automatically logged. The CLI's fatal diagnostics
+//! stay on unconditional stderr so filtering cannot hide a reported failure.
 //!
 //! Level filtering is controlled by `BLAD_LOG` (falling back to `RUST_LOG`),
 //! with a default of `warn`. When `BLAD_LOG_FILE` is set, diagnostic output is
@@ -18,6 +12,7 @@
 //! quiet while still capturing diagnostics for later inspection.
 
 use std::fs::File;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::sync::Once;
 use tracing_subscriber::EnvFilter;
@@ -70,17 +65,19 @@ pub fn init_logging_with_default(default_level: &str) {
             _ => EnvFilter::new(default_level),
         };
 
-        // The log file is a convenience, not a contract failure: if it cannot
-        // be opened we fall back to stderr so diagnostics are never lost.
-        let writer = match std::env::var(BLAD_LOG_FILE_ENV) {
-            Ok(path) if !path.trim().is_empty() => match open_log_file(&path) {
-                Ok(_) => LogFileWriter::new(std::path::PathBuf::from(&path)),
+        let writer = match std::env::var_os(BLAD_LOG_FILE_ENV) {
+            Some(path) if !path.is_empty() => match open_log_file(Path::new(&path)) {
+                Ok(file) => LogFileWriter(Some(file)),
                 Err(error) => {
-                    tracing::warn!(%error, log_file = %path, "cannot open log file; using stderr");
-                    LogFileWriter::stderr()
+                    eprintln!(
+                        "blad: cannot open diagnostic log {}: {}; using stderr",
+                        path.to_string_lossy().escape_debug(),
+                        error.to_string().escape_debug()
+                    );
+                    LogFileWriter(None)
                 }
             },
-            _ => LogFileWriter::stderr(),
+            _ => LogFileWriter(None),
         };
 
         let subscriber = tracing_subscriber::fmt()
@@ -94,46 +91,31 @@ pub fn init_logging_with_default(default_level: &str) {
 }
 
 /// Open a log file for appending, creating it if necessary.
-fn open_log_file(path: &str) -> std::io::Result<File> {
-    std::fs::OpenOptions::new()
+fn open_log_file(path: &Path) -> std::io::Result<File> {
+    let file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(Path::new(path))
-}
-
-/// A `MakeWriter` that opens a log file once and reuses the handle, falling
-/// back to stderr if the file cannot be opened. Opening lazily keeps
-/// diagnostics out of the live viewer and lets a user point `BLAD_LOG_FILE`
-/// at a file to capture them for later inspection.
-struct LogFileWriter {
-    path: std::path::PathBuf,
-    cache: std::sync::Mutex<Option<File>>,
-}
-
-impl LogFileWriter {
-    fn new(path: std::path::PathBuf) -> Self {
-        LogFileWriter {
-            path,
-            cache: std::sync::Mutex::new(None),
-        }
+        .mode(0o600)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "diagnostic log requires a regular file",
+        ));
     }
-
-    fn stderr() -> Self {
-        // A sentinel path that never matches; make_writer ignores it.
-        LogFileWriter {
-            path: std::path::PathBuf::from("-"),
-            cache: std::sync::Mutex::new(None),
-        }
-    }
+    Ok(file)
 }
+
+struct LogFileWriter(Option<File>);
 
 /// A log destination that is either a file handle or stderr.
-enum LogWriter {
-    File(File),
+enum LogWriter<'a> {
+    File(&'a File),
     Stderr,
 }
 
-impl std::io::Write for LogWriter {
+impl std::io::Write for LogWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
             LogWriter::File(file) => file.write(buf),
@@ -150,35 +132,43 @@ impl std::io::Write for LogWriter {
 }
 
 impl<'a> tracing_subscriber::fmt::writer::MakeWriter<'a> for LogFileWriter {
-    type Writer = LogWriter;
+    type Writer = LogWriter<'a>;
 
     fn make_writer(&'a self) -> <Self as tracing_subscriber::fmt::writer::MakeWriter<'a>>::Writer {
-        if self.path.as_os_str() == "-" {
-            return LogWriter::Stderr;
-        }
-        let mut cache = self.cache.lock().unwrap();
-        if let Some(file) = cache.as_ref() {
-            return match file.try_clone() {
-                Ok(f) => LogWriter::File(f),
-                Err(_) => LogWriter::Stderr,
-            };
-        }
-        match open_log_file(&self.path.to_string_lossy()) {
-            Ok(file) => {
-                *cache = file.try_clone().ok();
-                LogWriter::File(file)
-            }
-            Err(error) => {
-                tracing::warn!(%error, path = %self.path.display(), "cannot open log file; using stderr");
-                LogWriter::Stderr
-            }
+        match &self.0 {
+            Some(file) => LogWriter::File(file),
+            None => LogWriter::Stderr,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::init_logging_with_default;
+    use super::{LogFileWriter, init_logging_with_default, open_log_file};
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use tracing_subscriber::fmt::writer::MakeWriter;
+
+    #[test]
+    fn log_writers_retain_the_opened_descriptor_and_append_privately() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("log");
+        let retained = temp.path().join("retained");
+        let destination = LogFileWriter(Some(open_log_file(&path).unwrap()));
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o077,
+            0
+        );
+        destination.make_writer().write_all(b"first\n").unwrap();
+        std::fs::rename(&path, &retained).unwrap();
+        std::fs::write(&path, "replacement").unwrap();
+        destination.make_writer().write_all(b"second\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&retained).unwrap(),
+            "first\nsecond\n"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "replacement");
+    }
 
     // Logging is initialized over a `Once`; repeated calls must stay safe and
     // must not panic, double-initialize, or error out.

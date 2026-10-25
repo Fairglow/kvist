@@ -524,8 +524,6 @@ fn viewer_session(
                     match code {
                         KeyCode::Char('r') if modifiers.contains(KeyModifiers::CONTROL) => {
                             search.regex = !search.regex;
-                            // Re-run search with toggled regex mode
-                            changed = false;
                         }
                         KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
                             search.query.clear()
@@ -693,11 +691,8 @@ fn viewer_session(
                         KeyCode::Char('G') | KeyCode::Char('L') => {
                             scroll_offset = total_lines.saturating_sub(visible_lines);
                         }
-                        KeyCode::Char('/') => {
-                            // Always open a fresh forward search, replacing any
-                            // existing query. The previous query is not carried
-                            // over, so re-running a search is a new prompt.
-                            search.begin(false);
+                        KeyCode::Char('/' | '?') => {
+                            search.begin(code == KeyCode::Char('?'));
                             selected_link = None;
                         }
                         KeyCode::Char('n') | KeyCode::Char('>') if !search.matches.is_empty() => {
@@ -712,7 +707,7 @@ fn viewer_session(
                                 );
                             }
                         }
-                        KeyCode::Char('N') | KeyCode::Char('<') if !search.matches.is_empty() => {
+                        KeyCode::Char('N' | 'p' | '<') if !search.matches.is_empty() => {
                             search.advance(true);
                             if let Some(span) = search.current() {
                                 reveal(
@@ -821,7 +816,7 @@ fn viewer_session(
                             selected_link = None;
                             search = Search::default();
                         }
-                        KeyCode::Char('h') | KeyCode::Char('?') | KeyCode::F(1) => help = true,
+                        KeyCode::Char('h') | KeyCode::F(1) => help = true,
                         KeyCode::Char('Q') => return Ok(ViewerAction::Quit),
                         KeyCode::Char('q') | KeyCode::Esc => {
                             return Ok(ViewerAction::Close);
