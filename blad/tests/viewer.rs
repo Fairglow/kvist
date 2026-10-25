@@ -709,6 +709,92 @@ fn editor_rereads_reject_special_oversized_and_substituted_symlink_inputs() {
 }
 
 #[test]
+fn automatic_reload_preserves_offsets_search_and_terminal_ownership() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("watch.md");
+    let source = |word: &str| {
+        format!(
+            "```text\n{}\n```",
+            format!("{} {word} needle\n", "x".repeat(90)).repeat(40)
+        )
+    };
+    std::fs::write(&path, source("before")).unwrap();
+    let mut viewer = Viewer::start(&path, 60, 12, false);
+    viewer.keys(b"ddd");
+    viewer.keys(&b"\x1b[C".repeat(80));
+    viewer.keys(b"/needle\r");
+    let search_footer = viewer.screen.line(11);
+    assert!(search_footer.contains("/40"), "{search_footer}");
+    let before: Vec<_> = (1..11).map(|row| viewer.screen.content_line(row)).collect();
+    viewer.raw.clear();
+    std::fs::write(&path, source("after!")).unwrap();
+    viewer.read_frame();
+    let after: Vec<_> = (1..11).map(|row| viewer.screen.content_line(row)).collect();
+    for (old, new) in before.iter().zip(&after) {
+        assert_eq!(old.replace("before", "after!"), *new);
+    }
+    assert_eq!(viewer.screen.line(11), search_footer);
+    let raw = String::from_utf8_lossy(&viewer.raw);
+    assert!(
+        !raw.contains("\x1b[?1049") && !raw.contains("\x1b[2J"),
+        "{raw:?}"
+    );
+    viewer.keys(b"n");
+    assert!(viewer.screen.line(11).contains("/40"));
+    assert_ne!(viewer.screen.line(11), search_footer);
+    viewer.quit();
+}
+
+#[test]
+fn automatic_reload_handles_atomic_saves_inactive_tabs_and_shrink() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("first.md");
+    let other = temp.path().join("second.md");
+    let replacement = temp.path().join("save.md");
+    std::fs::write(&path, "# First\n\n".repeat(40)).unwrap();
+    std::fs::write(&other, "# Second").unwrap();
+    let mut viewer = Viewer::start_with(&path, 70, 12, false, &[other.to_str().unwrap()], &[]);
+    viewer.keys(b"G");
+    viewer.keys(b"\x1b[1;3C");
+    std::fs::write(&replacement, "# Atomic replacement").unwrap();
+    std::fs::rename(&replacement, &path).unwrap();
+    viewer.keys(b"\x1b[1;3D");
+    viewer.read_frame();
+    assert_eq!(viewer.screen.content_line(1), "# Atomic replacement");
+    assert!(
+        viewer.screen.line(0).find("first.md").unwrap()
+            < viewer.screen.line(0).find("second.md").unwrap()
+    );
+    std::fs::write(&other, "# Updated inactive tab").unwrap();
+    viewer.keys(b"\x1b[1;3C");
+    viewer.read_frame();
+    assert_eq!(viewer.screen.content_line(1), "# Updated inactive tab");
+    viewer.quit();
+}
+
+#[test]
+fn automatic_reload_retains_usable_content_on_failure_and_recovers() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("recover.md");
+    std::fs::write(&path, "# Original").unwrap();
+    let mut viewer = Viewer::start(&path, 90, 12, false);
+    std::fs::remove_file(&path).unwrap();
+    nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    viewer.read_frame();
+    assert_eq!(viewer.screen.content_line(1), "# Original");
+    assert!(viewer.screen.line(11).contains("Error reloading"));
+    viewer.keys(b"h");
+    assert!(viewer.screen.line(0).contains("help"));
+    viewer.keys(b"h");
+    std::fs::remove_file(&path).unwrap();
+    std::fs::write(&path, "# Recovered").unwrap();
+    viewer.read_frame();
+    assert_eq!(viewer.screen.content_line(1), "# Recovered");
+    assert!(!viewer.screen.line(11).contains("Error reloading"));
+    viewer.quit();
+}
+
+#[test]
 fn reload_preserves_position_policy_tabs_and_recomputes_search_and_links() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("reload.md");

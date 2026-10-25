@@ -10,6 +10,7 @@ A terminal Markdown viewer with tabbed browsing, link navigation, and search. Bl
 - **Rich rendering** — Syntax-highlighted code blocks, math notation, Mermaid diagrams
 - **Theming** — Dark, light, and terminal-native themes with custom JSON theme support
 - **Editor integration** — Open documents in your external editor and reload changes
+- **Automatic reload** — See file saves without losing your scroll position; inactive tabs refresh when revisited
 - **Plain output** — Dump rendered text without terminal escapes for scripting
 
 ## Quick Start

@@ -56,6 +56,16 @@ retain non-color emphasis escapes.
 
 ### File input limits
 
+Interactive file tabs reload saves automatically. Blad polls the active path
+every 250 ms and waits for metadata to remain stable for at least another
+250 ms, including rename-based editor saves. Inactive tabs refresh when
+revisited. Scroll offsets, search and rendering settings are retained;
+offsets clamp if the document shrinks. Read/render failure keeps the previous
+document and shows a footer error; another save or `Ctrl+R`/`F5` retries.
+No watch flag, worker or service is required. This is not tail-following or
+a guarantee of source-anchored position after arbitrary edits. Session snapshots,
+pathless documents and noninteractive output do not watch.
+
 Standalone files must be regular UTF-8 files of at most **16 MiB (16,777,216
 bytes) each**, inclusively. The same fixed ceiling applies to initial files,
 newly followed file links, reload and editor rereads. There is no silent

@@ -9,6 +9,29 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+### Seamless file reload (2026-10-25)
+
+Use the existing event loop with `event::poll`, not a worker or a new watcher
+dependency. A private `viewer_reload.rs` polls no-follow metadata at 250 ms
+intervals and waits for an unchanged observation for at least another 250 ms.
+Track device/inode, size, mode and nanosecond mtime/ctime, including explicit
+inspection errors, so same-length writes, rename saves and recovery are visible.
+Remember attempted observations to avoid repeated failure notices. Initialize
+each activated tab with a content check so inactive changes are picked up.
+Check deadlines even under continuous input. Do not read unchanged contents
+every tick or render when a checked source is identical.
+
+Explicit and automatic reload use one candidate read/render transaction and
+one metadata/search refresh path. Preserve search editing state and x/y,
+clear stale link mode/selection and clamp after success. Automatic success
+clears a prior reload error but does not overwrite unrelated notices or search
+feedback. Keep the painter and terminal alive. Poll only the active file;
+inactive tabs refresh on activation. All existing descriptor and source bounds
+apply. Metadata stability reduces partial-save flicker but cannot prove a
+snapshot or eliminate synchronous filesystem/render latency. This requested
+increment uses a deliberate advisory exception while receipts are unavailable;
+independent source observation/comparison follow, without acceptance claims.
+
 ### Publication preparation (2026-10-24)
 
 Publish only `kvist-blad` from the existing workspace, preserving `blad` binary

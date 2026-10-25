@@ -11,6 +11,37 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-watch-tests
+    title: "write_tests: seamless file reload"
+    description: "Pin in-place/atomic saves, retained offsets/search, inactive tabs and error recovery in real PTYs."
+    kind: test
+    status: completed
+    context: "Three PTY automatic-reload regressions failed first; debounce/identity unit checks and all eight automatic/manual reload PTY tests now pass."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-064"]
+  - id: blad-watch-code
+    title: "implement_code: debounced automatic reload"
+    description: "Poll active file metadata in the event loop and share transactional reload across automatic and explicit paths."
+    kind: implementation
+    status: completed
+    context: "Shared transactional reload, event-loop polling and bounded source reads implemented; strict all-feature lint passes."
+    depends_on: [blad-watch-tests]
+    requirements: ["REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-064"]
+  - id: blad-watch-audit
+    title: "security_audit: reload ownership"
+    description: "Inspect descriptor reuse, polling bounds, failure visibility and terminal ownership."
+    kind: security-audit
+    status: completed
+    context: "Scoped implementer inspection retains no-follow descriptor reads, per-file bounds and terminal ownership; no new worker, process, dependency or write authority. Metadata stability is not a snapshot or hard latency bound. Independent observation follows in release-readiness review."
+    depends_on: [blad-watch-code]
+    requirements: ["REQUIREMENTS.md#R-056", "REQUIREMENTS.md#R-057", "REQUIREMENTS.md#R-064"]
+  - id: blad-watch-review
+    title: "compliance_review: independent reload evidence"
+    description: "Derive source-only observations and compare source-blind against intent."
+    kind: compliance-review
+    status: pending
+    depends_on: [blad-watch-audit]
+    requirements: ["REQUIREMENTS.md#R-064"]
   - id: blad-publication-tests
     title: "write_tests: standalone publication boundaries"
     description: "Pin package payload, local fixtures, task markers and explicit session input failures."

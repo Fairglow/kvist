@@ -15,6 +15,7 @@ pub use crate::session_display::{
     dump_session, export_session, list_sessions, show_session, show_session_with_options,
 };
 use crate::viewer_navigation::{HELP, link_spans, reveal, spatial_link};
+use crate::viewer_reload::{FileWatch, read_document_source, read_reload_source};
 use crate::viewer_terminal::TerminalGuard;
 use crate::viewport::{Document, Frame, Painter};
 
@@ -392,8 +393,57 @@ fn viewer_session(
     let mut link_index = 0;
     let mut selected_link = None;
     let mut selected_part = 0;
+    let mut watch = FileWatch::new();
+    let mut reload_requested = false;
 
     loop {
+        let automatic = path.is_some_and(|path| watch.changed(path));
+        if automatic || reload_requested {
+            let candidate = read_reload_source(path).and_then(|source| {
+                if automatic && !reload_requested && source == *content {
+                    return Ok(None);
+                }
+                let updated = Document::render_with_options(
+                    &source,
+                    cols,
+                    line_numbers,
+                    width_limit,
+                    options,
+                )?;
+                Ok(Some((source, updated)))
+            });
+            match candidate {
+                Ok(Some((source, updated))) => {
+                    *content = source;
+                    document = updated;
+                    scroll_offset =
+                        scroll_offset.min(document.lines.len().saturating_sub(visible_lines));
+                    scroll_x = scroll_x.min(document.max_x());
+                    links = extract_links(&inert_source(content));
+                    spans = links
+                        .iter()
+                        .map(|link| link_spans(&document, link))
+                        .collect();
+                    link_mode = false;
+                    selected_link = None;
+                    selected_part = 0;
+                    link_index = 0;
+                    search.update(&document.lines, scroll_offset);
+                    if reload_requested {
+                        *status = "Reloaded file".into();
+                    } else if status.starts_with("Error reloading file:") {
+                        status.clear();
+                    }
+                }
+                Ok(None) => {
+                    if status.starts_with("Error reloading file:") {
+                        status.clear();
+                    }
+                }
+                Err(error) => *status = format!("Error reloading file: {error}"),
+            }
+            reload_requested = false;
+        }
         let mut pending_follow = None;
         let lines = &document.lines;
         let total_lines = lines.len();
@@ -484,6 +534,10 @@ fn viewer_session(
                 matches: if help { &[] } else { &highlights },
             },
         )?;
+
+        if path.is_some() && !event::poll(watch.wait())? {
+            continue;
+        }
 
         // Event handling
         match event::read() {
@@ -655,37 +709,7 @@ fn viewer_session(
                         KeyCode::End => {
                             scroll_offset = total_lines.saturating_sub(visible_lines);
                         }
-                        KeyCode::Char('r') => {
-                            let candidate = read_reload_source(path).and_then(|source| {
-                                let document = Document::render_with_options(
-                                    &source,
-                                    cols,
-                                    line_numbers,
-                                    width_limit,
-                                    options,
-                                )?;
-                                Ok((source, document))
-                            });
-                            match candidate {
-                                Ok((source, updated)) => {
-                                    *content = source;
-                                    document = updated;
-                                    scroll_offset = scroll_offset
-                                        .min(document.lines.len().saturating_sub(visible_lines));
-                                    scroll_x = scroll_x.min(document.max_x());
-                                    links = extract_links(&inert_source(content));
-                                    spans = links
-                                        .iter()
-                                        .map(|link| link_spans(&document, link))
-                                        .collect();
-                                    selected_link = None;
-                                    selected_part = 0;
-                                    search.update(&document.lines, scroll_offset);
-                                    *status = "Reloaded file".into();
-                                }
-                                Err(error) => *status = format!("Error reloading file: {error}"),
-                            }
-                        }
+                        KeyCode::Char('r') => reload_requested = true,
                         _ => {}
                     }
                 } else {
@@ -823,37 +847,7 @@ fn viewer_session(
                         KeyCode::Char('b') => {
                             return Ok(ViewerAction::Back);
                         }
-                        KeyCode::F(5) => {
-                            let candidate = read_reload_source(path).and_then(|source| {
-                                let document = Document::render_with_options(
-                                    &source,
-                                    cols,
-                                    line_numbers,
-                                    width_limit,
-                                    options,
-                                )?;
-                                Ok((source, document))
-                            });
-                            match candidate {
-                                Ok((source, updated)) => {
-                                    *content = source;
-                                    document = updated;
-                                    scroll_offset = scroll_offset
-                                        .min(document.lines.len().saturating_sub(visible_lines));
-                                    scroll_x = scroll_x.min(document.max_x());
-                                    links = extract_links(&inert_source(content));
-                                    spans = links
-                                        .iter()
-                                        .map(|link| link_spans(&document, link))
-                                        .collect();
-                                    selected_link = None;
-                                    selected_part = 0;
-                                    search.update(&document.lines, scroll_offset);
-                                    *status = "Reloaded file".into();
-                                }
-                                Err(error) => *status = format!("Error reloading file: {error}"),
-                            }
-                        }
+                        KeyCode::F(5) => reload_requested = true,
                         // Enter follows the first link at or below the top of
                         // the viewport, so links can be jumped to without
                         // entering link mode.
@@ -1020,61 +1014,4 @@ fn edit_file(path: &std::path::Path) -> io::Result<String> {
         )));
     }
     read_document_source(path)
-}
-
-fn read_document_source(path: &std::path::Path) -> io::Result<String> {
-    let bytes = crate::file_input::read_regular_file(path, 16 * 1024 * 1024)?;
-    String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-}
-
-fn read_reload_source(path: Option<&std::path::Path>) -> io::Result<String> {
-    let path = path.ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "reload unavailable: this document has no file path",
-        )
-    })?;
-    read_document_source(path)
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn reload_source_has_an_inclusive_16_mib_byte_limit() {
-        const LIMIT: u64 = 16 * 1024 * 1024;
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("boundary.md");
-        let file = std::fs::File::create(&path).unwrap();
-        for size in [LIMIT - 1, LIMIT, LIMIT + 1] {
-            file.set_len(size).unwrap();
-            let result = super::read_reload_source(Some(&path));
-            if size <= LIMIT {
-                assert_eq!(result.unwrap().len() as u64, size);
-            } else {
-                let Err(error) = result else {
-                    panic!("oversized reload must fail");
-                };
-                assert_eq!(error.kind(), std::io::ErrorKind::FileTooLarge);
-                assert!(error.to_string().contains("16777216"));
-            }
-        }
-    }
-
-    #[test]
-    fn reload_invalid_utf8_does_not_return_a_valid_prefix() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("invalid.md");
-        std::fs::write(&path, [b'x', 0xff]).unwrap();
-        assert_eq!(
-            super::read_reload_source(Some(&path)).unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
-        );
-    }
-
-    #[test]
-    fn reload_without_a_file_path_is_an_explicit_error() {
-        let error = super::read_reload_source(None).unwrap_err();
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-        assert!(error.to_string().contains("reload unavailable"));
-    }
 }
