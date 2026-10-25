@@ -1,6 +1,6 @@
 [package]
 name = "skott"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.95"
 authors = ["Stefan Lindblad"]
@@ -22,7 +22,7 @@ name = "skott-file-tool"
 path = "src/bin/file_tool.rs"
 
 [dependencies]
-blad = { package = "kvist-blad", version = "=0.3.0", path = "../blad" }
+blad = { package = "kvist-blad", version = "=0.3.1", path = "../blad" }
 sav = { version = "=0.3.0", path = "../sav" }
 galla = { version = "=0.3.0", path = "../galla" }
 clap = { version = "4.6", features = ["derive"] }
@@ -45,7 +45,7 @@ tracing = "0.1"
 	pulldown-cmark = "0.13"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
-csscolorparser = "0.9.0"
+csscolorparser = "0.9"
 
 [dev-dependencies]
 tempfile = "3.27"

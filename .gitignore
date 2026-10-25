@@ -2,11 +2,12 @@
 /target
 
 # Ignore settings
-.cargo
-.idea
+/.cargo
+/.config
+/.idea
 .kvist
-.vscode
-.zed
+/.vscode
+/.zed
 skott.toml
 kvist.toml
 
@@ -29,5 +30,5 @@ kvist.toml
 # the committed project.
 .work-docs/
 
-# Local nextest configuration
+# Sandbox nextest configuration
 /.config/nextest.toml
