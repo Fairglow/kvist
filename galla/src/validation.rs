@@ -337,6 +337,13 @@ fn validate_grants(request: &SandboxRequest) -> Result<(), ProtocolError> {
         let label = format!("grant {index}");
         validate_absolute(&grant.source, &format!("{label} source"))?;
         validate_absolute(&grant.destination, &format!("{label} destination"))?;
+        if path_contains(crate::context::SANDBOX_MARKER, &grant.destination)
+            || path_contains(&grant.destination, crate::context::SANDBOX_MARKER)
+        {
+            return Err(invalid(format!(
+                "{label} destination covers the reserved sandbox marker"
+            )));
+        }
         if !is_filtered_system_grant(grant)
             && ["/sbin", "/usr/sbin", "/usr/local/sbin"]
                 .iter()

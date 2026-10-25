@@ -1011,6 +1011,19 @@ fn rejects_administrative_search_and_covering_grants() {
 }
 
 #[test]
+fn nested_sandbox_marker_destinations_are_reserved() {
+    for destination in ["/.galla-sandbox", "/.galla-sandbox/child"] {
+        let mut request = valid_request();
+        request["grants"][0]["destination"] = json!(destination);
+        let error = validation::parse_and_validate(&encode(&request)).unwrap_err();
+        assert!(
+            error.to_string().contains("reserved sandbox marker"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn executable_executes_successfully_on_valid_request() {
     let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
         .arg("--kvist-sandbox-probe-v1")
@@ -1076,6 +1089,29 @@ fn executable_executes_successfully_on_valid_request() {
         before_permissions,
         host_permissions(),
         "namespace exclusions must not change host permissions"
+    );
+
+    request["phase"] = json!("authoring");
+    request["grants"][1]["purpose"] = json!("authoring");
+    request["grants"][1]["access"] = json!("read-write");
+    request["grants"].as_array_mut().unwrap().push(json!({
+        "source": std::fs::canonicalize(env!("CARGO_BIN_EXE_galla-runner")).unwrap(),
+        "destination": "/tooling/galla-runner",
+        "access": "read-only",
+        "purpose": "toolchain",
+        "identity": digest(b"nested-runner")
+    }));
+    // An open pipe with no data must not delay the request-mode guard.
+    request["argv"] = json!([
+        "/usr/bin/python3",
+        "-c",
+        "import subprocess\nfor mode in ['probe', 'request']:\n p = subprocess.Popen(['/tooling/galla-runner', '--kvist-sandbox-' + mode + '-v1'], env={}, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)\n try:\n  p.wait(timeout=2)\n except subprocess.TimeoutExpired:\n  p.kill(); p.wait(); raise\n assert p.returncode == 3, p.returncode\n assert p.stdout.read() == b''\n message = p.stderr.read()\n assert b'already inside a Galla sandbox' in message, message\n assert b'unnecessary' in message, message\n"
+    ]);
+    let output = run_runner(&encode(&request));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

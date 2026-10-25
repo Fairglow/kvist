@@ -14,6 +14,37 @@ component:
         expected_revision: "sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1"
         observed_revision: "sha256:1323af464fc004721bafc8fd3a0a524eaafb99fc078ea313570d7a04f46660e8"
 tasks:
+  - id: nested-sandbox-write-tests
+    title: "write_tests: nested sandbox rejection"
+    description: "Pin reserved destinations and native probe/request rejection with cleared environment and open stdin."
+    kind: test
+    status: completed
+    context: "Reserved-path and real Bubblewrap regressions failed first. Native cleared-environment probe/request guards now return 3 before waiting for stdin."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
+  - id: nested-sandbox-implement-code
+    title: "implement_code: namespace-local nesting guard"
+    description: "Create an immutable marker and reject nesting before input or backend work."
+    kind: implementation
+    status: completed
+    context: "Read-only tmpfs marker, CLI and library guards implemented; all default Galla tests and strict lint pass."
+    depends_on: [nested-sandbox-write-tests]
+    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
+  - id: nested-sandbox-security-audit
+    title: "security_audit: marker authority"
+    description: "Inspect mount ordering, host non-mutation and diagnostic-only scope."
+    kind: security-audit
+    status: completed
+    context: "Scoped implementer inspection: reserved disjoint path prevents grant mutation; marker is namespace-only and diagnostic, not authority. Independent observation follows in the release-readiness review."
+    depends_on: [nested-sandbox-implement-code]
+    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
+  - id: nested-sandbox-compliance-review
+    title: "compliance_review: independent nesting evidence"
+    description: "Derive source-only observations and compare source-blind with local intent."
+    kind: compliance-review
+    status: pending
+    depends_on: [nested-sandbox-security-audit]
+    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
   - id: "portable-toolchain-write-tests"
     title: "Pin host-independent Cargo subprocess execution"
     description: "Reproduce missing rustc with a linker-only sandbox PATH, then require private proxy execution of Cargo unit/doctests and a build script for every installed version."

@@ -415,6 +415,10 @@ fn count_processes_in_pgid(child_pid: u32) -> u64 {
 /// Executes the request in a secure Bubblewrap sandbox, supervises its resources,
 /// and reaps the child process.
 pub fn run(request: SandboxRequest) -> ExitCode {
+    if let Err(reason) = crate::context::require_host() {
+        eprintln!("galla-runner: {reason}");
+        return ExitCode::from(3);
+    }
     let Some(bwrap_path) = locate_backend() else {
         eprintln!("galla-runner: no Bubblewrap backend found on PATH or standard locations");
         return ExitCode::from(3);
@@ -576,6 +580,17 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         eprintln!("galla-runner: {error}");
         return ExitCode::from(3);
     }
+    bwrap_args.extend(
+        [
+            "--perms",
+            "0555",
+            "--tmpfs",
+            crate::context::SANDBOX_MARKER,
+            "--remount-ro",
+            crate::context::SANDBOX_MARKER,
+        ]
+        .map(str::to_owned),
+    );
 
     // 9. Map explicitly requested environment variables
     for (name, value) in &request.environment {
