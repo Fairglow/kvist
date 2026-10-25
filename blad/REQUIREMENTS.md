@@ -213,7 +213,7 @@ notation; graphical crow's-foot endpoints are not required.
     Kvist's all-feature build includes session support; rendering consumers do
     not need it. Blad has no dependency on Kvist/Sav to read session files.
 45. **R-045 CLI usability:** Both builds provide `--version`/`-V` and help.
-    Empty invocation displays usage. Multiple file arguments share one viewer;
+    Empty invocation on terminal stdin displays usage. Multiple file arguments share one viewer;
     repeated canonical files reuse a tab and render only once in dumps, in
     first-argument order. Unreadable files fail explicitly.
 46. **R-046 Stable tabs:** Tabs retain their initial/opening order when
@@ -355,6 +355,24 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     and changed-row painting. Pathless documents and noninteractive output
     must not watch. Polling is local and bounded in frequency, not a hard
     latency guarantee or snapshot of concurrent writes.
+
+### Unix pipeline behavior
+
+65. **R-065 Standard input:** With no file arguments and redirected stdin,
+    read one bounded UTF-8 document until EOF. `-` explicitly selects stdin,
+    may appear among files in argument order and is read/rendered once.
+    Named files do not otherwise consume stdin. Reject explicit `-` on
+    terminal stdin rather than waiting for document input. Apply the inclusive
+    16 MiB source limit and validate all initial sources before any output.
+    Empty input succeeds without document text; malformed/oversized input fails.
+66. **R-066 Pipeline output:** Enter the interactive viewer only when stdin
+    and stdout are terminals and `--dump` is absent. Otherwise output one
+    finite rendered snapshot, defaulting to escape-free text; explicit
+    `--color always` may retain styles, but `--dump` always removes them.
+    A downstream closed pipe must terminate quietly and successfully, without
+    a panic, diagnostic or waiting for viewer input. Other I/O errors must
+    remain explicit failures. Optional session stdout routes follow the same
+    error policy; exports remain source Markdown.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).

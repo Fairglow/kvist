@@ -85,6 +85,7 @@ mod session_display;
 mod table;
 mod table_navigation;
 mod terminal_text;
+mod viewer_files;
 mod viewer_navigation;
 mod viewer_reload;
 mod viewer_terminal;

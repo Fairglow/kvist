@@ -180,9 +180,225 @@ fn help_and_version_work_without_opening_files_or_themes() {
             .any(|name| line.trim_start().starts_with(&format!("{name} ")))),
         "{help}"
     );
-    let empty = blad().output().unwrap();
+    let pty = nix::pty::openpty(None, None).unwrap();
+    let empty = blad().stdin(pty.slave).output().unwrap();
     assert!(!empty.status.success());
     assert!(String::from_utf8_lossy(&empty.stderr).contains("Usage:"));
+}
+
+#[test]
+fn stdin_documents_are_bounded_ordered_and_rendered_once_without_terminal_controls() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("stdin.md");
+    let named = temp.path().join("named.md");
+    std::fs::write(&input, "# Piped\n\n**bold** and $x^2$\n").unwrap();
+    std::fs::write(&named, "# Named").unwrap();
+    for args in [vec![], vec!["-"], vec!["--dump", "-"]] {
+        let output = blad()
+            .args(args)
+            .stdin(std::fs::File::open(&input).unwrap())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            text.contains("# Piped") && text.contains("bold and x²"),
+            "{text}"
+        );
+        assert!(!text.contains('\x1b'), "{text:?}");
+    }
+    let output = blad()
+        .arg(&named)
+        .args(["-", "-"])
+        .arg(&named)
+        .stdin(std::fs::File::open(&input).unwrap())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.starts_with("# Named\n# Piped"), "{text}");
+    assert_eq!(text.matches("# Named").count(), 1);
+    assert_eq!(text.matches("# Piped").count(), 1);
+    for bytes in [vec![0xff], vec![b'x'; 16 * 1024 * 1024 + 1]] {
+        std::fs::write(&input, bytes).unwrap();
+        let output = blad()
+            .arg(&named)
+            .arg("-")
+            .stdin(std::fs::File::open(&input).unwrap())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert!(!output.stderr.is_empty());
+    }
+    let output = blad().stdin(std::process::Stdio::null()).output().unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn redirected_file_output_is_plain_by_default_and_head_closes_quietly() {
+    use std::process::Stdio;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("many.md");
+    std::fs::write(&path, "**rendered output**\n\n".repeat(10_000)).unwrap();
+    let mut producer = blad()
+        .arg(&path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut head = Command::new("head")
+        .args(["-n", "30"])
+        .stdin(Stdio::from(producer.stdout.take().unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if producer.try_wait().unwrap().is_some() && head.try_wait().unwrap().is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = producer.kill();
+            let _ = head.kill();
+            let _ = producer.wait();
+            let _ = head.wait();
+            panic!("pipeline did not exit before deadline");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let producer = producer.wait_with_output().unwrap();
+    let head = head.wait_with_output().unwrap();
+    assert!(producer.status.success(), "{:?}", producer.stderr);
+    assert!(producer.stderr.is_empty(), "{:?}", producer.stderr);
+    assert!(head.status.success());
+    assert_eq!(
+        head.stdout.iter().filter(|byte| **byte == b'\n').count(),
+        30
+    );
+    assert!(!head.stdout.contains(&0x1b));
+}
+
+#[test]
+fn real_stdin_pipe_and_inclusive_limit_finish_as_finite_snapshots() {
+    use std::process::Stdio;
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("input");
+    std::fs::write(&input, "# From a pipe\n\n**bold**").unwrap();
+    let mut cat = Command::new("cat")
+        .arg(&input)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let output = blad()
+        .stdin(Stdio::from(cat.stdout.take().unwrap()))
+        .output()
+        .unwrap();
+    assert!(cat.wait().unwrap().success());
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b"# From a pipe\n\nbold\n");
+    std::fs::write(&input, vec![b' '; 16 * 1024 * 1024]).unwrap();
+    let output = blad()
+        .stdin(std::fs::File::open(&input).unwrap())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn redirected_stdout_with_terminal_stdin_does_not_start_a_viewer() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("input");
+    std::fs::write(&input, "# Named\n\n**bold**").unwrap();
+    let pty = nix::pty::openpty(None, None).unwrap();
+    let mut child = blad()
+        .arg(input)
+        .stdin(pty.slave)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("redirected output entered the viewer");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b"# Named\n\nbold\n");
+}
+
+#[test]
+fn non_pipe_stdout_errors_remain_failures() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("input");
+    std::fs::write(&input, "# Full output").unwrap();
+    let output = blad()
+        .arg(&input)
+        .stdout(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap(),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Failed to display markdown"));
+}
+
+#[cfg(feature = "sessions")]
+#[test]
+fn empty_session_list_handles_a_fully_closed_stdout_without_panicking() {
+    let temp = tempfile::tempdir().unwrap();
+    let (reader, writer) = std::os::unix::net::UnixStream::pair().unwrap();
+    drop(reader);
+    let output = blad()
+        .args(["list", "--log-dir"])
+        .arg(temp.path())
+        .stdout(std::process::Stdio::from(std::os::fd::OwnedFd::from(
+            writer,
+        )))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert!(output.stderr.is_empty(), "{:?}", output.stderr);
+}
+
+#[test]
+fn explicit_stdin_on_a_terminal_is_rejected_without_waiting() {
+    let pty = nix::pty::openpty(None, None).unwrap();
+    let mut child = blad()
+        .arg("-")
+        .stdin(pty.slave)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("explicit terminal stdin waited for input");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("redirected stdin"));
 }
 
 #[test]

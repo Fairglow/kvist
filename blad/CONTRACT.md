@@ -37,7 +37,7 @@ The default feature set is empty. Session APIs and session-only options
 all-feature builds enable sessions; embedders can use the renderer alone.
 No command aliases or positional session auto-detection are retained.
 `view`, `show` and `stream` are not subcommands. Filenames matching enabled
-subcommands are passed after `--`. Empty invocation displays help.
+subcommands are passed after `--`. Empty invocation with terminal stdin displays help.
 Active sessions are current snapshots, explicitly identified as such; no
 background/live follow is promised.
 
@@ -45,6 +45,22 @@ Files need not have Markdown extensions. Canonical duplicates reuse one tab.
 All initial files are loaded before viewer entry; read errors fail explicitly.
 Noninteractive/dump output renders each distinct canonical file once, in
 first-argument order.
+
+Without file arguments, redirected stdin supplies one Markdown document.
+`blad -` explicitly reads stdin, including among named files; repeated `-`
+inputs reuse that source and render once. A literal file named `-` is addressed
+as `./-`. Explicit stdin requires redirection, not a terminal. Named file
+arguments otherwise leave stdin unread. Stdin is UTF-8, read through EOF with
+the same inclusive 16 MiB bound and single overflow probe as file sources;
+empty stdin is a successful empty document. All initial sources validate before
+output. Stdin is a finite snapshot, not an interactive pager, watched file or
+live stream; a producer must close stdin to finish the snapshot.
+
+The CLI enters the viewer only with terminal stdin and stdout and no `--dump`.
+Noninteractive snapshots default to escape-free rendered text. Explicit
+`--color always` opts into styling even through a pipe; `--dump` still overrides
+it. Downstream `BrokenPipe` is quiet success, including optional session stdout
+routes; other I/O failures retain status 1 and escaped diagnostics.
 
 ### File input bounds
 

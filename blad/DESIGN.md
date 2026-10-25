@@ -9,6 +9,25 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+### Unix pipeline behavior (2026-10-25)
+
+Resolve empty invocation after argument parsing: terminal stdin shows usage;
+redirected stdin becomes one `-` input, except when a session command is selected.
+Move initial tab loading into private `viewer_files.rs`, retaining canonical
+file deduplication and pre-output validation while admitting a single pathless
+stdin document in argument order. Reuse the limited reader with its extra
+probe byte, then decode UTF-8. Do not read unused redirected stdin or attempt
+terminal reads for explicit `-`. Keep the existing both-TTY viewer gate.
+
+Resolve CLI plain output for noninteractive snapshots unless `--color always`
+explicitly requests styles; `--dump` overrides everything. Suppress only
+`BrokenPipe` at the process reporting boundary, including final stdout flush.
+Replace optional session status `println!` writes with fallible writes so
+closed pipes cannot panic. Library writer errors remain errors. Snapshot
+reads still require producer EOF and have no hard I/O deadline.
+This user-directed bundle has a deliberate advisory exception while receipts
+are unavailable; source-only observation and source-blind comparison follow.
+
 ### Seamless file reload (2026-10-25)
 
 Use the existing event loop with `event::poll`, not a worker or a new watcher

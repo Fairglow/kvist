@@ -14,6 +14,7 @@ use crate::search::Search;
 pub use crate::session_display::{
     dump_session, export_session, list_sessions, show_session, show_session_with_options,
 };
+use crate::viewer_files::{OpenFile, Position, edit_file, load_files, tab_title};
 use crate::viewer_navigation::{HELP, link_spans, reveal, spatial_link};
 use crate::viewer_reload::{FileWatch, read_document_source, read_reload_source};
 use crate::viewer_terminal::TerminalGuard;
@@ -53,7 +54,7 @@ pub fn view_markdown_file_with_options(
     line_numbers: bool,
     options: &RenderOptions,
 ) -> io::Result<()> {
-    if is_tty() && is_stdin_tty() {
+    if is_tty() && is_stdin_tty() && !options.plain {
         run_viewer(path, content, line_numbers, None, options)
     } else {
         MarkdownRenderer::with_options(options.clone())
@@ -63,45 +64,14 @@ pub fn view_markdown_file_with_options(
 
 /// Open initial files in stable argument order, reusing canonical duplicates.
 ///
-/// All files are read before terminal entry or output. Plain settings bypass
-/// the interactive viewer; otherwise terminal inputs share one tabbed viewer.
+/// All inputs are read before terminal entry or output. `-` reads redirected
+/// stdin once. Plain settings bypass the viewer; terminal files share tabs.
 pub fn view_markdown_files_with_options(
     paths: &[std::path::PathBuf],
     line_numbers: bool,
     options: &RenderOptions,
 ) -> io::Result<()> {
-    let mut files: Vec<OpenFile> = Vec::new();
-    for path in paths {
-        let canonical = std::fs::canonicalize(path).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("cannot open {}: {error}", path.display()),
-            )
-        })?;
-        if files
-            .iter()
-            .any(|file| file.path.as_ref() == Some(&canonical))
-        {
-            continue;
-        }
-        let content = read_document_source(&canonical).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("cannot read {}: {error}", path.display()),
-            )
-        })?;
-        files.push(OpenFile {
-            path: Some(canonical),
-            content,
-            position: Position::default(),
-        });
-    }
-    if files.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "at least one file is required",
-        ));
-    }
+    let files = load_files(paths)?;
     if is_tty() && is_stdin_tty() && !options.plain {
         run_open_files(files, line_numbers, None, options)
     } else {
@@ -186,20 +156,6 @@ enum ViewerAction {
     Jump(String),
     Switch(isize),
     Back,
-}
-
-/// A file open in the viewer: its path (when it came from a file) and the
-/// content currently displayed.
-struct OpenFile {
-    path: Option<std::path::PathBuf>,
-    content: String,
-    position: Position,
-}
-
-#[derive(Default)]
-struct Position {
-    y: usize,
-    x: usize,
 }
 
 fn run_viewer(
@@ -318,31 +274,6 @@ fn run_open_files(
             }
         }
     }
-}
-
-fn tab_title(files: &[OpenFile], active: usize) -> String {
-    let label = |index: usize| {
-        files[index]
-            .path
-            .as_deref()
-            .and_then(std::path::Path::file_name)
-            .map_or_else(
-                || "Markdown".to_string(),
-                |name| name.to_string_lossy().into_owned(),
-            )
-    };
-    let mut title = "=== Blad: ".to_string();
-    for index in 0..files.len() {
-        if index > 0 {
-            title.push_str(" | ");
-        }
-        if index == active {
-            title.push_str(&format!("[{}]", label(index)));
-        } else {
-            title.push_str(&format!(" {} ", label(index)));
-        }
-    }
-    title
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -993,25 +924,4 @@ fn anchor_row(document: &Document, anchor: &str) -> Option<usize> {
     } else {
         document.navigation.anchors.get(anchor).copied()
     }
-}
-
-fn edit_file(path: &std::path::Path) -> io::Result<String> {
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nvim".to_string());
-    let args: Vec<&str> = editor.split_whitespace().collect();
-    let Some(program) = args.first() else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "cannot open editor: EDITOR is empty",
-        ));
-    };
-    let status = std::process::Command::new(program)
-        .args(&args[1..])
-        .arg(path)
-        .status()?;
-    if !status.success() {
-        return Err(io::Error::other(format!(
-            "editor exited with status: {status}"
-        )));
-    }
-    read_document_source(path)
 }

@@ -11,6 +11,37 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-pipe-tests
+    title: "write_tests: Unix pipelines"
+    description: "Pin implicit/explicit stdin, limits, ordered mixed sources, TTY routing and head/closed-pipe behavior."
+    kind: test
+    status: completed
+    context: "Implicit stdin and head regressions failed first. Both feature-mode CLI suites now cover real cat/head pipes, exact 16 MiB stdin, malformed/oversized sources, TTY routing, closed session stdout and non-pipe write errors."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066"]
+  - id: blad-pipe-code
+    title: "implement_code: finite stdin and graceful stdout"
+    description: "Load bounded stdin, default noninteractive output to plain and treat only BrokenPipe as quiet CLI success."
+    kind: implementation
+    status: completed
+    context: "Bounded ordered stdin snapshots, plain defaults, explicit style override and BrokenPipe-only CLI suppression implemented; all-feature strict lint passes."
+    depends_on: [blad-pipe-tests]
+    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066"]
+  - id: blad-pipe-audit
+    title: "security_audit: pipeline boundaries"
+    description: "Inspect bounded input, explicit failures and suppression limited to downstream pipe closure."
+    kind: security-audit
+    status: completed
+    context: "Scoped implementer inspection: shared limit/probe reader, no unused stdin consumption, no terminal reads for '-', no fallback on malformed sources. Only BrokenPipe is suppressed and library errors still propagate. EOF and kernel I/O remain unbounded. Independent observation follows in release-readiness review."
+    depends_on: [blad-pipe-code]
+    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066"]
+  - id: blad-pipe-review
+    title: "compliance_review: independent pipeline evidence"
+    description: "Derive source-only observations and compare source-blind against local intent."
+    kind: compliance-review
+    status: pending
+    depends_on: [blad-pipe-audit]
+    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066"]
   - id: blad-watch-tests
     title: "write_tests: seamless file reload"
     description: "Pin in-place/atomic saves, retained offsets/search, inactive tabs and error recovery in real PTYs."
