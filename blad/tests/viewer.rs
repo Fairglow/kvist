@@ -290,6 +290,11 @@ impl Viewer {
         self.read_update(false);
     }
 
+    fn keys_with_frame(&mut self, keys: &[u8]) {
+        self.master.write_all(keys).unwrap();
+        self.read_frame();
+    }
+
     fn resize(&mut self, columns: u16, rows: u16) {
         assert!(
             Command::new("stty")
@@ -329,6 +334,29 @@ impl Viewer {
         panic!("viewer did not quit");
     }
 }
+#[test]
+fn redraw_actions_wait_for_delayed_input_processing() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("delayed.md");
+    std::fs::write(&path, "hit").unwrap();
+    let mut viewer = Viewer::start(&path, 80, 12, false);
+    let pid = Pid::from_raw(viewer.child.id().try_into().unwrap());
+    kill(pid, Signal::SIGSTOP).unwrap();
+    std::thread::scope(|scope| {
+        scope.spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            kill(pid, Signal::SIGCONT).unwrap();
+        });
+        viewer.keys_with_frame(b"/hit");
+    });
+    assert!(
+        viewer.screen.line(11).contains("[literal] 1/1"),
+        "{}",
+        viewer.screen.line(11)
+    );
+    viewer.exit_with(b"\x03");
+}
+
 #[test]
 fn toggling_regex_recomputes_an_existing_query_without_an_extra_keystroke() {
     let temp = tempfile::tempdir().unwrap();
@@ -1288,7 +1316,7 @@ fn editing_reenters_without_losing_projection_or_appearance_options() {
     );
     for _ in 0..5 {
         viewer.raw.clear();
-        viewer.keys(b"e");
+        viewer.keys_with_frame(b"e");
         assert_eq!(viewer.screen.line(1), "# Edited H₂O");
         assert_eq!(viewer.screen.line(3), "$x^2$");
         let raw = String::from_utf8_lossy(&viewer.raw);
@@ -1571,16 +1599,20 @@ fn theme_file_settings_survive_tabs_edit_and_resize() {
         &["--theme-file", theme.to_str().unwrap(), "--color", "always"],
         &[("COLORTERM", "truecolor"), ("EDITOR", "/bin/true")],
     );
-    viewer.keys(b"\r");
-    for action in [b"e".as_slice(), b"\x1b[1;3D\x1b[1;3C".as_slice()] {
+    viewer.keys_with_frame(b"\r");
+    for (action, heading) in [
+        (b"e".as_slice(), "# Target"),
+        (b"\x1b[1;3D".as_slice(), "# Source"),
+        (b"\x1b[1;3C".as_slice(), "# Target"),
+    ] {
         viewer.raw.clear();
-        viewer.keys(action);
+        viewer.keys_with_frame(action);
         let raw = String::from_utf8_lossy(&viewer.raw);
-        assert!(
-            raw.contains("\x1b[38;2;1;2;3m") && raw.contains("\x1b[48;5;254m"),
-            "{raw:?}"
-        );
-        assert_eq!(viewer.screen.line(1), "# Target");
+        assert!(raw.contains("\x1b[38;2;1;2;3m"), "{raw:?}");
+        if heading == "# Target" {
+            assert!(raw.contains("\x1b[48;5;254m"), "{raw:?}");
+        }
+        assert_eq!(viewer.screen.line(1), heading);
     }
     viewer.raw.clear();
     viewer.resize(70, 16);

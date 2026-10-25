@@ -11,6 +11,38 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-package-pty-tests
+    title: "write_tests: delayed PTY input processing"
+    description: "Reproduce the idle-poll race with a temporarily stopped viewer before changing frame synchronization."
+    kind: test
+    status: completed
+    context: "Delayed viewer input reproduced the false completion deterministically: the old optional helper returned after 100 ms with the stale footer."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-063"]
+  - id: blad-package-pty-code
+    title: "implement_code: explicit redraw synchronization"
+    description: "Wait for a complete bounded frame for redraw actions; observe each themed tab switch independently."
+    kind: implementation
+    status: completed
+    context: "Added required-frame input for successful editor/theme actions; tab switches are asserted independently. Both toolchains pass all 44 PTY tests and both extracted feature suites/install checks."
+    depends_on: [blad-package-pty-tests]
+    requirements: ["REQUIREMENTS.md#R-063"]
+  - id: blad-package-pty-audit
+    title: "security_audit: PTY test process ownership"
+    description: "Check stopped-child resumption and cleanup, bounded waits and unchanged runtime authority."
+    kind: security-audit
+    status: completed
+    context: "No runtime source, authority or dependency changes. The scoped resumer joins before Viewer cleanup, including during unwinding; existing five-second frame and child-exit bounds remain."
+    depends_on: [blad-package-pty-code]
+    requirements: ["REQUIREMENTS.md#R-063"]
+  - id: blad-package-pty-review
+    title: "compliance_review: extracted-package synchronization evidence"
+    description: "Retain independent source observation and source-blind comparison of the narrow harness repair."
+    kind: compliance-review
+    status: completed
+    context: "Independent single-file source observation and separate source-blind comparison retained in IMPL.md. Narrow R-063 evidence agrees; end-marker acknowledgement limits, broader design wording and pre-existing exit-diagnostic race remain explicit. No runtime change, blanket compliance or acceptance claimed."
+    depends_on: [blad-package-pty-audit]
+    requirements: ["REQUIREMENTS.md#R-063"]
   - id: blad-readiness-tests
     title: "write_tests: release-readiness regressions"
     description: "Pin documented reverse search and nonblocking visible log-destination failures."

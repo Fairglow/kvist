@@ -9,6 +9,19 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+### Extracted-package PTY synchronization (2026-10-25)
+
+Actions expected to redraw must wait for a complete synchronized frame within
+the existing five-second deadline, not treat a 100 ms idle poll as completion.
+Keep the optional-update helper for no-op keys and process-exit tests. Exercise
+delayed input processing by briefly stopping and resuming the viewer in a PTY
+regression; join the scoped resumer before the owned child can be cleaned up,
+including on assertion failure. Theme checks await each tab switch separately so
+both intermediate and final documents are observed, including after editing.
+This is test-harness repair under R-063, not a runtime timing guarantee or
+changed consumer behavior. The user-directed bundle uses an explicit advisory
+exception while receipt enforcement is unavailable.
+
 ### Release-readiness follow-up (2026-10-25)
 
 Restore the existing contracted backward-search `?` and reverse-occurrence `p`
