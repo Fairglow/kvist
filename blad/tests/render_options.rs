@@ -22,7 +22,7 @@ fn plain_output_contains_rendered_text_but_no_controls() {
 
 #[test]
 fn color_depth_never_changes_visible_geometry() {
-    let source = "# Heading\n\n> [!WARNING]\n> Careful\n\nH~2~O $\\alpha_i^2$ and $\\frac{a}{b}$\n\n```rust\nlet x = 1;\n```\n\n| A | B |\n|:---:|---:|\n| 1 | 2 |\n| longest | longest |\n\n```mermaid\nflowchart LR\nA[Input] --> B[Output]\n```";
+    let source = "# Heading\n\n> [!WARNING]\n> Careful\n\nH~2~O $\\alpha_i^2$ and $\\frac{a}{b}$\n\n```rust\nlet x = 1;\n```\n\n| **A** | *B* |\n|:---:|---:|\n| ~~1~~ | ***2*** |\n| longest | longest |\n\n```mermaid\nflowchart LR\nA[Input] --> B[Output]\n```";
     let expected = render(source, RenderOptions::plain());
     for theme in [Theme::Dark, Theme::Light, Theme::Terminal] {
         for color_depth in [
@@ -45,7 +45,10 @@ fn color_depth_never_changes_visible_geometry() {
                 assert!(!output.contains(";2;") && !output.contains(";5;"));
             }
             if color_depth == ColorDepth::None {
-                assert!(!output.contains("[3") && !output.contains("[4"));
+                assert!(!(30..=49).chain(90..=107).any(|code| {
+                    output.contains(&format!("\x1b[{code}m"))
+                        || output.contains(&format!("\x1b[{code};"))
+                }));
             }
         }
     }
@@ -65,8 +68,7 @@ fn authored_terminal_controls_are_inert_even_in_highlighted_code() {
 
 #[test]
 fn entity_decoded_controls_cannot_become_renderer_owned_styling() {
-    let source =
-        "before&#7;&#127;&#27;[8mhidden&#27;[0m after &#27;[2J\n\n| A |\n|---|\n| &#27;[31mred |";
+    let source = "before&#7;&#127;&#27;[8mhidden&#27;[0m after &#27;[2J\n\n| A |\n|---|\n| **&#27;[31mred** |";
     for options in [RenderOptions::plain(), RenderOptions::default()] {
         let output = render(source, options);
         assert!(

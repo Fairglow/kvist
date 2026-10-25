@@ -31,7 +31,9 @@ First standalone crates.io release candidate, not yet published.
   mathematical text and five-family text-only Mermaid diagrams.
 - Table delimiter left/center/right alignment in headers and wrapped cells,
   with Unicode-aware padding and precise aligned link selection/hitboxes.
-  Inline cell emphasis/code styling remains flattened.
+- Bold/italic/strikethrough combinations in table cells, preserving wrapping,
+  row backgrounds, header reversal and styled link/search positions. Dedicated
+  inline-code cell appearance and code-specific wrapping remain deferred.
 - Self-contained package fixtures, unchanged AGPL license text and standalone
   package/installation verification.
 - Separate opt-in Kvist/Skott snapshot/export integration with explicit

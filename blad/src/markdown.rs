@@ -241,7 +241,7 @@ fn render_markdown_theme(
     let mut table_alignments = Vec::new();
     let mut table_rows: Vec<Vec<String>> = Vec::new();
     let mut table_row_cells: Vec<String> = Vec::new();
-    let mut table_links = crate::table_navigation::TableLinks::default();
+    let mut table_spans = crate::table_spans::TableSpans::default();
 
     let mut at_start = true;
     let mut need_blank = false;
@@ -414,36 +414,34 @@ fn render_markdown_theme(
                 } else if in_table {
                     let cleaned = text.replace('\n', " ").replace('\r', "");
                     if links > 0 {
-                        table_links.append(
-                            &mut table_row_cells,
-                            table_rows.len(),
-                            link_source,
-                            &cleaned,
-                        );
+                        table_spans.append(&mut table_row_cells, table_rows.len(), style, &cleaned);
                     } else {
                         let mut end = 0;
                         for url in crate::links::bare_urls(&cleaned) {
-                            table_links.append(
+                            table_spans.append(
                                 &mut table_row_cells,
                                 table_rows.len(),
-                                None,
+                                style,
                                 &cleaned[end..url.start],
                             );
-                            table_links.append(
+                            table_spans.append(
                                 &mut table_row_cells,
                                 table_rows.len(),
-                                Some(crate::links::NavigationId::Bare {
-                                    event: range.start,
-                                    offset: url.start,
-                                }),
+                                Style {
+                                    link: Some(crate::links::NavigationId::Bare {
+                                        event: range.start,
+                                        offset: url.start,
+                                    }),
+                                    ..style
+                                },
                                 &cleaned[url.clone()],
                             );
                             end = url.end;
                         }
-                        table_links.append(
+                        table_spans.append(
                             &mut table_row_cells,
                             table_rows.len(),
-                            None,
+                            style,
                             &cleaned[end..],
                         );
                     }
@@ -482,7 +480,7 @@ fn render_markdown_theme(
             Event::Code(text) => {
                 let text = inert_source(&text);
                 if in_table {
-                    table_links.append(&mut table_row_cells, table_rows.len(), link_source, &text);
+                    table_spans.append(&mut table_row_cells, table_rows.len(), style, &text);
                 } else {
                     inline.code(
                         &text,
@@ -671,7 +669,7 @@ fn render_markdown_theme(
                 table_alignments = alignments;
                 table_rows.clear();
                 table_row_cells.clear();
-                table_links = crate::table_navigation::TableLinks::default();
+                table_spans = crate::table_spans::TableSpans::default();
             }
             Event::End(TagEnd::Table) => {
                 in_table = false;
@@ -679,7 +677,7 @@ fn render_markdown_theme(
                     w,
                     &table_rows,
                     &table_alignments,
-                    &table_links,
+                    &table_spans,
                     terminal_width,
                     settings,
                 )?;
@@ -738,10 +736,10 @@ fn render_markdown_theme(
             Event::FootnoteReference(id) => {
                 let id = inert_source(&id);
                 if in_table {
-                    table_links.append(
+                    table_spans.append(
                         &mut table_row_cells,
                         table_rows.len(),
-                        link_source,
+                        style,
                         &footnote_marker(&id),
                     );
                     continue;
@@ -792,7 +790,7 @@ fn render_markdown_theme(
                 let currency = crate::math::currency(&tex, md[range.end..].chars().next());
                 let text = crate::math::present(&tex, original, settings.math, currency);
                 if in_table {
-                    table_links.append(&mut table_row_cells, table_rows.len(), link_source, &text);
+                    table_spans.append(&mut table_row_cells, table_rows.len(), style, &text);
                 } else {
                     inline.code(
                         &text,
@@ -812,7 +810,7 @@ fn render_markdown_theme(
                 })?;
                 let text = crate::math::present(&tex, original, settings.math, false);
                 if in_table {
-                    table_links.append(&mut table_row_cells, table_rows.len(), link_source, &text);
+                    table_spans.append(&mut table_row_cells, table_rows.len(), style, &text);
                 } else {
                     let had_content = inline.has_content();
                     inline.finish(w)?;
@@ -884,7 +882,7 @@ fn render_table(
     w: &mut crate::render_writer::RenderWriter<'_, impl Write>,
     rows: &[Vec<String>],
     alignments: &[Alignment],
-    links: &crate::table_navigation::TableLinks,
+    spans: &crate::table_spans::TableSpans,
     terminal_width: Option<usize>,
     settings: &RenderOptions,
 ) -> std::io::Result<()> {
@@ -932,11 +930,11 @@ fn render_table(
         for (cell, &width) in row.iter().zip(&col_widths) {
             wrapped_row.push(cell.wrap(width));
         }
-        let wrapped_links: Vec<_> = wrapped_row
+        let wrapped_spans: Vec<_> = wrapped_row
             .iter()
             .enumerate()
             .map(|(column, wrapped)| {
-                links.wrapped(
+                spans.wrapped(
                     row_idx,
                     column,
                     rows[row_idx].get(column).map_or("", String::as_str),
@@ -983,10 +981,8 @@ fn render_table(
                         alignments.get(i).copied().unwrap_or(Alignment::None),
                     );
                     write!(w, "{}", " ".repeat(leading))?;
-                    for mark in &wrapped_links[i][line_idx] {
-                        w.mark_link_columns(mark.source, mark.range.start, mark.range.end);
-                    }
-                    write!(w, "{cell}{}", " ".repeat(trailing))?;
+                    crate::table_spans::write_cell(w, cell, &wrapped_spans[i][line_idx])?;
+                    write!(w, "{}", " ".repeat(trailing))?;
                 } else {
                     // Pad with spaces for shorter cells
                     write!(w, "{}", " ".repeat(col_widths[i]))?;

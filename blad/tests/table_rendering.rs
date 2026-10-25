@@ -1,7 +1,93 @@
 //! Integration tests for table rendering with wrapping and column width adaptation.
 
-use blad::{MarkdownRenderer, RenderOptions};
+use blad::{ColorDepth, MarkdownRenderer, RenderOptions};
 use unicode_width::UnicodeWidthStr;
+use vte::{Params, Parser, Perform};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Attributes {
+    bold: bool,
+    italic: bool,
+    strike: bool,
+    reverse: bool,
+    background: bool,
+}
+
+#[derive(Default)]
+struct StyledText {
+    text: String,
+    attributes: Vec<Attributes>,
+    current: Attributes,
+}
+
+impl StyledText {
+    fn parse(output: &str) -> Self {
+        let mut text = Self::default();
+        Parser::new().advance(&mut text, output.as_bytes());
+        text
+    }
+
+    fn styles_for(&self, text: &str) -> &[Attributes] {
+        let offset = self.text.find(text).unwrap();
+        let start = self.text[..offset].chars().count();
+        &self.attributes[start..start + text.chars().count()]
+    }
+
+    fn assert_emphasis(&self, text: &str, flags: [bool; 3]) {
+        assert!(
+            self.styles_for(text)
+                .iter()
+                .all(|style| [style.bold, style.italic, style.strike] == flags),
+            "{text:?}: {:?}",
+            self.styles_for(text)
+        );
+    }
+}
+
+impl Perform for StyledText {
+    fn print(&mut self, character: char) {
+        self.text.push(character);
+        self.attributes.push(self.current);
+    }
+
+    fn execute(&mut self, byte: u8) {
+        if byte == b'\n' {
+            self.print('\n');
+        }
+    }
+
+    fn csi_dispatch(&mut self, params: &Params, _: &[u8], _: bool, action: char) {
+        if action != 'm' {
+            return;
+        }
+        let mut values = params.iter().map(|value| value[0]);
+        while let Some(value) = values.next() {
+            match value {
+                0 => self.current = Attributes::default(),
+                1 => self.current.bold = true,
+                3 => self.current.italic = true,
+                9 => self.current.strike = true,
+                22 => self.current.bold = false,
+                23 => self.current.italic = false,
+                29 => self.current.strike = false,
+                7 => self.current.reverse = true,
+                27 => self.current.reverse = false,
+                49 => self.current.background = false,
+                40..=47 | 100..=107 => self.current.background = true,
+                38 | 48 => {
+                    if value == 48 {
+                        self.current.background = true;
+                    }
+                    let count = if values.next() == Some(2) { 3 } else { 1 };
+                    for _ in 0..count {
+                        values.next();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
 
 /// Strip ANSI escape codes for easier testing.
 fn strip_ansi(s: &str) -> String {
@@ -165,6 +251,154 @@ fn delimiter_alignment_is_local_to_each_table() {
         80,
     ));
     assert_eq!(output, "First\n    x\n\n\nSecond\ny     \n\n");
+}
+
+#[test]
+fn cell_emphasis_composes_without_clearing_headers_backgrounds_or_neighbors() {
+    let output = render_width(
+        "| **Head** *ItalicHead* ~~StrikeHead~~ | Plain |\n| :---: | ---: |\n| **bold *both* end** *italic* ~~strike words~~ ~~***all***~~ | neighbor |\n| next row | **last** |",
+        1000,
+    );
+    let styled = StyledText::parse(&output);
+    for (text, flags) in [
+        ("Head", [true, false, false]),
+        ("ItalicHead", [false, true, false]),
+        ("StrikeHead", [false, false, true]),
+        ("bold", [true, false, false]),
+        ("both", [true, true, false]),
+        ("end", [true, false, false]),
+        ("italic", [false, true, false]),
+        ("strike words", [false, false, true]),
+        ("all", [true, true, true]),
+        ("neighbor", [false; 3]),
+        ("next row", [false; 3]),
+        ("last", [true, false, false]),
+    ] {
+        styled.assert_emphasis(text, flags);
+    }
+    let rows: Vec<_> = styled.text.lines().collect();
+    assert!(styled.styles_for(rows[0]).iter().all(|style| style.reverse));
+    assert!(
+        styled
+            .styles_for(rows[1])
+            .iter()
+            .all(|style| style.background && !style.reverse)
+    );
+    assert!(
+        styled
+            .styles_for(rows[2])
+            .iter()
+            .all(|style| !style.background && !style.reverse)
+    );
+    for row in rows.iter().take(3) {
+        let separator = row.find(" | ").unwrap();
+        let before = styled.text.find(row).unwrap();
+        let start = styled.text[..before + separator].chars().count();
+        assert!(
+            styled.attributes[start..start + 3]
+                .iter()
+                .all(|style| !style.bold && !style.italic && !style.strike)
+        );
+    }
+}
+
+#[test]
+fn cell_emphasis_tracks_normalized_spaces_event_split_words_and_unicode() {
+    let styled = StyledText::parse(&render_width(
+        "| Heading |\n| --- |\n| **joined   words** **apart** **parts** pre**middle**post **e\u{301} 界 👩‍💻** |",
+        1000,
+    ));
+    styled.assert_emphasis("joined words", [true, false, false]);
+    styled.assert_emphasis("apart", [true, false, false]);
+    styled.assert_emphasis("parts", [true, false, false]);
+    assert!(!styled.styles_for("apart parts")[5].bold);
+    styled.assert_emphasis("pre", [false; 3]);
+    styled.assert_emphasis("middle", [true, false, false]);
+    styled.assert_emphasis("post", [false; 3]);
+    styled.assert_emphasis("e\u{301} 界 👩‍💻", [true, false, false]);
+}
+
+#[test]
+fn cell_emphasis_survives_wrapping_and_breaks_without_changing_plain_geometry() {
+    let markdown = "| Left | Right |\n| :---: | ---: |\n| ~~one two three four five six seven eight nine~~ tail | **first<br><br/>last** |";
+    for width in [0, 25, 40, 80] {
+        let output = render_width(markdown, width);
+        let styled = StyledText::parse(&output);
+        for word in [
+            "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+        ] {
+            styled.assert_emphasis(word, [false, false, true]);
+        }
+        styled.assert_emphasis("tail", [false; 3]);
+        styled.assert_emphasis("first", [true, false, false]);
+        styled.assert_emphasis("last", [true, false, false]);
+        let mut renderer = MarkdownRenderer::with_options(RenderOptions::plain());
+        renderer.set_width(Some(width));
+        let mut plain = Vec::new();
+        renderer.render_markdown(markdown, &mut plain).unwrap();
+        assert_eq!(String::from_utf8(plain).unwrap(), strip_ansi(&output));
+    }
+}
+
+#[test]
+fn cell_emphasis_keeps_code_escapes_and_later_prose_semantics_unchanged() {
+    let styled = StyledText::parse(&render_width(
+        "| Heading |\n| --- |\n| `**literal**` \\*escaped\\* **`inherited code`** |\n\nplain after\n\n| Next |\n| --- |\n| unstyled |",
+        1000,
+    ));
+    styled.assert_emphasis("**literal**", [false; 3]);
+    styled.assert_emphasis("*escaped*", [false; 3]);
+    styled.assert_emphasis("inherited code", [true, false, false]);
+    assert!(
+        styled
+            .styles_for("inherited code")
+            .iter()
+            .all(|style| !style.reverse)
+    );
+    styled.assert_emphasis("plain after", [false; 3]);
+    styled.assert_emphasis("unstyled", [false; 3]);
+    assert_eq!(
+        styled.styles_for("plain after"),
+        [Attributes::default(); 11]
+    );
+}
+
+#[test]
+fn cell_emphasis_is_preserved_without_color_and_suppressed_in_plain_output() {
+    let markdown = "| Header |\n| --- |\n| **bold** *italic* ~~strike~~ |";
+    for plain in [false, true] {
+        let renderer = MarkdownRenderer::with_options(RenderOptions {
+            plain,
+            color_depth: ColorDepth::None,
+            ..RenderOptions::default()
+        });
+        let mut output = Vec::new();
+        renderer.render_markdown(markdown, &mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        let styled = StyledText::parse(&output);
+        styled.assert_emphasis("bold", [!plain, false, false]);
+        styled.assert_emphasis("italic", [false, !plain, false]);
+        styled.assert_emphasis("strike", [false, false, !plain]);
+        if plain {
+            assert!(!output.contains('\x1b'));
+        }
+    }
+}
+
+#[test]
+fn cell_emphasis_handles_many_spans_in_one_unbroken_word() {
+    let source = format!("| H |\n| --- |\n| {} |", "a**b**c".repeat(2000));
+    let styled = StyledText::parse(&render_width(&source, 1));
+    let row = styled.text.lines().nth(1).unwrap();
+    assert_eq!(row, "abc".repeat(2000));
+    assert_eq!(
+        styled
+            .styles_for(row)
+            .iter()
+            .filter(|style| style.bold)
+            .count(),
+        2000
+    );
 }
 
 #[test]

@@ -454,9 +454,27 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     excluding padding, after reflow and with quotes/line-number gutters.
     Verify exact styled/plain geometry, default/explicit alignments, empty
     cells, odd padding, Unicode, wrapping, resize, overflow and multiple tables.
-    Document supported alignment and the separate limitation that inline cell
-    emphasis/code styling is flattened; HTML tables and merged cells remain
-    outside the supported Markdown table profile.
+    Document supported alignment, the R-074 emphasis subset and deferred
+    dedicated inline-code styling; HTML tables and merged cells remain outside
+    the supported Markdown table profile.
+
+### First inline table styling subset
+
+74. **R-074 Table emphasis:** Preserve bold, italic and strikethrough attributes,
+    including nesting/combinations and supported emphasis within links, across
+    cell whitespace normalization, explicit breaks and whole-word wrapping.
+    Attributes apply to the corresponding displayed text, not alignment padding,
+    separators or neighboring cells/rows. Keep header reversal, alternating row
+    backgrounds and enclosing quote styling intact, with no style leakage.
+    Preserve plain text, solved geometry, alignment, source-owned link hitboxes,
+    precise search/selection overlays, grapheme-safe clipping and resize behavior.
+    Keep authored controls inert and propagate writer errors. Verify effective
+    attributes, not escape-sequence presence alone, including Unicode,
+    normalized spaces, nested/event-split words, plain/color policies and PTYs.
+    Dedicated code appearance, code-specific whitespace/nonbreaking semantics,
+    table link colors and other new inline styles remain deferred. Existing
+    enclosing emphasis may style their displayed text without adding those
+    separate semantics. Terminal/font attribute support is not guaranteed.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).

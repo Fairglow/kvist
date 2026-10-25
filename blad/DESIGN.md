@@ -9,6 +9,38 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+### First inline table styling subset (2026-10-25)
+
+Generalize the existing table-link token projection into one private
+`table_spans` module for source-bound links and emphasis, not a second wrapping
+engine. Retain plain cell strings for the solver. Store typed byte spans with
+only existing `Style` bold/italic/strike flags and optional navigation identity;
+discard colors, reverse and other attributes at this boundary. Merge adjacent
+equal spans. Capture projected/inert text offsets, never original Markdown
+delimiter offsets.
+
+Map spans through the same whole-word source correspondence used for links.
+Each wrapped span carries UTF-8 byte ranges for emitting text and grapheme-aware
+display columns for link marks. Map normalized inter-word spaces to the first
+source whitespace they replace; omit whitespace lost to wrapping. Explicit
+breaks reset output positions. Register links after leading alignment padding
+and before emitting styled text, retaining quote/gutter ownership.
+
+Emit only selective SGR on/off pairs for bold (1/22), italic (3/23) and strike
+(9/29), so header reversal and row/quote backgrounds survive without full
+resets. Disable attributes before padding/separators; the existing output
+encoder suppresses them for plain output. Keep all authored text inert and
+all writes fallible. Do not change width solving, token boundaries, script/math
+projection, dedicated code styling, code whitespace/atomicity or link colors.
+
+Fail-first tests inspect effective attributes through an ANSI parser, including
+nesting, adjacent event-split words, styled spaces, Unicode and breaks. Retain
+alignment and source-owned links; exercise styled link search/selection,
+numbered clipping and resize through the PTY model. Record independent
+source-only observations and a separate source-blind comparison after
+implementation. This user-directed bundle uses a deliberate advisory exception
+while receipt enforcement is unavailable, not a fabricated receipt or acceptance.
+
 ### Markdown table delimiter alignment (2026-10-25)
 
 Retain the parser's per-column `Alignment` vector for the current table and
@@ -29,9 +61,10 @@ Do not inject ANSI into measured cell strings.
 Fail-first rendering tests cover exact alignment, Unicode, odd padding, breaks,
 empty cells, table-local state and geometry across widths/output policies.
 Source-bound navigation and PTY tests cover wrapped/quoted/numbered labels,
-selection, padding hitboxes and resize. Inline emphasis and code remain
-flattened text; preserving style spans is a separate follow-up, not part of
-alignment. This user-directed bundle uses a deliberate advisory exception
+selection, padding hitboxes and resize. At the alignment increment, inline
+emphasis and code remained flattened; the subsequent emphasis subset above
+supersedes that limitation only for its three attributes. This user-directed
+bundle uses a deliberate advisory exception
 while review-receipt enforcement is unavailable. Independent source-only
 observation and separate source-blind comparison follow implementation and do
 not constitute human acceptance.

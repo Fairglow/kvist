@@ -159,10 +159,11 @@ Blad uses CommonMark parsing with selected extensions, not full CommonMark or
 GFM conformance. Tables support width-aware whole-word wrapping and delimiter
 alignment: `:---` left, `:---:` center, `---:` right; unspecified alignment is
 left. Long tokens or minimum column widths can require horizontal scrolling.
-Inline bold, italic, strikethrough and code in table cells retain their text,
-but not their individual styling; links remain navigable. HTML tables and
-merged cells are not supported. Raw HTML is omitted, except table-cell `<br>`
-line breaks, and images show alt text only.
+Table cells preserve bold, italic and strikethrough, including combinations;
+links remain navigable. Inline code has no dedicated cell styling and uses
+ordinary cell whitespace/wrapping rules. HTML tables and merged cells are not
+supported. Raw HTML is omitted, except table-cell `<br>` line breaks, and images
+show alt text only.
 
 ## Architecture
 
