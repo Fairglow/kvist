@@ -6,13 +6,16 @@ First standalone crates.io release candidate, not yet published.
 
 - Package name `kvist-blad`; executable and Rust library remain `blad`.
 - Local Markdown viewing, stable tabs, literal/regex search, precise links,
-  heading navigation, explicit reload and external editing.
+  heading navigation and external editing.
 - Debounced automatic file reload with retained viewport/search and recovery
   after failed reads; inactive tabs refresh when revisited.
 - Bounded stdin snapshots (`cat FILE | blad` or `blad -`), plain pipeline
   output by default, and quiet success when downstream readers close early.
-- Restored documented backward-search/reverse-match bindings and aligned key
-  references; diagnostic logging retains one descriptor, rejects blocking or
+- Simplified viewer keys: `?` opens help, `N`/`<` move to previous matches,
+  links need no mode, and file reload is automatic only. Removed `p`, `f` and
+  `F5` actions; normal-mode `Ctrl+R` starts regex search and search-prompt
+  `Ctrl+R` still toggles regex.
+- Diagnostic logging retains one descriptor, rejects blocking or
   linked destinations and reports initialization failures visibly.
 - Recompute existing matches immediately when toggling literal/regex search.
 - Dark, light and terminal-native palettes; strict JSON palette overrides;

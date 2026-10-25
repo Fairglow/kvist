@@ -91,10 +91,10 @@ styles, while `--dump` always removes them. Closed downstream pipes exit quietly
 | Keys | Action |
 |------|--------|
 | `/` | Start or refine forward search |
-| `?` | Start backward search |
+| `Ctrl+R` | Start forward search in regex mode |
 | `Ctrl+R` (in search) | Toggle regex mode |
 | `n`/`>` | Next match |
-| `N`/`p`/`<` | Match in reverse search direction |
+| `N`/`<` | Match in reverse search direction |
 | `Esc` | Cancel search |
 | `Enter` | Confirm search |
 
@@ -105,7 +105,6 @@ styles, while `--dump` always removes them. Closed downstream pipes exit quietly
 | `Tab`/`Shift+Tab` | Navigate links |
 | `Enter` | Follow selected or first visible link |
 | `Ctrl+Arrows` | Spatial link navigation |
-| `f` | Enter link mode |
 
 ### Tabs
 
@@ -121,9 +120,8 @@ styles, while `--dump` always removes them. Closed downstream pipes exit quietly
 | Keys | Action |
 |------|--------|
 | `e` | Open in external editor |
-| `Ctrl+R`/`F5` | Reload file |
 | `Ctrl+L` | Redraw |
-| `F1`/`h` | Show help |
+| `?`/`F1`/`h` | Show help |
 | `Q`/`Ctrl+Q` | Quit all tabs in normal mode |
 | `Ctrl+C` | Quit all tabs from any mode |
 

@@ -320,18 +320,14 @@ fn viewer_session(
         .iter()
         .map(|link| link_spans(&document, link))
         .collect();
-    let mut link_mode = false;
     let mut link_index = 0;
-    let mut selected_link = None;
+    let mut selected_link: Option<usize> = None;
     let mut selected_part = 0;
     let mut watch = FileWatch::new();
-    let mut reload_requested = false;
-
     loop {
-        let automatic = path.is_some_and(|path| watch.changed(path));
-        if automatic || reload_requested {
+        if path.is_some_and(|path| watch.changed(path)) {
             let candidate = read_reload_source(path).and_then(|source| {
-                if automatic && !reload_requested && source == *content {
+                if source == *content {
                     return Ok(None);
                 }
                 let updated = Document::render_with_options(
@@ -355,14 +351,11 @@ fn viewer_session(
                         .iter()
                         .map(|link| link_spans(&document, link))
                         .collect();
-                    link_mode = false;
                     selected_link = None;
                     selected_part = 0;
                     link_index = 0;
                     search.update(&document.lines, scroll_offset);
-                    if reload_requested {
-                        *status = "Reloaded file".into();
-                    } else if status.starts_with("Error reloading file:") {
+                    if status.starts_with("Error reloading file:") {
                         status.clear();
                     }
                 }
@@ -373,7 +366,6 @@ fn viewer_session(
                 }
                 Err(error) => *status = format!("Error reloading file: {error}"),
             }
-            reload_requested = false;
         }
         let mut pending_follow = None;
         let lines = &document.lines;
@@ -386,7 +378,7 @@ fn viewer_session(
         let end = scroll_offset.saturating_add(visible_lines).min(total_lines);
 
         // Header
-        let context = if (link_mode || selected_link.is_some()) && !links.is_empty() {
+        let context = if selected_link.is_some() && !links.is_empty() {
             format!(
                 "=== Links: {}/{} - {} ===",
                 link_index + 1,
@@ -439,7 +431,7 @@ fn viewer_session(
         let first_match = search.matches.partition_point(|span| span.row < start);
         let last_match = search.matches.partition_point(|span| span.row < end);
         let mut highlights = search.matches[first_match..last_match].to_vec();
-        if let Some(index) = selected_link.or_else(|| link_mode.then_some(link_index)) {
+        if let Some(index) = selected_link {
             highlights.extend(
                 spans[index]
                     .iter()
@@ -488,7 +480,6 @@ fn viewer_session(
                 }
                 if modifiers.contains(KeyModifiers::ALT)
                     && !search.editing
-                    && !link_mode
                     && matches!(code, KeyCode::Left | KeyCode::Right)
                 {
                     status.clear();
@@ -500,7 +491,6 @@ fn viewer_session(
                 }
                 if modifiers.contains(KeyModifiers::CONTROL)
                     && !search.editing
-                    && !link_mode
                     && matches!(code, KeyCode::PageUp | KeyCode::PageDown)
                 {
                     status.clear();
@@ -581,41 +571,6 @@ fn viewer_session(
                             document.content_width,
                         );
                     }
-                } else if link_mode && !modifiers.contains(KeyModifiers::CONTROL) {
-                    match code {
-                        KeyCode::Tab => {
-                            link_index = (link_index + 1) % links.len();
-                        }
-                        KeyCode::BackTab => {
-                            if link_index > 0 {
-                                link_index -= 1;
-                            } else {
-                                link_index = links.len() - 1;
-                            }
-                        }
-                        KeyCode::Enter => {
-                            pending_follow = Some(link_index);
-                            link_mode = false;
-                        }
-                        KeyCode::Esc => {
-                            link_mode = false;
-                            selected_link = None;
-                        }
-                        _ => {}
-                    }
-                    if link_mode {
-                        selected_link = Some(link_index);
-                        selected_part = 0;
-                        if let Some(span) = spans[link_index].first() {
-                            reveal(
-                                span,
-                                &mut scroll_offset,
-                                &mut scroll_x,
-                                visible_lines,
-                                document.content_width,
-                            );
-                        }
-                    }
                 } else if modifiers.contains(KeyModifiers::CONTROL) {
                     match code {
                         KeyCode::Char('f') => {
@@ -631,6 +586,11 @@ fn viewer_session(
                             scroll_offset = scroll_offset.saturating_sub((visible_lines / 2).max(1))
                         }
                         KeyCode::Char('l') => painter.invalidate(),
+                        KeyCode::Char('r') => {
+                            search.begin(false);
+                            search.regex = true;
+                            selected_link = None;
+                        }
                         KeyCode::Home => {
                             scroll_offset = 0;
                             scroll_x = 0;
@@ -638,7 +598,6 @@ fn viewer_session(
                         KeyCode::End => {
                             scroll_offset = total_lines.saturating_sub(visible_lines);
                         }
-                        KeyCode::Char('r') => reload_requested = true,
                         _ => {}
                     }
                 } else {
@@ -691,8 +650,8 @@ fn viewer_session(
                         KeyCode::Char('G') | KeyCode::Char('L') => {
                             scroll_offset = total_lines.saturating_sub(visible_lines);
                         }
-                        KeyCode::Char('/' | '?') => {
-                            search.begin(code == KeyCode::Char('?'));
+                        KeyCode::Char('/') => {
+                            search.begin(false);
                             selected_link = None;
                         }
                         KeyCode::Char('n') | KeyCode::Char('>') if !search.matches.is_empty() => {
@@ -707,25 +666,9 @@ fn viewer_session(
                                 );
                             }
                         }
-                        KeyCode::Char('N' | 'p' | '<') if !search.matches.is_empty() => {
+                        KeyCode::Char('N' | '<') if !search.matches.is_empty() => {
                             search.advance(true);
                             if let Some(span) = search.current() {
-                                reveal(
-                                    span,
-                                    &mut scroll_offset,
-                                    &mut scroll_x,
-                                    visible_lines,
-                                    document.content_width,
-                                );
-                            }
-                        }
-                        KeyCode::Char('f') if !links.is_empty() => {
-                            link_mode = true;
-                            link_index = 0;
-                            selected_link = Some(0);
-                            selected_part = 0;
-                            search = Search::default();
-                            if let Some(span) = spans[0].first() {
                                 reveal(
                                     span,
                                     &mut scroll_offset,
@@ -773,10 +716,6 @@ fn viewer_session(
                         KeyCode::Char('b') => {
                             return Ok(ViewerAction::Back);
                         }
-                        KeyCode::F(5) => reload_requested = true,
-                        // Enter follows the first link at or below the top of
-                        // the viewport, so links can be jumped to without
-                        // entering link mode.
                         KeyCode::Enter => {
                             pending_follow = selected_link.or_else(|| {
                                 links
@@ -816,7 +755,7 @@ fn viewer_session(
                             selected_link = None;
                             search = Search::default();
                         }
-                        KeyCode::Char('h') | KeyCode::F(1) => help = true,
+                        KeyCode::Char('?' | 'h') | KeyCode::F(1) => help = true,
                         KeyCode::Char('Q') => return Ok(ViewerAction::Quit),
                         KeyCode::Char('q') | KeyCode::Esc => {
                             return Ok(ViewerAction::Close);

@@ -9,6 +9,23 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+### Simplified viewer keybindings (2026-10-25)
+
+The user's README changes supersede the earlier backward-search, `p`, `f`
+link-mode and explicit-reload key decisions. Route normal-mode `?` to the
+existing help overlay with h/F1; `/` opens only forward search and N/< retain
+reverse occurrence traversal. Normal-mode Ctrl+R starts a fresh forward search
+with its regex flag enabled; Ctrl+R still toggles that flag inside a prompt.
+Delete the private link-mode state and dispatch branch; direct link selection
+remains modeless. Remove manual reload requests and their success notices,
+leaving the existing watcher-driven candidate transaction, descriptor checks,
+failure recovery and search/viewport refresh intact. Migrate manual-reload
+PTY coverage to save-triggered frames, pin removed keys as no-ops and verify
+Ctrl+R starts regex search without a preceding slash.
+This user-directed bundle has an explicit advisory exception while review
+receipt enforcement is unavailable. Historical sections below describe prior
+increments, not additional current bindings.
+
 ### Extracted-package PTY synchronization (2026-10-25)
 
 Actions expected to redraw must wait for a complete synchronized frame within

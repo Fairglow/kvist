@@ -235,10 +235,12 @@ feature toggle now.
 48. **R-048 Precise search:** Highlight only matching rendered text, including
     multiple occurrences on one line, through ANSI styles and horizontal
     clipping. Preserve graphemes. Literal, case-insensitive search is the
-    default; provide an explicit bounded Rust-regex mode in the same prompt.
+    default for `/`; normal-mode `Ctrl+R` starts a fresh forward regex search,
+    and `Ctrl+R` toggles literal/regex inside either prompt.
     Invalid patterns and no matches remain visible; zero-width matches are
-    excluded. `/` searches forward, `?` backward; `n` repeats that direction
-    and `N`/`p` reverse it, wrapping at either end. Start near the viewport.
+    excluded. `/` searches forward; `n`/`>` move forward and `N`/`<` move
+    backward, wrapping at either end. Start near the viewport. `?` opens help,
+    never backward search; `p` has no normal-mode search action.
 49. **R-049 Precise navigation:** Highlight only the selected link's rendered
     spans. Support deterministic Ctrl+Arrow navigation by rendered position,
     reveal offscreen selections vertically and horizontally, and recompute
@@ -246,7 +248,7 @@ feature toggle now.
     next/previous heading navigation without repurposing established keys.
 50. **R-050 Tab lifetime:** Normal-mode `q`/Esc closes the active tab, exiting
     only when it was the last. Preserve surviving tab order, positions and
-    valid back history. Provide an explicit quit-all key. Search, link and help
+    valid back history. Provide an explicit quit-all key. Search and help
     cancellation must not accidentally close a tab.
 51. **R-051 Stable display:** Scrolling and tab switching must not clear the
     full screen or leave/re-enter the alternate screen. Buffer frame output,
@@ -254,7 +256,7 @@ feature toggle now.
     explicit refresh. Ignore key-release events. Retain terminal restoration
     on success, editor handoff and error.
 52. **R-052 Discoverability:** Provide in-viewer help and familiar full-page,
-    half-page, backward-search and refresh keys. Document deliberate
+    half-page, reverse-match and repaint keys. Document deliberate
     differences from `less`, regex syntax/limits, and deferred capabilities.
 
 ### Viewer reliability follow-up
@@ -265,13 +267,14 @@ feature toggle now.
     timeout with bounded diagnostics, and retain the document and terminal.
     Do not wait for descendant-held output EOF or kill an independent browser.
     Test ordinary completion, failure, timeout, diagnostic floods and cleanup.
-54. **R-054 Explicit reload:** Normal-mode `Ctrl+R` or `F5` reloads the active file without
+54. **R-054 Transactional reload:** Automatic reload updates the active file without
     terminal teardown, retaining rendering policy, tab order/history and
     numeric vertical/horizontal offsets, clamped to the new layout. Recompute
     search results and navigation metadata; clear obsolete link selection.
     Commit the new contents only after successful read and render. Read/render
     failure retains the previous usable document and exposes a footer error.
-    Reload without a file path must produce an explicit unavailable notice.
+    Pathless documents do not reload. `F5` has no action; `Ctrl+R` starts regex
+    search in normal mode and toggles regex inside a search prompt, never reloads.
     Open candidates nonblockingly without following final symlinks, then
     validate the opened descriptor as a regular file before reading, avoiding
     a metadata/open race with a FIFO replacement.
@@ -286,7 +289,7 @@ feature toggle now.
 
 56. **R-056 Bounded document reads:** Standalone file reads must accept at
     most 16 MiB (16,777,216 bytes) per file, inclusively, across initial
-    interactive/dump inputs, newly followed file links, explicit reload and
+    interactive/dump inputs, newly followed file links, automatic reload and
     post-editor rereads. Reject oversized input explicitly, never truncate it
     into a successful document. Check both opened-file size and actual bytes
     read, consuming at most the limit plus one probe byte if size information
@@ -349,9 +352,9 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     when revisited. Retain numeric vertical/horizontal offsets (clamping only
     to the new layout), rendering options, tab order/history and search prompt,
     query/mode/direction. Recompute search and link/heading metadata; cancel
-    obsolete link selection/mode. Read/render errors retain the old document
+    obsolete link selection. Read/render errors retain the old document
     and report a footer error without repeated notices for unchanged failures.
-    Recover on the next change. Preserve explicit reload, terminal ownership
+    Recover on the next change. Preserve terminal ownership
     and changed-row painting. Pathless documents and noninteractive output
     must not watch. Polling is local and bounded in frequency, not a hard
     latency guarantee or snapshot of concurrent writes.
@@ -384,6 +387,13 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     Existing files append; newly created logs use private permissions.
     Logging must not claim that normal footer actions emit diagnostic events.
     Public docs/help must match implemented search, reload and navigation keys.
+
+### Simplified viewer keybindings
+
+68. **R-068 Modeless links:** Remove the `f` link mode and its modal dispatch.
+    Plain `f` has no action, with or without links or retained search results.
+    Preserve direct Tab/Shift+Tab, Enter, Ctrl+Arrow and mouse link navigation
+    without blocking normal scrolling, tab switching or quit keys.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).

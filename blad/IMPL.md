@@ -4,6 +4,75 @@
 
 Date: 2026-10-12
 
+## Simplified keybindings evidence - 2026-10-25
+
+An independent source-only observer examined `src/display.rs`,
+`src/viewer_navigation.rs`, `src/viewer_reload.rs`, `src/search.rs` and
+`tests/viewer.rs`, excluding intent, prior records, history and execution
+evidence. A subsequent source-only observer examined only the display,
+navigation-help and PTY files after the direct Ctrl+R follow-up. Together
+their observations describe:
+
+- Normal-mode `?`/h/F1 opens help; other help keys dismiss it, except Ctrl+C
+  which quits. `/` starts a fresh forward literal search; n/> and N/< traverse
+  occurrences forward/backward. The private Search type still supports a
+  backward flag, but viewer entry points pass false.
+- Normal-mode Ctrl+R starts a fresh forward search, enables regex and clears
+  link selection. In a prompt Ctrl+R toggles regex and immediately recomputes
+  matches. Printable `?` remains query text. Plain p/f and F5 have no normal
+  action binding.
+- Link selection retains an index and span part but no modal dispatch.
+  Tab/Shift+Tab, Enter and spatial navigation remain available without
+  blocking scrolling, help, tab switching or closing.
+- Only watcher observations trigger in-session reload. The existing 250 ms
+  polling/debounce, bounded source read and candidate-before-replacement
+  transaction remain. Failures retain the document and show a footer error;
+  successful changes clamp offsets, rebuild navigation, clear selection and
+  recompute search. Unchanged failed metadata is not retried until it changes.
+- Focused PTY assertions cover help, reverse traversal, inert keys, direct
+  regex entry, toggling, fresh re-entry, slash literal reset and link
+  deselection. Former manual-reload scenarios now await automatic save frames.
+
+These are source observations, not test execution or acceptance. Finite PTY
+coverage is not exhaustive modifier/terminal/race coverage; render failure is
+not injected. Empty Ctrl+R entry and its exact help wording are not separately
+asserted. Metadata stability is not a snapshot or hard latency bound; sustained
+writes can defer reload. Search occurrence indices are recalculated near the
+viewport rather than preserved exactly.
+
+Final source SHA-256, in display/navigation-help/reload/search/PTY order:
+
+```text
+53381386ba53422a363544dc54551c60d7b86a38a2deb1b932e78a34d8a8eb8b
+1b54a0baeea6e3bec313d984fad4b227af8c2ca6ff95b1a1c4ba81e06066c23a
+a0e4bf2cf9050f4b7180920b2dcfb51cb146fe84ce4d47b73298ad9fa9d3df76
+13fd59165af523e5b298e75b92e6645e783c1a4ef3869c29c558c7236358dbb3
+d188f52c81ab9104c2ad31472defc47772a78565783328751d3b2207d8314cfe
+```
+
+Implementer execution reproduced help-only ?, inert reload/f and direct-regex
+regressions before their corresponding fixes. Final `cargo fmt --all --check`,
+strict all-target/all-feature Blad Clippy and patch hygiene pass.
+`cargo test --offline --locked -p kvist-blad` passes 256 tests and
+`cargo test --offline --locked -p kvist-blad --all-features` passes 277 tests,
+including 46 PTY cases in each configuration; each suite retains its two
+pre-existing ignored characterizations. This is scoped engineering evidence,
+not human acceptance or whole-component certification.
+
+A separate source-blind comparator read only the relevant revised local intent
+and this evidence section, without source, tests, queue or historical records.
+It identified no concrete discrepancy in this increment and found support for
+the scoped alteration, retaining the coverage limitations above. It did not
+independently execute tests or certify broader requirements.
+
+Compared intent SHA-256, in requirements/contract/design order:
+
+```text
+cc9eda4e1ea3ae20b215a2df39f3e9ba14761d5d146e303cfdf857b2c54ab08e
+62030596a33086fe3b9eb1aa3aa9f2ec166259cca4ba842017f319f28f502593
+70513ff4e79fc0dcf736746ed9a3dea4ae83db0f94f67511c1e8b7810c41a591
+```
+
 ## Extracted-package PTY synchronization evidence - 2026-10-25
 
 PR #9's stable and Rust 1.95.0 archive jobs failed only

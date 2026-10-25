@@ -378,28 +378,85 @@ fn toggling_regex_recomputes_an_existing_query_without_an_extra_keystroke() {
 }
 
 #[test]
-fn documented_backward_search_and_reverse_alias_work_from_the_viewport() {
+fn question_mark_opens_help_and_reverse_search_uses_only_n_or_angle_bracket() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("backward.md");
+    let path = temp.path().join("keys.md");
     std::fs::write(&path, "hit one\n\nhit two\n\nhit three").unwrap();
-    let mut viewer = Viewer::start(&path, 80, 12, false);
-    viewer.keys(b"?hit\r");
+    let mut viewer = Viewer::start(&path, 100, 30, false);
+    viewer.keys_with_frame(b"?");
+    assert!(viewer.screen.line(0).contains("help"));
+    let help = (1..29)
+        .map(|row| viewer.screen.line(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(help.contains("? / F1 / h"));
+    assert!(!help.contains("backward"));
+    assert!(!help.contains("N/p"));
+    assert!(!help.contains("F5"));
+    viewer.keys_with_frame(b"?");
+    viewer.keys_with_frame(b"/hit\r");
     assert!(
-        viewer.screen.line(11).starts_with("? [literal] 1/3"),
+        viewer.screen.line(29).starts_with("/ [literal] 1/3"),
         "{}",
-        viewer.screen.line(11)
+        viewer.screen.line(29)
     );
-    viewer.keys(b"n");
-    assert!(viewer.screen.line(11).contains("3/3"));
+    viewer.keys_with_frame(b"n");
+    assert!(viewer.screen.line(29).contains("2/3"));
+    viewer.raw.clear();
     viewer.keys(b"p");
-    assert!(viewer.screen.line(11).contains("1/3"));
-    viewer.keys(b"<");
-    assert!(viewer.screen.line(11).contains("2/3"));
-    viewer.keys(b"\x1bOP");
+    assert!(viewer.raw.is_empty());
+    assert!(viewer.screen.line(29).contains("2/3"));
+    viewer.keys_with_frame(b"<");
+    assert!(viewer.screen.line(29).contains("1/3"));
+    viewer.keys_with_frame(b"N");
+    assert!(viewer.screen.line(29).contains("3/3"));
+    viewer.keys_with_frame(b">");
+    assert!(viewer.screen.line(29).contains("1/3"));
+    viewer.keys_with_frame(b"\x1bOP");
     assert!(viewer.screen.line(0).contains("help"));
     viewer.keys(b"Q");
     assert!(viewer.child.try_wait().unwrap().is_none());
     viewer.exit_with(b"\x03");
+}
+
+#[test]
+fn f5_is_inert_and_search_still_treats_question_mark_as_text() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("keys.md");
+    std::fs::write(&path, "hit? hit1").unwrap();
+    let mut viewer = Viewer::start(&path, 80, 12, false);
+    viewer.raw.clear();
+    viewer.keys(b"\x1b[15~");
+    assert!(viewer.raw.is_empty(), "retired reload key produced output");
+    assert!(viewer.child.try_wait().unwrap().is_none());
+    viewer.keys_with_frame(b"/hit?");
+    assert!(viewer.screen.line(11).starts_with("/ [literal] 1/1"));
+    viewer.keys_with_frame(b"\x12");
+    assert!(viewer.screen.line(11).starts_with("/ [regex] 1/2"));
+    viewer.exit_with(b"\x03");
+}
+
+#[test]
+fn ctrl_r_starts_a_fresh_regex_search_and_toggles_in_the_prompt() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("regex.md");
+    std::fs::write(&path, "hit? hit1\n\n[link](#target)\n\n# Target").unwrap();
+    let mut viewer = Viewer::start(&path, 80, 12, false);
+    viewer.keys_with_frame(b"\t");
+    assert!(viewer.screen.line(11).contains("Links: 1/1"));
+    viewer.keys_with_frame(b"\x12hit?");
+    assert!(viewer.screen.line(11).starts_with("/ [regex] 1/2"));
+    viewer.keys_with_frame(b"\x12");
+    assert!(viewer.screen.line(11).starts_with("/ [literal] 1/1"));
+    viewer.keys(b"\r");
+    viewer.keys_with_frame(b"\x12hit[0-9]");
+    assert!(viewer.screen.line(11).starts_with("/ [regex] 1/1"));
+    viewer.keys(b"\r");
+    viewer.keys_with_frame(b"/hit?");
+    assert!(viewer.screen.line(11).starts_with("/ [literal] 1/1"));
+    viewer.keys_with_frame(b"\x1b");
+    assert!(!viewer.screen.line(11).contains("Links:"));
+    viewer.quit();
 }
 
 #[test]
@@ -717,7 +774,7 @@ fn oversized_reload_retains_search_position_and_recovers() {
         .set_len(16 * 1024 * 1024 + 1)
         .unwrap();
     viewer.raw.clear();
-    viewer.keys(b"\x12");
+    viewer.read_frame();
     assert!(viewer.screen.line(11).contains("16777216"));
     assert_eq!(
         (1..11)
@@ -729,7 +786,7 @@ fn oversized_reload_retains_search_position_and_recovers() {
     viewer.keys(b"n");
     assert!(viewer.screen.line(11).contains("2/2"));
     std::fs::write(&path, "# Recovered needle").unwrap();
-    viewer.keys(b"\x12");
+    viewer.read_frame();
     assert_eq!(viewer.screen.content_line(1), "# Recovered needle");
     viewer.keys(b"n");
     assert!(viewer.screen.line(11).contains("1/1"));
@@ -887,13 +944,19 @@ fn reload_preserves_position_policy_tabs_and_recomputes_search_and_links() {
     let before = viewer.screen.content_line(1);
     std::fs::write(
         &path,
-        format!("# Updated\n\n{body}needle needle\n\n[new](#updated)\n\n$x^2$"),
+        format!(
+            "# Updated\n\n{}needle needle\n\n[new](#updated)\n\n$x^2$",
+            body.replace("filler", "updated filler")
+        ),
     )
     .unwrap();
     viewer.raw.clear();
-    viewer.keys(b"\x12");
-    assert_eq!(viewer.screen.content_line(1), before);
-    assert!(viewer.screen.line(11).contains("Reloaded"));
+    viewer.read_frame();
+    assert_eq!(
+        viewer.screen.content_line(1),
+        before.replace("filler", "updated filler")
+    );
+    assert!(!viewer.screen.line(11).contains("Reloaded"));
     let raw = String::from_utf8_lossy(&viewer.raw);
     assert!(!raw.contains("\x1b[?1049"));
     assert!(!raw.contains("\x1b[2J"));
@@ -901,10 +964,13 @@ fn reload_preserves_position_policy_tabs_and_recomputes_search_and_links() {
     assert!(viewer.screen.line(11).contains("1/2"));
     std::fs::write(
         &path,
-        format!("# Updated\n\n{body}needle\n\n[new](#updated)\n\n$x^2$"),
+        format!(
+            "# Updated\n\n{}needle\n\n[new](#updated)\n\n$x^2$",
+            body.replace("filler", "updated filler")
+        ),
     )
     .unwrap();
-    viewer.keys(b"\x12");
+    viewer.read_frame();
     viewer.keys(b"n");
     assert!(viewer.screen.line(11).contains("1/1"));
     viewer.keys(b"\t\r");
@@ -935,7 +1001,7 @@ fn reload_failure_retains_the_old_document_and_shrink_clamps_both_offsets() {
     viewer.keys(b"G");
     let before: Vec<_> = (1..11).map(|row| viewer.screen.content_line(row)).collect();
     std::fs::write(&path, [0xff, 0xfe]).unwrap();
-    viewer.keys(b"\x12");
+    viewer.read_frame();
     assert!(viewer.screen.line(11).contains("Error reloading"));
     assert_eq!(
         (1..11)
@@ -944,7 +1010,7 @@ fn reload_failure_retains_the_old_document_and_shrink_clamps_both_offsets() {
         before
     );
     std::fs::remove_file(&path).unwrap();
-    viewer.keys(b"\x12");
+    viewer.read_frame();
     assert!(viewer.screen.line(11).contains("Error reloading"));
     assert_eq!(
         (1..11)
@@ -953,7 +1019,7 @@ fn reload_failure_retains_the_old_document_and_shrink_clamps_both_offsets() {
         before
     );
     std::fs::write(&path, "# Short").unwrap();
-    viewer.keys(b"\x12");
+    viewer.read_frame();
     assert_eq!(viewer.screen.content_line(1), "# Short");
     assert!((2..11).all(|row| viewer.screen.line(row).is_empty()));
     viewer.resize(40, 10);
@@ -1060,7 +1126,7 @@ fn reload_rejects_fifo_replacements_without_blocking() {
         nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
     )
     .unwrap();
-    viewer.keys(b"\x12");
+    viewer.read_frame();
     assert!(viewer.screen.line(11).contains("requires a regular file"));
     assert_eq!(viewer.screen.content_line(1), "# Retained");
     viewer.quit();
@@ -1094,7 +1160,7 @@ fn reload_does_not_follow_a_replaced_final_symlink() {
     let mut viewer = Viewer::start(&path, 80, 12, false);
     std::fs::remove_file(&path).unwrap();
     std::os::unix::fs::symlink(&replacement, &path).unwrap();
-    viewer.keys(b"\x12");
+    viewer.read_frame();
     assert!(viewer.screen.line(11).contains("Error reloading"));
     assert_eq!(viewer.screen.content_line(1), "# Retained");
     viewer.quit();
@@ -1383,11 +1449,10 @@ fn following_a_file_link_opens_the_target_and_back_returns() {
     .unwrap();
     let mut viewer = Viewer::start(&source, 80, 24, false);
     assert!(viewer.screen.line(0).contains("source.md"));
-    // Enter link mode; the header announces the link count and first link.
-    viewer.keys(b"f");
+    viewer.keys_with_frame(b"\t");
     assert!(
         viewer.screen.line(23).contains("Links: 1/1"),
-        "link mode header not shown: {}",
+        "link selection not shown: {}",
         viewer.screen.line(23)
     );
     // Follow the link; the viewer must open the linked file.
@@ -1410,37 +1475,42 @@ fn following_a_file_link_opens_the_target_and_back_returns() {
 }
 
 #[test]
-fn link_mode_is_inert_without_links_and_esc_exits_it() {
+fn f_is_inert_with_or_without_links_and_does_not_clear_search_or_block_navigation() {
     let temp = tempfile::tempdir().unwrap();
-    // A document with no links: `f` must not enter link mode.
     let no_links = temp.path().join("nolinks.md");
     std::fs::write(&no_links, "# No Links Here\n\njust plain prose").unwrap();
     let mut viewer = Viewer::start(&no_links, 80, 24, false);
+    viewer.raw.clear();
     viewer.keys(b"f");
+    assert!(viewer.raw.is_empty());
     assert!(
         !viewer.screen.line(23).contains("Links:"),
-        "link mode must not start without links: {}",
+        "f must not select links: {}",
         viewer.screen.line(0)
     );
     viewer.quit();
-    // A document with a link: `f` enters link mode, Esc leaves it without
-    // following, and the header reverts to the file title.
     let with_link = temp.path().join("withlink.md");
-    std::fs::write(&with_link, "# Titled\n\n[link](https://example.com)").unwrap();
+    std::fs::write(&with_link, "# Titled\n\n[link](#titled)").unwrap();
     let mut viewer = Viewer::start(&with_link, 80, 24, false);
+    viewer.keys_with_frame(b"/Titled\r");
+    let footer = viewer.screen.line(23);
+    viewer.raw.clear();
     viewer.keys(b"f");
+    assert!(viewer.raw.is_empty());
+    assert_eq!(viewer.screen.line(23), footer);
+    viewer.keys_with_frame(b"\t");
     assert!(viewer.screen.line(23).contains("Links: 1/1"));
-    viewer.keys(b"\x1b");
-    assert!(
-        viewer.screen.line(0).contains("withlink.md"),
-        "Esc must exit link mode: {}",
-        viewer.screen.line(0)
-    );
-    viewer.quit();
+    viewer.raw.clear();
+    viewer.keys(b"f");
+    assert!(viewer.raw.is_empty());
+    viewer.keys_with_frame(b"h");
+    assert!(viewer.screen.line(0).contains("help"));
+    viewer.keys_with_frame(b"h");
+    viewer.exit_with(b"\x1b");
 }
 
 #[test]
-fn enter_follows_the_link_at_the_cursor_without_link_mode() {
+fn enter_follows_the_link_at_the_cursor() {
     let temp = tempfile::tempdir().unwrap();
     let linked = temp.path().join("linked.md");
     let source = temp.path().join("source.md");
@@ -1450,7 +1520,7 @@ fn enter_follows_the_link_at_the_cursor_without_link_mode() {
     let mut viewer = Viewer::start(&source, 80, 24, false);
     assert!(viewer.screen.line(0).contains("source.md"));
     // Enter in normal mode follows the first link at or below the top of the
-    // viewport — no `f` link mode required.
+    // viewport.
     viewer.keys(b"\r");
     assert!(
         viewer.screen.line(0).contains("linked.md"),
