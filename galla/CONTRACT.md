@@ -140,6 +140,14 @@ back to host execution.
 
 ## Errors and failure semantics
 
+Galla reserves `/.galla-sandbox` as a read-only namespace-local marker in every
+execution phase; grant destinations cannot cover it or its descendants.
+Inside a marked sandbox, both protocol modes return status 3 without reading
+stdin, probing Bubblewrap or starting another sandbox. Stderr explains:
+already inside a Galla sandbox; nesting is unnecessary; run the intended
+command directly. Clearing environment variables does not remove detection.
+The marker is a diagnostic signal, not an authority or confinement certificate.
+
 Prepared Rust workspace authoring has one resolver view: when an authoring
 request grants writable `/workspace` and read-only toolchain `/rust/vendor`,
 an existing `/workspace/.kvist/vendored` is covered by an empty, mode-000,

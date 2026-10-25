@@ -12,6 +12,15 @@ prerequisites or invalid requests fail closed.
 
 ## Internal structure
 
+Before probe/enforcement work (and CLI request input), inspect the fixed
+`/.galla-sandbox` marker with `symlink_metadata`. Any existing entry rejects
+nesting; errors other than absence fail explicitly. Mount a fresh read-only
+tmpfs marker after request grants in every phase. Reserve its path in grant
+validation so marker setup cannot touch a writable host grant. Do not infer
+confinement from environment, generic containers or namespace IDs. This
+user-requested increment uses a deliberate advisory exception while review
+receipts are unavailable; it claims neither acceptance nor certification.
+
 `enforcement/system_layout.rs` constructs a namespace-only filtered `/usr`
 view, binding its immediate children read-only except `sbin` and handling
 `local` with the same bounded, sorted one-level enumeration. This avoids

@@ -62,6 +62,12 @@ The accepted target interface is the redefined `kvist-sandbox-probe-v1` and
 parsing, validation, and Bubblewrap-backed isolation are fully implemented and
 active.
 
+Nested Galla invocations are rejected with status 3 and a clear "already inside
+a Galla sandbox" diagnostic, before waiting for request input. Run the intended
+command directly in the existing sandbox instead. Detection uses a read-only
+namespace-local marker, not inherited environment variables. This notice does
+not authorize bypassing an enclosing tool's execution policy.
+
 ## Documentation
 
 - [Requirements](REQUIREMENTS.md) — functional and non-functional requirements

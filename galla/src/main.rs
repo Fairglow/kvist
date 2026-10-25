@@ -13,6 +13,8 @@ use galla::probe::{self, ProbeOutcome};
 use galla::protocol::MAX_REQUEST_BYTES;
 use galla::validation;
 
+mod context;
+
 const PROBE_ARGUMENT: &str = "--kvist-sandbox-probe-v1";
 const REQUEST_ARGUMENT: &str = "--kvist-sandbox-request-v1";
 
@@ -59,6 +61,10 @@ fn run_probe() -> ExitCode {
 }
 
 fn run_request() -> ExitCode {
+    if let Err(reason) = context::require_host() {
+        eprintln!("galla-runner: {reason}");
+        return ExitCode::from(3);
+    }
     let mut buffer = Vec::new();
     let mut handle = io::stdin().lock().take((MAX_REQUEST_BYTES as u64) + 1);
     if let Err(error) = handle.read_to_end(&mut buffer) {

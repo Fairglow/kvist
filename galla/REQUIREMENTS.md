@@ -37,6 +37,15 @@ request MUST fail closed.
 
 ## Functional requirements
 
+### SR-REQ-NO-NESTING
+
+Every sandbox MUST contain an immutable namespace-local marker. Request and
+probe invocations inside that sandbox MUST fail promptly with status 3, empty
+stdout and a diagnostic explaining that another sandbox is unnecessary.
+Detection MUST survive environment clearing and precede request stdin reads.
+Grants MUST NOT cover the reserved marker. This is a usability guard, not
+proof of confinement or authorization to bypass a consumer's sandbox policy.
+
 The following stable requirement identifiers define the mandatory behavior of
 the enforcement component.
 
