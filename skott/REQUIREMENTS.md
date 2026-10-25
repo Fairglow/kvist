@@ -102,10 +102,13 @@ overlap other tests in the same nextest invocation, because their temporary
 fixtures and sandbox-only registrations mutate that checkout. Other tests MUST
 retain their normal parallelism.
 
-The checked-in nextest default configuration MUST select the exact package,
+The checked-in `tools/nextest.toml` default configuration MUST select the exact package,
 binary and test, reserve the complete configured test-thread pool, and apply to
 profiles inheriting the default. Verification MUST demonstrate both absence of
 overlap for the repository trial and concurrent execution of ordinary tests.
+The repository test recipe MUST explicitly select this configuration. A clean
+checkout MUST retain the policy without the ignored, sandbox-local
+`.config/nextest.toml`; repository regressions MUST NOT require that local file.
 This scheduling guarantee does not coordinate separate runner invocations or
 unrelated host writers, and it does not excuse stale interrupted-test fixtures.
 

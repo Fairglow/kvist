@@ -3,6 +3,15 @@
 Small build helpers that are not part of the Rust workspace. They are invoked
 by the [justfile](../justfile), not by Cargo directly.
 
+## `nextest.toml`
+
+Shared repository scheduling policy. `just test` explicitly selects this file;
+direct nextest runs should also pass `--config-file tools/nextest.toml`.
+It reserves the complete test-thread pool for the native repository-wide
+sandbox trial while ordinary tests stay parallel. The CI profile inherits
+the default rule. This tracked policy does not depend on the ignored,
+sandbox-local `.config/nextest.toml`.
+
 ## `cargo_install_binaries.py`
 
 Extracts the built executables from a Cargo NDJSON build log and copies them to

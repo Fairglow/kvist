@@ -10,6 +10,58 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: repository-config-write-tests
+    title: "Pin checkout-independent scheduling configuration"
+    description: "Reproduce the clean-checkout failure, retain the exact full-pool assertion and pin explicit recipe configuration selection."
+    context: "Human requests PR #10 Quality/MSRV repair. Deliberate advisory exception for this CI-only repair while receipt enforcement is unavailable; no acceptance claimed. The tracked-only HEAD archive reproduced the missing local-file failure; both new-location and recipe-selection checks failed before repair."
+    purpose: "Keep repository tests independent of ignored sandbox settings."
+    expected_outcome: "Both configuration availability and recipe selection fail before repair."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    timestamps: {created_at: "2026-10-25T23:14:04Z", updated_at: "2026-10-25T23:20:00Z", completed_at: "2026-10-25T23:20:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: repository-config-implement-code
+    title: "Separate shared scheduling from sandbox settings"
+    description: "Track tools/nextest.toml, explicitly select it in just test and document its relationship to the ignored local file."
+    context: "Exact selector, dynamic full-pool reservation and inherited CI profile preserved. Stable/MSRV all-feature checks and tracked-only archive checks pass. Full native binary passes 16 tests under both default/four-thread and CI/three-thread nextest runs. Recipe dry run, formatting and strict targeted Clippy pass. Local config remains ignored and untouched; no production code changed."
+    purpose: "Restore clean-checkout tests without weakening repository-trial isolation."
+    expected_outcome: "Stable and MSRV regressions pass without .config/nextest.toml."
+    kind: implementation
+    status: completed
+    depends_on: [repository-config-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    timestamps: {created_at: "2026-10-25T23:14:04Z", updated_at: "2026-10-25T23:20:00Z", completed_at: "2026-10-25T23:20:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: repository-config-security-audit
+    title: "Inspect scheduling authority independently"
+    description: "Derive scoped implementation observations from the configuration, recipe and regression source in a clean-slate context."
+    context: "Clean-slate configuration/native-trial observation and separate narrowed recipe-test observation are recorded in IMPL.md. Initial unrelated-recipe coverage gap was fixed and verified with an isolated negative control. Static assertions are not new native scheduler-overlap evidence; no production authority changed."
+    purpose: "Retain independent observations without self-certification."
+    expected_outcome: "No hidden local-file dependency, expanded authority or relaxed isolation is introduced."
+    kind: security-audit
+    status: completed
+    depends_on: [repository-config-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    timestamps: {created_at: "2026-10-25T23:14:04Z", updated_at: "2026-10-25T23:20:00Z", completed_at: "2026-10-25T23:20:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: repository-config-compliance-review
+    title: "Compare checkout-independent scheduling evidence"
+    description: "Compare scoped intent with the clean-slate observations and execution evidence in a separate source-blind context."
+    context: "Separate source-blind comparison found no concrete implementation contradiction but requested fresh runtime evidence. A narrower independent event-stream comparison then verified 16 starts/completions/passes per profile, zero native-trial overlap and ordinary concurrency peaks of four and three. Both reports and finite scope are retained in IMPL.md; no acceptance or blanket certification."
+    purpose: "Keep independent comparison separate from implementation."
+    expected_outcome: "Scoped discrepancies are explicit; no blanket certification or acceptance receipt."
+    kind: compliance-review
+    status: completed
+    depends_on: [repository-config-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    timestamps: {created_at: "2026-10-25T23:14:04Z", updated_at: "2026-10-25T23:24:38Z", completed_at: "2026-10-25T23:24:38Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: shared-runtime-write-tests
     title: "Pin shared profiles and independent run inspection"
     description: "Test shared configuration consumption, headless parity, read-only journal attachment and explicitly authorized controls before code."

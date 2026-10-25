@@ -213,7 +213,7 @@ Nextest starts each test in a separate process, so that attribute does not
 provide nextest-wide exclusion. A serial test group also excludes only its own
 members, not other tests.
 
-The repository's `.config/nextest.toml` selects the exact package, binary and
+The repository's tracked `tools/nextest.toml` selects the exact package, binary and
 repository trial and uses `threads-required = "num-test-threads"` in the default
 profile. This reserves the whole current nextest pool, even when `-j` changes
 its size, and is inherited by the CI profile. Ordinary tests remain parallel.
@@ -221,10 +221,16 @@ Use the same override pattern for future tests that must run alone; change the
 selector to their exact identity. Alternate configs or overriding profile rules
 must retain this policy.
 
+`just test` explicitly selects this configuration. For direct repository runs,
+pass `--config-file tools/nextest.toml` as well: the ignored
+`.config/nextest.toml` is optional sandbox-local configuration and is not
+included in a clean checkout.
+
 For a one-off isolated run:
 
 ```bash
-cargo nextest run --offline --locked -p skott --test rust_build_environment \
+cargo nextest run --config-file tools/nextest.toml --offline --locked \
+  -p skott --test rust_build_environment \
   -E 'test(=native_repository_tests_execute_inside_the_workspace_sandbox)'
 ```
 

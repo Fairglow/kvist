@@ -336,7 +336,7 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
 
 #[test]
 fn repository_trial_requires_global_nextest_exclusivity() {
-    let path = manifest_dir().join("../.config/nextest.toml");
+    let path = manifest_dir().join("../tools/nextest.toml");
     let contents = fs::read_to_string(path).expect("read repository nextest configuration");
     let config: toml::Value = toml::from_str(&contents).expect("parse nextest configuration");
     let overrides = config["profile"]["default"]["overrides"]
@@ -351,6 +351,28 @@ fn repository_trial_requires_global_nextest_exclusivity() {
         rule["threads-required"].as_str(),
         Some("num-test-threads"),
         "the repository trial must reserve the whole pool, not just one serial group"
+    );
+}
+
+#[test]
+fn repository_nextest_recipe_selects_shared_configuration() {
+    let recipes = fs::read_to_string(manifest_dir().join("../justfile"))
+        .expect("read repository test recipes");
+    let test_recipe = recipes
+        .split_once("\ntest:\n")
+        .expect("repository test recipe")
+        .1;
+    let command = test_recipe
+        .lines()
+        .take_while(|line| line.starts_with(' ') || line.starts_with('\t'))
+        .find(|line| line.trim_start().starts_with("cargo nextest run "))
+        .expect("repository test recipe nextest command");
+    let arguments: Vec<_> = command.split_whitespace().collect();
+    assert!(
+        arguments
+            .windows(2)
+            .any(|pair| pair == ["--config-file", "tools/nextest.toml"]),
+        "the repository recipe must explicitly select tracked scheduling configuration"
     );
 }
 

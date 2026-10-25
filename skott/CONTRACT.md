@@ -642,9 +642,12 @@ arbitrary external writers are not locked transactionally.
 
 ### Native repository test scheduling
 
-The repository's `.config/nextest.toml` reserves all configured nextest slots
+The repository's tracked `tools/nextest.toml` reserves all configured nextest slots
 for `skott::rust_build_environment::native_repository_tests_execute_inside_the_workspace_sandbox`.
 The rule is inherited from the default profile; unrelated tests remain parallel.
+`just test` explicitly selects it with `--config-file tools/nextest.toml`.
+The ignored `.config/nextest.toml` remains optional sandbox-local configuration,
+not a prerequisite for repository tests.
 `#[serial]` remains the in-process libtest mechanism, not a nextest or
 cross-invocation lock. Alternate configs or explicit overriding profile rules
 must preserve exclusivity when running this repository-wide trial.
