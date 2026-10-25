@@ -27,6 +27,10 @@ blad --line-numbers README.md
 
 # Plain text output (no terminal viewer)
 blad --dump README.md > readme.txt
+
+# Pipelines use finite, plain rendered output by default
+cat README.md | blad
+blad README.md | head -n 30
 ```
 
 ## Install
@@ -62,6 +66,11 @@ Options:
 ```
 
 Filenames need no particular extension. Use `--` before filenames beginning with `-`.
+With no files, redirected stdin supplies one document; `-` also selects stdin
+among files, once. Use `./-` for a literal file named `-`. Stdin is a snapshot
+read through EOF, not a live stream. File and stdin sources are limited to
+16 MiB each. Pipes never start the viewer; `--color always` explicitly retains
+styles, while `--dump` always removes them. Closed downstream pipes exit quietly.
 
 ## Viewer Keyboard Shortcuts
 

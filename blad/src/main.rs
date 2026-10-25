@@ -3,8 +3,8 @@
 #[cfg(feature = "sessions")]
 use blad::session;
 use blad::{ColorDepth, DiagramCharset, MathMode, MermaidMode, RenderOptions, Theme, display};
-use clap::{Parser, ValueEnum};
-use std::io::IsTerminal;
+use clap::{CommandFactory, Parser, ValueEnum};
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
 mod file_input;
@@ -16,7 +16,6 @@ mod theme_file;
     about = "Terminal Markdown viewer",
     version,
     propagate_version = true,
-    arg_required_else_help = true,
     subcommand_precedence_over_arg = true
 )]
 pub struct Cli {
@@ -57,7 +56,7 @@ pub struct Cli {
     #[clap(long, global = true, value_enum, default_value = "unicode")]
     diagram_charset: DiagramCharset,
 
-    /// Files to open in tabs, in argument order
+    /// Files in tab order; '-' reads redirected stdin (also used with no files)
     #[arg(value_name = "FILE", num_args = 1..)]
     files: Vec<PathBuf>,
 
@@ -117,7 +116,9 @@ fn render_options(cli: &Cli) -> std::io::Result<RenderOptions> {
     Ok(RenderOptions {
         theme,
         color_depth,
-        plain: cli.dump,
+        plain: cli.dump
+            || ((!std::io::stdout().is_terminal() || !std::io::stdin().is_terminal())
+                && !matches!(cli.color, ColorChoice::Always)),
         math: cli.math,
         mermaid: cli.mermaid,
         diagram_charset: cli.diagram_charset,
@@ -147,7 +148,10 @@ pub enum Command {
 
 /// Report an I/O failure and exit with the contract's error code (1).
 fn report_io(context: &str, result: std::io::Result<()>) {
-    if let Err(error) = result {
+    if let Err(error) = result.and_then(|()| std::io::stdout().flush()) {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            return;
+        }
         eprintln!("Failed to {context}: {}", error.to_string().escape_debug());
         std::process::exit(1);
     }
@@ -165,10 +169,24 @@ fn fail(message: &str) -> ! {
 
 fn main() {
     blad::logging::init_logging();
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
     #[cfg(feature = "sessions")]
     if cli.command.is_some() && !cli.files.is_empty() {
         fail("Files and session commands cannot be combined; use -- before command-like filenames");
+    }
+    #[cfg(feature = "sessions")]
+    let has_command = cli.command.is_some();
+    #[cfg(not(feature = "sessions"))]
+    let has_command = false;
+    if cli.files.is_empty() && !has_command {
+        if std::io::stdin().is_terminal() {
+            report_io(
+                "print help",
+                Cli::command().write_help(&mut std::io::stderr()),
+            );
+            std::process::exit(2);
+        }
+        cli.files.push(PathBuf::from("-"));
     }
     let options = render_options(&cli).unwrap_or_else(|error| {
         fail(&format!(
@@ -202,10 +220,11 @@ fn run_session_command(
         Command::List { limit } => {
             let sessions = session::list_sessions(log_dir, *limit)?;
             if sessions.is_empty() {
-                println!(
+                writeln!(
+                    std::io::stdout().lock(),
                     "No sessions found in {}",
                     log_dir.display().to_string().escape_debug()
-                );
+                )?;
                 return Ok(());
             }
             display::list_sessions(&sessions)

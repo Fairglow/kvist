@@ -29,6 +29,9 @@ cargo install --locked kvist-blad --version 0.3.0
 blad README.md
 blad README.md GUIDE.md
 blad --dump README.md > readme.txt
+cat README.md | blad
+blad README.md | head -n 30
+cat generated.md | blad README.md - GUIDE.md
 blad --version
 blad --help
 ```
@@ -39,7 +42,7 @@ Open standalone files in tabs, in argument order, with the first active.
 Canonical duplicates reuse one tab. All initial files must be readable before
 the viewer starts or any dump output is emitted. With redirected output or
 `--dump`, render each unique input once in order. Filename extensions do not
-matter. Empty invocation displays usage.
+matter. Empty invocation with terminal stdin displays usage.
 
 ```bash
 blad document.md
@@ -48,11 +51,20 @@ blad README.md GUIDE.md
 blad -- -notes.md
 ```
 
-There is **no stdin-piping mode**: `cat document.md | blad` does not read a
-document. Supply file paths. If stdin or stdout is not a terminal, the supplied
-files render to stdout without the viewer. `--dump` also bypasses the viewer
-and guarantees escape-free output. Redirected output without `--dump` may
-retain non-color emphasis escapes.
+With no files, redirected stdin supplies a UTF-8 Markdown document. Explicit
+`-` reads stdin among named files in argument order; repeated `-` reuses it.
+Use `./-` to open a literal file named `-`. Named files otherwise leave stdin
+unread. Explicit `-` with terminal stdin fails rather than waiting for input.
+Empty redirected input succeeds. Input must end (EOF) before rendering: this
+is a finite snapshot, not streaming or an interactive stdin pager.
+
+If stdin or stdout is not a terminal, inputs render to stdout without the
+viewer or automatic reload. Output is escape-free by default; `--color always`
+explicitly opts into styles for a pipe. `--dump` always suppresses all styling.
+Closing the downstream pipe (for example, `head -n 30`) exits quietly with
+success. Other read/write failures remain errors. Stdin shares the inclusive
+16 MiB input ceiling and single overflow probe; invalid UTF-8 or oversized
+input fails before output from any initial source.
 
 ### File input limits
 
@@ -134,7 +146,8 @@ Appearance and color policy resolve independently:
 4. When colors are enabled, `COLORTERM` (case-insensitive `truecolor` or `24bit`)
    selects truecolor, otherwise a `TERM` containing `256color` selects ANSI256,
    otherwise ANSI16. The CLI has no explicit depth selector.
-5. `--dump` overrides every color/style choice with escape-free rendered text.
+5. Noninteractive output is escape-free unless `--color always` is explicit.
+   `--dump` overrides every color/style choice with escape-free rendered text.
 
 ### Theme files
 

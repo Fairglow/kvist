@@ -85,7 +85,11 @@ pub fn export_session(session: &Session, output: Option<&std::path::Path>) -> io
     match output {
         Some(path) => {
             std::fs::File::create(path)?.write_all(doc.as_bytes())?;
-            println!("Exported to {}", inert_source(&path.display().to_string()));
+            writeln!(
+                io::stdout().lock(),
+                "Exported to {}",
+                inert_source(&path.display().to_string())
+            )?;
         }
         None => io::stdout().write_all(doc.as_bytes())?,
     }

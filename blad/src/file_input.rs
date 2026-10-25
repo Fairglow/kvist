@@ -28,7 +28,7 @@ pub(crate) fn read_regular_descriptor(
     read_bounded(file, max_bytes)
 }
 
-fn read_bounded(reader: impl Read, max_bytes: usize) -> io::Result<Vec<u8>> {
+pub(crate) fn read_bounded(reader: impl Read, max_bytes: usize) -> io::Result<Vec<u8>> {
     let limit = u64::try_from(max_bytes).map_err(io::Error::other)?;
     let mut bytes = Vec::new();
     reader
