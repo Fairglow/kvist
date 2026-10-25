@@ -91,9 +91,10 @@ styles, while `--dump` always removes them. Closed downstream pipes exit quietly
 | Keys | Action |
 |------|--------|
 | `/` | Start or refine forward search |
+| `?` | Start backward search |
 | `Ctrl+R` (in search) | Toggle regex mode |
 | `n`/`>` | Next match |
-| `N`/`<` | Previous match |
+| `N`/`p`/`<` | Match in reverse search direction |
 | `Esc` | Cancel search |
 | `Enter` | Confirm search |
 
@@ -122,10 +123,13 @@ styles, while `--dump` always removes them. Closed downstream pipes exit quietly
 | `e` | Open in external editor |
 | `Ctrl+R`/`F5` | Reload file |
 | `Ctrl+L` | Redraw |
-| `F1`/`?`/`h` | Show help |
-| `Ctrl+Q`/`Ctrl+C` | Quit all tabs |
+| `F1`/`h` | Show help |
+| `Q`/`Ctrl+Q` | Quit all tabs in normal mode |
+| `Ctrl+C` | Quit all tabs from any mode |
 
-The mouse wheel scrolls; left-click a link to follow it.
+The mouse wheel scrolls; left-click a link to follow it. In a search prompt,
+Esc cancels; after Enter confirms a search, Esc closes the active tab. In help,
+any key except Ctrl+C returns to the document.
 
 ## Rendering
 
@@ -152,4 +156,8 @@ The library can be used independently for Markdown rendering in other Rust appli
 
 ## License
 
-See `LICENSE` in the repository root.
+AGPL-3.0-or-later; see [LICENSE](LICENSE).
+
+See the [user guide](docs/USAGE.md) for limits, rendering subsets, diagnostics,
+palette configuration and complete key precedence. Linux x86_64 is the verified
+executable target; source files are limited to 16 MiB, not streamed.

@@ -23,6 +23,9 @@ repository, tests both feature modes, and release-installs each into an
 isolated prefix. Builds use an archive-hash-specific target directory to avoid
 reusing another candidate's binaries. It checks target identity, required payload, absence of peer
 packages and basic installed behavior. Linux tests require `setsid` and `stty`.
+Installed smoke checks compare plain file output, redirected output and stdin
+snapshots. The extracted test suite includes actual `cat`/`head` pipelines,
+TTY routing, automatic reload, and nonblocking diagnostic-log failures.
 Only for a local uncommitted candidate, add `--allow-dirty`; never use that
 option for publication. Generated archives are under Cargo's target directory.
 
@@ -43,6 +46,29 @@ Record exact-revision human acceptance, independent observations/comparison,
 security findings and any unresolved limitations. Completed engineering tasks
 are not approval. Resolve the retained input-policy and key-precedence
 arbitration findings explicitly; do not rewrite historical evidence as accepted.
+
+### Candidate assessment (2026-10-25)
+
+Blad has useful first-release scope for ordinary local Markdown on Linux:
+tabbed reading, precise search/links, text math/diagrams, automatic save reload
+and finite Unix pipelines. Do not market it as a giant-file/streaming pager,
+a full Markdown/TeX/Mermaid implementation or a cross-platform viewer.
+Automatic reload retains numeric rendered offsets, not source paragraphs;
+inactive tabs refresh when revisited. Stdin snapshots wait for producer EOF.
+
+This follow-up fixes documented backward-search dispatch, stale key references,
+the rustdoc logging link, and diagnostic initialization that could silently
+lose an error or block on a FIFO. Earlier export-authority, nonblank-kind and
+help-key findings have candidate documentation clarifications, not retroactive
+human acceptance. The conservative 16 MiB limit and modal key choices remain
+explicit release decisions for the maintainer.
+
+The release decision is **a bounded Linux release candidate, not unconditional
+publication approval**. Independent observations and final local evidence are
+retained in `IMPL.md`; the actual registry, protected publishing environment,
+fresh advisory data and exact-revision human acceptance must still be verified.
+Run a real-terminal smoke test with the maintainer's terminal/font before
+publishing; PTY emulation alone is not that evidence.
 
 Verify that the registry name is still available or controlled by the intended
 maintainer, verify the maintainer's crates.io account/email, and review the

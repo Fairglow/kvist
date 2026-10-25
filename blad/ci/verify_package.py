@@ -102,6 +102,12 @@ def main():
                          capture_output=True, env={**os.environ, "PATH": ""}).stdout
             require(b"\x1b" not in output and b"[x] done" in output and b"[ ] todo" in output,
                     "incorrect standalone rendering or task state")
+            piped = run([str(executable)], input=document.read_bytes(),
+                        capture_output=True, timeout=10).stdout
+            require(piped == output, "stdin snapshot differs from plain file rendering")
+            redirected = run([str(executable), str(document)],
+                             capture_output=True, timeout=10).stdout
+            require(redirected == output, "redirected output is not plain rendered text")
         print(f"Verified {archive}: standalone archive tests and release installations passed.")
 
 

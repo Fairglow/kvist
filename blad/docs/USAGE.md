@@ -202,7 +202,7 @@ the separate interactive helpers in `blad::display`.
 `set_width`, `set_options`, `set_syntax_theme` and `set_background` configure
 the renderer; an unknown explicit syntax theme returns `InvalidInput` during
 rendering. Syntax definitions and built-in themes are reused across renders.
-See the [basic library example](../README.md#embed-the-renderer).
+See the [library API and examples](https://docs.rs/kvist-blad).
 
 ## Text Rendering
 
@@ -298,12 +298,12 @@ Code block lines retain their whitespace and do not wrap. Use Left/Right to
 read horizontal overflow; short lines no longer reset the horizontal position.
 Header, footer and content rows are clipped independently so long lines cannot
 scroll the first document lines off the screen. Tabs display at eight-column
-stops. Home goes to the top and resets the horizontal offset; End goes to the
-bottom without resetting it. Frames are buffered and only changed rows are
+stops. Home/End select the beginning/end of the rendered line horizontally;
+Ctrl+Home/End and g/G move to the top/bottom of the document. Frames are buffered and only changed rows are
 written; scrolling and tab changes do not clear the screen or re-enter the
 alternate screen. Synchronized updates further reduce flicker on terminals
 that support them. `Ctrl+L` forces a repaint if another program damages the
-display. Folding and live follow remain deferred.
+display. Folding and session live follow remain deferred; file tabs reload saves.
 
 ### Table sizing
 
@@ -338,18 +338,20 @@ breaks and empty lines. Without a configured width, tables stay unwrapped.
 | `PageUp` / `Ctrl+B` | Scroll up one page |
 | `PageDown` / `Ctrl+F` / `Space` | Scroll down one page |
 | `u` / `Ctrl+U`, `d` / `Ctrl+D` | Half page up/down |
-| `Home` / `g` / `H` | Top of document; reset horizontal offset |
-| `End` / `G` / `L` | Bottom of document; retain horizontal offset |
+| `Ctrl+Home` / `g` / `H` | Top of document; reset horizontal offset |
+| `Ctrl+End` / `G` / `L` | Bottom of document; retain horizontal offset |
+| `Home` / `End` | Horizontal start/end of rendered content |
 | `Left` / `Right` | Scroll horizontally one column |
 | Mouse wheel | Scroll one line per wheel event |
 | `b` | Return to the previous file |
-| `Alt+Left` / `Alt+Right` | Switch open-file tabs, retaining scroll positions |
+| `Alt+Left` / `Alt+Right`, `Ctrl+PageUp` / `Ctrl+PageDown` | Switch tabs, retaining scroll positions |
 | `[` / `]` | Previous/next heading (no wrap) |
 | `q` / `Esc` | Close active tab; exit if it was the last |
-| `Q` / `Ctrl+C` | Quit all tabs |
-| `h` | Keyboard help; any key except global Ctrl+C returns |
+| `Q` / `Ctrl+Q` | Quit all tabs in normal mode |
+| `Ctrl+C` | Quit all tabs from any mode |
+| `h` / `F1` | Keyboard help; any key except Ctrl+C returns |
 | `Ctrl+L` | Force repaint |
-| `r` | Reload the active file, retaining viewport position |
+| `Ctrl+R` / `F5` | Reload the active file, retaining viewport position |
 
 Closing a tab selects the next surviving tab, or the previous one if closing
 the rightmost tab. Surviving tabs keep their order and scroll positions;
@@ -370,8 +372,9 @@ table. Key-release events are ignored.
    dismiss help; it is not a scrollable modal pager.
 3. **Alt+Left/Right switches tabs only outside an open search prompt or `f`
    link mode.** A normal selected link or committed search does not block it.
-4. **`Q` quits all tabs outside the search prompt**, including from `f` mode.
-   In the search prompt it is literal query text.
+4. **Ctrl+Q quits outside the search prompt** (after help dismissal takes
+   precedence). Plain `Q` quits in normal mode, is query text in a search prompt,
+   and is ignored by `f` link mode. Ctrl+C is the unambiguous global quit.
 5. **An open search prompt consumes keys.** Printable characters without
    Ctrl/Alt append; Backspace deletes; Ctrl+R toggles regex; Ctrl+U clears;
    Enter keeps results and returns to normal mode; Esc clears the query/results
@@ -380,8 +383,8 @@ table. Key-release events are ignored.
 6. Outside search, **Ctrl+Arrows selects spatial links**, even in `f` mode.
 7. **`f` link mode consumes non-Ctrl keys**: Tab/Shift+Tab cycle, Enter follows
    and leaves the mode, Esc leaves it and clears selection. Other non-Ctrl keys,
-   including `q`, `h`, arrows, `r`, `b` and Alt+Arrows, do nothing (except `Q`
-   handled above). Ctrl+B/F, Ctrl+U/D and Ctrl+L still scroll/repaint in this mode.
+   including `Q`, `q`, `h`, arrows, `r`, `b` and Alt+Arrows, do nothing.
+   Ctrl+B/F, Ctrl+U/D, Ctrl+L and Ctrl+R still scroll/repaint/reload in this mode.
 8. Remaining Ctrl keys use the page/half-page/repaint bindings; remaining keys
    use normal-mode bindings.
 
@@ -464,8 +467,8 @@ to exit search mode and keep the matches highlighted.
 | `Ctrl+R` | Toggle literal/regex in this prompt |
 | `Ctrl+U` | Clear the prompt |
 | `Enter` | Exit search, keep highlights |
-| `n` | Next occurrence in the search direction, wrapping |
-| `N` / `p` | Occurrence in the reverse direction, wrapping |
+| `n` / `>` | Next occurrence in the search direction, wrapping |
+| `N` / `p` / `<` | Occurrence in the reverse direction, wrapping |
 | `Esc` | Cancel only an open prompt; after Enter this closes the tab |
 
 The footer shows mode, direction and occurrence position (e.g., "3/12 matches"),
@@ -500,14 +503,14 @@ keys; use `[`/`]` for headings. Unlike `less`, search starts literally and
 regex is explicit, preventing punctuation from unexpectedly becoming syntax.
 Normal `q`/Esc closes one tab rather than always quitting.
 
-Folding, live follow, a heading outline, numeric movement/line/percent jumps,
+Folding, session live follow, a heading outline, numeric movement/line/percent jumps,
 marks, within-document jump history and per-tab retained searches are not
 implemented. Giant-file responsiveness is not guaranteed by the byte limits.
 There are no shell escapes or document-triggered external commands.
 
 ### Reloading changed files
 
-Press `r` in normal mode to reread the active file from its opening canonical
+Press `Ctrl+R` or `F5` in normal mode to reread the active file from its opening canonical
 path. A successful reload preserves render/theme options, tab history and
 numeric vertical/horizontal positions, clamped to the new document.
 Search query, direction and literal/regex mode persist; results and link
@@ -521,8 +524,19 @@ Reload opens nonblockingly, refuses final symlinks and validates the opened
 descriptor before reading; FIFO/symlink replacement therefore fails safely.
 This is not ancestor-path isolation or a snapshot of concurrent writes. Embedded
 documents without a file path report that reload is unavailable.
-Reload is explicit, not automatic live following. While entering a search,
-`r` remains ordinary query text.
+File tabs also reload automatically after debounced save detection, as described
+above; this is not tail-following. While entering a search, `Ctrl+R` toggles
+regex and `r` remains ordinary query text.
+
+### Diagnostics
+
+`BLAD_LOG` controls tracing levels (fallback `RUST_LOG`, default `warn`).
+`BLAD_LOG_FILE=/path/to/log` explicitly appends diagnostic events to a regular
+file opened once at startup; new files are private (mode 0600 subject to umask).
+Final symlinks and nonregular destinations are rejected nonblockingly, with an
+escaped warning and stderr fallback. No log is created by default. Footer
+notices and fatal CLI messages are separate from tracing; not every viewer
+action emits a diagnostic event. Ancestor paths and kernel I/O are not isolated.
 
 The PTY regression model now accounts for display-width continuation cells,
 combining text and joined emoji, including across SGR transitions. This

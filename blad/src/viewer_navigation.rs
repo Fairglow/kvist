@@ -7,8 +7,8 @@ use crate::viewport::Document;
 pub(crate) const HELP: &str = "\
 # Blad keyboard help
 
-/ start or refine forward search; Ctrl+R toggles regex while editing
-n next match, N previous; > and < also work
+/ forward search, ? backward; Ctrl+R toggles regex while editing
+n repeats direction, N/p reverses; > and < also work
 Esc cancels search; Enter confirms
 
 Tab / Shift+Tab: next / previous link; Enter: follow
@@ -16,13 +16,13 @@ Ctrl+Arrows: spatial links; [ / ]: previous / next heading
 
 j/k or arrows: line; Space / PageDown / Ctrl+F: page down
 PageUp / Ctrl+B: page up; d/u or Ctrl+D/U: half page
-g/G or Home/End: top/bottom; Left/Right: horizontal
+g/G or Ctrl+Home/End: top/bottom; Home/End: horizontal start/end
 
 Alt+Left/Right: tabs; Ctrl+PageUp/Down also work
 b: back; e: editor; Ctrl+R or F5: reload
 
 q/Esc: close tab; Ctrl+Q or Ctrl+C: quit all; Ctrl+L: redraw
-F1 or ? or h: this help
+F1 or h: this help; Ctrl+C quits from any mode
 ";
 
 pub(crate) fn link_spans(document: &Document, link: &Link) -> Vec<LinkSpan> {

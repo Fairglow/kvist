@@ -153,8 +153,8 @@ and file paths are decoded as UTF-8; malformed encoding is an actionable error.
 Other: `e` hands the whole file to `$EDITOR`, `b` returns to the previous tab,
 `Alt+Left`/`Alt+Right` switch open-file tabs. Normal-mode `q`/`Esc` closes
 the current tab, selecting the next tab (or previous if last); closing the sole
-tab exits. `Q`/`Ctrl+C` quits all tabs. Modal Esc cancels only that mode.
-`h` opens keyboard help (any key except global quit dismisses);
+tab exits. Normal-mode `Q`/`Ctrl+Q` quits all tabs. Modal Esc cancels only that mode.
+`h`/`F1` opens keyboard help (any key except Ctrl+C dismisses);
 `Ctrl+C` always quits, including from help/search. `Ctrl+L` forces a repaint.
 Normal-mode `Ctrl+R` or `F5` explicitly reloads the active file from its opening canonical
 path. It retains options, tab order/history and numeric viewport offsets,
@@ -241,7 +241,7 @@ Required manifest/entry fields are validated; additional producer fields are
 allowed. Manifests require `schema_version: 1`, `kind: "skott-conversation"`,
 nonempty `session_id` and `status` strings, and an `entries` array (which may be
 empty); each entry requires a positive
-`sequence`, nonempty `kind` and `path`. `model` and `created_at` are optional
+`sequence`, nonblank `kind` and a `path` in the shape below. `model` and `created_at` are optional
 strings. Entry paths must have exactly `messages/<filename>` shape with normal
 path components. Opened session roots, candidate directories, manifests,
 message directories and message files reject final symlinks. Descendant reads
@@ -296,7 +296,7 @@ column and, when requested, the rendered-line-number gutter. There is no
 additional wrap margin. Resize recalculates that budget. Code block lines and
 atomic inline-code spans are not broken to fit the viewport; the existing
 Left/Right keys reveal horizontal overflow without resetting on shorter lines.
-Home/End retain their current vertical behavior.
+Home/End select horizontal start/end; Ctrl+Home/End retain vertical top/bottom.
 
 Each screen row is positioned and clipped independently, including header/footer
 text. Wide graphemes may extend past the content column into the scrollbar area.
@@ -401,9 +401,23 @@ fallback successes. No document-triggered external command is permitted.
 ## Security and authority
 
 - Read-only access to skott session files
-- No write operations without explicit edit mode
+- Source documents are read-only except for explicit editor handoff.
+  Named session export and an explicitly configured diagnostic log are the
+  other write surfaces; export may overwrite its selected path.
 - No network access
 - No credential or secret exposure
+
+### Diagnostic logging
+
+`BLAD_LOG` selects tracing levels, falling back to `RUST_LOG`, default `warn`.
+An explicit `BLAD_LOG_FILE` appends diagnostics to a regular file opened once
+at initialization, nonblockingly and without following a final symlink. New
+files use mode 0600 subject to umask; existing modes are not changed. Invalid
+destinations produce an escaped stderr warning and use stderr instead.
+No implicit log file is created. Footer notices and fatal CLI diagnostics
+remain their own surfaces; this does not promise an event for every action.
+As with document input, ancestor paths and hard kernel-I/O deadlines are not
+isolated. A host embedding the library may already own the tracing subscriber.
 
 ## Compatibility and verification
 

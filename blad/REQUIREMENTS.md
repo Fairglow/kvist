@@ -374,6 +374,17 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     remain explicit failures. Optional session stdout routes follow the same
     error policy; exports remain source Markdown.
 
+### Release-readiness follow-up
+
+67. **R-067 Diagnostic initialization:** `BLAD_LOG_FILE` must open at most
+    once during logging initialization, nonblockingly, without following a
+    final symlink, and require a regular file. Retain the opened handle for
+    later events. Failure must visibly report escaped context and fall back
+    to stderr without recursion, deadlock or suppressing help/version.
+    Existing files append; newly created logs use private permissions.
+    Logging must not claim that normal footer actions emit diagnostic events.
+    Public docs/help must match implemented search, reload and navigation keys.
+
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).
 - **C-002 No new state format:** Blad reads skott's structured session
