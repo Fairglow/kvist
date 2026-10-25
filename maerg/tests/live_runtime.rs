@@ -4,7 +4,7 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use kvist::agent::{AgentExecutionRequest, execute_agent};
 use kvist::config::{AgentProfile, Model, Role, SandboxConfig, VcsSelection};
@@ -353,6 +353,30 @@ fn read_request(stream: &mut std::net::TcpStream) -> Option<serde_json::Value> {
     }
 }
 
+fn accept_request(listener: &TcpListener) -> (std::net::TcpStream, serde_json::Value) {
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking listener");
+    let started = Instant::now();
+    loop {
+        assert!(
+            started.elapsed() < Duration::from_secs(60),
+            "provider did not receive the expected inference request"
+        );
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                if let Some(request) = read_request(&mut stream) {
+                    return (stream, request);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("accept provider connection: {error}"),
+        }
+    }
+}
+
 fn respond(stream: &mut std::net::TcpStream, input: u64, output: u64) {
     let body = serde_json::json!({
         "model":"fixture","message":{"role":"assistant","content":"observed answer"},
@@ -474,10 +498,7 @@ fn steering_retains_whole_run_usage_and_cumulative_token_limit() {
         let provider = thread::spawn(move || {
             let mut inference = 0;
             loop {
-                let (mut stream, _) = listener.accept().expect("accept");
-                let Some(request) = read_request(&mut stream) else {
-                    continue;
-                };
+                let (mut stream, request) = accept_request(&listener);
                 inference += 1;
                 if inference == 1 {
                     controls.steer("continue with guidance").expect("guidance");
@@ -493,6 +514,8 @@ fn steering_retains_whole_run_usage_and_cumulative_token_limit() {
             }
         });
         let mut selected = shared_profile(&endpoint, 8192);
+        // This tests accounting, not durable-recording latency under parallel load.
+        selected.timeout_seconds = 60;
         selected.token_limit = limited.then_some(7000);
         let result = kvist::agent::execute_agent_controlled(
             &selected,
@@ -592,10 +615,7 @@ fn cancelled_generation_keeps_earlier_turn_evidence_and_usage() {
     let provider = thread::spawn(move || {
         let mut inference = 0;
         loop {
-            let (mut stream, _) = listener.accept().expect("accept");
-            if read_request(&mut stream).is_none() {
-                continue;
-            }
+            let (mut stream, _) = accept_request(&listener);
             inference += 1;
             if inference == 1 {
                 controls.steer("continue").expect("guidance");
@@ -606,8 +626,10 @@ fn cancelled_generation_keeps_earlier_turn_evidence_and_usage() {
             }
         }
     });
+    let mut selected = shared_profile(&endpoint, 8192);
+    selected.timeout_seconds = 60;
     let error = kvist::agent::execute_agent_controlled(
-        &shared_profile(&endpoint, 8192),
+        &selected,
         &SandboxConfig {
             runner: "/usr/bin/true".into(),
             backend: "/usr/bin/true".into(),

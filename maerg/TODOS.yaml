@@ -14,6 +14,38 @@ component:
         expected_revision: "sha256:3d971935e8b59ab1d977550b5c2146caff46dc7af0dc6c15c7b18d414d0ccae5"
         observed_revision: "sha256:e27ae1c3224da961bd30030a6a838b9da2c0f52f58524f5a59fe273fde2445f5"
 tasks:
+  - id: model-budget-regression-write-tests
+    title: "write_tests: classify expired and cancelled model turns"
+    description: "Pin timeout/cancellation before native and explicit transport construction; retain live cumulative usage and cancellation evidence assertions."
+    kind: test
+    status: completed
+    context: "2026-10-25: parallel workspace execution exposed zero remaining budget reported as InvalidModelTransport and an unbounded fixture accept. A deterministic zero-budget regression reproduces the classification error before repair."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+  - id: model-budget-regression-implement-code
+    title: "implement_code: guard model transport deadlines"
+    description: "Reject cancellation and expiry before transport construction, and bound live fixture waits without changing production budgets or accounting assertions."
+    kind: implementation
+    status: completed
+    context: "The deterministic native/explicit zero-budget regression and all eight live-runtime tests pass. Cancellation precedes expiry at each transport construction; production time/token/attempt limits are unchanged. Fixture accepts are bounded and accounting/cancellation assertions retained."
+    depends_on: [model-budget-regression-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+  - id: model-budget-regression-security-audit
+    title: "security_audit: inspect budget and cancellation ordering"
+    description: "Inspect fail-closed deadline checks, preserved endpoint validation and unchanged protected effect authority."
+    kind: security-audit
+    status: completed
+    context: "Bounded implementer inspection and independent source-only observations retained in IMPL.md: no endpoint or effect-authority bypass, no zero-duration transport construction, no widened production budget or replay. Cooperative check races and per-read fixture bounds remain explicit; no whole-runtime audit claim."
+    depends_on: [model-budget-regression-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+  - id: model-budget-regression-compliance-review
+    title: "compliance_review: compare independent budget observations"
+    description: "Derive source-only observations and compare separately against local intent and execution evidence."
+    kind: compliance-review
+    status: completed
+    context: "Independent source-only budget-source-observer supplement and separate source-blind budget-intent-comparator comparison retained in IMPL.md. No concrete scoped mismatch identified; zero-budget coverage, non-atomic checks and fixture per-read timeout limits remain explicit. No whole-runtime certification or acceptance."
+    depends_on: [model-budget-regression-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
   - id: shared-runtime-write-tests
     title: "Pin shared resolution and live protected diagnostics"
     description: "Test shared profile selection, live model/broker/effect records, bounded controls and refusal of unsupported external backends before implementation."

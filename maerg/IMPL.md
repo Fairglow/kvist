@@ -5,6 +5,61 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped model-budget regression repair - 2026-10-25
+
+Independent clean-slate `budget-source-observer` inspected only the budget,
+transport-construction and corresponding regression/fixture source. It excluded
+intent, queues, prior records, reviews and history, ran no tests and made no
+compliance judgment. The observations below are transcribed from that report:
+
+- `TurnBudget` subtracts elapsed wall time saturating at zero.
+  `model_deadline` rejects cancellation before expiry, returning the respective
+  model-transport cancellation or timeout error. Initial native/explicit
+  transport construction and each retry use that check; shared-native capacity
+  discovery uses it when capacity is unspecified.
+- Model identity resolution and token preflight still precede the host-turn
+  deadline check. Endpoint construction still precedes the liveness probe;
+  no configured agent command is executed by this path. These checks do not
+  authorize effects. Retry limits, emitted-output restrictions and the shared
+  wall-clock budget remain visible in the source.
+- The new host-turn test supplies zero time for native and explicit paths,
+  asserting timeout without cancellation and cancellation when both hold.
+  It does not instrument construction/network calls or exercise
+  positive-budget cancellation.
+- Live steering/accounting assertions retain exact known-usage totals,
+  cumulative token-limit failure and trajectory totals. The cancellation
+  fixture retains assertions for an explicit cancellation error, the previous
+  answer, known 11/7 usage and unsuccessful replay with total 18.
+- Those two fixtures allow 60 seconds for model work rather than asserting
+  durable-recording latency. Their provider accept helper polls nonblockingly
+  with a 60-second guard and skips empty liveness connections. Accepted streams
+  retain three-second per-read timeouts; this is not a hard end-to-end read
+  bound. Steering and provider-close interleavings remain finite tested cases,
+  not exhaustive proofs. Cancellation/expiry checks are not atomic with
+  subsequent work.
+
+Implementer-attributed execution: the zero-budget regression first failed with
+an invalid-deadline configuration error, then passed after the guard repair.
+All eight live-runtime integration tests pass, including ten repeated
+four-worker nextest iterations (80 executions). Final all-feature workspace
+verification with four workers passes all 1817 tests, with 15 existing skips;
+strict workspace lint and formatting pass. CPU-count-concurrency runs still
+encounter intermittent native-render and repository-preparation timeouts under
+observed host I/O/memory pressure, including after diagram-test isolation.
+Their production limits were not relaxed, and that full-concurrency limitation
+remains unresolved. No component acceptance or whole-runtime certification
+is implied.
+
+The separate source-blind `budget-intent-comparator` compared this supplement
+and attributed execution with local intent and the root contract, without
+reading implementation/test source or running tests. It found no concrete
+scoped discrepancy in cancellation-first deadline checks, retained usage or
+cumulative accounting. It retained that zero-budget cases do not prove
+positive-budget cancellation, absence of network/construction calls or every
+race; checks are non-atomic and per-read fixture timeouts are not end-to-end
+bounds. Fixture scheduling slack changes no production limit or authority.
+This comparison is neither blanket compliance nor acceptance.
+
 ## Observed public contract
 
 ### Command and workflow surface

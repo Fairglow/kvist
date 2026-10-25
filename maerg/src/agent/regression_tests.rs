@@ -2,6 +2,69 @@ use super::*;
 use std::os::unix::{fs::symlink, process::ExitStatusExt};
 
 #[test]
+fn host_turn_checks_cancellation_and_expiry_before_transport_construction() {
+    let dir = tempfile::tempdir().expect("workspace");
+    let profile =
+        tests::test_profile("curl --json '{\"model\":\"fixture\"}' 'http://127.0.0.1:1/api/chat'");
+    let live = LiveRun::create(
+        &dir.path().join("events.jsonl"),
+        "budget",
+        "task",
+        "fixture",
+        &[],
+    )
+    .expect("live run");
+    for native in [false, true] {
+        let mut choice =
+            select_model_choice(&profile, crate::config::Role::Developer, None).expect("choice");
+        if native {
+            choice.native = Some(sav::registry::NativeModel::new(
+                LocalModelProvider::Ollama,
+                "http://127.0.0.1:1".into(),
+                "fixture".into(),
+            ));
+        }
+        for cancelled in [false, true] {
+            let token = CancellationToken::new();
+            if cancelled {
+                token.cancel();
+            }
+            let budget = TurnBudget::new(Duration::ZERO);
+            let request = ModelRequest {
+                model: "fixture".into(),
+                messages: vec![sav::ModelMessage::User("task".into())],
+                tools: vec![],
+                tool_choice: sav::ToolChoice::None,
+                reasoning_effort: None,
+                output_schema: None,
+                max_output_tokens: None,
+            };
+            let error = execute_host_turn(
+                &choice,
+                &profile,
+                &tests::test_execution_request(dir.path()),
+                &budget,
+                &[],
+                &request,
+                &token,
+                &live,
+                &mut 0,
+                &mut TokenBudget::new(None),
+            )
+            .expect_err("no transport work after cancellation or expiry");
+            assert!(
+                if cancelled {
+                    matches!(error, KvistError::Sav(ModelError::ModelTransportCancelled))
+                } else {
+                    matches!(error, KvistError::Sav(ModelError::ModelTransportTimedOut))
+                },
+                "{error:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn selected_context_is_bounded_and_never_follows_links_or_expands_source() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
     let root = dir.path().canonicalize().expect("absolute workspace");

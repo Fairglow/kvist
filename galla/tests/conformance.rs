@@ -1107,17 +1107,24 @@ fn executable_executes_successfully_on_valid_request() {
         "identity": digest(b"nested-runner")
     }));
     // An open pipe with no data must not delay the request-mode guard.
-    request["argv"] = json!([
-        "/usr/bin/python3",
-        "-c",
-        "import subprocess\nfor mode in ['probe', 'request']:\n p = subprocess.Popen(['/tooling/galla-runner', '--kvist-sandbox-' + mode + '-v1'], env={}, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)\n try:\n  p.wait(timeout=2)\n except subprocess.TimeoutExpired:\n  p.kill(); p.wait(); raise\n assert p.returncode == 3, p.returncode\n assert p.stdout.read() == b''\n message = p.stderr.read()\n assert b'already inside a Galla sandbox' in message, message\n assert b'unnecessary' in message, message\n"
-    ]);
-    let output = run_runner(&encode(&request));
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let mut failures = Vec::new();
+    for mode in ["probe", "request"] {
+        request["argv"] = json!([
+            "/usr/bin/python3",
+            "-c",
+            format!(
+                "import subprocess\np = subprocess.Popen(['/tooling/galla-runner', '--kvist-sandbox-{mode}-v1'], env={{}}, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)\ntry:\n p.wait(timeout=2)\nexcept subprocess.TimeoutExpired:\n p.kill(); p.wait(); raise\nassert p.returncode == 3, p.returncode\nassert p.stdout.read() == b''\nmessage = p.stderr.read()\nassert b'already inside a Galla sandbox' in message, message\nassert b'unnecessary' in message, message\n"
+            )
+        ]);
+        let output = run_runner(&encode(&request));
+        if !output.status.success() {
+            failures.push(format!(
+                "{mode}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]

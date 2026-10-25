@@ -14,6 +14,38 @@ component:
         expected_revision: "sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1"
         observed_revision: "sha256:1323af464fc004721bafc8fd3a0a524eaafb99fc078ea313570d7a04f46660e8"
 tasks:
+  - id: nesting-regression-write-tests
+    title: "write_tests: independently reproduce both nesting failures"
+    description: "Exercise probe and request separately with cleared environment and open stdin, retaining both failures."
+    kind: test
+    status: completed
+    context: "2026-10-25: reproduced probe status 0 and request stdin timeout before restoring either guard. Existing SR-REQ-NO-NESTING remains authoritative; no product behavior change."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
+  - id: nesting-regression-implement-code
+    title: "implement_code: restore early nesting rejection"
+    description: "Check the marker before probe backend discovery and before request stdin reads."
+    kind: implementation
+    status: completed
+    context: "Restored both early guards without changing validation or mount authority. All 80 default Galla tests pass with two existing opt-in trials ignored; all-feature workspace strict lint and formatting pass."
+    depends_on: [nesting-regression-write-tests]
+    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
+  - id: nesting-regression-security-audit
+    title: "security_audit: inspect restored guard ordering"
+    description: "Inspect marker handling, early failure, empty stdout and unchanged grant authority."
+    kind: security-audit
+    status: completed
+    context: "Bounded implementer inspection: existing non-following marker detection remains fail-closed, both execution paths reject before input/backend work with status 3 and empty stdout, and no grant or host-execution authority changes. Independent source-only observations are retained in IMPL.md; no runner-wide audit claim."
+    depends_on: [nesting-regression-implement-code]
+    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
+  - id: nesting-regression-compliance-review
+    title: "compliance_review: independently compare nesting repair evidence"
+    description: "Derive a clean-slate source-only record and separately compare it with local intent and execution evidence."
+    kind: compliance-review
+    status: completed
+    context: "Independent source-only nesting-source-observer supplement and separate source-blind nesting-intent-comparator comparison retained in IMPL.md. No concrete post-repair scoped mismatch identified; runtime all-phase, direct-library, metadata-error and exhaustive interleaving limits remain explicit. Review activity is complete, not component acceptance or runner-wide certification."
+    depends_on: [nesting-regression-security-audit]
+    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
   - id: nested-sandbox-write-tests
     title: "write_tests: nested sandbox rejection"
     description: "Pin reserved destinations and native probe/request rejection with cleared environment and open stdin."
