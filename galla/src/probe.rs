@@ -40,9 +40,6 @@ fn file_sha256(path: &Path) -> Result<String, std::io::Error> {
 
 /// Attempts to confirm the runner's production enforcement capabilities.
 pub fn probe() -> ProbeOutcome {
-    if let Err(reason) = crate::context::require_host() {
-        return ProbeOutcome::Unavailable { reason };
-    }
     let bwrap_path = match locate_backend() {
         Some(path) => path,
         None => {

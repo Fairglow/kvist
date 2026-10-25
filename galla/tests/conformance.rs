@@ -1025,6 +1025,11 @@ fn nested_sandbox_marker_destinations_are_reserved() {
 
 #[test]
 fn executable_executes_successfully_on_valid_request() {
+    // This test requires spawning an actual sandbox, which cannot run inside
+    // a sandbox. Skip when the marker is present.
+    if std::path::Path::new("/.galla-sandbox").exists() {
+        return;
+    }
     let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
