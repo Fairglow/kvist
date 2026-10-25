@@ -47,8 +47,9 @@
 //!
 //! CommonMark parsing and selected extensions are terminal projections, not
 //! full CommonMark/GFM conformance: raw HTML is omitted (table-cell `<br>` is a
-//! line-break exception), images show alternative text only, and table delimiter
-//! alignment is not implemented. Math and spatial Mermaid diagrams have bounded
+//! line-break exception), images show alternative text only, and table cells
+//! flatten individual inline emphasis/code styling. Tables honor delimiter
+//! left/center/right alignment. Math and spatial Mermaid diagrams have bounded
 //! subset profiles and visible source fallback, not full TeX/Mermaid support.
 //! Authored terminal controls are made inert.
 //!

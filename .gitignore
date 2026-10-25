@@ -28,3 +28,6 @@ kvist.toml
 # not part of the Kvist durable set. Kept on disk for reference, excluded from
 # the committed project.
 .work-docs/
+
+# Local nextest configuration
+/.config/nextest.toml

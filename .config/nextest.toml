@@ -1,5 +1,0 @@
-[[profile.default.overrides]]
-filter = "package(=skott) & binary(=rust_build_environment) & test(=native_repository_tests_execute_inside_the_workspace_sandbox)"
-threads-required = "num-test-threads"
-
-[profile.ci]

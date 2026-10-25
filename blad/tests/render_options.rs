@@ -22,7 +22,7 @@ fn plain_output_contains_rendered_text_but_no_controls() {
 
 #[test]
 fn color_depth_never_changes_visible_geometry() {
-    let source = "# Heading\n\n> [!WARNING]\n> Careful\n\nH~2~O $\\alpha_i^2$ and $\\frac{a}{b}$\n\n```rust\nlet x = 1;\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```mermaid\nflowchart LR\nA[Input] --> B[Output]\n```";
+    let source = "# Heading\n\n> [!WARNING]\n> Careful\n\nH~2~O $\\alpha_i^2$ and $\\frac{a}{b}$\n\n```rust\nlet x = 1;\n```\n\n| A | B |\n|:---:|---:|\n| 1 | 2 |\n| longest | longest |\n\n```mermaid\nflowchart LR\nA[Input] --> B[Output]\n```";
     let expected = render(source, RenderOptions::plain());
     for theme in [Theme::Dark, Theme::Light, Theme::Terminal] {
         for color_depth in [

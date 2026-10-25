@@ -62,7 +62,7 @@ Blad must provide the following capabilities:
 15. **R-015 GitHub Flavored Markdown:** Support documented extensions including
     tables, strikethrough, task lists, autolinks, footnotes, superscript,
     subscript, and alert blockquotes ([!NOTE], [!TIP], etc.). This is not a
-    full GFM conformance claim; table delimiter alignment is not implemented.
+    full GFM conformance claim; table alignment follows R-073.
 16. **R-016 Syntax highlighting:** Highlight fenced code blocks using
     syntect (50+ languages).
 17. **R-017 Mermaid support:** Render the admitted Mermaid subset as terminal
@@ -442,6 +442,21 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     resource limits and distinction from session/file tail-following. Record
     a measured representative sustained-input workload without claiming a
     universal performance guarantee.
+
+### Markdown table alignment
+
+73. **R-073 Table alignment:** Honor left, center and right delimiter alignment
+    in headers and every wrapped body-cell line; unspecified alignment remains
+    left. Use Unicode display columns for padding, placing an odd extra center
+    space on the right. Alignment must not change width solving, wrapping,
+    explicit breaks, source column order, row styling or horizontal-overflow
+    policy. Keep link selection and mouse hitboxes on the rendered label,
+    excluding padding, after reflow and with quotes/line-number gutters.
+    Verify exact styled/plain geometry, default/explicit alignments, empty
+    cells, odd padding, Unicode, wrapping, resize, overflow and multiple tables.
+    Document supported alignment and the separate limitation that inline cell
+    emphasis/code styling is flattened; HTML tables and merged cells remain
+    outside the supported Markdown table profile.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).

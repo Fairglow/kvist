@@ -4,6 +4,208 @@
 
 Date: 2026-10-12
 
+## Scoped table alignment source observation - 2026-10-25
+
+### Scope and evidence status
+
+This observation derives from executable Rust and test source in `blad/src/markdown.rs`, `blad/src/table/{mod.rs,cell.rs,tests.rs}`, `blad/src/table_navigation.rs`, `blad/src/render_writer.rs`, `blad/src/viewport.rs`, `blad/src/inline.rs`, `blad/src/output.rs`, `blad/src/terminal_text.rs`, and `blad/tests/{table_rendering.rs,render_options.rs,viewer.rs}`.
+
+No intent documents, prior implementation records, reviews, or Git history/diffs were consulted. No repository files were edited. No tests were independently executed; test descriptions below report inspected assertions, not observed passes. Separately supplied execution results are not independent execution evidence here. This supplement is not whole-component certification or human acceptance.
+
+### Table construction and width selection
+
+`blad/src/markdown.rs` collects table cell strings, parser-provided column alignments, and link marks separately. Starting a table resets these collections; ending it renders the accumulated rows and clears alignment state.
+
+In `blad/src/table/mod.rs`, `Table::new` determines the largest row length and fills missing cells with empty strings. Each column's minimum and natural widths are the maxima of its cells' respective widths.
+
+`blad/src/table/cell.rs`:
+
+- Splits cells on explicit newlines, preserving empty and trailing lines.
+- Normalizes each line through `TerminalLine`, then tokenizes with `split_whitespace`.
+- Measures words with Unicode display width and rejoins adjacent words with single spaces.
+- Wraps greedily between whole words; it does not split a word to fit a supplied width.
+- Computes a cell minimum by binary-searching between its longest word and natural width. Below natural width, the admissibility check permits at most `width / 4` occupied wrapped lines. Empty lines do not contribute to that count. Natural width remains the upper-bound fallback even when explicit line breaks prevent this aspect relation.
+
+Width selection reserves three columns per inter-column separator:
+
+1. Without a viewport, return natural widths.
+2. If natural widths fit the remaining budget, return them.
+3. If column minima consume or exceed that budget, return the minima, allowing horizontal overflow.
+4. Otherwise, binary-search a maximum cell-height cap. For each cap, independently find each column's smallest width at which all its cells fit.
+5. Distribute remaining budget proportionally to unused natural-width capacity, using integer largest remainders; equal remainders favor earlier columns.
+
+The height objective is the maximum individual cell height, equivalently the maximum rendered row height, not the sum of all rendered row heights. Explicit empty lines count toward wrapping height, although they do not inflate the aspect minimum.
+
+### Alignment and emitted layout
+
+`render_table` and `cell_padding` in `blad/src/markdown.rs` apply alignment after width selection and wrapping. Alignment therefore does not alter solver inputs or word partitioning.
+
+For each wrapped cell line, spare space is the allocated width minus Unicode display width, using saturating subtraction:
+
+- Unspecified and left alignment: all spare space trails the text.
+- Center alignment: `spare / 2` precedes the text; an odd extra space trails it.
+- Right alignment: all spare space precedes the text.
+
+Headers and body cells use the same calculation. Missing alignment entries default to unspecified alignment. Cells with fewer fragments than their row's maximum height are filled with spaces.
+
+Columns are joined by `" | "` without outer borders or horizontal separator rows. The first logical row receives reverse video. Body rows alternate between the configured table background and no table-specific prefix; every fragment of a logical row receives that row's treatment.
+
+### Inline cell formatting
+
+Table content does not use the styled-word representation in `blad/src/inline.rs`.
+
+In `blad/src/markdown.rs`, emphasis, strong, and strikethrough events update style counters, but table text is appended as strings without those styles. Inline code also appends text directly: it receives neither the non-table reverse-video treatment nor `InlineWriter`'s atomic-code behavior. Its internal whitespace consequently participates in ordinary cell whitespace normalization and word wrapping.
+
+Links retain label text and navigation identity, but table rendering does not apply the ordinary inline link color. Link destinations are not emitted by the table branches.
+
+Ordinary table text passes through text projection and inert-text handling; embedded newlines in text events become spaces. Table soft breaks append spaces. Hard breaks append newlines. Inline HTML contributes a newline only for trimmed, case-insensitive `<br>`, `<br/>`, or `<br />`; other inline HTML is ignored by that branch.
+
+Footnote references and math events append their helper-produced text without retaining separate inline styles.
+
+Thus alignment applies to normalized cell text, not to preserved rich inline formatting.
+
+### Link mark positioning
+
+`blad/src/table_navigation.rs` records appended linked text as byte ranges in the accumulated cell string, keyed by logical row and column.
+
+After wrapping, `TableLinks::wrapped` finds each emitted word sequentially in the original cell string. It intersects that word with recorded link ranges and uses `TerminalLine::column_ranges` to convert intersecting byte ranges to grapheme-aware display-column ranges. Normalized inter-word spacing advances the wrapped column by one.
+
+In `render_table`, leading alignment padding is written **before** link marks are registered. `RenderWriter::mark_link_columns` in `blad/src/render_writer.rs` then adds:
+
+- The display width already buffered on the output line, including earlier cells, separators, and leading padding.
+- The current quote-border width.
+
+Trailing alignment padding is written after marking and is not added to the mark. Repeated marks for the same navigation identity on one output row extend its last span, so spaces between linked words can lie inside the resulting span.
+
+`blad/src/viewport.rs` keeps navigation coordinates relative to rendered document lines. Line-number gutters are painted separately. Documents are rendered anew for their available width, producing corresponding geometry and navigation spans.
+
+### Bounds and errors
+
+The inspected paths use saturating arithmetic for separator budgets, width totals, padding subtraction, quote-width reductions, viewport width/gutter reservation, horizontal overflow, and clipping endpoints.
+
+Empty tables and tables with no columns produce no table content. Empty cells can have zero natural width. Zero or narrow viewports do not force table words or geometry below their computed minima.
+
+`TableLinks::wrapped` returns `InvalidData` with `"table link token lost during wrapping"` if sequential token correspondence fails. The inspected tests do not directly exercise that failure branch.
+
+Rendering propagates writer and flush errors. `RenderWriter` and viewport document construction report invalid UTF-8 as `InvalidData`. `Output` rejects unexpected, malformed, overlong, or incomplete renderer controls. Plain mode suppresses renderer SGR; color-depth handling otherwise preserves non-color attributes.
+
+`TerminalLine` excludes recognized SGR from display width and clips by grapheme boundaries, substituting spaces for partially visible wide graphemes. Authored controls are made inert before rendering, including control characters decoded into text events.
+
+These observations do not establish arbitrary-input resource bounds. Table solving and emission contain no internal cancellation checkpoints; the enclosing Markdown event loop checks cancellation between events.
+
+### Relevant assertions and coverage limits
+
+**`blad/tests/table_rendering.rs`**
+
+- `delimiter_alignment_applies_to_headers_and_body_in_styled_and_plain_output` checks exact left, center, right, unspecified, and missing-cell padding at widths `None`, `0`, `1`, and `80`; it also checks plain output lacks escapes and styled output starts with header reversal.
+- `delimiter_alignment_measures_unicode_display_columns` checks exact padding for a wide character, combining sequence, and ZWJ emoji.
+- `delimiter_alignment_preserves_explicit_and_empty_cell_lines` checks aligned fragments around supported HTML breaks.
+- `delimiter_alignment_pads_each_wrapped_line_without_changing_geometry` compares aligned and unaligned output at six widths, asserting equal line counts and display widths with expected per-fragment padding.
+- `delimiter_alignment_is_local_to_each_table` checks that right alignment does not carry into a following unspecified-alignment table.
+- Whole-word overflow, short/empty columns, Unicode words, explicit empty lines, deterministic resizing, equal rendered widths, and table writer failure have additional targeted assertions.
+
+These tests do not assert preservation of bold, italic, strike, code styling, or code atomicity inside cells.
+
+**`blad/src/table/tests.rs`**
+
+- `exact_solver_matches_exhaustive_small_tables` enumerates candidate widths for selected small tables and compares fitting-height or overflow results.
+- `cell_floor_matches_exhaustive_text_geometry` compares cell minima with enumerated admissible widths, including generated word lengths, Unicode, and explicit blank lines.
+- `wrap_measurement_matches_output_and_is_monotone` checks wrapping height, height predicates, whitespace normalization, explicit empty lines, and selected Unicode/control cases.
+- Other tests cover ragged/empty tables, stable rounding, neighbor-independent floors, `usize::MAX` viewports, and a 10,000-word cell.
+
+These are finite cases, not exhaustive coverage of all inputs or performance guarantees.
+
+**`blad/src/viewport.rs`**
+
+- `duplicate_table_and_bare_links_have_source_owned_spans` checks distinct source-owned navigation spans.
+- `wrapped_unicode_table_links_are_precise_in_quotes_and_after_reflow` reconstructs linked labels from spans at two widths, including a wrapped label containing strong markup.
+- `aligned_table_link_spans_exclude_padding_after_numbered_quoted_reflow` reconstructs header/body labels at widths `25`, `40`, and `80`, with numbering both enabled and disabled; fragments must be trimmed and exclude the quote prefix.
+
+These assertions inspect span text and coordinates, not retained inline styling.
+
+**`blad/tests/viewer.rs`**
+
+`aligned_table_links_keep_selection_and_mouse_hitboxes_after_resize` exercises centered and right-aligned two-column-wide labels, with and without line numbers. It checks that preceding padding does not activate the link, Tab underlines exactly the label's occupied columns, and clicking the resized label opens its target without screen scrolling.
+
+Its resize is from 40 to 50 terminal columns around a fixed, unwrapped table. It does not independently establish wrapped or quoted aligned-table mouse behavior.
+
+`table_overflow_is_accessible_and_resize_preserves_the_first_row` separately checks horizontal access to an overflowing table and its presentation after widening.
+
+**Output and terminal tests**
+
+`color_depth_never_changes_visible_geometry` in `blad/tests/render_options.rs` compares stripped output across themes and color depths, including an aligned table. Entity-decoded control and writer/flush tests cover related error boundaries. `blad/src/terminal_text.rs` tests grapheme-safe clipping and span overlays; `blad/src/output.rs` tests bytewise encoding and malformed-control rejection.
+
+## Table alignment execution evidence - 2026-10-25
+
+The implementer, separately from the clean-slate source observer, executed:
+
+- Before production changes, all five `delimiter_alignment` rendering
+  regressions failed on output padding and the aligned-table PTY regression
+  failed on the expected label position. The source-bound span regression
+  already passed and subsequently protects the new padding/mark ordering.
+- `cargo test --offline --locked -p kvist-blad --lib --test table_rendering
+  --test render_options --test viewer -- --test-threads=4`: 107 library,
+  23 table, 10 render-options and 62 viewer tests passed. One pre-existing
+  explicitly invoked sustained-input characterization remained ignored.
+- The same selected suites with `--features sessions` passed with the same
+  counts and ignored characterization.
+- Both selected-suite commands also passed on Rust 1.95.0 with the same
+  counts and ignored characterization.
+- `cargo clippy --offline --locked -p kvist-blad --all-targets --all-features
+  -- -D warnings`, `cargo fmt -p kvist-blad -- --check` and
+  `git diff --check` passed.
+- A real piped `blad --dump` invocation now centers `b` and right-aligns
+  `7` in a table using `:---:` and `---:` delimiters.
+
+These are scoped execution results, not acceptance, independent execution or
+a new universal performance/security guarantee. Unrelated pre-existing dirty
+configuration, lockfile and manifest changes were preserved.
+
+### Independent source-blind table alignment comparison
+
+**Scope and basis.** Compared the revised Blad requirements, contract, relevant design and `blad-table-alignment-*` task definitions against only the two permitted leading IMPL sections. No source, test source, historical implementation records, other reviews or Git evidence was consulted. Execution results below are supplied implementer reports, not independently rerun tests.
+
+**Implemented behavior.** The independent observation supports R-073 and the new alignment design:
+
+- Parser alignment is retained per table and cleared between tables.
+- Alignment is applied after solving widths and wrapping, without changing either algorithm.
+- Headers and body fragments receive Unicode-display-column padding. Unspecified/left alignment trails padding; right alignment leads it; center puts an odd surplus space on the right.
+- Empty fragments retain allocated width. Source column order, separators, header reversal and logical-row backgrounds remain intact.
+- Leading padding precedes link-mark registration. Observed coordinate composition accounts for earlier columns and quote prefixes; number gutters remain viewport-owned.
+
+The observed cell floors, natural-width ceilings, whole-word wrapping, explicit empty lines, supported HTML breaks and overflow policy are consistent with directly relevant R-029/R-031 and table-layout semantics. Alignment introduces no observed contradiction with those constraints.
+
+R-015 and the terminal profile appropriately disclaim full GFM conformance. Inline cell emphasis, strike, code and ordinary link styling remain flattened. Inline code also undergoes ordinary cell whitespace normalization and wrapping; this increment does not preserve atomic code spans. These observations fit the table-specific normalization policy and deliberately separate future styling increment, rather than establishing an alignment defect.
+
+**Verified assertions and supplied execution.** Inspected assertions reported by the observer cover exact padding, odd centers, default/explicit alignment, Unicode widths, empty/broken/wrapped cells, multiple tables, geometry preservation and output policies. Navigation assertions reconstruct labels after quoted/numbered reflow. The PTY assertion checks exact selected-label columns, preceding-padding nonactivation and resized mouse activation with and without numbering, supporting the alignment-related portions of R-049/R-055.
+
+The implementer reports five rendering regressions and the PTY regression failing before production changes; the source-bound span regression already passed. Selected suites subsequently passed in default and `sessions` configurations: 107 library, 23 table, 10 render-options and 62 viewer tests per configuration. Strict Clippy, formatting, whitespace checks and a real piped dump demonstration are also reported passing. One pre-existing sustained-input characterization remained ignored.
+
+**Material gaps and finite boundaries.**
+
+- **R-062 public documentation:** the task record claims README, guide, rustdoc and changelog updates, but the scoped independent observation does not examine them, and supplied execution does not validate their wording. The permitted intent documents describe alignment and flattened styling precisely; publication-facing documentation accuracy remains independently unestablished here.
+- The aligned-table PTY resize uses an unwrapped table at 40 to 50 columns. Wrapped/quoted coordinates have inspected assertions, but wrapped/quoted aligned mouse behavior is not independently demonstrated by that PTY case.
+- The scoped record does not establish all R-055 emulator details, including continuation-cell/delayed-wrap modeling. Unicode rendering assertions and wide-label PTY evidence are bounded, not terminal/font certification.
+- Solver enumeration covers finite small cases. The token-correspondence error branch lacks a direct test. No universal performance, cancellation or arbitrary-input resource guarantee follows.
+
+These boundaries do not create requirements for exhaustive Cartesian coverage or full Markdown conformance.
+
+**Disposition.** No concrete scoped implementation-intent contradiction is established. The queue preserves tests, implementation, audit, then comparison ordering and leaves comparison pending. This report supplies independent comparison, not independent execution, security certification or human acceptance. Acceptance remains a human decision, with the documentation-evidence limitation retained explicitly.
+
+### Subsequent implementer documentation cross-check
+
+The implementer checked the README Rendering section, user-guide table sizing
+and syntax profile, rustdoc and changelog wording against observed behavior.
+A documentation search also exposed stale alignment disclaimers and an
+"alignment ignored" showcase row in `docs/EXAMPLES.md`; these were corrected.
+The showcase now demonstrates honored alignment, and all checked public
+surfaces distinguish that support from flattened inline cell styling.
+No stale unsupported/ignored-alignment claim remains in the searched public
+Markdown guides. This cross-check is not independent documentation review;
+the independent comparison's limited documentation scope remains explicit.
+The comparison task is recorded complete after preserving its report, not as
+human acceptance or blanket compliance.
+
 ## Automatic streaming pager evidence - 2026-10-25
 
 ### Independent source-only observations

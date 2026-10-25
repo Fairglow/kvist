@@ -406,6 +406,13 @@ display. Folding and session live follow remain deferred; file tabs reload saves
 
 ### Table sizing
 
+Tables honor Markdown delimiter alignment in headers and body cells: `:---`
+is left-aligned, `:---:` centered and `---:` right-aligned. An unmarked `---`
+defaults to left alignment. Each wrapped line is aligned independently using
+Unicode display columns; an odd extra center-padding space goes on the right.
+Alignment changes padding only, not column sizing or wrapping. Links remain
+selectable/clickable on their labels, not the surrounding padding.
+
 Table width floors depend on each cell's own soft-wrapped text, not the height
 of neighboring cells. Empty lines and vertical padding never widen a column.
 The renderer assumes terminal character cells are twice as tall as wide, so
@@ -427,6 +434,11 @@ Cells wrap between whole words, never inside a Unicode grapheme or long file
 path. A long unbroken token may therefore force overflow. Whitespace within a
 cell line becomes one space; `<br>`, `<br/>`, and `<br />` preserve explicit
 breaks and empty lines. Without a configured width, tables stay unwrapped.
+
+Inline bold, italic, strikethrough and code in cells retain their text but
+not their individual styling. HTML tables, merged cells and nested block
+content are not part of the supported pipe-table profile; these are not
+limitations imposed by a terminal's ability to align or style text.
 
 ### Navigation
 
@@ -682,7 +694,8 @@ projection, **not full CommonMark/GFM conformance**:
 - Images (shown as alt text in terminal)
 - Code blocks with syntax highlighting (50+ languages)
 - Inline code with inverted video
-- Tables with width-aware whole-word wrapping, but no delimiter left/center/right alignment
+- Tables with width-aware whole-word wrapping and delimiter left/center/right
+  alignment; individual inline cell emphasis/code styling remains flattened
 - Blockquotes, including GFM alert styles:
   - [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]
   - Labels/edges preserve meaning without color; colors follow the palette

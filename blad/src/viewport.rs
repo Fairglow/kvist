@@ -449,4 +449,38 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn aligned_table_link_spans_exclude_padding_after_numbered_quoted_reflow() {
+        let source = "> | [界](#header-center) | [e\u{301}](#header-right) |\n> | :---: | ---: |\n> | prefix [界 wide label **words**](#target) tail | [短](#short) |\n> | longer heading value | longest second column value |";
+        let links = crate::links::extract_links(source);
+        let labels = ["界", "e\u{301}", "界 wide label words", "短"];
+        for columns in [25, 40, 80] {
+            for numbers in [false, true] {
+                let document = Document::render(source, columns, numbers, None).unwrap();
+                for (link, label) in links.iter().zip(labels) {
+                    let spans = &document.navigation.links[&link.navigation_id()];
+                    assert!(!spans.is_empty());
+                    let parts: Vec<_> = spans
+                        .iter()
+                        .map(|span| {
+                            let text = TerminalLine::new(
+                                &document.lines[span.row].clip(span.start, span.end - span.start),
+                            )
+                            .plain()
+                            .to_owned();
+                            assert_eq!(text, text.trim(), "padding in link span: {text:?}");
+                            assert!(span.start >= 2, "quote prefix included");
+                            text
+                        })
+                        .collect();
+                    assert_eq!(
+                        parts.join(" "),
+                        label,
+                        "{columns} columns, numbers {numbers}"
+                    );
+                }
+            }
+        }
+    }
 }

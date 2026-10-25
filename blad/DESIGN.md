@@ -9,6 +9,33 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+### Markdown table delimiter alignment (2026-10-25)
+
+Retain the parser's per-column `Alignment` vector for the current table and
+pass it to the output stage, not the integer solver. Each table replaces that
+vector, so alignment cannot leak into a later table. After wrapping each cell,
+measure each rendered fragment with `unicode-width` and split its spare
+column width into leading/trailing spaces. None/left has no leading padding;
+right uses all spare space; center uses floor(spare / 2) before the text and
+the remainder after it. Empty fragments remain full-width blanks.
+
+Write leading padding before recording the existing wrapped link marks, then
+write the fragment and trailing padding. The render writer consequently adds
+the correct current display column and quote prefix; viewport composition
+continues to own line-number gutters and horizontal clipping. Keep the
+whole-word solver, row backgrounds and source-bound link identity unchanged.
+Do not inject ANSI into measured cell strings.
+
+Fail-first rendering tests cover exact alignment, Unicode, odd padding, breaks,
+empty cells, table-local state and geometry across widths/output policies.
+Source-bound navigation and PTY tests cover wrapped/quoted/numbered labels,
+selection, padding hitboxes and resize. Inline emphasis and code remain
+flattened text; preserving style spans is a separate follow-up, not part of
+alignment. This user-directed bundle uses a deliberate advisory exception
+while review-receipt enforcement is unavailable. Independent source-only
+observation and separate source-blind comparison follow implementation and do
+not constitute human acceptance.
+
 ### Automatic bounded stdin pager (2026-10-25)
 
 The user explicitly approves replacing both-TTY routing with automatic paging
