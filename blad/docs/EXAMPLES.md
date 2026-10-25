@@ -4,8 +4,8 @@ This document exercises Blad's terminal rendering profile. From the repository
 root, open it with `blad blad/docs/EXAMPLES.md`, or use `blad docs/EXAMPLES.md`
 inside `blad/`. See the [user's guide](USAGE.md) for exact profiles and limits.
 This is not a CommonMark/GFM conformance suite: raw HTML is omitted, images
-show alternative text only, and individual inline cell emphasis/code styling
-is flattened. Tables honor left/center/right delimiter alignment.
+show alternative text only, and inline code has no dedicated table-cell
+styling. Tables honor delimiter alignment and bold/italic/strikethrough.
 
 ## Headers
 
@@ -79,6 +79,7 @@ fn main() {
 |---------|-----------|-------|
 | Headers | ✅ | H1-H6 with color coding |
 | Bold/Italic | ✅ | Combined formatting |
+| Table emphasis | ✅ | **bold**, *italic*, ~~strike~~ and ~~***combinations***~~ |
 | Code blocks | ✅ | 50+ languages via syntect |
 | Tables | ✅ | Whole-word wrapping and delimiter alignment |
 | Math | ✅ | Bounded inline/display text subset |

@@ -435,10 +435,17 @@ path. A long unbroken token may therefore force overflow. Whitespace within a
 cell line becomes one space; `<br>`, `<br/>`, and `<br />` preserve explicit
 breaks and empty lines. Without a configured width, tables stay unwrapped.
 
-Inline bold, italic, strikethrough and code in cells retain their text but
-not their individual styling. HTML tables, merged cells and nested block
-content are not part of the supported pipe-table profile; these are not
-limitations imposed by a terminal's ability to align or style text.
+Cells preserve bold, italic and strikethrough, including combinations and
+emphasis inside link labels, without styling alignment padding or separators.
+These attributes survive wrapping, header reversal and row backgrounds; plain
+output removes them without changing geometry. Actual italic/strike appearance
+depends on terminal/font support.
+
+Inline code has no dedicated cell styling and retains ordinary table
+whitespace normalization and wrapping, rather than nonbreaking code spans.
+Supported enclosing emphasis can still style code text. Table link colors,
+HTML tables, merged cells and nested block content remain outside this profile;
+these are not limitations imposed by a terminal's ability to align or style text.
 
 ### Navigation
 
@@ -695,7 +702,8 @@ projection, **not full CommonMark/GFM conformance**:
 - Code blocks with syntax highlighting (50+ languages)
 - Inline code with inverted video
 - Tables with width-aware whole-word wrapping and delimiter left/center/right
-  alignment; individual inline cell emphasis/code styling remains flattened
+  alignment, plus bold/italic/strikethrough; dedicated inline-code cell styling
+  and code-specific whitespace/nonbreaking spans remain unsupported
 - Blockquotes, including GFM alert styles:
   - [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]
   - Labels/edges preserve meaning without color; colors follow the palette

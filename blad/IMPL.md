@@ -4,6 +4,81 @@
 
 Date: 2026-10-12
 
+## Scoped table emphasis source observation - 2026-10-25
+
+**Scope.** Derived from the specified Rust source and tests only. No files were changed or tests executed here. This is an implementation observation, not acceptance or whole-component compliance certification.
+
+**Capture and normalization.** Markdown emphasis uses nesting counters. Table cells accumulate plain text separately from byte-indexed spans retaining only bold, italic, strikethrough, and link identity; foreground color, reverse, and dim are discarded. Adjacent equal styles coalesce. Text, code, projected math, and footnote markers inherit captured emphasis. Recognized table-cell `<br>` variants insert explicit newlines. Whitespace normalization collapses token separators to single spaces while preserving explicit empty lines.
+
+Wrapping and alignment operate independently of style metadata. Cells retain whole whitespace-delimited words, including words spanning parser events. The integer width solver respects token/aspect floors and natural-width caps; tables may overflow narrow viewports. Alignment pads each wrapped fragment using display width.
+
+**Projection.** A forward source cursor locates wrapped tokens in original cell text. Span intersections retain UTF-8 byte ranges for emission; grapheme-based projection separately calculates display-column ranges. Thus style changes inside a combining-character grapheme retain distinct byte slices while link coordinates encompass the whole grapheme. A normalized interword space receives the first source-whitespace character's captured style. Whitespace removed at wrapping boundaries is not emitted.
+
+**Emission and navigation.** Cell emphasis emits selective SGR enable/disable pairs: 1/22, 3/23, and 9/29. It does not globally reset each span, preserving header reverse video and row backgrounds. Each visual header line is reversed; alternating body rows receive the configured table tint. Padding and separators remain outside cell emphasis.
+
+Table inline code has neither dedicated reverse styling nor nonbreaking code-span atomicity; surrounding emphasis still applies. Table links retain navigation identity but receive no dedicated link foreground color because capture filters color out. Outside tables, inline code uses reverse and atomic wrapping, and ordinary links can receive the palette link color.
+
+Link registration precedes cell text emission and includes the already-written prefix, alignment padding, and quote-border width. Same-identity spans on one row merge. Viewport clipping counts display columns, substitutes spaces for partially visible wide graphemes, and restores source SGR around search/selection overlays.
+
+**Errors and boundaries.** Lost wrapping tokens, failed grapheme projection, and invalid span slices return `InvalidData`. Writer and flush errors propagate; output can already be partially written. Authored controls are made inert, including entity-decoded controls. The output adapter validates renderer controls, suppresses all SGR in plain mode, and filters/quantizes colors independently of emphasis.
+
+Tables are buffered and normalized before row emission. Projection advances span cursors and uses grapheme-range lookups, but allocates intermediate vectors; link registration repeatedly measures buffered line prefixes. Width solving, projection, and table emission have no internal cancellation checkpoints. No hard latency or aggregate-memory bound follows from this implementation.
+
+**Inspected assertions.** Tests check combined/nested emphasis, header/tint preservation, unstyled neighbors/separators, normalized spaces, event-split words, Unicode, wrapping and explicit breaks, unchanged plain geometry, colorless emphasis, inert controls, and propagated failures. A 2,000-span unbroken-word test checks content and bold counts, not timing.
+
+The mixed-style PTY table test exercises centered/right alignment with/without line numbers: bold wide `界`, italic `x`, struck `y`; search overlay application/removal; exact six-column link-selection underline; narrow resize plus horizontal clipping retaining all three emphasis flags; wider resize and successful mouse activation; and zero terminal scrolls. Separate viewport tests assert wrapped Unicode link labels exclude alignment padding and quote prefixes after numbered reflow.
+
+No concrete table-emphasis defect was established within this inspection. Parent-supplied execution reports 110 library, 29 table, 10 render-options, and 62 viewer passes across selected stable/MSRV default/sessions suites, an existing ignored characterization, and strict clippy; these are not independently verified results here.
+
+## Table emphasis execution evidence - 2026-10-25
+
+Implementer execution, separate from the clean-slate observation:
+
+- Five effective-attribute rendering regressions and the bold-link PTY
+  assertion failed against the previous implementation before production
+  changes. Later coverage added dense spans, explicit projection/slice errors,
+  mixed linked attributes and narrow horizontal clipping.
+- `cargo test --offline --locked --quiet -p kvist-blad --lib
+  --test table_rendering --test render_options --test viewer --
+  --test-threads=4` passed on stable and Rust 1.95.0, with and without
+  `--features sessions`: 110 library, 29 table, 10 render-options and
+  62 viewer tests per configuration. The existing explicit sustained-input
+  characterization remained ignored.
+- After strengthening the PTY case to a mixed bold/italic/strike link searched
+  across style boundaries, clipped at 16 columns and resized back to 50,
+  `--test viewer aligned_table` passed again in all four toolchain/feature
+  combinations.
+- Strict `cargo clippy --offline --locked --quiet -p kvist-blad --all-targets
+  --all-features -- -D warnings`, formatting and whitespace checks passed.
+  The monochrome assertion was corrected to reject actual SGR color codes,
+  not italic's legitimate SGR 3.
+
+The observer read `src/{markdown,table_spans,render_writer,inline,terminal_text,
+viewport,output,lib}.rs`, `src/table/{mod,cell}.rs` and
+`tests/{table_rendering,render_options,viewer}.rs` only, without intent, prior
+records, reviews or Git history. Execution counts above are not its independent reruns.
+No acceptance, exhaustive Cartesian coverage, hard performance bound or
+whole-component security certification is implied.
+
+### Independent source-blind table emphasis comparison
+
+**Basis.** Compared the specified requirements, contract, design, four task definitions and publication-facing table documentation against the two new leading IMPL sections. No Rust source/test inspection or independent test execution was performed. Execution results are implementer-supplied evidence.
+
+**Supported agreement.**
+
+- The observed nesting counters and typed bold/italic/strike spans match R-074's first subset, including combinations and supported emphasis within links.
+- Plain solver text remains separate from styling. Whole-word/event-split token handling, explicit breaks, Unicode measurement and normalized spaces agree with R-031/R-073. Assigning a retained space the first represented source whitespace's attributes matches the contract.
+- Selective attribute transitions, rather than whole-style resets, support preservation of header reversal, alternating row backgrounds and enclosing quote styling. Observed assertions cover effective attributes and unstyled neighbors/separators, not merely escape-sequence presence.
+- Source-owned link registration accounts for alignment padding and quote prefixes. Reported viewport assertions address numbered reflow and exclusion of padding/prefixes from link marks.
+- The mixed-style PTY observation addresses search overlay application/removal, exact link-selection underline, narrow clipping, resize and subsequent mouse activation. This supports the scoped R-049/R-055 preservation claims without establishing universal terminal behavior.
+- Inert authored controls, checked slices/projection failures and propagated writer errors are recorded consistently with the design.
+
+**Scope and documentation.** README, USAGE, EXAMPLES and CHANGELOG consistently describe the three-attribute subset. Dedicated table-code appearance, code-specific whitespace/nonbreaking behavior and table link colors remain deferred; enclosing emphasis on code text is explicitly compatible with that deferral. HTML tables/merged cells and full CommonMark/GFM conformance are not promised. Terminal/font attribute limitations are appropriately acknowledged.
+
+**Evidence limits.** The supplied execution record reports 110 library, 29 table, 10 render-options and 62 viewer passes per configuration, plus strengthened aligned-table reruns, lint and formatting checks. These counts do not establish exhaustive interaction coverage. Initial fail-first evidence covers the five rendering regressions and bold-link PTY assertion; later strengthened cases are not represented as independently observed fail-first runs. An existing characterization remains ignored. Dense-span assertions establish content/attribute behavior, not performance bounds.
+
+**Conclusion.** No concrete scoped contradiction or material unmet obligation is established by the permitted record. This is a bounded comparison of intent against independent observations and supplied execution evidence, not independent rerun verification, human acceptance, exhaustive compliance or security certification.
+
 ## Scoped table alignment source observation - 2026-10-25
 
 ### Scope and evidence status

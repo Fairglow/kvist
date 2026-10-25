@@ -19,6 +19,8 @@ struct Screen {
     reverse: bool,
     underlined: Vec<Vec<bool>>,
     underline: bool,
+    emphasis: Vec<Vec<[bool; 3]>>,
+    current_emphasis: [bool; 3],
     x: usize,
     y: usize,
     wrap: bool,
@@ -34,6 +36,8 @@ impl Screen {
             reverse: false,
             underlined: vec![vec![false; columns]; rows],
             underline: false,
+            emphasis: vec![vec![[false; 3]; columns]; rows],
+            current_emphasis: [false; 3],
             x: 0,
             y: 0,
             wrap: false,
@@ -51,6 +55,8 @@ impl Screen {
             self.reversed.last_mut().unwrap().fill(false);
             self.underlined.rotate_left(1);
             self.underlined.last_mut().unwrap().fill(false);
+            self.emphasis.rotate_left(1);
+            self.emphasis.last_mut().unwrap().fill([false; 3]);
             self.scrolls += 1;
         } else {
             self.y += 1;
@@ -79,6 +85,7 @@ impl Screen {
         for cell in column..end {
             self.reversed[row][cell] = self.reverse;
             self.underlined[row][cell] = self.underline;
+            self.emphasis[row][cell] = self.current_emphasis;
         }
         self.wrap = end == self.cells[row].len();
         self.x = end.min(self.cells[row].len() - 1);
@@ -151,6 +158,9 @@ impl Perform for Screen {
                 for row in &mut self.underlined {
                     row.fill(false);
                 }
+                for row in &mut self.emphasis {
+                    row.fill([false; 3]);
+                }
             }
             'm' => {
                 let mut values = values.into_iter();
@@ -159,7 +169,14 @@ impl Perform for Screen {
                         0 => {
                             self.reverse = false;
                             self.underline = false;
+                            self.current_emphasis = [false; 3];
                         }
+                        1 => self.current_emphasis[0] = true,
+                        3 => self.current_emphasis[1] = true,
+                        9 => self.current_emphasis[2] = true,
+                        22 => self.current_emphasis[0] = false,
+                        23 => self.current_emphasis[1] = false,
+                        29 => self.current_emphasis[2] = false,
                         27 => self.reverse = false,
                         7 => self.reverse = true,
                         4 => self.underline = true,
@@ -2135,11 +2152,11 @@ fn aligned_table_links_keep_selection_and_mouse_hitboxes_after_resize() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("source.md");
     std::fs::write(temp.path().join("target.md"), "# Target").unwrap();
-    for (delimiter, leading) in [(":---:", 9), ("---:", 18)] {
+    for (delimiter, leading) in [(":---:", 7), ("---:", 14)] {
         std::fs::write(
             &source,
             format!(
-                "| Alignment |\n| {delimiter} |\n| [界](target.md) |\n| 01234567890123456789 |"
+                "| Alignment |\n| {delimiter} |\n| [**界** *x* ~~y~~](target.md) |\n| 01234567890123456789 |"
             ),
         )
         .unwrap();
@@ -2147,17 +2164,41 @@ fn aligned_table_links_keep_selection_and_mouse_hitboxes_after_resize() {
             let mut viewer = Viewer::start(&source, 40, 10, numbers);
             let column = leading + if numbers { 2 } else { 0 };
             assert_eq!(viewer.screen.cells[2][column], "界");
+            assert_eq!(viewer.screen.emphasis[2][column], [true, false, false]);
+            assert_eq!(viewer.screen.emphasis[2][column + 3], [false, true, false]);
+            assert_eq!(viewer.screen.emphasis[2][column + 5], [false, false, true]);
             viewer.keys(format!("\x1b[<0;{};3M", column).as_bytes());
             assert!(viewer.screen.line(0).contains("source.md"));
+            viewer.keys_with_frame("/界 x y\r".as_bytes());
+            assert_eq!(viewer.screen.emphasis[2][column], [true, false, false]);
+            assert_eq!(viewer.screen.emphasis[2][column + 3], [false, true, false]);
+            assert_eq!(viewer.screen.emphasis[2][column + 5], [false, false, true]);
+            assert!(viewer.screen.underlined[2][column]);
+            viewer.keys_with_frame(b"/absent\r");
+            assert_eq!(viewer.screen.emphasis[2][column], [true, false, false]);
+            assert!(!viewer.screen.underlined[2][column]);
             viewer.keys_with_frame(b"\t");
             assert!(
                 viewer.screen.underlined[2]
                     .iter()
                     .enumerate()
-                    .all(|(index, &value)| value == (column..column + 2).contains(&index))
+                    .all(|(index, &value)| value == (column..column + 6).contains(&index))
+            );
+            viewer.resize(16, 10);
+            viewer.keys(&b"\x1b[C".repeat(20));
+            let clipped = leading - 5;
+            assert_eq!(viewer.screen.cells[2][clipped], "界");
+            assert_eq!(viewer.screen.emphasis[2][clipped], [true, false, false]);
+            assert_eq!(viewer.screen.emphasis[2][clipped + 3], [false, true, false]);
+            assert_eq!(viewer.screen.emphasis[2][clipped + 5], [false, false, true]);
+            assert!(
+                viewer.screen.underlined[2][clipped..clipped + 6]
+                    .iter()
+                    .all(|&v| v)
             );
             viewer.resize(50, 12);
             assert_eq!(viewer.screen.cells[2][column], "界");
+            assert_eq!(viewer.screen.emphasis[2][column], [true, false, false]);
             viewer.keys(format!("\x1b[<0;{};3M", column + 1).as_bytes());
             assert_eq!(
                 viewer.screen.line(1),

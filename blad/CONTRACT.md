@@ -282,9 +282,11 @@ CommonMark parsing and documented extensions are terminal projections, not
 full CommonMark/GFM conformance claims. Raw HTML is omitted; image alternative
 text remains visible without graphics. Task items retain `[x]` or `[ ]`
 markers. Tables retain source column order and honor delimiter left/center/right
-alignment as specified below. Inline cell emphasis and code retain their text,
-but not their individual styling. HTML tables and merged cells are outside this
-profile. Script, math and alert extensions are Blad's documented dialect.
+alignment as specified below. Table cells support bold, italic and strikethrough,
+including combinations and emphasis within link labels. Dedicated inline-code
+appearance and nonbreaking/whitespace semantics, and table link colors, remain
+unsupported. HTML tables and merged cells are outside this profile. Script,
+math and alert extensions are Blad's documented dialect.
 
 ### Optional Kvist/Skott integration reliability
 
@@ -382,6 +384,18 @@ MUST NOT alter column widths, wrapping, row heights or row styling. Empty
 lines/cells retain the full column width. Link spans MUST cover their rendered
 labels after leading alignment padding, never that padding, including after
 resize and inside quotes or numbered viewports.
+
+Cell bold, italic and strikethrough MUST follow parser-recognized nesting and
+combinations through normalization and wrapping. Retained inter-word spaces
+inherit the attributes of the first source whitespace they represent.
+Attributes MUST end before alignment padding, column separators and other
+cells/rows, without clearing header reversal, row backgrounds or quote styling.
+Plain output MUST suppress attributes without changing text or geometry.
+Link marks and viewer search/selection overlays MUST remain correct through
+attribute transitions, Unicode, clipping and resize. Existing cell whitespace
+normalization and wrapping also apply to inline-code text; code does not gain
+its own reverse-video styling or atomic spans. Supported enclosing emphasis
+MAY apply to code/math/footnote text without adding their dedicated styling.
 
 Under the fixed terminal geometry model (display-column width : line height =
 1:2), each cell's width floor MUST come from its own nonempty wrapped text

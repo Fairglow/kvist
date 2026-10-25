@@ -11,6 +11,38 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-table-emphasis-tests
+    title: "write_tests: first table emphasis subset"
+    description: "Pin effective bold/italic/strike state, nesting, normalized spaces, event boundaries, Unicode, wrapping/breaks, row-style preservation and styled link search/selection."
+    kind: test
+    status: completed
+    context: "All five initial effective-attribute rendering regressions and the styled-link PTY assertion failed before production changes. Added dense single-word spans and private projection/UTF-8 failure cases. The monochrome check now rejects actual SGR color codes rather than incorrectly rejecting italic SGR 3."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-049", "REQUIREMENTS.md#R-055"]
+  - id: blad-table-emphasis-code
+    title: "implement_code: typed table emphasis spans"
+    description: "Share source-to-wrapped mapping for links and emphasis, emit selective attribute transitions and document the exact subset without changing geometry or code semantics."
+    kind: implementation
+    status: completed
+    context: "Generalized the existing table-link mapper into table_spans, sharing projected/inert byte offsets and grapheme-aware link columns. Attribute-only SGR transitions preserve row/header/quote styling. User docs state the three-attribute subset and deferred dedicated code/link colors; geometry and code whitespace remain unchanged."
+    depends_on: [blad-table-emphasis-tests]
+    requirements: ["REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-062", "REQUIREMENTS.md#R-073"]
+  - id: blad-table-emphasis-audit
+    title: "security_audit: typed cell span boundaries"
+    description: "Inspect UTF-8 span slicing, source-token correspondence, inert controls, fallible output and preserved authority/resource behavior."
+    kind: security-audit
+    status: completed
+    context: "Scoped implementer inspection: capture filters styles to bold/italic/strike and typed navigation IDs, leaving source inert and measured strings escape-free. Token/range mismatches report InvalidData; output slices are checked and writes propagate errors. Batched per-word grapheme mapping avoids rescanning dense style spans. No dependency, unsafe code, process or filesystem authority added. Strict all-feature lint and stable/MSRV default/sessions suites pass; no whole-component security certification."
+    depends_on: [blad-table-emphasis-code]
+    requirements: ["REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-038"]
+  - id: blad-table-emphasis-review
+    title: "compliance_review: independent emphasis evidence"
+    description: "Derive a clean-source implementation observation and compare source-blind with intent and execution; retain discrepancies without acceptance claims."
+    kind: compliance-review
+    status: completed
+    context: "Clean-slate source-only observation and separate source-blind comparison, including publication-facing documentation, are retained in IMPL.md. No concrete scoped contradiction or material unmet obligation identified. Stable/MSRV default/sessions suites, dense-span/error cases and strengthened mixed-style search/clipping/resize PTYs pass. Finite coverage and deferred code/link styling remain explicit; no human acceptance or blanket certification."
+    depends_on: [blad-table-emphasis-audit]
+    requirements: ["REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-062"]
   - id: blad-table-alignment-tests
     title: "write_tests: Markdown table alignment"
     description: "Pin exact header/body padding, odd centers, Unicode, empty/broken/wrapped cells, table-local state, output geometry and aligned link hitboxes after resize."
