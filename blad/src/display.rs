@@ -5,6 +5,7 @@
 //! without crashing.
 
 use std::io::{self, IsTerminal, Write};
+use std::time::{Duration, Instant};
 
 use crate::RenderOptions;
 use crate::links::{Link, extract_links};
@@ -14,10 +15,11 @@ use crate::search::Search;
 pub use crate::session_display::{
     dump_session, export_session, list_sessions, show_session, show_session_with_options,
 };
+use crate::stream_input::{REFRESH_INTERVAL, Refresh, StdinStream};
 use crate::viewer_files::{OpenFile, Position, edit_file, load_files, tab_title};
-use crate::viewer_navigation::{HELP, link_spans, reveal, spatial_link};
+use crate::viewer_navigation::{HELP, follow_key, link_spans, reveal, spatial_link};
 use crate::viewer_reload::{FileWatch, read_document_source, read_reload_source};
-use crate::viewer_terminal::TerminalGuard;
+use crate::viewer_terminal::{TerminalGuard, require_controlling_terminal, wait_event};
 use crate::viewport::{Document, Frame, Painter};
 
 /// Check if stdout is a TTY (interactive terminal).
@@ -64,16 +66,36 @@ pub fn view_markdown_file_with_options(
 
 /// Open initial files in stable argument order, reusing canonical duplicates.
 ///
-/// All inputs are read before terminal entry or output. `-` reads redirected
-/// stdin once. Plain settings bypass the viewer; terminal files share tabs.
+/// Named files validate before terminal entry. With terminal stdout, redirected
+/// stdin streams into one tab using the controlling terminal for keyboard input.
+/// Plain settings or nonterminal stdout read all inputs through EOF before output.
+/// Interactive stdin is exclusively consumed: fd 0 becomes the controlling
+/// terminal. Do not concurrently read or pre-buffer stdin around this helper.
 pub fn view_markdown_files_with_options(
     paths: &[std::path::PathBuf],
     line_numbers: bool,
     options: &RenderOptions,
 ) -> io::Result<()> {
-    let files = load_files(paths)?;
-    if is_tty() && is_stdin_tty() && !options.plain {
-        run_open_files(files, line_numbers, None, options)
+    let interactive = is_tty() && !options.plain;
+    let keyboard = if interactive && !is_stdin_tty() {
+        Some(require_controlling_terminal()?)
+    } else {
+        None
+    };
+    let files = load_files(paths, interactive)?;
+    if interactive {
+        let stream = if files.iter().any(|file| file.path.is_none()) {
+            let keyboard = keyboard.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "stdin paging requires redirected input",
+                )
+            })?;
+            Some(StdinStream::take_stdin(keyboard)?)
+        } else {
+            None
+        };
+        run_open_files(files, line_numbers, None, options, stream)
     } else {
         let renderer = MarkdownRenderer::with_options(options.clone());
         let mut stdout = io::stdout().lock();
@@ -170,7 +192,7 @@ fn run_viewer(
         content: content.to_string(),
         position: Position::default(),
     }];
-    run_open_files(files, line_numbers, width_limit, options)
+    run_open_files(files, line_numbers, width_limit, options, None)
 }
 
 fn run_open_files(
@@ -178,6 +200,7 @@ fn run_open_files(
     line_numbers: bool,
     width_limit: Option<usize>,
     options: &RenderOptions,
+    mut stream: Option<StdinStream>,
 ) -> io::Result<()> {
     let mut active = 0;
     let mut history = Vec::new();
@@ -200,12 +223,22 @@ fn run_open_files(
             &mut status,
             anchor.take(),
             &mut painter,
+            &mut stream,
         )?;
         match action {
-            ViewerAction::Quit => return terminal.restore(),
+            ViewerAction::Quit => {
+                terminal.restore()?;
+                return stream.map_or(Ok(()), StdinStream::finish);
+            }
             ViewerAction::Close => {
                 if files.len() == 1 {
-                    return terminal.restore();
+                    terminal.restore()?;
+                    return stream.map_or(Ok(()), StdinStream::finish);
+                }
+                if files[active].path.is_none()
+                    && let Some(stream) = &mut stream
+                {
+                    stream.stop();
                 }
                 files.remove(active);
                 history.retain_mut(|index| {
@@ -288,6 +321,7 @@ fn viewer_session(
     status: &mut String,
     anchor: Option<String>,
     painter: &mut Painter,
+    stream: &mut Option<StdinStream>,
 ) -> io::Result<ViewerAction> {
     use crossterm::event::{
         self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
@@ -295,8 +329,10 @@ fn viewer_session(
     };
 
     let (mut cols, mut rows) = crossterm::terminal::size()?;
+    let stdin_tab = path.is_none() && stream.is_some();
+    let source = current_source(content, stream, stdin_tab);
     let mut document =
-        Document::render_with_options(content, cols, line_numbers, width_limit, options)?;
+        Document::render_with_options(source, cols, line_numbers, width_limit, options)?;
 
     let mut scroll_offset = position.y;
     let mut scroll_x = position.x;
@@ -315,7 +351,7 @@ fn viewer_session(
     let mut help_document = Document::render_with_options(HELP, cols, false, width_limit, options)?;
 
     // Source offsets identify actual rendered link spans, including duplicates.
-    let mut links = extract_links(&inert_source(content));
+    let mut links = extract_links(&inert_source(source));
     let mut spans: Vec<_> = links
         .iter()
         .map(|link| link_spans(&document, link))
@@ -324,7 +360,33 @@ fn viewer_session(
     let mut selected_link: Option<usize> = None;
     let mut selected_part = 0;
     let mut watch = FileWatch::new();
+    let mut refresh = Refresh::new(stream.as_ref().map_or(0, |stream| stream.revision));
     loop {
+        let input_ready = stream.as_mut().is_some_and(StdinStream::pump);
+        if stdin_tab
+            && let Some(stream) = stream.as_ref()
+            && (refresh.due(stream.revision, Instant::now())
+                || (!stream.live() && refresh.pending(stream.revision)))
+        {
+            let started = Instant::now();
+            document = Document::render_with_options(
+                stream.source(),
+                cols,
+                line_numbers,
+                width_limit,
+                options,
+            )?;
+            links = extract_links(&inert_source(stream.source()));
+            spans = links
+                .iter()
+                .map(|link| link_spans(&document, link))
+                .collect();
+            selected_link = None;
+            selected_part = 0;
+            link_index = 0;
+            search.update(&document.lines, scroll_offset);
+            refresh.completed(stream.revision, started.elapsed());
+        }
         if path.is_some_and(|path| watch.changed(path)) {
             let candidate = read_reload_source(path).and_then(|source| {
                 if source == *content {
@@ -370,6 +432,9 @@ fn viewer_session(
         let mut pending_follow = None;
         let lines = &document.lines;
         let total_lines = lines.len();
+        if stdin_tab && position.following {
+            scroll_offset = total_lines.saturating_sub(visible_lines);
+        }
         scroll_offset = scroll_offset.min(total_lines.saturating_sub(visible_lines));
         scroll_x = scroll_x.min(document.max_x());
         position.y = scroll_offset;
@@ -408,7 +473,7 @@ fn viewer_session(
             end,
             total_lines
         );
-        let footer = if !status.is_empty() {
+        let mut footer = if !status.is_empty() {
             status.clone()
         } else if !search_info.is_empty() {
             search_info
@@ -428,6 +493,23 @@ fn viewer_session(
                 }
             )
         };
+        if let Some(stream) = stream.as_ref()
+            && (stdin_tab || stream.failed())
+        {
+            footer = format!("{} {footer}", stream.footer(position.following));
+        }
+        let help_footer = stream
+            .as_ref()
+            .filter(|stream| stdin_tab || stream.failed())
+            .map_or_else(
+                || "Any key returns to the document".to_string(),
+                |stream| {
+                    format!(
+                        "{} Any key returns to the document",
+                        stream.footer(position.following)
+                    )
+                },
+            );
         let first_match = search.matches.partition_point(|span| span.row < start);
         let last_match = search.matches.partition_point(|span| span.row < end);
         let mut highlights = search.matches[first_match..last_match].to_vec();
@@ -449,20 +531,33 @@ fn viewer_session(
                 y: if help { 0 } else { scroll_offset },
                 x: if help { 0 } else { scroll_x },
                 header: if help { "Blad help" } else { title },
-                footer: if help {
-                    "Any key returns to the document"
-                } else {
-                    &footer
-                },
+                footer: if help { &help_footer } else { &footer },
                 matches: if help { &[] } else { &highlights },
             },
         )?;
 
-        if path.is_some() && !event::poll(watch.wait())? {
-            continue;
+        let input_live = stream.as_ref().is_some_and(StdinStream::live);
+        let input_pending = stdin_tab
+            && stream
+                .as_ref()
+                .is_some_and(|stream| refresh.pending(stream.revision));
+        if path.is_some() || input_live || input_pending {
+            let wait = if input_ready {
+                Duration::ZERO
+            } else if path.is_some() && (input_live || input_pending) {
+                REFRESH_INTERVAL.min(watch.wait())
+            } else if input_live || input_pending {
+                REFRESH_INTERVAL
+            } else {
+                watch.wait()
+            };
+            if !wait_event(stream.as_ref(), wait)? {
+                continue;
+            }
         }
 
         // Event handling
+        let mut scroll_down = false;
         match event::read() {
             Ok(Event::Key(KeyEvent {
                 kind: KeyEventKind::Release,
@@ -477,6 +572,9 @@ fn viewer_session(
                 if help {
                     help = false;
                     continue;
+                }
+                if stdin_tab && !search.editing {
+                    scroll_down = follow_key(code, modifiers, &mut position.following);
                 }
                 if modifiers.contains(KeyModifiers::ALT)
                     && !search.editing
@@ -772,6 +870,7 @@ fn viewer_session(
                         && row < rows.saturating_sub(1)
                         && usize::from(column) >= document.gutter =>
                 {
+                    position.following = false;
                     let target_row = scroll_offset + usize::from(row - 1);
                     let target_column = scroll_x + usize::from(column) - document.gutter;
                     pending_follow = links.iter().position(|link| {
@@ -788,26 +887,37 @@ fn viewer_session(
                     });
                 }
                 MouseEventKind::ScrollUp => {
+                    position.following = false;
                     scroll_offset = scroll_offset.saturating_sub(1);
                 }
                 MouseEventKind::ScrollDown
                     if scroll_offset < total_lines.saturating_sub(visible_lines) =>
                 {
+                    scroll_down = true;
                     scroll_offset += 1;
                 }
                 _ => {}
             },
             Ok(Event::Resize(columns, height)) => {
+                let started = Instant::now();
                 cols = columns;
                 rows = height;
                 visible_lines = usize::from(rows.saturating_sub(2));
                 document = Document::render_with_options(
-                    content,
+                    current_source(content, stream, stdin_tab),
                     cols,
                     line_numbers,
                     width_limit,
                     options,
                 )?;
+                if stdin_tab
+                    && let Some(stream) = stream.as_ref()
+                    && refresh.pending(stream.revision)
+                {
+                    links = extract_links(&inert_source(stream.source()));
+                    selected_link = None;
+                    link_index = 0;
+                }
                 search.update(&document.lines, scroll_offset);
                 spans = links
                     .iter()
@@ -827,12 +937,19 @@ fn viewer_session(
                 }
                 help_document =
                     Document::render_with_options(HELP, cols, false, width_limit, options)?;
+                if stdin_tab && let Some(stream) = stream.as_ref() {
+                    refresh.completed(stream.revision, started.elapsed());
+                }
                 painter.invalidate();
             }
             Ok(_) => {}
             Err(error) => return Err(error),
         }
+        if stdin_tab && scroll_down {
+            position.following = scroll_offset >= total_lines.saturating_sub(visible_lines);
+        }
         if let Some(index) = pending_follow {
+            position.following = false;
             status.clear();
             match follow_link(&links[index], path) {
                 Ok(ViewerAction::Jump(anchor)) => {
@@ -857,5 +974,17 @@ fn anchor_row(document: &Document, anchor: &str) -> Option<usize> {
         Some(0)
     } else {
         document.navigation.anchors.get(anchor).copied()
+    }
+}
+
+fn current_source<'a>(
+    content: &'a str,
+    stream: &'a Option<StdinStream>,
+    stdin_tab: bool,
+) -> &'a str {
+    if stdin_tab && let Some(stream) = stream {
+        stream.source()
+    } else {
+        content
     }
 }

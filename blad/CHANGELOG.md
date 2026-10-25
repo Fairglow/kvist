@@ -9,8 +9,15 @@ First standalone crates.io release candidate, not yet published.
   heading navigation and external editing.
 - Debounced automatic file reload with retained viewport/search and recovery
   after failed reads; inactive tabs refresh when revisited.
-- Bounded stdin snapshots (`cat FILE | blad` or `blad -`), plain pipeline
-  output by default, and quiet success when downstream readers close early.
+- **Breaking:** terminal stdout now automatically pages piped/redirected stdin
+  live (`cat FILE | blad` or `blad -`), without waiting for EOF. Use `--dump`
+  to retain finite noninteractive output; redirected stdout remains finite
+  and plain by default. Missing controlling terminals fail with a `--dump` hint.
+- Bounded 16 MiB live source, split UTF-8 handling, provisional whole-document
+  Markdown, timed/coalesced refresh, follow/pause/resume, retained EOF browsing
+  and persistent input failures with nonzero exit after terminal restoration.
+  Input continues across tabs/help; quit never drains or kills the producer.
+- Quiet success when downstream readers close finite output early.
 - Simplified viewer keys: `?` opens help, `N`/`<` move to previous matches,
   links need no mode, and file reload is automatic only. Removed `p`, `f` and
   `F5` actions; normal-mode `Ctrl+R` starts regex search and search-prompt
@@ -28,5 +35,5 @@ First standalone crates.io release candidate, not yet published.
   bounded artifact errors and descriptor-relative no-follow message reads.
 
 Supported executable target: Linux; x86_64 is verified. Rust 1.95 or newer.
-This is not full CommonMark/GFM/TeX/Mermaid conformance, a streaming pager,
+This is not full CommonMark/GFM/TeX/Mermaid conformance, an unlimited-stream pager,
 or a promise of hard resource/latency bounds. See the user guides for details.

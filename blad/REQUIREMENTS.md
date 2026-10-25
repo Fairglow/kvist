@@ -226,9 +226,9 @@ notation; graphical crow's-foot endpoints are not required.
     user action replaces them. Browser launch does not reset the document.
 
 The human selected opt-in `sessions`, direct file arguments in both builds,
-and removal of the misleading snapshot-only `stream` command. Future real
-live-follow support needs separately approved behavior rather than another
-feature toggle now.
+and removal of the misleading snapshot-only `stream` command. Session
+live-follow remains deferred. Separately approved bounded stdin paging is
+specified in R-069 through R-072, without another feature toggle.
 
 ### Accepted production viewer increment
 
@@ -294,7 +294,9 @@ feature toggle now.
     into a successful document. Check both opened-file size and actual bytes
     read, consuming at most the limit plus one probe byte if size information
     understates the stream. Apply the limit before UTF-8 decoding and rendering.
-    All initial inputs must validate before terminal entry or dump output;
+    All initial named files must validate before terminal entry; all inputs
+    must validate before dump/noninteractive output. Live stdin is the
+    explicitly incremental exception described in R-069;
     link/reload failure retains the previous usable document and tab/history
     structure. Existing editor-error propagation/restoration remains unchanged.
 57. **R-057 Regular-file inputs:** All standalone document and explicit theme
@@ -362,14 +364,17 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
 ### Unix pipeline behavior
 
 65. **R-065 Standard input:** With no file arguments and redirected stdin,
-    read one bounded UTF-8 document until EOF. `-` explicitly selects stdin,
+    read one bounded UTF-8 document. `-` explicitly selects stdin,
     may appear among files in argument order and is read/rendered once.
     Named files do not otherwise consume stdin. Reject explicit `-` on
     terminal stdin rather than waiting for document input. Apply the inclusive
-    16 MiB source limit and validate all initial sources before any output.
-    Empty input succeeds without document text; malformed/oversized input fails.
-66. **R-066 Pipeline output:** Enter the interactive viewer only when stdin
-    and stdout are terminals and `--dump` is absent. Otherwise output one
+    16 MiB source limit. Noninteractive/dump sources validate through EOF
+    before output; interactive stdin follows R-069. Empty input succeeds
+    without document text; malformed/oversized input fails.
+66. **R-066 Pipeline output:** Automatically enter the interactive viewer
+    when stdout is a terminal and `--dump` is absent, including redirected
+    stdin. A controlling terminal must be available for redirected-stdin
+    paging; otherwise fail promptly and recommend `--dump`. Otherwise output one
     finite rendered snapshot, defaulting to escape-free text; explicit
     `--color always` may retain styles, but `--dump` always removes them.
     A downstream closed pipe must terminate quietly and successfully, without
@@ -394,6 +399,49 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     Plain `f` has no action, with or without links or retained search results.
     Preserve direct Tab/Shift+Tab, Enter, Ctrl+Arrow and mouse link navigation
     without blocking normal scrolling, tab switching or quit keys.
+
+### Automatic bounded streaming pager
+
+69. **R-069 Live stdin:** Interactive stdin must display valid incoming text
+    before EOF, without requiring a newline, paragraph boundary or closed fence.
+    Keyboard input comes from the controlling terminal, never the Markdown pipe.
+    Keep navigation, help, search, links, tab switching and quit responsive while
+    the producer is idle or continuously writing. Editor handoffs must use
+    terminal keyboard input, never consume the document pipe. Continue bounded
+    ingestion while the stdin tab is inactive. EOF finalizes the document without
+    exiting the viewer, including empty input. Closing the stdin tab releases its owned
+    document descriptor so an upstream writer is not stranded on an unread pipe;
+    quitting must neither drain stdin nor kill the producer.
+70. **R-070 Streaming fidelity and follow:** Preserve split UTF-8 and authored
+    newlines across arbitrary read boundaries. Re-render retained source so
+    pending syntax and late reference/footnote definitions can revise earlier
+    output. At EOF the document and navigation metadata must match one-shot
+    rendering at the same width/options. Initially follow the newest content;
+    upward navigation, search and link/heading browsing pause following.
+    Bottom navigation resumes following. Keep numeric offsets while paused,
+    clamping only to layout bounds; preserve the follow state through resize
+    and tab switches. Refresh retained searches and clear obsolete selections.
+71. **R-071 Streaming bounds and failures:** Retain at most 16 MiB source
+    bytes, with at most one overflow probe and a bounded UTF-8 carry buffer.
+    Wait on document and keyboard readiness rather than imposing a polling
+    delay on every short input batch. Bound work per input pump and coalesce
+    whole-document renders without waiting for a quiet producer.
+    Do not add an unbounded queue, worker, daemon,
+    temporary spool or parser cache. Malformed/incomplete-at-EOF UTF-8,
+    overflow and read failures stop ingestion, retain the last valid display,
+    remain visible and return status 1 when the viewer closes. Rendering/writer
+    failures propagate after terminal cleanup. Source controls remain inert.
+    These are source/input-work bounds, not aggregate-memory or hard
+    filesystem/render/search latency guarantees.
+72. **R-072 Pager evidence and documentation:** Cover real pipes and controlling
+    PTYs, early rendering, idle/continuous producers, follow/pause/resume,
+    inactive/closed stdin tabs, resize, search/links, EOF, errors, exact bounds,
+    split Unicode/control/syntax and final-render equivalence. Preserve finite
+    dump/redirected-output behavior and optional session snapshots. Document
+    the breaking routing change, `--dump` opt-out, missing-terminal errors,
+    resource limits and distinction from session/file tail-following. Record
+    a measured representative sustained-input workload without claiming a
+    universal performance guarantee.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).

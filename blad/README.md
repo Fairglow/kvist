@@ -1,6 +1,6 @@
 # Blad
 
-A terminal Markdown viewer with tabbed browsing, link navigation, and search. Blad renders Markdown documents directly in your terminal with syntax highlighting, math notation, and diagram support — no browser, no network, no configuration required.
+A terminal Markdown viewer and streaming pager with tabbed browsing, link navigation, and search. Blad renders Markdown documents directly in your terminal with syntax highlighting, math notation, and diagram support — no browser, no network, no configuration required.
 
 ## Features
 
@@ -11,6 +11,7 @@ A terminal Markdown viewer with tabbed browsing, link navigation, and search. Bl
 - **Theming** — Dark, light, and terminal-native themes with custom JSON theme support
 - **Editor integration** — Open documents in your external editor and reload changes
 - **Automatic reload** — See file saves without losing your scroll position; inactive tabs refresh when revisited
+- **Streaming pager** — Pipe Markdown into an automatic live viewer; scroll back to pause following and press `G` to resume
 - **Plain output** — Dump rendered text without terminal escapes for scripting
 
 ## Quick Start
@@ -28,8 +29,11 @@ blad --line-numbers README.md
 # Plain text output (no terminal viewer)
 blad --dump README.md > readme.txt
 
-# Pipelines use finite, plain rendered output by default
+# Automatically page incoming Markdown when output is a terminal
 cat README.md | blad
+
+# Disable paging, or redirect output for finite plain rendering
+cat README.md | blad --dump
 blad README.md | head -n 30
 ```
 
@@ -67,10 +71,20 @@ Options:
 
 Filenames need no particular extension. Use `--` before filenames beginning with `-`.
 With no files, redirected stdin supplies one document; `-` also selects stdin
-among files, once. Use `./-` for a literal file named `-`. Stdin is a snapshot
-read through EOF, not a live stream. File and stdin sources are limited to
-16 MiB each. Pipes never start the viewer; `--color always` explicitly retains
-styles, while `--dump` always removes them. Closed downstream pipes exit quietly.
+among files, once. Use `./-` for a literal file named `-`. With terminal stdout,
+stdin is paged **as it arrives**, including unfinished paragraphs and code.
+Keyboard input uses the controlling terminal, separately from the pipe.
+EOF leaves the document open; `q` closes it. The footer shows live following,
+paused, EOF or a persistent input error. Scroll upward or search to pause
+following; `G`/`Ctrl+End` resumes.
+
+**Behavior change:** piped stdin now opens the viewer automatically when stdout
+is a terminal. Use `--dump` to opt out; no pager flags are required. Without a
+controlling terminal, automatic paging fails with a `--dump` hint.
+Redirected stdout or `--dump` still renders one finite snapshot after EOF.
+File and stdin sources are limited to 16 MiB each; this is not unlimited
+scrollback or session/file tail-following. `--color always` retains styles in
+redirected output; `--dump` always removes them. Closed downstream pipes exit quietly.
 
 ## Viewer Keyboard Shortcuts
 
@@ -158,4 +172,4 @@ AGPL-3.0-or-later; see [LICENSE](LICENSE).
 
 See the [user guide](docs/USAGE.md) for limits, rendering subsets, diagnostics,
 palette configuration and complete key precedence. Linux x86_64 is the verified
-executable target; source files are limited to 16 MiB, not streamed.
+executable target; each file or live stdin source is limited to 16 MiB.

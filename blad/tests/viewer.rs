@@ -186,6 +186,7 @@ struct Viewer {
     parser: Parser,
     screen: Screen,
     raw: Vec<u8>,
+    input: Option<File>,
 }
 
 impl Viewer {
@@ -201,6 +202,22 @@ impl Viewer {
         args: &[&str],
         environment: &[(&str, &str)],
     ) -> Self {
+        Self::start_sources(&[path], columns, rows, numbers, args, environment, false)
+    }
+
+    fn start_stream(columns: u16, rows: u16) -> Self {
+        Self::start_sources(&[], columns, rows, false, &[], &[], true)
+    }
+
+    fn start_sources(
+        paths: &[&std::path::Path],
+        columns: u16,
+        rows: u16,
+        numbers: bool,
+        args: &[&str],
+        environment: &[(&str, &str)],
+        stream: bool,
+    ) -> Self {
         let pty = openpty(
             Some(&Winsize {
                 ws_row: rows,
@@ -214,9 +231,18 @@ impl Viewer {
         fcntl(&pty.master, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)).unwrap();
         // Crossterm prefers /dev/tty over stdin for terminal state and size.
         let mut command = Command::new("setsid");
-        command
-            .args(["--ctty", "--wait", env!("CARGO_BIN_EXE_blad")])
-            .arg(path);
+        command.args(["--ctty", "--wait"]);
+        let pipe = stream.then(|| nix::unistd::pipe2(OFlag::O_CLOEXEC).unwrap());
+        if let Some((reader, _)) = &pipe {
+            use std::os::fd::AsRawFd;
+            command
+                .args(["sh", "-c", "exec \"$@\" < \"$BLAD_TEST_STDIN\"", "blad-pty"])
+                .env(
+                    "BLAD_TEST_STDIN",
+                    format!("/proc/{}/fd/{}", std::process::id(), reader.as_raw_fd()),
+                );
+        }
+        command.arg(env!("CARGO_BIN_EXE_blad")).args(paths);
         command.args(args).envs(environment.iter().copied());
         if numbers {
             command.arg("--line-numbers");
@@ -234,9 +260,34 @@ impl Viewer {
             parser: Parser::new(),
             screen: Screen::new(usize::from(columns), usize::from(rows)),
             raw: Vec::new(),
+            input: pipe
+                .as_ref()
+                .map(|(_, writer)| File::from(writer.try_clone().unwrap())),
         };
         viewer.read_frame();
         viewer
+    }
+
+    fn send_input(&mut self, bytes: &[u8]) {
+        self.input.as_mut().unwrap().write_all(bytes).unwrap();
+    }
+
+    fn wait_for(&mut self, predicate: impl Fn(&Screen) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !predicate(&self.screen) && Instant::now() < deadline {
+            self.read_with_timeout(false, deadline.saturating_duration_since(Instant::now()));
+            assert!(
+                self.child.try_wait().unwrap().is_none(),
+                "viewer exited early"
+            );
+        }
+        assert!(
+            predicate(&self.screen),
+            "unexpected screen: {:?}",
+            (0..self.screen.cells.len())
+                .map(|row| self.screen.line(row))
+                .collect::<Vec<_>>()
+        );
     }
 
     fn read_frame(&mut self) {
@@ -254,7 +305,11 @@ impl Viewer {
         let mut complete = false;
         while Instant::now() < deadline {
             let mut descriptors = [PollFd::new(self.master.as_fd(), PollFlags::POLLIN)];
-            let ready = poll(&mut descriptors, 100_u16).unwrap();
+            let wait = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .clamp(1, 100) as u16;
+            let ready = poll(&mut descriptors, wait).unwrap();
             if ready == 0 {
                 if complete || (!required && !received) {
                     return;
@@ -318,22 +373,452 @@ impl Viewer {
     }
 
     fn exit_with(&mut self, keys: &[u8]) {
+        self.exit_with_status(keys, 0);
+    }
+
+    fn exit_with_status(&mut self, keys: &[u8], expected: i32) {
         self.master.write_all(keys).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {
             if let Some(status) = self.child.try_wait().unwrap() {
-                assert!(status.success(), "viewer exited {status}");
+                self.read_update(false);
+                assert_eq!(status.code(), Some(expected), "viewer exited {status}");
                 let terminal = nix::sys::termios::tcgetattr(&self.slave).unwrap();
                 assert!(terminal.local_flags.contains(
                     nix::sys::termios::LocalFlags::ICANON | nix::sys::termios::LocalFlags::ECHO
                 ));
+                assert!(self.raw.windows(8).any(|bytes| bytes == b"\x1b[?1049l"));
                 return;
             }
+
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!("viewer did not quit");
     }
 }
+
+#[test]
+fn live_stdin_starts_without_bytes_and_quits_without_waiting_for_eof() {
+    let mut viewer = Viewer::start_stream(90, 14);
+    assert!(viewer.screen.line(13).contains("LIVE"));
+    viewer.keys_with_frame(b"?");
+    assert!(viewer.screen.line(0).contains("help"));
+    viewer.exit_with(b"\x03");
+}
+
+#[test]
+fn live_stdin_renders_unfinished_paragraphs_and_fences_then_keeps_eof_open() {
+    let mut viewer = Viewer::start_stream(90, 18);
+    viewer.send_input(b"EARLY_WITHOUT_NEWLINE");
+    viewer.wait_for(|screen| screen.line(1).contains("EARLY_WITHOUT_NEWLINE"));
+    viewer.send_input(b"\n\n```rust\nlet unfinished = 1;");
+    viewer.wait_for(|screen| (1..17).any(|row| screen.line(row).contains("let unfinished = 1;")));
+    viewer.input.take();
+    viewer.wait_for(|screen| screen.line(17).contains("EOF"));
+    assert!(viewer.child.try_wait().unwrap().is_none());
+    assert_eq!(viewer.screen.scrolls, 0);
+    viewer.quit();
+}
+
+#[test]
+fn live_stdin_preserves_split_unicode_controls_and_search_refresh() {
+    let mut viewer = Viewer::start_stream(100, 18);
+    viewer.send_input(b"hit ");
+    viewer.wait_for(|screen| screen.line(1).contains("hit"));
+    viewer.keys_with_frame(b"/hit");
+    assert!(viewer.screen.line(17).contains("1/1"));
+    viewer.send_input(&[0xe7, 0x95]);
+    viewer.read_update(false);
+    assert!(!viewer.screen.line(17).contains("error"));
+    viewer.send_input(&[0x8c]);
+    viewer.send_input(b" hit \x1b");
+    viewer.send_input(b"[2J INERT");
+    viewer.wait_for(|screen| screen.line(17).contains("1/2"));
+    assert!(viewer.screen.line(1).contains("界"));
+    assert!(viewer.screen.line(1).contains("INERT"));
+    assert!(viewer.screen.line(0).contains("Blad"));
+    assert_eq!(viewer.screen.scrolls, 0);
+    viewer.keys(b"\r");
+    viewer.input.take();
+    viewer.wait_for(|screen| screen.line(17).contains("EOF") && screen.line(17).contains("1/2"));
+    viewer.quit();
+}
+
+#[test]
+fn live_stdin_follow_pause_resume_and_resize_retain_their_state() {
+    let mut viewer = Viewer::start_stream(70, 12);
+    for batch in 0..3 {
+        let source: String = (batch * 20..batch * 20 + 20)
+            .map(|index| format!("row {index:03}\n\n"))
+            .collect();
+        viewer.send_input(source.as_bytes());
+        viewer.wait_for(|screen| {
+            (1..11).any(|row| {
+                screen
+                    .line(row)
+                    .contains(&format!("row {:03}", batch * 20 + 19))
+            })
+        });
+    }
+    viewer.keys_with_frame(b"g");
+    assert!(viewer.screen.line(1).starts_with("row 000"));
+    assert!(viewer.screen.line(11).contains("PAUSED"));
+    viewer.send_input(b"row 060\n\n");
+    viewer.wait_for(|screen| screen.line(11).contains("of 121"));
+    assert!(viewer.screen.line(1).starts_with("row 000"));
+    viewer.resize(55, 14);
+    assert!(viewer.screen.line(1).starts_with("row 000"));
+    assert!(viewer.screen.line(13).contains("PAUSED"));
+    viewer.keys_with_frame(b"\x1b[1;5F");
+    assert!(viewer.screen.line(13).contains("FOLLOW"));
+    viewer.send_input(b"row 061\n\n");
+    viewer.wait_for(|screen| (1..13).any(|row| screen.line(row).contains("row 061")));
+    viewer.resize(80, 10);
+    assert!((1..9).any(|row| viewer.screen.line(row).contains("row 061")));
+    assert!(viewer.screen.line(9).contains("FOLLOW"));
+    viewer.quit();
+}
+
+#[test]
+fn live_stdin_revises_late_references_and_matches_one_shot_rendering_at_eof() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut viewer = Viewer::start_stream(90, 35);
+    let first = "# Heading\n\n[jump][target]\n\nUnicode 界 e\u{301}\n\n";
+    viewer.send_input(first.as_bytes());
+    viewer.wait_for(|screen| screen.line(3).contains("[jump][target]"));
+    let rest = "[target]: #heading\n\n| A | B |\n| - | - |\n| one | two |\n\nText $x^2$ with **bold**.\n\n```rust\nlet value = 1;";
+    for chunk in rest.as_bytes().chunks(3) {
+        viewer.send_input(chunk);
+    }
+    viewer.input.take();
+    viewer.wait_for(|screen| screen.line(34).contains("EOF"));
+    assert!(viewer.screen.line(3).starts_with("jump"));
+    let path = temp.path().join("complete.md");
+    std::fs::write(&path, format!("{first}{rest}")).unwrap();
+    let mut complete = Viewer::start(&path, 90, 35, false);
+    for row in 1..34 {
+        assert_eq!(
+            viewer.screen.content_line(row),
+            complete.screen.content_line(row),
+            "row {row}"
+        );
+    }
+    viewer.keys_with_frame(b"\t");
+    assert!(viewer.screen.line(34).contains("Links:") || viewer.screen.line(0).contains("Links:"));
+    viewer.keys_with_frame(b"\r");
+    assert!(viewer.screen.line(1).starts_with("# Heading"));
+    viewer.quit();
+    complete.quit();
+}
+
+#[test]
+fn live_stdin_ingests_inactive_tabs_and_deduplicates_then_stops_when_closed() {
+    let temp = tempfile::tempdir().unwrap();
+    let named = temp.path().join("named.md");
+    std::fs::write(&named, "# Named").unwrap();
+    let mut viewer = Viewer::start_sources(
+        &[&named, std::path::Path::new("-"), std::path::Path::new("-")],
+        90,
+        14,
+        false,
+        &[],
+        &[],
+        true,
+    );
+    viewer.send_input(b"INACTIVE_INPUT");
+    viewer.read_update(false);
+    viewer.keys_with_frame(b"\x1b[6;5~");
+    viewer.wait_for(|screen| screen.line(1).contains("INACTIVE_INPUT"));
+    viewer.keys_with_frame(b"q");
+    assert!(viewer.screen.line(1).contains("Named"));
+    assert_eq!(
+        viewer
+            .input
+            .as_mut()
+            .unwrap()
+            .write(b"closed")
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::BrokenPipe,
+    );
+    viewer.exit_with(b"q");
+}
+
+#[test]
+fn live_stdin_editor_reads_keyboard_without_consuming_the_document_pipe() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let named = temp.path().join("named.md");
+    std::fs::write(&named, "# Named").unwrap();
+    let editor = temp.path().join("editor");
+    std::fs::write(&editor, "#!/bin/sh\nprintf 'EDITOR_READY\\n'\nIFS= read -r line || exit 1\nprintf 'EDITOR_INPUT:%s\\n' \"$line\"\n").unwrap();
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut viewer = Viewer::start_sources(
+        &[&named, std::path::Path::new("-")],
+        100,
+        16,
+        false,
+        &[],
+        &[("EDITOR", editor.to_str().unwrap())],
+        true,
+    );
+    viewer.master.write_all(b"e").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !viewer.raw.windows(12).any(|bytes| bytes == b"EDITOR_READY") && Instant::now() < deadline
+    {
+        viewer.read_with_timeout(false, Duration::from_millis(50));
+    }
+    assert!(viewer.raw.windows(12).any(|bytes| bytes == b"EDITOR_READY"));
+    viewer.send_input(b"STREAM_MUST_SURVIVE\n");
+    std::thread::sleep(Duration::from_millis(50));
+    viewer.master.write_all(b"EDITOR_KEYBOARD\n").unwrap();
+    viewer.read_frame();
+    assert!(
+        viewer
+            .raw
+            .windows(b"EDITOR_INPUT:EDITOR_KEYBOARD".len())
+            .any(|bytes| bytes == b"EDITOR_INPUT:EDITOR_KEYBOARD")
+    );
+    viewer.keys_with_frame(b"\x1b[6;5~");
+    viewer.wait_for(|screen| screen.line(1).contains("STREAM_MUST_SURVIVE"));
+    viewer.quit();
+}
+
+#[test]
+fn live_stdin_errors_remain_visible_and_fail_after_terminal_restoration() {
+    for bytes in [b"valid \xff".as_slice(), b"valid \xe7\x95".as_slice()] {
+        let mut viewer = Viewer::start_stream(100, 14);
+        viewer.send_input(b"LAST_VALID");
+        viewer.wait_for(|screen| screen.line(1).contains("LAST_VALID"));
+        viewer.send_input(bytes);
+        viewer.input.take();
+        viewer.wait_for(|screen| screen.line(13).contains("stdin error"));
+        viewer.keys(b"g");
+        assert!(viewer.screen.line(13).contains("stdin error"));
+        assert!(viewer.screen.line(1).contains("LAST_VALID"));
+        viewer.exit_with_status(b"q", 1);
+    }
+}
+#[test]
+fn live_stdin_continuous_input_updates_without_idle_debounce_and_coalesces_frames() {
+    let mut viewer = Viewer::start_stream(80, 12);
+    viewer.raw.clear();
+    for index in 0..80 {
+        viewer.send_input(format!("tick {index:03}\n\n").as_bytes());
+        viewer.read_with_timeout(false, Duration::from_millis(10));
+        if index == 40 {
+            assert!((1..11).any(|row| viewer.screen.line(row).contains("tick 0")));
+            assert!(viewer.screen.line(11).contains("LIVE"));
+        }
+    }
+    viewer.wait_for(|screen| (1..11).any(|row| screen.line(row).contains("tick 079")));
+    let frames = viewer
+        .raw
+        .windows(8)
+        .filter(|bytes| *bytes == b"\x1b[?2026l")
+        .count();
+    assert!(
+        (2..80).contains(&frames),
+        "expected coalescing, got {frames} frames"
+    );
+    viewer.quit();
+}
+
+#[test]
+fn live_stdin_empty_eof_and_color_opt_outs_still_leave_a_pager() {
+    for (args, environment) in [
+        (vec![], vec![]),
+        (vec!["--color", "never"], vec![]),
+        (vec![], vec![("NO_COLOR", "1")]),
+        (vec![], vec![("TERM", "dumb")]),
+    ] {
+        let mut viewer = Viewer::start_sources(&[], 80, 12, false, &args, &environment, true);
+        viewer.input.take();
+        viewer.wait_for(|screen| screen.line(11).contains("EOF"));
+        assert!(viewer.screen.content_line(1).is_empty());
+        viewer.quit();
+    }
+}
+
+#[test]
+fn live_stdin_updates_and_errors_remain_observable_while_help_is_open() {
+    for fail in [false, true] {
+        let mut viewer = Viewer::start_stream(100, 20);
+        viewer.keys_with_frame(b"?");
+        viewer.send_input(b"ARRIVED_DURING_HELP");
+        if fail {
+            viewer.send_input(b"\xff");
+        }
+        viewer.input.take();
+        viewer.wait_for(|screen| {
+            screen
+                .line(19)
+                .contains(if fail { "stdin error" } else { "EOF" })
+        });
+        assert!(viewer.screen.line(0).contains("help"));
+        viewer.keys_with_frame(b"?");
+        assert!(viewer.screen.line(1).contains("ARRIVED_DURING_HELP"));
+        viewer.exit_with_status(b"q", i32::from(fail));
+    }
+}
+
+#[test]
+fn live_stdin_follow_pin_survives_tab_switches_in_both_states() {
+    let temp = tempfile::tempdir().unwrap();
+    let named = temp.path().join("named.md");
+    std::fs::write(&named, "# Other").unwrap();
+    let mut viewer = Viewer::start_sources(
+        &[std::path::Path::new("-"), &named],
+        80,
+        12,
+        false,
+        &[],
+        &[],
+        true,
+    );
+    let source: String = (0..30).map(|index| format!("row {index:03}\n\n")).collect();
+    viewer.send_input(source.as_bytes());
+    viewer.wait_for(|screen| (1..11).any(|row| screen.line(row).contains("row 029")));
+    viewer.keys_with_frame(b"\x1b[6;5~");
+    viewer.send_input(b"row 030\n\n");
+    viewer.read_update(false);
+    viewer.keys_with_frame(b"\x1b[5;5~");
+    viewer.wait_for(|screen| (1..11).any(|row| screen.line(row).contains("row 030")));
+    assert!(viewer.screen.line(11).contains("FOLLOW"));
+    viewer.keys_with_frame(b"g");
+    viewer.keys_with_frame(b"\x1b[6;5~");
+    viewer.send_input(b"row 031\n\n");
+    viewer.read_update(false);
+    viewer.keys_with_frame(b"\x1b[5;5~");
+    assert!(viewer.screen.line(1).starts_with("row 000"));
+    assert!(viewer.screen.line(11).contains("PAUSED"));
+    viewer.quit();
+}
+
+#[test]
+fn live_stdin_limit_is_inclusive_and_overflow_fails_without_losing_the_viewer() {
+    const LIMIT: usize = 16 * 1024 * 1024;
+    for overflow in [false, true] {
+        let mut viewer = Viewer::start_stream(100, 12);
+        let mut producer = viewer.input.take().unwrap();
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                producer.write_all(b"VALID_PREFIX\n\n").unwrap();
+                let count = LIMIT - b"VALID_PREFIX\n\n".len() + usize::from(overflow);
+                let bytes = [b' '; 64 * 1024];
+                for _ in 0..count / bytes.len() {
+                    producer.write_all(&bytes).unwrap();
+                }
+                producer.write_all(&bytes[..count % bytes.len()]).unwrap();
+            });
+            viewer.wait_for(|screen| {
+                screen
+                    .line(11)
+                    .contains(if overflow { "stdin error" } else { "EOF" })
+            });
+        });
+        assert!(viewer.screen.line(1).contains("VALID_PREFIX"));
+        if overflow {
+            assert!(viewer.screen.line(11).contains("16777216"));
+        }
+        viewer.exit_with_status(b"q", i32::from(overflow));
+    }
+}
+
+#[test]
+fn live_stdin_failure_is_retained_across_closing_the_stdin_tab() {
+    let temp = tempfile::tempdir().unwrap();
+    let named = temp.path().join("named.md");
+    std::fs::write(&named, "# Named").unwrap();
+    let mut viewer = Viewer::start_sources(
+        &[&named, std::path::Path::new("-")],
+        100,
+        12,
+        false,
+        &[],
+        &[],
+        true,
+    );
+    viewer.send_input(b"valid\xff");
+    viewer.wait_for(|screen| screen.line(11).contains("stdin error"));
+    viewer.keys_with_frame(b"\x1b[6;5~");
+    viewer.keys_with_frame(b"q");
+    assert!(viewer.screen.line(1).contains("Named"));
+    assert!(viewer.screen.line(11).contains("stdin error"));
+    viewer.exit_with_status(b"Q", 1);
+}
+
+#[test]
+fn live_stdin_quit_while_a_fast_producer_is_active_never_drains_the_pipe() {
+    let mut viewer = Viewer::start_stream(80, 12);
+    let mut producer = viewer.input.take().unwrap();
+    fcntl(&producer, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)).unwrap();
+    std::thread::scope(|scope| {
+        scope.spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                match producer.write(b"busy producer\n\n") {
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => return,
+                    Err(error) => panic!("producer failed: {error}"),
+                }
+            }
+            panic!("viewer did not close its read end");
+        });
+        viewer.wait_for(|screen| (1..11).any(|row| screen.line(row).contains("busy producer")));
+        viewer.exit_with(b"\x03");
+    });
+}
+
+#[test]
+#[ignore = "explicit sustained-input performance characterization, not a latency guarantee"]
+fn live_stdin_sustained_input_characterization() {
+    let mut viewer = Viewer::start_stream(100, 30);
+    viewer.raw.clear();
+    let source: String = (0..200).map(|index| format!(
+        "# Section {index:04}\n\nReadable **Markdown** with 界, $x^2$ and [a reference][ref].\n\n\
+         - item one\n- item two\n\n```rust\nlet value = {index};\n```\n\n\
+         | Name | Value |\n| ---- | ----- |\n| width | {index} |\n\n"
+    )).collect();
+    let started = Instant::now();
+    viewer.send_input(b"# Early\n\n");
+    viewer.wait_for(|screen| screen.line(1).contains("Early"));
+    let first = started.elapsed();
+    for bytes in source.as_bytes().chunks(1024) {
+        viewer.send_input(bytes);
+        viewer.read_with_timeout(false, Duration::from_millis(10));
+    }
+    viewer.send_input(b"\n[ref]: #early\n\nFINAL_SENTINEL");
+    viewer.input.take();
+    viewer.wait_for(|screen| {
+        screen.line(29).contains("EOF")
+            && (1..29).any(|row| screen.line(row).contains("FINAL_SENTINEL"))
+    });
+    let elapsed = started.elapsed();
+    let frames = viewer
+        .raw
+        .windows(8)
+        .filter(|bytes| *bytes == b"\x1b[?2026l")
+        .count();
+    let memory = std::fs::read_to_string(format!("/proc/{}/status", viewer.child.id())).unwrap();
+    let peak = memory
+        .lines()
+        .find(|line| line.starts_with("VmHWM:"))
+        .unwrap();
+    let quit = Instant::now();
+    viewer.quit();
+    eprintln!(
+        "live stdin: source={} bytes; first={first:?}; total={elapsed:?}; frames={frames}; \
+         terminal={} bytes; quit={:?}; {peak}",
+        source.len() + b"# Early\n\n".len() + b"\n[ref]: #early\n\nFINAL_SENTINEL".len(),
+        viewer.raw.len(),
+        quit.elapsed(),
+    );
+}
+
 #[test]
 fn redraw_actions_wait_for_delayed_input_processing() {
     let temp = tempfile::tempdir().unwrap();

@@ -4,6 +4,187 @@
 
 Date: 2026-10-12
 
+## Automatic streaming pager evidence - 2026-10-25
+
+### Independent source-only observations
+
+One clean-slate observer examined CLI routing, live input, rendering,
+navigation and relevant tests without intent, prior records or history.
+A subsequent clean-slate observer examined the repaired descriptor lifecycle
+and event wakeup with the same exclusions. The observations below combine
+their still-current findings; the second observation supersedes the first
+observation's descriptor findings.
+
+- Terminal stdout and non-plain settings select paging, including redirected
+  stdin. Dump/nonterminal output remains finite; color suppression does not
+  disable paging. Missing controlling-terminal preflight fails with a dump
+  hint before document consumption. Named files validate first and stdin
+  occupies one deduplicated deferred tab.
+- Live input owns one close-on-exec duplicate numbered at least 3. Entry
+  replaces process fd 0 with the controlling terminal, without changing
+  document open-file-description flags. Replacement failure drops the local
+  duplicate. This requires exclusive, unbuffered stdin consumption; fd 0
+  remains the keyboard terminal after viewer return.
+- Editors receive a separately opened controlling terminal as stdin. The
+  owned document descriptor does not survive exec. Synchronous editor/browser
+  handoffs suspend ingestion and allow normal producer backpressure.
+- Source retention is capped at 16,777,216 bytes, including pending UTF-8.
+  A pump performs at most four 64-KiB readiness-driven reads, capped by the
+  remaining allowance plus one overflow probe. Overflow rejects that read
+  wholesale. Decoding preserves valid prefixes, carries incomplete UTF-8,
+  and rejects malformed bytes or incomplete UTF-8 at EOF.
+- The loop checks buffered keyboard events, waits on document and keyboard
+  readiness together, and checks keyboard events again after waking.
+  Interrupted polls allow a new loop iteration. A full input batch requests
+  an immediate keyboard check. Source arrival need not await a keyboard event
+  or the ordinary 50-ms live timeout.
+- The retained source is rendered as a complete provisional document, allowing
+  unfinished syntax and late definitions to revise earlier output. Refreshes
+  rebuild links/navigation/search and clear link selection. Renders coalesce
+  behind a 50-ms minimum interval, extended by prior refresh cost. EOF/error
+  forces pending final refresh; inactive stdin accumulates without repeated
+  rendering and renders when activated.
+- Stdin initially follows the bottom. Upward/browsing/search actions pause
+  following; bottom navigation resumes it, including downward arrival at the
+  bottom. Numeric positions and following survive tabs and resize; resize
+  recomputes layout/navigation/search and reapplies the follow pin.
+- EOF leaves browsing open. EOF, failure, stop and destruction release the
+  owned descriptor without draining. Closing stdin retains decoded source
+  and any sticky failure but releases its pipe reader. Ingestion continues
+  during help and on other tabs. Input failures remain visible there and
+  survive closing stdin.
+- Normal quit/final-tab close explicitly restores the terminal before returning
+  a stored input error. Restoration attempts each enabled operation and
+  retains its first failure; drop retries unfinished steps. Another earlier
+  viewer or restoration error can supersede an input error.
+
+The first observer independently reproduced two concrete defects: an editor
+could consume the Markdown pipe, and closing stdin left fd 0 holding an
+abandoned pipe reader. Dedicated regressions failed before repair. The final
+source-only follow-up observed the ownership changes above and independently
+passed the editor-input and producer-BrokenPipe regressions. It established
+no remaining concrete defect within that narrower scope.
+
+The initial observer independently ran seven input units, one follow-key unit,
+14 live-input PTY regressions and five stdin CLI regressions. The follow-up
+independently ran:
+
+```text
+cargo --offline --locked test --manifest-path blad/Cargo.toml --lib stream_input::tests
+8 passed
+cargo --offline --locked test --manifest-path blad/Cargo.toml --test viewer live_stdin
+15 passed; 1 ignored characterization
+cargo --offline --locked test --manifest-path blad/Cargo.toml --test cli stdin
+5 passed
+```
+
+Its initial `-p blad` attempt failed because the workspace package is named
+`kvist-blad`; the manifest-path commands above succeeded. Observed evidence
+includes unchanged source flags, descriptor release, keyboard/editor isolation,
+fast-producer quit, retained errors and restoration on tested exits. CLOEXEC
+was observed through the explicit API, not an exec-time descriptor inventory.
+Duplication/replacement/restoration failures were not injected. No fatal-signal
+cleanup or non-Linux behavior was established.
+
+### Implementation-session execution evidence
+
+These are execution results, not independently executed by the observers:
+
+- Complete default and `sessions` suites passed on stable Rust 1.99.1 and
+  Rust 1.95.0: 282/303 passing tests respectively, with three ignored
+  characterizations per configuration. The new streaming characterization
+  was also run explicitly.
+- Passing regressions cover idle/continuous input, unfinished paragraphs and
+  fences, split Unicode/inert controls, help/inactive tabs, follow/resize,
+  retained search, late references, empty EOF, sticky failures and the exact
+  source ceiling. Whole-source fidelity units compare rendered bytes, link
+  spans and anchors with one-shot rendering across chunk widths, rendering
+  widths and color/plain settings.
+- Explicit finite-route regressions include
+  `explicit_stdin_on_a_terminal_is_rejected_without_waiting`,
+  `named_files_leave_redirected_stdin_unconsumed`,
+  `redirected_file_output_is_plain_by_default_and_head_closes_quietly`, and,
+  with sessions, `empty_session_list_handles_a_fully_closed_stdout_without_panicking`.
+  Both complete CLI configurations pass. The unused-input regression was
+  added after source observation to close a comparison traceability gap.
+- The README, user guide, changelog, release guidance and CLI help document
+  automatic terminal-stdout paging, the dump opt-out, controlling-terminal
+  failure, EOF/follow/source bounds and snapshot/tail distinctions. The user
+  guide also discloses process-stdin replacement and error precedence.
+  These documentation checks are implementation-session evidence, not source
+  observer findings. Inspection found no new spool, worker, unbounded input
+  queue or parser cache; retained source is re-rendered through existing APIs.
+- Strict all-target/all-feature Clippy passed on both toolchains; strict
+  all-feature rustdoc and formatting passed on stable.
+- All 221 downstream Skott library tests passed.
+- `python3 blad/ci/verify_package.py --offline --allow-dirty` passed actual
+  extracted-archive default/session suites, both release installations and
+  installed-binary smoke checks. An earlier extracted sessions suite exposed
+  short-batch draining delayed by keyboard-only waiting; combined readiness
+  fixed the cause. The exact-limit regression also passed with unoptimized
+  workspace development/test profiles, without extending its deadline.
+- The explicit sustained-input characterization used 36,419 source bytes in
+  1,024-byte batches. It observed first text around 101 ms, final EOF around
+  557 ms, seven frames, 17,002 terminal bytes, 18,216 KiB peak RSS and quit
+  around 110 ms. Harness pacing/polling is included; these are not universal
+  throughput or latency bounds.
+
+The source cap is not an aggregate-memory guarantee. Rendering, search and
+navigation allocate additional data and run synchronously; viewer refresh
+does not use cooperative renderer cancellation. Finite tests establish no
+hard filesystem/render/search/wakeup/quit deadline. Named-file reload remains
+save-oriented and optional session input remains snapshots.
+
+Final source SHA-256, in stream-input/display/terminal/files/navigation/main/
+viewer-tests/CLI-tests order:
+
+```text
+9feef5d547710bde32ede605b4c442366ccd7821e2dec0093230328cefb6d8e7
+9088838c4e4255ea003cf16abe90fba041af915fff6c4c910ba2aae1c4c2eed3
+c6c296a00350ea808d71eacbeeba34eddc3129398e9596a92d07c976952f004e
+d83842a63cb87a882d2c7567514cb80af77ec2fa4b934796ee83c6a4abeecc2b
+c3c5f83f36c356ee347162faf848a8a2bffb3c398f5ec649fbe47c884d9c89f5
+6a955f8fbdfffd5a8cb2da8540ddb15ffda6547c725bb274c48f6d80cbe0306a
+8156b1845d043aad23331b8fd98c6c89ee512dc8697266f2a4b3837b4d5a8982
+26fd5c2172e82c71cfa6b4b431f0bdfc5a42ffd075ad01352f400ab4fd015f33
+```
+
+These are independent observations and scoped engineering evidence, not human
+acceptance, a Kvist acceptance receipt or whole-component certification.
+
+### Separate source-blind comparison
+
+A separate reviewer compared only R-065/R-066, R-069 through R-072 and related
+contract/design intent against this increment's observations and reported
+execution evidence. It did not inspect source/tests, run the application or
+read historical records. It found support for routing, readiness/bounds,
+fidelity/follow and lifecycle/error behavior; the repaired ownership defects
+were not established as outstanding.
+
+The comparison identified traceability gaps for documentation, individual
+finite-route cases and explicit absence of architectural additions. The
+implementation-session evidence above now names the documentation and finite
+regressions, adds an unread-input regression, and records the architecture
+inspection. This is additional implementer evidence, not another independent
+comparison or an acceptance determination.
+
+The reviewer also reserved simultaneous-error diagnostic preservation:
+an earlier viewer/restoration failure can supersede a stored input failure.
+It identified no incorrect status, but did not establish preservation of each
+concurrent diagnostic. Existing precedence is retained and disclosed rather
+than silently changing intent; that policy/evidence reservation remains for
+explicit human disposition. Failure injection, fatal-signal handling, other
+platforms, aggregate memory and hard latency remain outside established evidence.
+No blanket compliance certification or human/Kvist acceptance is claimed.
+
+Compared intent SHA-256, in requirements/contract/design order:
+
+```text
+cbe7892daabcc961173571e557bdcc0dd9a3a9edf249e61b9639ee40aabf9e8f
+0681951f05479492f8af5f935773381bc55d70769b47c0b6c1adfc94539a59e6
+c3053a7210ffcf946b0db67224a8fcc2a86982b66923ce3defd43dd213fdbf96
+```
+
 ## Simplified keybindings evidence - 2026-10-25
 
 An independent source-only observer examined `src/display.rs`,

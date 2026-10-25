@@ -13,7 +13,7 @@ mod theme_file;
 #[derive(Parser)]
 #[command(
     name = "blad",
-    about = "Terminal Markdown viewer",
+    about = "Terminal Markdown viewer and streaming pager",
     version,
     propagate_version = true,
     subcommand_precedence_over_arg = true
@@ -24,7 +24,7 @@ pub struct Cli {
     #[cfg(feature = "sessions")]
     log_dir: Option<PathBuf>,
 
-    /// Output plain text without interactive viewer
+    /// Output plain text without paging; stdin waits for EOF
     #[clap(long, global = true)]
     dump: bool,
 
@@ -117,8 +117,7 @@ fn render_options(cli: &Cli) -> std::io::Result<RenderOptions> {
         theme,
         color_depth,
         plain: cli.dump
-            || ((!std::io::stdout().is_terminal() || !std::io::stdin().is_terminal())
-                && !matches!(cli.color, ColorChoice::Always)),
+            || (!std::io::stdout().is_terminal() && !matches!(cli.color, ColorChoice::Always)),
         math: cli.math,
         mermaid: cli.mermaid,
         diagram_charset: cli.diagram_charset,

@@ -50,17 +50,74 @@ Without file arguments, redirected stdin supplies one Markdown document.
 `blad -` explicitly reads stdin, including among named files; repeated `-`
 inputs reuse that source and render once. A literal file named `-` is addressed
 as `./-`. Explicit stdin requires redirection, not a terminal. Named file
-arguments otherwise leave stdin unread. Stdin is UTF-8, read through EOF with
-the same inclusive 16 MiB bound and single overflow probe as file sources;
-empty stdin is a successful empty document. All initial sources validate before
-output. Stdin is a finite snapshot, not an interactive pager, watched file or
-live stream; a producer must close stdin to finish the snapshot.
+arguments otherwise leave stdin unread. Stdin is UTF-8 with the same inclusive
+16 MiB bound and single overflow probe as file sources. Empty stdin is a
+successful empty document. Named files validate before terminal entry;
+noninteractive/dump sources all validate through EOF before output.
 
-The CLI enters the viewer only with terminal stdin and stdout and no `--dump`.
+The CLI automatically enters the viewer with terminal stdout and no `--dump`,
+including piped or file-redirected stdin. With redirected stdin it MUST open
+the controlling terminal for keyboard input before reading document bytes.
+If unavailable, it MUST fail promptly with an actionable `--dump` diagnostic,
+not consume stdin as keystrokes or silently select another mode. No `--pager`
+or `--no-pager` option is needed: `--dump` explicitly disables paging.
+This deliberately replaces the previous both-stdin-and-stdout-TTY routing.
 Noninteractive snapshots default to escape-free rendered text. Explicit
 `--color always` opts into styling even through a pipe; `--dump` still overrides
 it. Downstream `BrokenPipe` is quiet success, including optional session stdout
 routes; other I/O failures retain status 1 and escaped diagnostics.
+
+### Live stdin pager
+
+An interactive stdin tab starts empty and displays incoming text without
+waiting for a newline, completed Markdown block or EOF. Partial UTF-8 sequences
+wait for their remaining bytes; invalid UTF-8 is never replaced or silently
+dropped. Source newlines are preserved across read boundaries. The same
+whole-document renderer and options apply to every provisional snapshot.
+Later input MAY revise earlier rendering, including reference links, footnotes,
+lists and incomplete fences. At EOF rendering/navigation match one-shot
+rendering of the complete source at the same width/options.
+
+The stdin tab initially follows the bottom. Upward navigation, search, link
+selection and heading/anchor browsing pause following; normal `G`/`L` or
+`Ctrl+End` resumes it, as does scrolling down to the bottom. Paused numeric
+offsets are retained and clamped to the layout. Resize and tab switching retain
+the follow state. Search query/mode/direction persist and results refresh;
+source changes clear obsolete link selection. The footer identifies live
+following, live paused, EOF or a persistent input error alongside normal
+search/navigation feedback.
+
+The interactive stdin entry point exclusively consumes process stdin. Before
+viewer entry it duplicates the document descriptor with close-on-exec and
+replaces fd 0 with the controlling terminal. Callers MUST NOT concurrently
+read stdin or pre-buffer it through another reader while invoking this
+interactive helper. Rendering-only APIs and finite routes do not replace stdin.
+Editor handoffs receive terminal input, never the document descriptor.
+
+Ingestion continues while another tab or help is visible; inactive stdin
+renders on activation, rather than being fully rendered on each incoming
+fragment. Closing stdin stops ingestion and releases its document descriptor.
+EOF/input failure also releases that descriptor while retaining display/error
+metadata. EOF, including empty input, leaves the viewer open for browsing.
+Quit never drains input or supervises/kills the
+producer. Browser/editor handoffs retain their existing synchronous waiting
+semantics; the kernel pipe provides backpressure while Blad is busy.
+
+Malformed UTF-8 (including an incomplete sequence at EOF), source overflow and
+read errors stop ingestion. The valid retained document remains browsable with
+a persistent footer error; closing/quitting subsequently returns status 1 with
+an escaped diagnostic after terminal restoration. Rendering or terminal writer
+errors propagate after restoration. A producer's nonzero exit cannot be
+inferred from pipe EOF; shell users needing its status should use `pipefail`.
+
+Document and keyboard readiness wake the event loop independently. Input is
+pumped in bounded batches and renders are coalesced on a timed
+cadence, never a producer-idle debounce. The retained source limit is 16 MiB,
+not an unlimited-history promise. There is no disk spool, new worker/daemon,
+unbounded input queue or total-memory/hard render/search/I/O latency guarantee.
+This is raw Markdown stdin paging, not live following of session directories
+or a `tail -f` mode for named files. The renderer library remains a finite
+string-in/writer-out API without its own streaming parser state.
 
 ### File input bounds
 
@@ -87,7 +144,7 @@ a latency guarantee for rendering/search, path resolution, open, filesystem
 reads or editor execution. Ancestor symlinks, concurrent content snapshots,
 device-open effects and kernel/FUSE stalls are not isolated. Session artifact
 loading and caller-supplied rendering strings are outside these file-read
-limits; this is not a streaming or giant-file pager.
+limits; this is not an unlimited-stream or giant-file pager.
 
 ### Options
 

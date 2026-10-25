@@ -265,6 +265,27 @@ fn stdin_documents_are_bounded_ordered_and_rendered_once_without_terminal_contro
 }
 
 #[test]
+fn named_files_leave_redirected_stdin_unconsumed() {
+    use std::io::Read;
+    let temp = tempfile::tempdir().unwrap();
+    let named = temp.path().join("named.md");
+    let input = temp.path().join("unused");
+    std::fs::write(&named, "# Named").unwrap();
+    std::fs::write(&input, b"\xffstill unread").unwrap();
+    let mut stdin = std::fs::File::open(&input).unwrap();
+    let output = blad()
+        .arg(&named)
+        .stdin(stdin.try_clone().unwrap())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b"# Named\n");
+    let mut remaining = Vec::new();
+    stdin.read_to_end(&mut remaining).unwrap();
+    assert_eq!(remaining, b"\xffstill unread");
+}
+
+#[test]
 fn redirected_file_output_is_plain_by_default_and_head_closes_quietly() {
     use std::process::Stdio;
     let temp = tempfile::tempdir().unwrap();
@@ -422,6 +443,7 @@ fn explicit_stdin_on_a_terminal_is_rejected_without_waiting() {
             let _ = child.wait();
             panic!("explicit terminal stdin waited for input");
         }
+
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     let output = child.wait_with_output().unwrap();
@@ -429,6 +451,37 @@ fn explicit_stdin_on_a_terminal_is_rejected_without_waiting() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("redirected stdin"));
 }
 
+#[test]
+fn piped_stdin_with_terminal_output_requires_a_controlling_terminal_unless_dumping() {
+    use std::process::Stdio;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("input.md");
+    std::fs::write(&path, "# Still unread").unwrap();
+    let mut input = std::fs::File::open(&path).unwrap();
+    let pty = nix::pty::openpty(None, None).unwrap();
+    let output = Command::new("setsid")
+        .args(["--wait", env!("CARGO_BIN_EXE_blad")])
+        .stdin(input.try_clone().unwrap())
+        .stdout(pty.slave)
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--dump"));
+    let mut unread = String::new();
+    use std::io::Read;
+    input.read_to_string(&mut unread).unwrap();
+    assert_eq!(unread, "# Still unread");
+    let pty = nix::pty::openpty(None, None).unwrap();
+    let output = Command::new("setsid")
+        .args(["--wait", env!("CARGO_BIN_EXE_blad"), "--dump"])
+        .stdin(std::fs::File::open(&path).unwrap())
+        .stdout(pty.slave)
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+}
 #[test]
 fn file_arguments_are_extension_independent_ordered_and_deduplicated() {
     let temp = tempfile::tempdir().unwrap();
