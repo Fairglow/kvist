@@ -276,6 +276,8 @@ Blad depends on:
 
 ## Data and schemas
 
+Blad does not persist user data; all rendering operates on provided input files.
+
 ### Terminal Markdown profile
 
 CommonMark parsing and documented extensions are terminal projections, not

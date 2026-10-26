@@ -1,6 +1,4 @@
 schema_version: 1
-# Recorded revisions below predate the latest viewer/table intent; no acceptance or
-# independent compliance certification is implied by this implementation work.
 component:
   requirements_revision: "sha256:6685311fdea00a81db0411344216fa36014f93416b9e893f5d29ba8a1400f650"
   contract_revision: "sha256:51b9c61c6ccafe3a2422a5aa20c3856c52fa8a93dec755659212c79bf38ad997"
@@ -9,1122 +7,1982 @@ component:
   revalidation:
     state: current
     checked_at: "2026-10-17T17:30:00Z"
+    stale_since: null
     causes: []
 tasks:
-  - id: blad-table-emphasis-tests
+  - id: "blad-table-emphasis-tests"
     title: "write_tests: first table emphasis subset"
     description: "Pin effective bold/italic/strike state, nesting, normalized spaces, event boundaries, Unicode, wrapping/breaks, row-style preservation and styled link search/selection."
+    context: "All five initial effective-attribute rendering regressions and the styled-link PTY assertion failed before production changes. Added dense single-word spans and private projection/UTF-8 failure cases. The monochrome check now rejects actual SGR color codes rather than incorrectly rejecting italic SGR 3."
+    purpose: "Pin effective bold/italic/strike state, nesting, normalized spaces, event boundaries, Unicode, wrapping/breaks, row-style preservation and styled link search/selection."
+    expected_outcome: "All effective-attribute rendering regressions and styled-link PTY assertions fail before production changes."
     kind: test
     status: completed
-    context: "All five initial effective-attribute rendering regressions and the styled-link PTY assertion failed before production changes. Added dense single-word spans and private projection/UTF-8 failure cases. The monochrome check now rejects actual SGR color codes rather than incorrectly rejecting italic SGR 3."
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-049", "REQUIREMENTS.md#R-055"]
-  - id: blad-table-emphasis-code
+    requirements:
+      - "REQUIREMENTS.md#R-049"
+      - "REQUIREMENTS.md#R-055"
+      - "REQUIREMENTS.md#R-074"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-emphasis-code"
     title: "implement_code: typed table emphasis spans"
     description: "Share source-to-wrapped mapping for links and emphasis, emit selective attribute transitions and document the exact subset without changing geometry or code semantics."
+    context: "Generalized the existing table-link mapper into table_spans, sharing projected/inert byte offsets and grapheme-aware link columns. Attribute-only SGR transitions preserve row/header/quote styling. User docs state the three-attribute subset and deferred dedicated code/link colors; geometry and code whitespace remain unchanged."
+    purpose: "Share source-to-wrapped mapping for links and emphasis, emit selective attribute transitions and document the exact subset without changing geometry or code semantics."
+    expected_outcome: "Share source-to-wrapped mapping for links and emphasis, emit selective attribute transitions and document the exact subset without changing geometry or code semantics."
     kind: implementation
     status: completed
-    context: "Generalized the existing table-link mapper into table_spans, sharing projected/inert byte offsets and grapheme-aware link columns. Attribute-only SGR transitions preserve row/header/quote styling. User docs state the three-attribute subset and deferred dedicated code/link colors; geometry and code whitespace remain unchanged."
-    depends_on: [blad-table-emphasis-tests]
-    requirements: ["REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-062", "REQUIREMENTS.md#R-073"]
-  - id: blad-table-emphasis-audit
+    depends_on:
+      - "blad-table-emphasis-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-031"
+      - "REQUIREMENTS.md#R-062"
+      - "REQUIREMENTS.md#R-073"
+      - "REQUIREMENTS.md#R-074"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-emphasis-audit"
     title: "security_audit: typed cell span boundaries"
     description: "Inspect UTF-8 span slicing, source-token correspondence, inert controls, fallible output and preserved authority/resource behavior."
+    context: "Scoped implementer inspection: capture filters styles to bold/italic/strike and typed navigation IDs, leaving source inert and measured strings escape-free. Token/range mismatches report InvalidData; output slices are checked and writes propagate errors. Batched per-word grapheme mapping avoids rescanning dense style spans. No dependency, unsafe code, process or filesystem authority added. Strict all-feature lint and stable/MSRV default/sessions suites pass; no whole-component security certification."
+    purpose: "Inspect UTF-8 span slicing, source-token correspondence, inert controls, fallible output and preserved authority/resource behavior."
+    expected_outcome: "Inspect UTF-8 span slicing, source-token correspondence, inert controls, fallible output and preserved authority/resource behavior."
     kind: security-audit
     status: completed
-    context: "Scoped implementer inspection: capture filters styles to bold/italic/strike and typed navigation IDs, leaving source inert and measured strings escape-free. Token/range mismatches report InvalidData; output slices are checked and writes propagate errors. Batched per-word grapheme mapping avoids rescanning dense style spans. No dependency, unsafe code, process or filesystem authority added. Strict all-feature lint and stable/MSRV default/sessions suites pass; no whole-component security certification."
-    depends_on: [blad-table-emphasis-code]
-    requirements: ["REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-038"]
-  - id: blad-table-emphasis-review
+    depends_on:
+      - "blad-table-emphasis-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-074"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-emphasis-review"
     title: "compliance_review: independent emphasis evidence"
     description: "Derive a clean-source implementation observation and compare source-blind with intent and execution; retain discrepancies without acceptance claims."
+    context: "Clean-slate source-only observation and separate source-blind comparison, including publication-facing documentation, are retained in IMPL.md. No concrete scoped contradiction or material unmet obligation identified. Stable/MSRV default/sessions suites, dense-span/error cases and strengthened mixed-style search/clipping/resize PTYs pass. Finite coverage and deferred code/link styling remain explicit; no human acceptance or blanket certification."
+    purpose: "Derive a clean-source implementation observation and compare source-blind with intent and execution; retain discrepancies without acceptance claims."
+    expected_outcome: "Derive a clean-source implementation observation and compare source-blind with intent and execution; retain discrepancies without acceptance claims."
     kind: compliance-review
     status: completed
-    context: "Clean-slate source-only observation and separate source-blind comparison, including publication-facing documentation, are retained in IMPL.md. No concrete scoped contradiction or material unmet obligation identified. Stable/MSRV default/sessions suites, dense-span/error cases and strengthened mixed-style search/clipping/resize PTYs pass. Finite coverage and deferred code/link styling remain explicit; no human acceptance or blanket certification."
-    depends_on: [blad-table-emphasis-audit]
-    requirements: ["REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-062"]
-  - id: blad-table-alignment-tests
+    depends_on:
+      - "blad-table-emphasis-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-062"
+      - "REQUIREMENTS.md#R-074"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-alignment-tests"
     title: "write_tests: Markdown table alignment"
     description: "Pin exact header/body padding, odd centers, Unicode, empty/broken/wrapped cells, table-local state, output geometry and aligned link hitboxes after resize."
+    context: "All five delimiter-alignment rendering regressions and the aligned-link PTY regression failed against the original renderer before production changes. Source-bound link-span coverage also pins quoted/numbered reflow."
+    purpose: "Pin exact header/body padding, odd centers, Unicode, empty/broken/wrapped cells, table-local state, output geometry and aligned link hitboxes after resize."
+    expected_outcome: "Pin exact header/body padding, odd centers, Unicode, empty/broken/wrapped cells, table-local state, output geometry and aligned link hitboxes after resize."
     kind: test
     status: completed
-    context: "All five delimiter-alignment rendering regressions and the aligned-link PTY regression failed against the original renderer before production changes. Source-bound link-span coverage also pins quoted/numbered reflow."
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-049", "REQUIREMENTS.md#R-055"]
-  - id: blad-table-alignment-code
+    requirements:
+      - "REQUIREMENTS.md#R-049"
+      - "REQUIREMENTS.md#R-055"
+      - "REQUIREMENTS.md#R-073"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-alignment-code"
     title: "implement_code: delimiter alignment and precise table limits"
     description: "Preserve parser alignment through table output, pad by display width after wrapping, shift link coordinates and clarify supported/unsupported table features."
+    context: "Parser alignments now reach output-only Unicode padding; link marks follow leading spaces. Width solving, wrapping and row styles are unchanged. README, user guide, feature showcase, rustdoc and changelog explicitly describe supported alignment and flattened inline cell styling."
+    purpose: "Preserve parser alignment through table output, pad by display width after wrapping, shift link coordinates and clarify supported/unsupported table features."
+    expected_outcome: "Preserve parser alignment through table output, pad by display width after wrapping, shift link coordinates and clarify supported/unsupported table features."
     kind: implementation
     status: completed
-    context: "Parser alignments now reach output-only Unicode padding; link marks follow leading spaces. Width solving, wrapping and row styles are unchanged. README, user guide, feature showcase, rustdoc and changelog explicitly describe supported alignment and flattened inline cell styling."
-    depends_on: [blad-table-alignment-tests]
-    requirements: ["REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-062"]
-  - id: blad-table-alignment-audit
+    depends_on:
+      - "blad-table-alignment-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-029"
+      - "REQUIREMENTS.md#R-031"
+      - "REQUIREMENTS.md#R-062"
+      - "REQUIREMENTS.md#R-073"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-alignment-audit"
     title: "security_audit: alignment output boundaries"
     description: "Inspect padding arithmetic, inert input, fallible writes, link-coordinate ownership and unchanged resource/process authority."
+    context: "Scoped implementer inspection: padding uses saturating display-width subtraction with center/right offsets bounded by existing column widths; source controls still cross the existing inert-text boundary. All new writes propagate I/O errors, leading padding precedes source-owned link marks, and no dependency, process, filesystem or input authority is added. Default/sessions focused suites, strict all-feature Clippy and formatting pass. This is not independent whole-component security certification."
+    purpose: "Inspect padding arithmetic, inert input, fallible writes, link-coordinate ownership and unchanged resource/process authority."
+    expected_outcome: "Inspect padding arithmetic, inert input, fallible writes, link-coordinate ownership and unchanged resource/process authority."
     kind: security-audit
     status: completed
-    context: "Scoped implementer inspection: padding uses saturating display-width subtraction with center/right offsets bounded by existing column widths; source controls still cross the existing inert-text boundary. All new writes propagate I/O errors, leading padding precedes source-owned link marks, and no dependency, process, filesystem or input authority is added. Default/sessions focused suites, strict all-feature Clippy and formatting pass. This is not independent whole-component security certification."
-    depends_on: [blad-table-alignment-code]
-    requirements: ["REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-038"]
-  - id: blad-table-alignment-review
+    depends_on:
+      - "blad-table-alignment-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-073"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-alignment-review"
     title: "compliance_review: independent table alignment evidence"
     description: "Derive source-only observations, compare source-blind against alignment intent and execution evidence, and retain discrepancies without acceptance claims."
+    context: "Clean-slate source-only observation and separate source-blind comparison are retained in IMPL.md with stable/MSRV default/sessions execution evidence. No concrete scoped implementation-intent contradiction was identified. Finite aligned PTY reflow/mouse combinations and the lack of independent public-documentation review remain explicit; implementer cross-check corrected stale showcase text. No acceptance or blanket compliance certification."
+    purpose: "Derive source-only observations, compare source-blind against alignment intent and execution evidence, and retain discrepancies without acceptance claims."
+    expected_outcome: "Derive source-only observations, compare source-blind against alignment intent and execution evidence, and retain discrepancies without acceptance claims."
     kind: compliance-review
     status: completed
-    context: "Clean-slate source-only observation and separate source-blind comparison are retained in IMPL.md with stable/MSRV default/sessions execution evidence. No concrete scoped implementation-intent contradiction was identified. Finite aligned PTY reflow/mouse combinations and the lack of independent public-documentation review remain explicit; implementer cross-check corrected stale showcase text. No acceptance or blanket compliance certification."
-    depends_on: [blad-table-alignment-audit]
-    requirements: ["REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-062"]
-  - id: blad-pager-tests
+    depends_on:
+      - "blad-table-alignment-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-062"
+      - "REQUIREMENTS.md#R-073"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-pager-tests"
     title: "write_tests: automatic bounded streaming pager"
     description: "Pin live stdin through a separate controlling PTY, bounded decoder/pump behavior, follow/search/resize/tabs, errors and finite-route preservation."
+    context: "Idle-producer startup and missing-controlling-terminal regressions failed before production changes. Independent review later reproduced editor pipe theft and an abandoned fd-0 reader; dedicated regressions failed before ownership repairs. Final stable/MSRV default+sessions suites and actual extracted-package suites/installations pass; precise evidence and limits are in IMPL.md."
+    purpose: "Pin live stdin through a separate controlling PTY, bounded decoder/pump behavior, follow/search/resize/tabs, errors and finite-route preservation."
+    expected_outcome: "Pin live stdin through a separate controlling PTY, bounded decoder/pump behavior, follow/search/resize/tabs, errors and finite-route preservation."
     kind: test
     status: completed
-    context: "Idle-producer startup and missing-controlling-terminal regressions failed before production changes. Independent review later reproduced editor pipe theft and an abandoned fd-0 reader; dedicated regressions failed before ownership repairs. Final stable/MSRV default+sessions suites and actual extracted-package suites/installations pass; precise evidence and limits are in IMPL.md."
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066", "REQUIREMENTS.md#R-069", "REQUIREMENTS.md#R-070", "REQUIREMENTS.md#R-071", "REQUIREMENTS.md#R-072"]
-  - id: blad-pager-code
+    requirements:
+      - "REQUIREMENTS.md#R-065"
+      - "REQUIREMENTS.md#R-066"
+      - "REQUIREMENTS.md#R-069"
+      - "REQUIREMENTS.md#R-070"
+      - "REQUIREMENTS.md#R-071"
+      - "REQUIREMENTS.md#R-072"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-pager-code"
     title: "implement_code: automatic stdin paging"
     description: "Add readiness-driven bounded ingestion and coalesced complete-source refresh to the existing viewer; document automatic routing and dump opt-out."
+    context: "Automatic terminal-stdout paging, separate keyboard terminal, bounded safe input pump, coalesced complete-source refresh, sticky input errors and dump opt-out implemented/documented. Independent findings drove owned close-on-exec document input, keyboard fd 0 and explicit editor stdin; extracted debug-package evidence drove multiplexed readiness waiting instead of a fixed drain delay. Final characterization is in docs/USAGE.md."
+    purpose: "Add readiness-driven bounded ingestion and coalesced complete-source refresh to the existing viewer; document automatic routing and dump opt-out."
+    expected_outcome: "Add readiness-driven bounded ingestion and coalesced complete-source refresh to the existing viewer; document automatic routing and dump opt-out."
     kind: implementation
     status: completed
-    context: "Automatic terminal-stdout paging, separate keyboard terminal, bounded safe input pump, coalesced complete-source refresh, sticky input errors and dump opt-out implemented/documented. Independent findings drove owned close-on-exec document input, keyboard fd 0 and explicit editor stdin; extracted debug-package evidence drove multiplexed readiness waiting instead of a fixed drain delay. Final characterization is in docs/USAGE.md."
-    depends_on: [blad-pager-tests]
-    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066", "REQUIREMENTS.md#R-069", "REQUIREMENTS.md#R-070", "REQUIREMENTS.md#R-071", "REQUIREMENTS.md#R-072"]
-  - id: blad-pager-audit
+    depends_on:
+      - "blad-pager-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-065"
+      - "REQUIREMENTS.md#R-066"
+      - "REQUIREMENTS.md#R-069"
+      - "REQUIREMENTS.md#R-070"
+      - "REQUIREMENTS.md#R-071"
+      - "REQUIREMENTS.md#R-072"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-pager-audit"
     title: "security_audit: stream and terminal ownership"
     description: "Inspect bounded bytes/work, inert controls, exclusive keyboard/document descriptors, sticky failures and terminal/process cleanup."
+    context: "Scoped input/terminal audit and independent source-only observations retained in IMPL.md. Editor pipe theft and an abandoned reader were reproduced and repaired; independent focused reruns pass. Bounds, inert controls, sticky failures, source ownership and tested cleanup covered; no failure-injection, fatal-signal or blanket security certification."
+    purpose: "Inspect bounded bytes/work, inert controls, exclusive keyboard/document descriptors, sticky failures and terminal/process cleanup."
+    expected_outcome: "Inspect bounded bytes/work, inert controls, exclusive keyboard/document descriptors, sticky failures and terminal/process cleanup."
     kind: security-audit
     status: completed
-    context: "Scoped input/terminal audit and independent source-only observations retained in IMPL.md. Editor pipe theft and an abandoned reader were reproduced and repaired; independent focused reruns pass. Bounds, inert controls, sticky failures, source ownership and tested cleanup covered; no failure-injection, fatal-signal or blanket security certification."
-    depends_on: [blad-pager-code]
-    requirements: ["REQUIREMENTS.md#R-069", "REQUIREMENTS.md#R-071", "REQUIREMENTS.md#R-072"]
-  - id: blad-pager-review
+    depends_on:
+      - "blad-pager-code"
+    requirements:
+      - "REQUIREMENTS.md#R-069"
+      - "REQUIREMENTS.md#R-071"
+      - "REQUIREMENTS.md#R-072"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-pager-review"
     title: "compliance_review: independent streaming pager evidence"
     description: "Derive source-only IMPL observations, compare source-blind against intent and test evidence, and retain limits/discrepancies explicitly."
+    context: "Independent source-only observations and separate source-blind comparison are in IMPL.md. Initial traceability gaps have explicit supplemental execution/documentation evidence; concurrent-failure diagnostic preservation remains an identified policy/evidence reservation for human disposition. No intent rewritten to conceal findings, acceptance or blanket certification."
+    purpose: "Derive source-only IMPL observations, compare source-blind against intent and test evidence, and retain limits/discrepancies explicitly."
+    expected_outcome: "Derive source-only IMPL observations, compare source-blind against intent and test evidence, and retain limits/discrepancies explicitly."
     kind: compliance-review
     status: completed
-    context: "Independent source-only observations and separate source-blind comparison are in IMPL.md. Initial traceability gaps have explicit supplemental execution/documentation evidence; concurrent-failure diagnostic preservation remains an identified policy/evidence reservation for human disposition. No intent rewritten to conceal findings, acceptance or blanket certification."
-    depends_on: [blad-pager-audit]
-    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066", "REQUIREMENTS.md#R-069", "REQUIREMENTS.md#R-070", "REQUIREMENTS.md#R-071", "REQUIREMENTS.md#R-072"]
-  - id: blad-keybindings-tests
+    depends_on:
+      - "blad-pager-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-065"
+      - "REQUIREMENTS.md#R-066"
+      - "REQUIREMENTS.md#R-069"
+      - "REQUIREMENTS.md#R-070"
+      - "REQUIREMENTS.md#R-071"
+      - "REQUIREMENTS.md#R-072"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-keybindings-tests"
     title: "write_tests: simplified viewer keys"
     description: "Pin help-only question mark, inert p/f/F5, direct Ctrl+R regex search, modeless navigation and save-driven reload."
+    context: "Help-only question mark, inert reload/f and direct Ctrl+R regex entry regressions failed before their fixes; both final feature configurations pass all 46 PTY cases."
+    purpose: "Pin help-only question mark, inert p/f/F5, direct Ctrl+R regex search, modeless navigation and save-driven reload."
+    expected_outcome: "Pin help-only question mark, inert p/f/F5, direct Ctrl+R regex search, modeless navigation and save-driven reload."
     kind: test
     status: completed
-    context: "Help-only question mark, inert reload/f and direct Ctrl+R regex entry regressions failed before their fixes; both final feature configurations pass all 46 PTY cases."
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-064", "REQUIREMENTS.md#R-068"]
-  - id: blad-keybindings-code
+    requirements:
+      - "REQUIREMENTS.md#R-048"
+      - "REQUIREMENTS.md#R-054"
+      - "REQUIREMENTS.md#R-064"
+      - "REQUIREMENTS.md#R-068"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-keybindings-code"
     title: "implement_code: modeless navigation and automatic-only reload"
     description: "Remove retired dispatch/state and align README, help and user guide with the approved keybindings."
+    context: "Removed backward-search entry, p alias, f mode and manual reload state; Ctrl+R now enters regex search or toggles inside a prompt. README/help/user guide aligned; default and sessions suites pass."
+    purpose: "Remove retired dispatch/state and align README, help and user guide with the approved keybindings."
+    expected_outcome: "Remove retired dispatch/state and align README, help and user guide with the approved keybindings."
     kind: implementation
     status: completed
-    context: "Removed backward-search entry, p alias, f mode and manual reload state; Ctrl+R now enters regex search or toggles inside a prompt. README/help/user guide aligned; default and sessions suites pass."
-    depends_on: [blad-keybindings-tests]
-    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-052", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-064", "REQUIREMENTS.md#R-068"]
-  - id: blad-keybindings-audit
+    depends_on:
+      - "blad-keybindings-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-048"
+      - "REQUIREMENTS.md#R-052"
+      - "REQUIREMENTS.md#R-054"
+      - "REQUIREMENTS.md#R-064"
+      - "REQUIREMENTS.md#R-068"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-keybindings-audit"
     title: "security_audit: key dispatch and reload preservation"
     description: "Inspect mode removal and retained bounded descriptor reads, visible errors and terminal ownership; no new authority."
+    context: "Scoped implementer inspection and independent source observation: no new process, dependency, write authority or reload reader. Watcher-driven transactions, visible errors and terminal ownership retained. No whole-component independent security certification claimed."
+    purpose: "Inspect mode removal and retained bounded descriptor reads, visible errors and terminal ownership; no new authority."
+    expected_outcome: "Inspect mode removal and retained bounded descriptor reads, visible errors and terminal ownership; no new authority."
     kind: security-audit
     status: completed
-    context: "Scoped implementer inspection and independent source observation: no new process, dependency, write authority or reload reader. Watcher-driven transactions, visible errors and terminal ownership retained. No whole-component independent security certification claimed."
-    depends_on: [blad-keybindings-code]
-    requirements: ["REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-064", "REQUIREMENTS.md#R-068"]
-  - id: blad-keybindings-review
+    depends_on:
+      - "blad-keybindings-code"
+    requirements:
+      - "REQUIREMENTS.md#R-054"
+      - "REQUIREMENTS.md#R-064"
+      - "REQUIREMENTS.md#R-068"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-keybindings-review"
     title: "compliance_review: independent scoped keybinding evidence"
     description: "Derive a source-only implementation supplement and compare source-blind against revised intent and execution evidence."
+    context: "Independent source-only observations and a separate source-blind comparison retained in IMPL.md; no concrete scoped discrepancy identified. Finite PTY/render-failure/modifier coverage limits remain explicit; no human acceptance or whole-component certification."
+    purpose: "Derive a source-only implementation supplement and compare source-blind against revised intent and execution evidence."
+    expected_outcome: "Derive a source-only implementation supplement and compare source-blind against revised intent and execution evidence."
     kind: compliance-review
     status: completed
-    context: "Independent source-only observations and a separate source-blind comparison retained in IMPL.md; no concrete scoped discrepancy identified. Finite PTY/render-failure/modifier coverage limits remain explicit; no human acceptance or whole-component certification."
-    depends_on: [blad-keybindings-audit]
-    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-052", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-064", "REQUIREMENTS.md#R-068"]
-  - id: blad-package-pty-tests
+    depends_on:
+      - "blad-keybindings-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-048"
+      - "REQUIREMENTS.md#R-052"
+      - "REQUIREMENTS.md#R-054"
+      - "REQUIREMENTS.md#R-064"
+      - "REQUIREMENTS.md#R-068"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-package-pty-tests"
     title: "write_tests: delayed PTY input processing"
     description: "Reproduce the idle-poll race with a temporarily stopped viewer before changing frame synchronization."
+    context: "Delayed viewer input reproduced the false completion deterministically: the old optional helper returned after 100 ms with the stale footer."
+    purpose: "Reproduce the idle-poll race with a temporarily stopped viewer before changing frame synchronization."
+    expected_outcome: "Reproduce the idle-poll race with a temporarily stopped viewer before changing frame synchronization."
     kind: test
     status: completed
-    context: "Delayed viewer input reproduced the false completion deterministically: the old optional helper returned after 100 ms with the stale footer."
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-063"]
-  - id: blad-package-pty-code
+    requirements:
+      - "REQUIREMENTS.md#R-063"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-package-pty-code"
     title: "implement_code: explicit redraw synchronization"
     description: "Wait for a complete bounded frame for redraw actions; observe each themed tab switch independently."
+    context: "Added required-frame input for successful editor/theme actions; tab switches are asserted independently. Both toolchains pass all 44 PTY tests and both extracted feature suites/install checks."
+    purpose: "Wait for a complete bounded frame for redraw actions; observe each themed tab switch independently."
+    expected_outcome: "Wait for a complete bounded frame for redraw actions; observe each themed tab switch independently."
     kind: implementation
     status: completed
-    context: "Added required-frame input for successful editor/theme actions; tab switches are asserted independently. Both toolchains pass all 44 PTY tests and both extracted feature suites/install checks."
-    depends_on: [blad-package-pty-tests]
-    requirements: ["REQUIREMENTS.md#R-063"]
-  - id: blad-package-pty-audit
+    depends_on:
+      - "blad-package-pty-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-063"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-package-pty-audit"
     title: "security_audit: PTY test process ownership"
     description: "Check stopped-child resumption and cleanup, bounded waits and unchanged runtime authority."
+    context: "No runtime source, authority or dependency changes. The scoped resumer joins before Viewer cleanup, including during unwinding; existing five-second frame and child-exit bounds remain."
+    purpose: "Check stopped-child resumption and cleanup, bounded waits and unchanged runtime authority."
+    expected_outcome: "Check stopped-child resumption and cleanup, bounded waits and unchanged runtime authority."
     kind: security-audit
     status: completed
-    context: "No runtime source, authority or dependency changes. The scoped resumer joins before Viewer cleanup, including during unwinding; existing five-second frame and child-exit bounds remain."
-    depends_on: [blad-package-pty-code]
-    requirements: ["REQUIREMENTS.md#R-063"]
-  - id: blad-package-pty-review
+    depends_on:
+      - "blad-package-pty-code"
+    requirements:
+      - "REQUIREMENTS.md#R-063"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-package-pty-review"
     title: "compliance_review: extracted-package synchronization evidence"
     description: "Retain independent source observation and source-blind comparison of the narrow harness repair."
+    context: "Independent single-file source observation and separate source-blind comparison retained in IMPL.md. Narrow R-063 evidence agrees; end-marker acknowledgement limits, broader design wording and pre-existing exit-diagnostic race remain explicit. No runtime change, blanket compliance or acceptance claimed."
+    purpose: "Retain independent source observation and source-blind comparison of the narrow harness repair."
+    expected_outcome: "Retain independent source observation and source-blind comparison of the narrow harness repair."
     kind: compliance-review
     status: completed
-    context: "Independent single-file source observation and separate source-blind comparison retained in IMPL.md. Narrow R-063 evidence agrees; end-marker acknowledgement limits, broader design wording and pre-existing exit-diagnostic race remain explicit. No runtime change, blanket compliance or acceptance claimed."
-    depends_on: [blad-package-pty-audit]
-    requirements: ["REQUIREMENTS.md#R-063"]
-  - id: blad-readiness-tests
+    depends_on:
+      - "blad-package-pty-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-063"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-readiness-tests"
     title: "write_tests: release-readiness regressions"
     description: "Pin documented reverse search and nonblocking visible log-destination failures."
+    context: "Logging fallback, backward search and independently found stale regex-toggle regressions failed first; final source and extracted feature suites pass."
+    purpose: "Pin documented reverse search and nonblocking visible log-destination failures."
+    expected_outcome: "Pin documented reverse search and nonblocking visible log-destination failures."
     kind: test
     status: completed
-    context: "Logging fallback, backward search and independently found stale regex-toggle regressions failed first; final source and extracted feature suites pass."
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-067"]
-  - id: blad-readiness-code
+    requirements:
+      - "REQUIREMENTS.md#R-048"
+      - "REQUIREMENTS.md#R-067"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-readiness-code"
     title: "implement_code: release-readiness repairs"
     description: "Repair key dispatch/log initialization, align public docs and extend archive smoke gates."
+    context: "Key dispatch, retained nonblocking log descriptors, public docs/rustdoc and installed stdin/redirected smoke gates repaired; final stable/MSRV feature matrix, strict lint/docs, downstream checks and standalone archive installs pass."
+    purpose: "Repair key dispatch/log initialization, align public docs and extend archive smoke gates."
+    expected_outcome: "Repair key dispatch/log initialization, align public docs and extend archive smoke gates."
     kind: implementation
     status: completed
-    context: "Key dispatch, retained nonblocking log descriptors, public docs/rustdoc and installed stdin/redirected smoke gates repaired; final stable/MSRV feature matrix, strict lint/docs, downstream checks and standalone archive installs pass."
-    depends_on: [blad-readiness-tests]
-    requirements: ["REQUIREMENTS.md#R-062", "REQUIREMENTS.md#R-063", "REQUIREMENTS.md#R-067"]
-  - id: blad-readiness-audit
+    depends_on:
+      - "blad-readiness-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-062"
+      - "REQUIREMENTS.md#R-063"
+      - "REQUIREMENTS.md#R-067"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-readiness-audit"
     title: "security_audit: publication boundaries"
     description: "Inspect retained log descriptors, explicit failures and package authority; retain limitations."
+    context: "Scoped implementer inspection plus independent source observation retained. Logging uses one regular no-follow descriptor with direct escaped fallback and no recursive writer/mutex. Offline dependency/license policy passes; no fresh advisory or whole-component independent security certification claimed."
+    purpose: "Inspect retained log descriptors, explicit failures and package authority; retain limitations."
+    expected_outcome: "Inspect retained log descriptors, explicit failures and package authority; retain limitations."
     kind: security-audit
     status: completed
-    context: "Scoped implementer inspection plus independent source observation retained. Logging uses one regular no-follow descriptor with direct escaped fallback and no recursive writer/mutex. Offline dependency/license policy passes; no fresh advisory or whole-component independent security certification claimed."
-    depends_on: [blad-readiness-code]
-    requirements: ["REQUIREMENTS.md#R-063", "REQUIREMENTS.md#R-067"]
-  - id: blad-readiness-review
+    depends_on:
+      - "blad-readiness-code"
+    requirements:
+      - "REQUIREMENTS.md#R-063"
+      - "REQUIREMENTS.md#R-067"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-readiness-review"
     title: "compliance_review: independent release-readiness evidence"
     description: "Derive source-only observations, compare source-blind with intent and retain publication prerequisites."
+    context: "Independent source observer, final narrow supplement and separate source-blind comparison recorded in IMPL.md. Two historical design wording discrepancies and maintainer/external publication gates remain explicit; no acceptance or blanket compliance. Additional labelled matrix/native runs address original quiet-log attribution limits."
+    purpose: "Derive source-only observations, compare source-blind with intent and retain publication prerequisites."
+    expected_outcome: "Derive source-only observations, compare source-blind with intent and retain publication prerequisites."
     kind: compliance-review
     status: completed
-    context: "Independent source observer, final narrow supplement and separate source-blind comparison recorded in IMPL.md. Two historical design wording discrepancies and maintainer/external publication gates remain explicit; no acceptance or blanket compliance. Additional labelled matrix/native runs address original quiet-log attribution limits."
-    depends_on: [blad-readiness-audit]
-    requirements: ["REQUIREMENTS.md#R-063", "REQUIREMENTS.md#R-064", "REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066", "REQUIREMENTS.md#R-067"]
-  - id: blad-pipe-tests
+    depends_on:
+      - "blad-readiness-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-063"
+      - "REQUIREMENTS.md#R-064"
+      - "REQUIREMENTS.md#R-065"
+      - "REQUIREMENTS.md#R-066"
+      - "REQUIREMENTS.md#R-067"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-pipe-tests"
     title: "write_tests: Unix pipelines"
     description: "Pin implicit/explicit stdin, limits, ordered mixed sources, TTY routing and head/closed-pipe behavior."
+    context: "Implicit stdin and head regressions failed first. Both feature-mode CLI suites now cover real cat/head pipes, exact 16 MiB stdin, malformed/oversized sources, TTY routing, closed session stdout and non-pipe write errors."
+    purpose: "Pin implicit/explicit stdin, limits, ordered mixed sources, TTY routing and head/closed-pipe behavior."
+    expected_outcome: "Pin implicit/explicit stdin, limits, ordered mixed sources, TTY routing and head/closed-pipe behavior."
     kind: test
     status: completed
-    context: "Implicit stdin and head regressions failed first. Both feature-mode CLI suites now cover real cat/head pipes, exact 16 MiB stdin, malformed/oversized sources, TTY routing, closed session stdout and non-pipe write errors."
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066"]
-  - id: blad-pipe-code
+    requirements:
+      - "REQUIREMENTS.md#R-065"
+      - "REQUIREMENTS.md#R-066"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-pipe-code"
     title: "implement_code: finite stdin and graceful stdout"
     description: "Load bounded stdin, default noninteractive output to plain and treat only BrokenPipe as quiet CLI success."
+    context: "Bounded ordered stdin snapshots, plain defaults, explicit style override and BrokenPipe-only CLI suppression implemented; all-feature strict lint passes."
+    purpose: "Load bounded stdin, default noninteractive output to plain and treat only BrokenPipe as quiet CLI success."
+    expected_outcome: "Load bounded stdin, default noninteractive output to plain and treat only BrokenPipe as quiet CLI success."
     kind: implementation
     status: completed
-    context: "Bounded ordered stdin snapshots, plain defaults, explicit style override and BrokenPipe-only CLI suppression implemented; all-feature strict lint passes."
-    depends_on: [blad-pipe-tests]
-    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066"]
-  - id: blad-pipe-audit
+    depends_on:
+      - "blad-pipe-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-065"
+      - "REQUIREMENTS.md#R-066"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-pipe-audit"
     title: "security_audit: pipeline boundaries"
     description: "Inspect bounded input, explicit failures and suppression limited to downstream pipe closure."
+    context: "Scoped implementer inspection: shared limit/probe reader, no unused stdin consumption, no terminal reads for '-', no fallback on malformed sources. Only BrokenPipe is suppressed and library errors still propagate. EOF and kernel I/O remain unbounded. Independent observation follows in release-readiness review."
+    purpose: "Inspect bounded input, explicit failures and suppression limited to downstream pipe closure."
+    expected_outcome: "Inspect bounded input, explicit failures and suppression limited to downstream pipe closure."
     kind: security-audit
     status: completed
-    context: "Scoped implementer inspection: shared limit/probe reader, no unused stdin consumption, no terminal reads for '-', no fallback on malformed sources. Only BrokenPipe is suppressed and library errors still propagate. EOF and kernel I/O remain unbounded. Independent observation follows in release-readiness review."
-    depends_on: [blad-pipe-code]
-    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066"]
-  - id: blad-pipe-review
+    depends_on:
+      - "blad-pipe-code"
+    requirements:
+      - "REQUIREMENTS.md#R-065"
+      - "REQUIREMENTS.md#R-066"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-pipe-review"
     title: "compliance_review: independent pipeline evidence"
     description: "Derive source-only observations and compare source-blind against local intent."
+    context: "Independent source observation and separate source-blind comparison find scoped agreement for finite bounded stdin/plain defaults/BrokenPipe; final archive CLI suites and both installed feature modes pass. EOF/latency/memory and publication limits retained in IMPL.md."
+    purpose: "Derive source-only observations and compare source-blind against local intent."
+    expected_outcome: "Derive source-only observations and compare source-blind against local intent."
     kind: compliance-review
     status: completed
-    context: "Independent source observation and separate source-blind comparison find scoped agreement for finite bounded stdin/plain defaults/BrokenPipe; final archive CLI suites and both installed feature modes pass. EOF/latency/memory and publication limits retained in IMPL.md."
-    depends_on: [blad-pipe-audit]
-    requirements: ["REQUIREMENTS.md#R-065", "REQUIREMENTS.md#R-066"]
-  - id: blad-watch-tests
+    depends_on:
+      - "blad-pipe-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-065"
+      - "REQUIREMENTS.md#R-066"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-watch-tests"
     title: "write_tests: seamless file reload"
     description: "Pin in-place/atomic saves, retained offsets/search, inactive tabs and error recovery in real PTYs."
+    context: "Three PTY automatic-reload regressions failed first; debounce/identity unit checks and all eight automatic/manual reload PTY tests now pass."
+    purpose: "Pin in-place/atomic saves, retained offsets/search, inactive tabs and error recovery in real PTYs."
+    expected_outcome: "Pin in-place/atomic saves, retained offsets/search, inactive tabs and error recovery in real PTYs."
     kind: test
     status: completed
-    context: "Three PTY automatic-reload regressions failed first; debounce/identity unit checks and all eight automatic/manual reload PTY tests now pass."
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-064"]
-  - id: blad-watch-code
+    requirements:
+      - "REQUIREMENTS.md#R-064"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-watch-code"
     title: "implement_code: debounced automatic reload"
     description: "Poll active file metadata in the event loop and share transactional reload across automatic and explicit paths."
+    context: "Shared transactional reload, event-loop polling and bounded source reads implemented; strict all-feature lint passes."
+    purpose: "Poll active file metadata in the event loop and share transactional reload across automatic and explicit paths."
+    expected_outcome: "Poll active file metadata in the event loop and share transactional reload across automatic and explicit paths."
     kind: implementation
     status: completed
-    context: "Shared transactional reload, event-loop polling and bounded source reads implemented; strict all-feature lint passes."
-    depends_on: [blad-watch-tests]
-    requirements: ["REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-064"]
-  - id: blad-watch-audit
+    depends_on:
+      - "blad-watch-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-054"
+      - "REQUIREMENTS.md#R-064"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-watch-audit"
     title: "security_audit: reload ownership"
     description: "Inspect descriptor reuse, polling bounds, failure visibility and terminal ownership."
+    context: "Scoped implementer inspection retains no-follow descriptor reads, per-file bounds and terminal ownership; no new worker, process, dependency or write authority. Metadata stability is not a snapshot or hard latency bound. Independent observation follows in release-readiness review."
+    purpose: "Inspect descriptor reuse, polling bounds, failure visibility and terminal ownership."
+    expected_outcome: "Inspect descriptor reuse, polling bounds, failure visibility and terminal ownership."
     kind: security-audit
     status: completed
-    context: "Scoped implementer inspection retains no-follow descriptor reads, per-file bounds and terminal ownership; no new worker, process, dependency or write authority. Metadata stability is not a snapshot or hard latency bound. Independent observation follows in release-readiness review."
-    depends_on: [blad-watch-code]
-    requirements: ["REQUIREMENTS.md#R-056", "REQUIREMENTS.md#R-057", "REQUIREMENTS.md#R-064"]
-  - id: blad-watch-review
+    depends_on:
+      - "blad-watch-code"
+    requirements:
+      - "REQUIREMENTS.md#R-056"
+      - "REQUIREMENTS.md#R-057"
+      - "REQUIREMENTS.md#R-064"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-watch-review"
     title: "compliance_review: independent reload evidence"
     description: "Derive source-only observations and compare source-blind against intent."
+    context: "Independent source observation and separate source-blind comparison find scoped agreement; final archive PTY suites include automatic saves, offsets/search, atomic replacement/inactive tabs and recovery. No snapshot, source-anchor or hard deadline claim."
+    purpose: "Derive source-only observations and compare source-blind against intent."
+    expected_outcome: "Derive source-only observations and compare source-blind against intent."
     kind: compliance-review
     status: completed
-    context: "Independent source observation and separate source-blind comparison find scoped agreement; final archive PTY suites include automatic saves, offsets/search, atomic replacement/inactive tabs and recovery. No snapshot, source-anchor or hard deadline claim."
-    depends_on: [blad-watch-audit]
-    requirements: ["REQUIREMENTS.md#R-064"]
-  - id: blad-publication-tests
+    depends_on:
+      - "blad-watch-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-064"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-publication-tests"
     title: "write_tests: standalone publication boundaries"
     description: "Pin package payload, local fixtures, task markers and explicit session input failures."
+    context: "Fail-first package/task/session regressions were reproduced; final default/sessions suites and both extracted-package test suites pass. PTY harness now waits for synchronized frames instead of terminal-setup bytes."
     purpose: "Make publication readiness measurable before production changes"
     expected_outcome: "Regression evidence fails before corresponding implementation"
-    context: "Fail-first package/task/session regressions were reproduced; final default/sessions suites and both extracted-package test suites pass. PTY harness now waits for synchronized frames instead of terminal-setup bytes."
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-059", "REQUIREMENTS.md#R-060", "REQUIREMENTS.md#R-061"]
-  - id: blad-publication-code
+    requirements:
+      - "REQUIREMENTS.md#R-059"
+      - "REQUIREMENTS.md#R-060"
+      - "REQUIREMENTS.md#R-061"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-publication-code"
     title: "implement_code: standalone release preparation"
     description: "Prepare package identity, docs, payload, semantic markers, session reliability and CI."
+    context: "Package renamed without changing binary/library names; metadata/docs/license/payload, semantic task markers, descriptor-relative sessions and standalone CI prepared. Stable/MSRV, downstream and isolated install gates pass. Unresolved acceptance findings remain."
     purpose: "Release only Blad without peer installation"
     expected_outcome: "Both feature modes and extracted-package checks pass"
-    context: "Package renamed without changing binary/library names; metadata/docs/license/payload, semantic task markers, descriptor-relative sessions and standalone CI prepared. Stable/MSRV, downstream and isolated install gates pass. Unresolved acceptance findings remain."
     kind: implementation
     status: completed
-    depends_on: [blad-publication-tests]
-    requirements: ["REQUIREMENTS.md#R-059", "REQUIREMENTS.md#R-060", "REQUIREMENTS.md#R-061", "REQUIREMENTS.md#R-062", "REQUIREMENTS.md#R-063"]
-  - id: blad-publication-audit
+    depends_on:
+      - "blad-publication-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-059"
+      - "REQUIREMENTS.md#R-060"
+      - "REQUIREMENTS.md#R-061"
+      - "REQUIREMENTS.md#R-062"
+      - "REQUIREMENTS.md#R-063"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-publication-audit"
     title: "security_audit: standalone release boundaries"
     description: "Independently inspect retained session paths, failures, package contents and release authority."
+    context: "Independent security review found tag/branch checkout ambiguity and local Python module spoofing of the accepted-SHA guard. Explicit tag refs and isolated Python before repository-controlled execution fix both; reviewer verified closure. Live publishing authority remains unverified."
     purpose: "Find actionable security defects without claiming universal assurance"
     expected_outcome: "Findings addressed or explicitly retained"
-    context: "Independent security review found tag/branch checkout ambiguity and local Python module spoofing of the accepted-SHA guard. Explicit tag refs and isolated Python before repository-controlled execution fix both; reviewer verified closure. Live publishing authority remains unverified."
     kind: security-audit
     status: completed
-    depends_on: [blad-publication-code]
-    requirements: ["REQUIREMENTS.md#R-061", "REQUIREMENTS.md#R-063"]
-  - id: blad-publication-review
+    depends_on:
+      - "blad-publication-code"
+    requirements:
+      - "REQUIREMENTS.md#R-061"
+      - "REQUIREMENTS.md#R-063"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-publication-review"
     title: "compliance_review: independent release evidence"
     description: "Derive a source-only implementation record and compare source-blind against intent and evidence."
+    context: "Independent source-only observation and separate source-blind comparison retained in IMPL.md with final source/intent/evidence hashes. Engineering evidence supports the increment; F-01 export authority, F-02 entry-kind intent, I-01 help interpretation and retained input/key decisions need human disposition. No acceptance or publication."
     purpose: "Keep observation, intent and acceptance distinct"
     expected_outcome: "Independent observations and unresolved release blockers retained"
-    context: "Independent source-only observation and separate source-blind comparison retained in IMPL.md with final source/intent/evidence hashes. Engineering evidence supports the increment; F-01 export authority, F-02 entry-kind intent, I-01 help interpretation and retained input/key decisions need human disposition. No acceptance or publication."
     kind: compliance-review
     status: completed
-    depends_on: [blad-publication-audit]
-    requirements: ["REQUIREMENTS.md#R-059", "REQUIREMENTS.md#R-060", "REQUIREMENTS.md#R-061", "REQUIREMENTS.md#R-062", "REQUIREMENTS.md#R-063"]
-  - id: blad-file-input-tests
+    depends_on:
+      - "blad-publication-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-059"
+      - "REQUIREMENTS.md#R-060"
+      - "REQUIREMENTS.md#R-061"
+      - "REQUIREMENTS.md#R-062"
+      - "REQUIREMENTS.md#R-063"
+    timestamps:
+      created_at: "2026-10-25T00:00:00Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-file-input-tests"
     title: "write_tests: bounded regular-file inputs"
     description: "Pin source/theme limits, descriptor rules and recoverable loading failures."
+    context: "Oversized reload acceptance and initial/theme/link/editor FIFO regressions reproduced before code; exact document/theme bounds, probe counts and failure recovery now pass."
     purpose: "Prevent inconsistent file-read behavior before further viewer features"
     expected_outcome: "Input regressions fail before the corresponding reader changes"
-    context: "Oversized reload acceptance and initial/theme/link/editor FIFO regressions reproduced before code; exact document/theme bounds, probe counts and failure recovery now pass."
-    timestamps: {created_at: "2026-10-23T16:01:34Z", updated_at: "2026-10-23T16:09:07Z", completed_at: "2026-10-23T16:09:07Z"}
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-056", "REQUIREMENTS.md#R-057", "REQUIREMENTS.md#R-058"]
-  - id: blad-file-input-code
+    requirements:
+      - "REQUIREMENTS.md#R-056"
+      - "REQUIREMENTS.md#R-057"
+      - "REQUIREMENTS.md#R-058"
+    timestamps:
+      created_at: "2026-10-23T16:01:34Z"
+      updated_at: "2026-10-23T16:09:07Z"
+      completed_at: "2026-10-23T16:09:07Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-file-input-code"
     title: "implement_code: shared bounded file reader"
     description: "Apply one private descriptor reader to initial/link/reload/editor/theme file reads."
+    context: "Shared bounded descriptor reads wired to all standalone document and theme paths; both feature configurations and strict lint/workspace checks pass. No streaming guarantee."
     purpose: "Keep all relevant file inputs bounded and explicit without changing editor failure semantics"
     expected_outcome: "Approved input-boundary and existing behavior tests pass"
-    context: "Shared bounded descriptor reads wired to all standalone document and theme paths; both feature configurations and strict lint/workspace checks pass. No streaming guarantee."
-    timestamps: {created_at: "2026-10-23T16:01:34Z", updated_at: "2026-10-23T16:09:07Z", completed_at: "2026-10-23T16:09:07Z"}
     kind: implementation
     status: completed
-    depends_on: [blad-file-input-tests]
-    requirements: ["REQUIREMENTS.md#R-056", "REQUIREMENTS.md#R-057", "REQUIREMENTS.md#R-058"]
-  - id: blad-file-input-audit
+    depends_on:
+      - "blad-file-input-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-056"
+      - "REQUIREMENTS.md#R-057"
+      - "REQUIREMENTS.md#R-058"
+    timestamps:
+      created_at: "2026-10-23T16:01:34Z"
+      updated_at: "2026-10-23T16:09:07Z"
+      completed_at: "2026-10-23T16:09:07Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-file-input-audit"
     title: "security_audit: bounded input ownership"
     description: "Inspect byte caps, same-descriptor reads, canonicalization, diagnostics and failure cleanup."
+    context: "Scoped implementer inspection and explicit device/kernel/ancestor/memory/latency limitations retained in DESIGN.md; not an independent security or whole-component certification."
     purpose: "Keep input authority and resource claims narrower than the actual boundary"
     expected_outcome: "Scoped findings and unresolved limits recorded"
-    context: "Scoped implementer inspection and explicit device/kernel/ancestor/memory/latency limitations retained in DESIGN.md; not an independent security or whole-component certification."
-    timestamps: {created_at: "2026-10-23T16:01:34Z", updated_at: "2026-10-23T16:09:07Z", completed_at: "2026-10-23T16:09:07Z"}
     kind: security-audit
     status: completed
-    depends_on: [blad-file-input-code]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-056", "REQUIREMENTS.md#R-057"]
-  - id: blad-file-input-review
+    depends_on:
+      - "blad-file-input-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-056"
+      - "REQUIREMENTS.md#R-057"
+    timestamps:
+      created_at: "2026-10-23T16:01:34Z"
+      updated_at: "2026-10-23T16:09:07Z"
+      completed_at: "2026-10-23T16:09:07Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-file-input-review"
     title: "compliance_review: independent file-input evidence"
     description: "Derive source-only observations and compare source-blind against the exact local intent."
+    context: "Source-only observation and separate source-blind comparison retained in IMPL.md. D-01 streaming language marked historical/unimplemented; D-02 conservative 16 MiB policy and earlier A-01/A-02 remain for human disposition. No acceptance."
     purpose: "Separate observed behavior from implementation intent and retain arbitration"
     expected_outcome: "Independent observations, discrepancies and evidence limits persisted"
-    context: "Source-only observation and separate source-blind comparison retained in IMPL.md. D-01 streaming language marked historical/unimplemented; D-02 conservative 16 MiB policy and earlier A-01/A-02 remain for human disposition. No acceptance."
-    timestamps: {created_at: "2026-10-23T16:01:34Z", updated_at: "2026-10-23T16:14:03Z", completed_at: "2026-10-23T16:14:03Z"}
     kind: compliance-review
     status: completed
-    depends_on: [blad-file-input-audit]
-    requirements: ["REQUIREMENTS.md#R-056", "REQUIREMENTS.md#R-057", "REQUIREMENTS.md#R-058"]
-  - id: blad-reliability-tests
+    depends_on:
+      - "blad-file-input-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-056"
+      - "REQUIREMENTS.md#R-057"
+      - "REQUIREMENTS.md#R-058"
+    timestamps:
+      created_at: "2026-10-23T16:01:34Z"
+      updated_at: "2026-10-23T16:14:03Z"
+      completed_at: "2026-10-23T16:14:03Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-reliability-tests"
     title: "write_tests: viewer reliability follow-up"
     description: "Pin launcher deadlines/cleanup, transactional reload and Unicode display-cell PTY behavior."
+    context: "Reload/Unicode and final-symlink regressions failed before fixes; deadline/cleanup and final feature-matrix evidence retained in IMPL.md."
     purpose: "Address observed reliability and evidence gaps before more navigation features"
     expected_outcome: "New regressions fail before the corresponding code changes"
-    context: "Reload/Unicode and final-symlink regressions failed before fixes; deadline/cleanup and final feature-matrix evidence retained in IMPL.md."
-    timestamps: {created_at: "2026-10-23T15:25:00Z", updated_at: "2026-10-23T15:43:54Z", completed_at: "2026-10-23T15:43:54Z"}
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-053", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-055"]
-  - id: blad-reliability-code
+    requirements:
+      - "REQUIREMENTS.md#R-053"
+      - "REQUIREMENTS.md#R-054"
+      - "REQUIREMENTS.md#R-055"
+    timestamps:
+      created_at: "2026-10-23T15:25:00Z"
+      updated_at: "2026-10-23T15:43:54Z"
+      completed_at: "2026-10-23T15:43:54Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-reliability-code"
     title: "implement_code: bounded launch and explicit reload"
     description: "Bound launcher waiting, retain safe reload state and upgrade the Unicode test screen."
+    context: "Five-second launcher deadline, transactional descriptor-validated reload and Unicode-aware PTY cells; no async worker or automatic following."
     purpose: "Keep the viewer recoverable and make terminal geometry evidence meaningful"
     expected_outcome: "New and existing viewer coverage passes"
-    context: "Five-second launcher deadline, transactional descriptor-validated reload and Unicode-aware PTY cells; no async worker or automatic following."
-    timestamps: {created_at: "2026-10-23T15:25:00Z", updated_at: "2026-10-23T15:43:54Z", completed_at: "2026-10-23T15:43:54Z"}
     kind: implementation
     status: completed
-    depends_on: [blad-reliability-tests]
-    requirements: ["REQUIREMENTS.md#R-053", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-055"]
-  - id: blad-reliability-audit
+    depends_on:
+      - "blad-reliability-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-053"
+      - "REQUIREMENTS.md#R-054"
+      - "REQUIREMENTS.md#R-055"
+    timestamps:
+      created_at: "2026-10-23T15:25:00Z"
+      updated_at: "2026-10-23T15:43:54Z"
+      completed_at: "2026-10-23T15:43:54Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-reliability-audit"
     title: "security_audit: reload and launcher ownership"
     description: "Inspect child cleanup, bounded capture, reload failure state and inert diagnostics."
+    context: "Scoped implementer inspection and corrected reload pathname race retained in DESIGN.md/IMPL.md; direct-child, filesystem and terminal-model limits remain explicit. Not a whole-component certification."
     purpose: "Preserve explicit subprocess authority and document usability"
     expected_outcome: "Scoped findings and limitations retained"
-    context: "Scoped implementer inspection and corrected reload pathname race retained in DESIGN.md/IMPL.md; direct-child, filesystem and terminal-model limits remain explicit. Not a whole-component certification."
-    timestamps: {created_at: "2026-10-23T15:25:00Z", updated_at: "2026-10-23T15:43:54Z", completed_at: "2026-10-23T15:43:54Z"}
     kind: security-audit
     status: completed
-    depends_on: [blad-reliability-code]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-053", "REQUIREMENTS.md#R-054"]
-  - id: blad-reliability-review
+    depends_on:
+      - "blad-reliability-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-053"
+      - "REQUIREMENTS.md#R-054"
+    timestamps:
+      created_at: "2026-10-23T15:25:00Z"
+      updated_at: "2026-10-23T15:43:54Z"
+      completed_at: "2026-10-23T15:43:54Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-reliability-review"
     title: "compliance_review: reliability evidence"
     description: "Derive independent source observations and compare source-blind against the follow-up intent."
+    context: "Independent source-only observations and source-blind comparison retained in IMPL.md; initial reload race corrected, no new concrete contradiction identified, finite-evidence reservations and earlier A-01/A-02 remain unresolved."
     purpose: "Keep evidence separate from implementation intent"
     expected_outcome: "Observations, limitations and discrepancies retained for human arbitration"
-    context: "Independent source-only observations and source-blind comparison retained in IMPL.md; initial reload race corrected, no new concrete contradiction identified, finite-evidence reservations and earlier A-01/A-02 remain unresolved."
-    timestamps: {created_at: "2026-10-23T15:25:00Z", updated_at: "2026-10-23T15:45:36Z", completed_at: "2026-10-23T15:45:36Z"}
     kind: compliance-review
     status: completed
-    depends_on: [blad-reliability-audit]
-    requirements: ["REQUIREMENTS.md#R-053", "REQUIREMENTS.md#R-054", "REQUIREMENTS.md#R-055"]
-  - id: blad-production-tests
+    depends_on:
+      - "blad-reliability-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-053"
+      - "REQUIREMENTS.md#R-054"
+      - "REQUIREMENTS.md#R-055"
+    timestamps:
+      created_at: "2026-10-23T15:25:00Z"
+      updated_at: "2026-10-23T15:45:36Z"
+      completed_at: "2026-10-23T15:45:36Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-production-tests"
     title: "write_tests: production viewer interactions"
     description: "Pin precise spans, search direction/regex, spatial links, tab closure and stable frames."
+    context: "Human requested less-like navigation, exact highlights and flicker reduction."
     purpose: "Specify requested viewer behavior before code"
     expected_outcome: "Regressions fail first and then pass"
-    context: "Human requested less-like navigation, exact highlights and flicker reduction."
-    timestamps: {created_at: "2026-10-23T14:30:00Z", updated_at: "2026-10-23T14:42:40Z", completed_at: "2026-10-23T14:42:40Z"}
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-049", "REQUIREMENTS.md#R-050", "REQUIREMENTS.md#R-051", "REQUIREMENTS.md#R-052"]
-  - id: blad-production-code
+    requirements:
+      - "REQUIREMENTS.md#R-048"
+      - "REQUIREMENTS.md#R-049"
+      - "REQUIREMENTS.md#R-050"
+      - "REQUIREMENTS.md#R-051"
+      - "REQUIREMENTS.md#R-052"
+    timestamps:
+      created_at: "2026-10-23T14:30:00Z"
+      updated_at: "2026-10-23T14:42:40Z"
+      completed_at: "2026-10-23T14:42:40Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-production-code"
     title: "implement_code: production viewer interactions"
     description: "Implement occurrence search, precise selection, navigation, close-tab and retained painting."
+    context: "Keep established link keys and explicit regex opt-in."
     purpose: "Deliver predictable keyboard behavior and stable display"
     expected_outcome: "New and existing viewer coverage passes"
-    context: "Keep established link keys and explicit regex opt-in."
-    timestamps: {created_at: "2026-10-23T14:30:00Z", updated_at: "2026-10-23T14:42:40Z", completed_at: "2026-10-23T14:42:40Z"}
     kind: implementation
     status: completed
-    depends_on: [blad-production-tests]
-    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-049", "REQUIREMENTS.md#R-050", "REQUIREMENTS.md#R-051", "REQUIREMENTS.md#R-052"]
-  - id: blad-production-audit
+    depends_on:
+      - "blad-production-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-048"
+      - "REQUIREMENTS.md#R-049"
+      - "REQUIREMENTS.md#R-050"
+      - "REQUIREMENTS.md#R-051"
+      - "REQUIREMENTS.md#R-052"
+    timestamps:
+      created_at: "2026-10-23T14:30:00Z"
+      updated_at: "2026-10-23T14:42:40Z"
+      completed_at: "2026-10-23T14:42:40Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-production-audit"
     title: "security_audit: viewer input and terminal boundaries"
     description: "Inspect bounded regex work, inert diagnostics, row writes and terminal cleanup."
+    context: "Scoped inspection and resource/terminal limitations retained in DESIGN.md; not a whole-component security certification."
     purpose: "Preserve local input and terminal safety"
     expected_outcome: "Scoped findings and limitations recorded"
-    context: "Scoped inspection and resource/terminal limitations retained in DESIGN.md; not a whole-component security certification."
-    timestamps: {created_at: "2026-10-23T14:30:00Z", updated_at: "2026-10-23T14:42:40Z", completed_at: "2026-10-23T14:42:40Z"}
     kind: security-audit
     status: completed
-    depends_on: [blad-production-code]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-051"]
-  - id: blad-production-review
+    depends_on:
+      - "blad-production-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-048"
+      - "REQUIREMENTS.md#R-051"
+    timestamps:
+      created_at: "2026-10-23T14:30:00Z"
+      updated_at: "2026-10-23T14:42:40Z"
+      completed_at: "2026-10-23T14:42:40Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-production-review"
     title: "compliance_review: production viewer evidence"
     description: "Derive source-only observations and compare source-blind with intent and test evidence."
+    context: "Independent observation/comparison and unresolved A-01/A-02 interpretation findings retained in IMPL.md for human arbitration; no automatic acceptance or compliance claim."
     purpose: "Keep evidence independent of implementation intent"
     expected_outcome: "Observations and discrepancies retained for human arbitration"
-    context: "Independent observation/comparison and unresolved A-01/A-02 interpretation findings retained in IMPL.md for human arbitration; no automatic acceptance or compliance claim."
-    timestamps: {created_at: "2026-10-23T14:30:00Z", updated_at: "2026-10-23T14:49:00Z", completed_at: "2026-10-23T14:49:00Z"}
     kind: compliance-review
     status: completed
-    depends_on: [blad-production-audit]
-    requirements: ["REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-049", "REQUIREMENTS.md#R-050", "REQUIREMENTS.md#R-051", "REQUIREMENTS.md#R-052"]
-  - id: blad-standalone-tests
+    depends_on:
+      - "blad-production-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-048"
+      - "REQUIREMENTS.md#R-049"
+      - "REQUIREMENTS.md#R-050"
+      - "REQUIREMENTS.md#R-051"
+      - "REQUIREMENTS.md#R-052"
+    timestamps:
+      created_at: "2026-10-23T14:30:00Z"
+      updated_at: "2026-10-23T14:49:00Z"
+      completed_at: "2026-10-23T14:49:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-standalone-tests"
     title: "write_tests: standalone feature boundary"
     description: "Pin feature-specific CLI surfaces, version, multi-file tabs and browser diagnostics."
+    context: "Human selected opt-in sessions, file-only positional inputs and removal of view/stream."
     purpose: "Specify the human-selected standalone/session boundary"
     expected_outcome: "Regressions fail before production changes"
-    context: "Human selected opt-in sessions, file-only positional inputs and removal of view/stream."
-    timestamps: {created_at: "2026-10-22T22:25:00Z", updated_at: "2026-10-23T05:08:07Z", completed_at: "2026-10-23T05:08:07Z"}
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-044", "REQUIREMENTS.md#R-045", "REQUIREMENTS.md#R-046", "REQUIREMENTS.md#R-047"]
-  - id: blad-standalone-code
+    requirements:
+      - "REQUIREMENTS.md#R-044"
+      - "REQUIREMENTS.md#R-045"
+      - "REQUIREMENTS.md#R-046"
+      - "REQUIREMENTS.md#R-047"
+    timestamps:
+      created_at: "2026-10-22T22:25:00Z"
+      updated_at: "2026-10-23T05:08:07Z"
+      completed_at: "2026-10-23T05:08:07Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-standalone-code"
     title: "implement_code: standalone CLI and session feature"
     description: "Gate session integration, simplify file invocation, stabilize tabs and capture launch diagnostics."
+    context: "No compatibility aliases or live-follow behavior are introduced."
     purpose: "Keep standalone Blad independent and its viewer predictable"
     expected_outcome: "Both feature configurations satisfy the new regressions"
-    context: "No compatibility aliases or live-follow behavior are introduced."
-    timestamps: {created_at: "2026-10-22T22:25:00Z", updated_at: "2026-10-23T05:08:07Z", completed_at: "2026-10-23T05:08:07Z"}
     kind: implementation
     status: completed
-    depends_on: [blad-standalone-tests]
-    requirements: ["REQUIREMENTS.md#R-044", "REQUIREMENTS.md#R-045", "REQUIREMENTS.md#R-046", "REQUIREMENTS.md#R-047"]
-  - id: blad-standalone-audit
+    depends_on:
+      - "blad-standalone-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-044"
+      - "REQUIREMENTS.md#R-045"
+      - "REQUIREMENTS.md#R-046"
+      - "REQUIREMENTS.md#R-047"
+    timestamps:
+      created_at: "2026-10-22T22:25:00Z"
+      updated_at: "2026-10-23T05:08:07Z"
+      completed_at: "2026-10-23T05:08:07Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-standalone-audit"
     title: "security_audit: standalone and browser boundaries"
     description: "Inspect compile gates, file error handling and bounded subprocess diagnostics."
+    context: "Scoped audit and limitations retained in IMPL.md; no whole-component security certification."
     purpose: "Preserve inert terminal output and explicit process authority"
     expected_outcome: "Scoped findings and dispositions retained"
-    context: "Scoped audit and limitations retained in IMPL.md; no whole-component security certification."
-    timestamps: {created_at: "2026-10-22T22:25:00Z", updated_at: "2026-10-23T05:08:07Z", completed_at: "2026-10-23T05:08:07Z"}
     kind: security-audit
     status: completed
-    depends_on: [blad-standalone-code]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-047"]
-  - id: blad-standalone-review
+    depends_on:
+      - "blad-standalone-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-047"
+    timestamps:
+      created_at: "2026-10-22T22:25:00Z"
+      updated_at: "2026-10-23T05:08:07Z"
+      completed_at: "2026-10-23T05:08:07Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-standalone-review"
     title: "compliance_review: standalone boundary evidence"
     description: "Derive clean-source observations and compare them source-blind with the approved increment."
+    context: "Independent observation/comparison retained in IMPL.md; human selected canonical dump deduplication. No Kvist acceptance or receipt."
     purpose: "Keep observed evidence independent of implementation intent"
     expected_outcome: "Evidence and any discrepancies retained for human disposition"
-    context: "Independent observation/comparison retained in IMPL.md; human selected canonical dump deduplication. No Kvist acceptance or receipt."
-    timestamps: {created_at: "2026-10-22T22:25:00Z", updated_at: "2026-10-23T05:08:07Z", completed_at: "2026-10-23T05:08:07Z"}
     kind: compliance-review
     status: completed
-    depends_on: [blad-standalone-audit]
-    requirements: ["REQUIREMENTS.md#R-044", "REQUIREMENTS.md#R-045", "REQUIREMENTS.md#R-046", "REQUIREMENTS.md#R-047"]
-  - id: blad-polish-tests
+    depends_on:
+      - "blad-standalone-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-044"
+      - "REQUIREMENTS.md#R-045"
+      - "REQUIREMENTS.md#R-046"
+      - "REQUIREMENTS.md#R-047"
+    timestamps:
+      created_at: "2026-10-22T22:25:00Z"
+      updated_at: "2026-10-23T05:08:07Z"
+      completed_at: "2026-10-23T05:08:07Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-polish-tests"
     title: "write_tests: viewer polish regressions"
     description: "Cover navigation, tabs, strict theme files, quotes and nested numbering."
+    context: "Human requested review and completion of the viewer improvement list."
     purpose: "Specify accepted polish behavior before production changes"
     expected_outcome: "New regression tests fail first, then cover the repaired behavior"
-    context: "Human requested review and completion of the viewer improvement list."
-    timestamps: {created_at: "2026-10-22T21:10:00Z", updated_at: "2026-10-22T21:17:08Z", completed_at: "2026-10-22T21:17:08Z"}
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-042", "REQUIREMENTS.md#R-043"]
-  - id: blad-polish-code
+    requirements:
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-042"
+      - "REQUIREMENTS.md#R-043"
+    timestamps:
+      created_at: "2026-10-22T21:10:00Z"
+      updated_at: "2026-10-22T21:17:08Z"
+      completed_at: "2026-10-22T21:17:08Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-polish-code"
     title: "implement_code: viewer polish"
     description: "Implement accepted navigation, palette-file and rendering behavior."
+    context: "Includes the directly affected Skott code-panel consumer assertion."
     purpose: "Complete accepted viewer polish without adding another editor"
     expected_outcome: "Navigation, theme-file and rendering regressions pass"
-    context: "Includes the directly affected Skott code-panel consumer assertion."
-    timestamps: {created_at: "2026-10-22T21:10:00Z", updated_at: "2026-10-22T21:23:00Z", completed_at: "2026-10-22T21:23:00Z"}
     kind: implementation
     status: completed
-    depends_on: [blad-polish-tests]
-    requirements: ["REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-042", "REQUIREMENTS.md#R-043"]
-  - id: blad-polish-audit
+    depends_on:
+      - "blad-polish-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-042"
+      - "REQUIREMENTS.md#R-043"
+    timestamps:
+      created_at: "2026-10-22T21:10:00Z"
+      updated_at: "2026-10-22T21:23:00Z"
+      completed_at: "2026-10-22T21:23:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-polish-audit"
     title: "security_audit: viewer polish boundaries"
     description: "Inspect theme bounds, inert text, path decoding and subprocess arguments."
+    context: "Scoped audit and theme diagnostic-control correction recorded in DESIGN.md; no whole-component certification."
     purpose: "Review the increment's input and authority boundaries"
     expected_outcome: "Scoped findings and dispositions retained"
-    context: "Scoped audit and theme diagnostic-control correction recorded in DESIGN.md; no whole-component certification."
-    timestamps: {created_at: "2026-10-22T21:10:00Z", updated_at: "2026-10-22T21:23:00Z", completed_at: "2026-10-22T21:23:00Z"}
     kind: security-audit
     status: completed
-    depends_on: [blad-polish-code]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-042"]
-  - id: blad-polish-review
+    depends_on:
+      - "blad-polish-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-042"
+    timestamps:
+      created_at: "2026-10-22T21:10:00Z"
+      updated_at: "2026-10-22T21:23:00Z"
+      completed_at: "2026-10-22T21:23:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-polish-review"
     title: "compliance_review: viewer polish evidence"
     description: "Derive clean-source observations and compare them source-blind with intent."
+    context: "Independent observations and source-blind comparison are in IMPL.md; human arbitration preserved underscores in heading slugs. No whole-component certification or acceptance."
     purpose: "Keep source observation separate from intended behavior"
     expected_outcome: "Independent observations and discrepancies retained"
-    context: "Independent observations and source-blind comparison are in IMPL.md; human arbitration preserved underscores in heading slugs. No whole-component certification or acceptance."
-    timestamps: {created_at: "2026-10-22T21:10:00Z", updated_at: "2026-10-22T21:29:00Z", completed_at: "2026-10-22T21:29:00Z"}
     kind: compliance-review
     status: completed
-    depends_on: [blad-polish-audit]
-    requirements: ["REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-042", "REQUIREMENTS.md#R-043"]
-  - id: blad-text-p1-tests
+    depends_on:
+      - "blad-polish-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-042"
+      - "REQUIREMENTS.md#R-043"
+    timestamps:
+      created_at: "2026-10-22T21:10:00Z"
+      updated_at: "2026-10-22T21:29:00Z"
+      completed_at: "2026-10-22T21:29:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p1-tests"
     title: "write_tests: themes and plain output"
     description: "Pin palette/capability precedence, all render routes and escape-free dumps."
+    context: "Human accepted TEXT_RENDERING_PLAN.md on 2026-10-21; advisory findings acknowledged in DESIGN.md."
     purpose: "Specify accepted output policy before implementation"
     expected_outcome: "Regressions fail against current theme and dump behavior"
-    context: "Human accepted TEXT_RENDERING_PLAN.md on 2026-10-21; advisory findings acknowledged in DESIGN.md."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-038"]
-  - id: blad-text-p1-code
+    requirements:
+      - "REQUIREMENTS.md#R-033"
+      - "REQUIREMENTS.md#R-034"
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:21:46Z"
+      completed_at: "2026-10-21T18:21:46Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p1-code"
     title: "implement_code: shared themes and output settings"
     description: "Resolve CLI policy, share typed settings, preserve host palettes and plain dumps."
+    context: "Include immutable asset reuse and absence of render-time input/process effects."
     purpose: "Provide coherent text-only appearance"
     expected_outcome: "P1 output-policy tests pass"
-    context: "Include immutable asset reuse and absence of render-time input/process effects."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: implementation
     status: completed
-    depends_on: [blad-text-p1-tests]
-    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-040"]
-  - id: blad-text-p1-audit
+    depends_on:
+      - "blad-text-p1-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-033"
+      - "REQUIREMENTS.md#R-034"
+      - "REQUIREMENTS.md#R-040"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:21:46Z"
+      completed_at: "2026-10-21T18:21:46Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p1-audit"
     title: "security_audit: theme and output boundaries"
     description: "Inspect inert controls, CLI policy, output encoding and failure propagation."
+    context: "No whole-component security certification is implied."
     purpose: "Review P1 input and authority boundaries"
     expected_outcome: "Scoped findings and dispositions recorded"
-    context: "No whole-component security certification is implied."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: security-audit
     status: completed
-    depends_on: [blad-text-p1-code]
-    requirements: ["REQUIREMENTS.md#R-038"]
-  - id: blad-text-p1-review
+    depends_on:
+      - "blad-text-p1-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:21:46Z"
+      completed_at: "2026-10-21T18:21:46Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p1-review"
     title: "compliance_review: theme and output evidence"
     description: "Independently derive observed behavior and compare source-blind to local intent."
+    context: "Separate observers and source-blind comparison recorded in IMPL.md; no proven P1 mismatch; integration evidence reservations retained for P5."
     purpose: "Separate implementation from compliance evidence"
     expected_outcome: "P1 evidence and discrepancies retained"
-    context: "Separate observers and source-blind comparison recorded in IMPL.md; no proven P1 mismatch; integration evidence reservations retained for P5."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: compliance-review
     status: completed
-    depends_on: [blad-text-p1-audit]
-    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-039"]
-  - id: blad-text-p2-tests
+    depends_on:
+      - "blad-text-p1-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-033"
+      - "REQUIREMENTS.md#R-034"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:21:46Z"
+      completed_at: "2026-10-21T18:21:46Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p2-tests"
     title: "write_tests: adjacent script spans"
     description: "Pin scripts, escaped/code literals, nesting and all-or-nothing fallbacks."
+    context: "Freeze exact mappings and parser-extension profile before these tests."
     purpose: "Specify Unicode script semantics"
     expected_outcome: "P2 regressions fail before glyph conversion"
-    context: "Freeze exact mappings and parser-extension profile before these tests."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: test
     status: completed
-    depends_on: [blad-text-p1-review]
-    requirements: ["REQUIREMENTS.md#R-035"]
-  - id: blad-text-p2-code
+    depends_on:
+      - "blad-text-p1-review"
+    requirements:
+      - "REQUIREMENTS.md#R-035"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:31:51Z"
+      completed_at: "2026-10-21T18:31:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p2-code"
     title: "implement_code: parser-aware scripts"
     description: "Add curated mappings and adjacent-span extension without rewriting source."
+    context: "Preserve code, escapes and surrounding style state."
     purpose: "Preserve script meaning in terminal text"
     expected_outcome: "P2 script regressions pass"
-    context: "Preserve code, escapes and surrounding style state."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: implementation
     status: completed
-    depends_on: [blad-text-p2-tests]
-    requirements: ["REQUIREMENTS.md#R-035"]
-  - id: blad-text-p2-audit
+    depends_on:
+      - "blad-text-p2-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-035"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:31:51Z"
+      completed_at: "2026-10-21T18:31:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p2-audit"
     title: "security_audit: script parsing"
     description: "Inspect delimiter progress, source boundaries, nesting and control handling."
+    context: "Inspect finite progress and whole-span fallback behavior."
     purpose: "Review bounded script processing"
     expected_outcome: "P2 scoped findings retained"
-    context: "Inspect finite progress and whole-span fallback behavior."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: security-audit
     status: completed
-    depends_on: [blad-text-p2-code]
-    requirements: ["REQUIREMENTS.md#R-038"]
-  - id: blad-text-p2-review
+    depends_on:
+      - "blad-text-p2-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:31:51Z"
+      completed_at: "2026-10-21T18:31:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p2-review"
     title: "compliance_review: script evidence"
     description: "Derive and compare independent script observations without source/intent mixing."
+    context: "Source-only observation/audit and source-blind comparison in IMPL.md; no proven mismatch; cross-feature evidence retained for P5."
     purpose: "Verify P2 evidence independently"
     expected_outcome: "P2 observations and discrepancies retained"
-    context: "Source-only observation/audit and source-blind comparison in IMPL.md; no proven mismatch; cross-feature evidence retained for P5."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: compliance-review
     status: completed
-    depends_on: [blad-text-p2-audit]
-    requirements: ["REQUIREMENTS.md#R-035", "REQUIREMENTS.md#R-039"]
-  - id: blad-text-p3-tests
+    depends_on:
+      - "blad-text-p2-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-035"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:31:51Z"
+      completed_at: "2026-10-21T18:31:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p3-tests"
     title: "write_tests: bounded mathematical text"
     description: "Pin grammar, grouping, currency/delimiters, source fallbacks and limits."
+    context: "Freeze exact commands, currency policy and limit fixtures before code."
     purpose: "Specify math meaning before conversion"
     expected_outcome: "P3 regressions fail before math implementation"
-    context: "Freeze exact commands, currency policy and limit fixtures before code."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: test
     status: completed
-    depends_on: [blad-text-p2-review]
-    requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-038"]
-  - id: blad-text-p3-code
+    depends_on:
+      - "blad-text-p2-review"
+    requirements:
+      - "REQUIREMENTS.md#R-036"
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:44:25Z"
+      completed_at: "2026-10-21T18:44:25Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p3-code"
     title: "implement_code: bounded mathematical projection"
     description: "Enable math events, preserve raw source and project only the supported grammar."
+    context: "Do not partially convert unsupported expressions."
     purpose: "Provide unambiguous inline/display math"
     expected_outcome: "P3 math regressions pass"
-    context: "Do not partially convert unsupported expressions."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: implementation
     status: completed
-    depends_on: [blad-text-p3-tests]
-    requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-038"]
-  - id: blad-text-p3-audit
+    depends_on:
+      - "blad-text-p3-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-036"
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:44:25Z"
+      completed_at: "2026-10-21T18:44:25Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p3-audit"
     title: "security_audit: mathematical parser limits"
     description: "Inspect progress, recursion/output bounds and no-execution guarantees."
+    context: "Exact source excludes visible inert-control escaping and explicit bounded omission."
     purpose: "Review untrusted formula handling"
     expected_outcome: "P3 scoped findings retained"
-    context: "Exact source excludes visible inert-control escaping and explicit bounded omission."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: security-audit
     status: completed
-    depends_on: [blad-text-p3-code]
-    requirements: ["REQUIREMENTS.md#R-038"]
-  - id: blad-text-p3-review
+    depends_on:
+      - "blad-text-p3-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:44:25Z"
+      completed_at: "2026-10-21T18:44:25Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p3-review"
     title: "compliance_review: mathematical evidence"
     description: "Independently observe formulas and compare source-blind to the declared grammar."
+    context: "Source-only observation/audit and source-blind comparison in IMPL.md; supported with explicit P4/P5 integration and remediation-observation reservations."
     purpose: "Preserve independent P3 evidence"
     expected_outcome: "P3 observations and discrepancies retained"
-    context: "Source-only observation/audit and source-blind comparison in IMPL.md; supported with explicit P4/P5 integration and remediation-observation reservations."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: compliance-review
     status: completed
-    depends_on: [blad-text-p3-audit]
-    requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-039"]
-  - id: blad-text-p4-tests
+    depends_on:
+      - "blad-text-p3-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-036"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:44:25Z"
+      completed_at: "2026-10-21T18:44:25Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p4-tests"
     title: "write_tests: native text diagram corpus"
     description: "Compare pinned engines, record budgets and assert spatial/semantic invariants."
+    context: "Require numeric work/cancellation budgets before backend admission."
     purpose: "Admit one backend from evidence"
     expected_outcome: "Engine selection and failing adapter regressions recorded"
-    context: "Require numeric work/cancellation budgets before backend admission."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: test
     status: completed
-    depends_on: [blad-text-p1-review]
-    requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-040"]
-  - id: blad-text-p4-code
+    depends_on:
+      - "blad-text-p1-review"
+    requirements:
+      - "REQUIREMENTS.md#R-037"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-040"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:52:21Z"
+      completed_at: "2026-10-21T18:52:21Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p4-code"
     title: "implement_code: native text Mermaid"
     description: "Vendor admitted engine, remove mmdc and integrate bounded unwrapped diagrams."
+    context: "ER is required; unsuitable backend warrants explicit arbitration, not weakened guarantees."
     purpose: "Render real terminal text boxes without runtime tools"
     expected_outcome: "P4 admitted-family corpus passes"
-    context: "ER is required; unsuitable backend warrants explicit arbitration, not weakened guarantees."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: implementation
     status: completed
-    depends_on: [blad-text-p4-tests]
-    requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-040"]
-  - id: blad-text-p4-audit
+    depends_on:
+      - "blad-text-p4-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-037"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-040"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:52:21Z"
+      completed_at: "2026-10-21T18:52:21Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p4-audit"
     title: "security_audit: native diagram boundaries"
     description: "Inspect backend input/work/grid limits, cancellation, output and dependency scope."
+    context: "Review selected feature graph, not all optional upstream features."
     purpose: "Review untrusted diagram processing"
     expected_outcome: "P4 scoped findings and dependency notices retained"
-    context: "Review selected feature graph, not all optional upstream features."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: security-audit
     status: completed
-    depends_on: [blad-text-p4-code]
-    requirements: ["REQUIREMENTS.md#R-038"]
-  - id: blad-text-p4-review
+    depends_on:
+      - "blad-text-p4-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:52:21Z"
+      completed_at: "2026-10-21T18:52:21Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p4-review"
     title: "compliance_review: text diagram evidence"
     description: "Independently derive diagram observations and compare to admitted-family intent."
+    context: "Independent spatial/source observation, executed corpus and source-blind comparison recorded in IMPL.md; no proven mismatch; final remediation reconfirmation retained for P5."
     purpose: "Preserve independent P4 evidence"
     expected_outcome: "P4 observations and discrepancies retained"
-    context: "Independent spatial/source observation, executed corpus and source-blind comparison recorded in IMPL.md; no proven mismatch; final remediation reconfirmation retained for P5."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: compliance-review
     status: completed
-    depends_on: [blad-text-p4-audit]
-    requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-039"]
-  - id: blad-text-p5-tests
+    depends_on:
+      - "blad-text-p4-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-037"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T18:52:21Z"
+      completed_at: "2026-10-21T18:52:21Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p5-tests"
     title: "write_tests: text rendering integration"
     description: "Cover cross-feature CLI, PTY resize, consumers, dumps and preserved export."
+    context: "Cross-feature, CLI, PTY, cache, stdin/tool-independence and export coverage added. Search-overlay and tab-padding regressions failed before their fixes. Final suite: 155 passed, two optional characterization tests ignored."
     purpose: "Pin integrated text-only behavior"
     expected_outcome: "Integration regressions expose remaining gaps"
-    context: "Cross-feature, CLI, PTY, cache, stdin/tool-independence and export coverage added. Search-overlay and tab-padding regressions failed before their fixes. Final suite: 155 passed, two optional characterization tests ignored."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T19:12:37Z", completed_at: "2026-10-21T19:12:37Z"}
     kind: test
     status: completed
-    depends_on: [blad-text-p2-review, blad-text-p3-review, blad-text-p4-review]
-    requirements: ["REQUIREMENTS.md#R-039"]
-  - id: blad-text-p5-code
+    depends_on:
+      - "blad-text-p2-review"
+      - "blad-text-p3-review"
+      - "blad-text-p4-review"
+    requirements:
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T19:12:37Z"
+      completed_at: "2026-10-21T19:12:37Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p5-code"
     title: "implement_code: finish integrated rendering"
     description: "Resolve integrated gaps and publish exact CLI and supported-profile documentation."
+    context: "Shared inert-source/cache paths, compositional search overlays, iterative settings-preserving editor re-entry and consistent tab-stop padding implemented. Exact profiles, measured timings and residual limits documented."
     purpose: "Deliver consistent rendering surfaces"
     expected_outcome: "Integrated behavior and documentation agree"
-    context: "Shared inert-source/cache paths, compositional search overlays, iterative settings-preserving editor re-entry and consistent tab-stop padding implemented. Exact profiles, measured timings and residual limits documented."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T19:12:37Z", completed_at: "2026-10-21T19:12:37Z"}
     kind: implementation
     status: completed
-    depends_on: [blad-text-p5-tests]
-    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-039"]
-  - id: blad-text-p5-audit
+    depends_on:
+      - "blad-text-p5-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-033"
+      - "REQUIREMENTS.md#R-034"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T19:12:37Z"
+      completed_at: "2026-10-21T19:12:37Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p5-audit"
     title: "security_audit: integrated rendering"
     description: "Review combined controls, resources, subprocess absence and error propagation."
+    context: "Independent source-only integration observation and narrow tab-remediation observation retained in IMPL.md. Prior control/math/diagram fixes reconfirmed; final padding defect reproduced and corrected. Whole-document, dependency-audit and legacy behavior caveats retained."
     purpose: "Review final rendering boundaries"
     expected_outcome: "Final scoped findings resolved or explicitly retained"
-    context: "Independent source-only integration observation and narrow tab-remediation observation retained in IMPL.md. Prior control/math/diagram fixes reconfirmed; final padding defect reproduced and corrected. Whole-document, dependency-audit and legacy behavior caveats retained."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T19:12:37Z", completed_at: "2026-10-21T19:12:37Z"}
     kind: security-audit
     status: completed
-    depends_on: [blad-text-p5-code]
-    requirements: ["REQUIREMENTS.md#R-038"]
-  - id: blad-text-p5-review
+    depends_on:
+      - "blad-text-p5-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T19:12:37Z"
+      completed_at: "2026-10-21T19:12:37Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-text-p5-review"
     title: "compliance_review: integrated rendering evidence"
     description: "Derive final source/test record independently and compare source-blind to intent."
+    context: "Separate source-blind comparison supports R-033 through R-040 and related consumer semantics without a demonstrated in-scope contradiction. Finite evidence, cooperative limits, minimum-toolchain gap and legacy behavior remain explicit in IMPL.md; no whole-component certification or fabricated receipt."
     purpose: "Finish with inspectable independent evidence"
     expected_outcome: "Final evidence and any human-arbitration discrepancies retained"
-    context: "Separate source-blind comparison supports R-033 through R-040 and related consumer semantics without a demonstrated in-scope contradiction. Finite evidence, cooperative limits, minimum-toolchain gap and legacy behavior remain explicit in IMPL.md; no whole-component certification or fabricated receipt."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T19:14:51Z", completed_at: "2026-10-21T19:14:51Z"}
     kind: compliance-review
     status: completed
-    depends_on: [blad-text-p5-audit]
-    requirements: ["REQUIREMENTS.md#R-039", "REQUIREMENTS.md#R-040"]
-  - id: blad-table-text-write-tests
+    depends_on:
+      - "blad-text-p5-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-039"
+      - "REQUIREMENTS.md#R-040"
+    timestamps:
+      created_at: "2026-10-21T18:01:38Z"
+      updated_at: "2026-10-21T19:14:51Z"
+      completed_at: "2026-10-21T19:14:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-text-write-tests"
     title: "write_tests: text-only aspect and natural-width caps"
     description: "Reproduce excess padding using the Component Model table; independently enumerate widths under per-cell text constraints."
+    context: "The actual Component Model regression reproduced widths [20, 20] instead of natural [11, 6] before replacement. The updated oracle independently enumerates text-feasible widths; short/empty, explicit-break, Unicode, resize and text-shape regressions pass."
     purpose: "Pin corrected geometry without weakening wrapping or height optimization"
     expected_outcome: "Regressions fail before replacement of the shared row-height floor"
     kind: test
-    context: "The actual Component Model regression reproduced widths [20, 20] instead of natural [11, 6] before replacement. The updated oracle independently enumerates text-feasible widths; short/empty, explicit-break, Unicode, resize and text-shape regressions pass."
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-032"]
-    timestamps: {created_at: "2026-10-21T05:36:40Z", updated_at: "2026-10-21T05:42:01Z", completed_at: "2026-10-21T05:42:01Z"}
+    requirements:
+      - "REQUIREMENTS.md#R-029"
+      - "REQUIREMENTS.md#R-030"
+      - "REQUIREMENTS.md#R-032"
+    timestamps:
+      created_at: "2026-10-21T05:36:40Z"
+      updated_at: "2026-10-21T05:42:01Z"
+      completed_at: "2026-10-21T05:42:01Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-table-text-implement-code
+  - id: "blad-table-text-implement-code"
     title: "implement_code: independent text-derived bounds"
     description: "Compute per-cell aspect floors capped at natural widths and binary-search the monotone minimax-height objective."
+    context: "Cell preparation computes independent aspect floors, ignoring blank height and exempting natural width. Column floors and caps feed a monotone binary height search; no height-cap enumeration remains. Full Blad tests, strict Clippy and Skott compilation pass."
     purpose: "Remove artificial width caused by blank height"
     expected_outcome: "Columns remain within their text bounds at every viewport width"
     kind: implementation
-    context: "Cell preparation computes independent aspect floors, ignoring blank height and exempting natural width. Column floors and caps feed a monotone binary height search; no height-cap enumeration remains. Full Blad tests, strict Clippy and Skott compilation pass."
     status: completed
-    depends_on: [blad-table-text-write-tests]
-    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-031"]
-    timestamps: {created_at: "2026-10-21T05:36:40Z", updated_at: "2026-10-21T05:42:01Z", completed_at: "2026-10-21T05:42:01Z"}
+    depends_on:
+      - "blad-table-text-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-029"
+      - "REQUIREMENTS.md#R-030"
+      - "REQUIREMENTS.md#R-031"
+    timestamps:
+      created_at: "2026-10-21T05:36:40Z"
+      updated_at: "2026-10-21T05:42:01Z"
+      completed_at: "2026-10-21T05:42:01Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-table-text-security-audit
+  - id: "blad-table-text-security-audit"
     title: "security_audit: corrected search and empty-text bounds"
     description: "Inspect zero-width columns, integer operations, monotone predicates and allocation-free bounded searches."
+    context: "Author-side scoped input/resource inspection: zero-width cells remain finite and empty, natural caps bound all searches, midpoint arithmetic is overflow-safe, height/text-line queries short-circuit without rendered-string allocations, and no I/O or authority boundary changed. No independent safety certification or hard resource bound is claimed."
     purpose: "Retain resource and input robustness"
     expected_outcome: "Scoped inspection recorded without safety certification"
     kind: security-audit
-    context: "Author-side scoped input/resource inspection: zero-width cells remain finite and empty, natural caps bound all searches, midpoint arithmetic is overflow-safe, height/text-line queries short-circuit without rendered-string allocations, and no I/O or authority boundary changed. No independent safety certification or hard resource bound is claimed."
     status: completed
-    depends_on: [blad-table-text-implement-code]
-    requirements: ["REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-032"]
-    timestamps: {created_at: "2026-10-21T05:36:40Z", updated_at: "2026-10-21T05:42:01Z", completed_at: "2026-10-21T05:42:01Z"}
+    depends_on:
+      - "blad-table-text-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#R-031"
+      - "REQUIREMENTS.md#R-032"
+    timestamps:
+      created_at: "2026-10-21T05:36:40Z"
+      updated_at: "2026-10-21T05:42:01Z"
+      completed_at: "2026-10-21T05:42:01Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-table-text-compliance-review
+  - id: "blad-table-text-compliance-review"
     title: "compliance_review: independent text-bound evidence"
     description: "Derive a clean source/test observation and compare it to corrected intent in a separate source-blind context."
+    context: "Independent text-table-observer derived the 2026-10-21 IMPL.md supplement\nfrom allowed source and tests, excluding intent, queue, prior records,\nreviews and Git. Its runs passed 7 solver, 18 table-rendering and 5 PTY\nviewer tests. The architecture fixture remained opaque to the observer.\n\nSeparate source-blind text-table-intent-comparison compared only current\nlocal intent, that supplement and supplied execution evidence. It found\nsupport for per-cell occupied-text floors, each cell's natural exemption,\nindependent column caps, zero-width empty columns, exact minimax search,\nminimum-width overflow and the actual Component Model regression.\nEmpty explicit lines still affect rendered height and minimax feasibility,\nnot the aspect floor; this was found consistent with the corrected intent.\nNo concrete scoped intent/evidence discrepancy was identified.\n\nFinite enumeration and summarized coverage are not universal proof, and\nphysical-terminal Unicode behavior remains outside the evidence. These\nlimits are retained without asserting safety, human acceptance or\nwhole-component compliance. Earlier table observations remain historical.\n\nAuthor verification passed all 81 Blad tests, strict Clippy, Skott\nconsumer compilation, workspace formatting and whitespace checks."
     purpose: "Preserve independent evidence and human arbitration"
     expected_outcome: "Observed behavior and any discrepancies retained without acceptance claims"
     kind: compliance-review
-    context: |-
-      Independent text-table-observer derived the 2026-10-21 IMPL.md supplement
-      from allowed source and tests, excluding intent, queue, prior records,
-      reviews and Git. Its runs passed 7 solver, 18 table-rendering and 5 PTY
-      viewer tests. The architecture fixture remained opaque to the observer.
-
-      Separate source-blind text-table-intent-comparison compared only current
-      local intent, that supplement and supplied execution evidence. It found
-      support for per-cell occupied-text floors, each cell's natural exemption,
-      independent column caps, zero-width empty columns, exact minimax search,
-      minimum-width overflow and the actual Component Model regression.
-      Empty explicit lines still affect rendered height and minimax feasibility,
-      not the aspect floor; this was found consistent with the corrected intent.
-      No concrete scoped intent/evidence discrepancy was identified.
-
-      Finite enumeration and summarized coverage are not universal proof, and
-      physical-terminal Unicode behavior remains outside the evidence. These
-      limits are retained without asserting safety, human acceptance or
-      whole-component compliance. Earlier table observations remain historical.
-
-      Author verification passed all 81 Blad tests, strict Clippy, Skott
-      consumer compilation, workspace formatting and whitespace checks.
     status: completed
-    depends_on: [blad-table-text-security-audit]
-    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-032"]
-    timestamps: {created_at: "2026-10-21T05:36:40Z", updated_at: "2026-10-21T05:45:32Z", completed_at: "2026-10-21T05:45:32Z"}
+    depends_on:
+      - "blad-table-text-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-029"
+      - "REQUIREMENTS.md#R-030"
+      - "REQUIREMENTS.md#R-032"
+    timestamps:
+      created_at: "2026-10-21T05:36:40Z"
+      updated_at: "2026-10-21T05:45:32Z"
+      completed_at: "2026-10-21T05:45:32Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-table-write-tests
+  - id: "blad-table-write-tests"
     title: "write_tests: exact table geometry and optimization"
     description: "Add failing geometry regressions and a brute-force small-case oracle before solver production code."
+    context: "The width-zero regression reproduced the old allocator panic before replacement; exhaustive width enumeration and rendered assertions now pass."
     purpose: "Pin visual aspect, minimax height, minimum overflow and wrapping semantics"
     expected_outcome: "Measured assertions reproduce current ratio and tiny-width failures"
     kind: test
-    context: "The width-zero regression reproduced the old allocator panic before replacement; exhaustive width enumeration and rendered assertions now pass."
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-032"]
-    timestamps: {created_at: "2026-10-20T21:31:22Z", updated_at: "2026-10-20T21:40:12Z", completed_at: "2026-10-20T21:40:12Z"}
+    requirements:
+      - "REQUIREMENTS.md#R-029"
+      - "REQUIREMENTS.md#R-030"
+      - "REQUIREMENTS.md#R-031"
+      - "REQUIREMENTS.md#R-032"
+    timestamps:
+      created_at: "2026-10-20T21:31:22Z"
+      updated_at: "2026-10-20T21:40:12Z"
+      completed_at: "2026-10-20T21:40:12Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-table-implement-code
+  - id: "blad-table-implement-code"
     title: "implement_code: prepared wrapping and integer constraint solving"
     description: "Separate measured cells, allocation-free height queries, exact solver and styled output."
+    context: "Prepared whole-word wrapping and exact integer height-cap solving replace pre-shrink ratio checks; all 78 Blad tests and strict Clippy pass."
     purpose: "Implement deterministic layout without sacrificing the visual floor"
     expected_outcome: "The solver satisfies the independent oracle and rendering regressions"
     kind: implementation
-    context: "Prepared whole-word wrapping and exact integer height-cap solving replace pre-shrink ratio checks; all 78 Blad tests and strict Clippy pass."
     status: completed
-    depends_on: [blad-table-write-tests]
-    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-031"]
-    timestamps: {created_at: "2026-10-20T21:31:22Z", updated_at: "2026-10-20T21:40:12Z", completed_at: "2026-10-20T21:40:12Z"}
+    depends_on:
+      - "blad-table-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-029"
+      - "REQUIREMENTS.md#R-030"
+      - "REQUIREMENTS.md#R-031"
+    timestamps:
+      created_at: "2026-10-20T21:31:22Z"
+      updated_at: "2026-10-20T21:40:12Z"
+      completed_at: "2026-10-20T21:40:12Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-table-security-audit
+  - id: "blad-table-security-audit"
     title: "security_audit: table input and resource boundaries"
     description: "Review terminal normalization, integer bounds, termination and allocation behavior."
+    context: "Scoped author-side input/resource inspection: inert terminal text, no shell or new authority, bounded content-derived cap enumeration, short-circuit allocation-free height queries, saturating sizes and u128 proportional products. Not independent safety certification."
     purpose: "Review robustness without broadening viewer authority"
     expected_outcome: "Scoped findings retained without implying acceptance"
     kind: security-audit
-    context: "Scoped author-side input/resource inspection: inert terminal text, no shell or new authority, bounded content-derived cap enumeration, short-circuit allocation-free height queries, saturating sizes and u128 proportional products. Not independent safety certification."
     status: completed
-    depends_on: [blad-table-implement-code]
-    requirements: ["REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-032"]
-    timestamps: {created_at: "2026-10-20T21:31:22Z", updated_at: "2026-10-20T21:40:12Z", completed_at: "2026-10-20T21:40:12Z"}
+    depends_on:
+      - "blad-table-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#R-031"
+      - "REQUIREMENTS.md#R-032"
+    timestamps:
+      created_at: "2026-10-20T21:31:22Z"
+      updated_at: "2026-10-20T21:40:12Z"
+      completed_at: "2026-10-20T21:40:12Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-table-compliance-review
+  - id: "blad-table-compliance-review"
     title: "compliance_review: independent observed table evidence"
     description: "Derive an observed record in a clean context, then compare it to intent in a separate source-blind context."
+    context: "Independent table-observer derived the scoped IMPL.md supplement solely\nfrom source/tests, excluding intent, queues, prior records/reviews and Git.\nIts independent runs passed 5 solver, 17 table-rendering and 5 viewer tests.\nSeparate table-intent-comparison read only local intent and that supplement,\nplus author execution evidence; it inspected no source or test source.\nThe comparison found scoped support for R-029 through R-032, not general\nproof, human acceptance, or whole-component certification.\n\nFindings retained for human arbitration:\n- The exact objective is minimax row height when fitting, otherwise minimum\n  width followed by maximum row height; total height is not optimized.\n- The visual guarantee assumes the fixed 1:2 terminal-cell font model.\n- Prepared cells preserve newlines, but parser Text events normalize them;\n  the mapping of every intended explicit break is not established by the\n  observation. Hard-break events and br variants have a preserving path.\n- Unicode examples and the character-based PTY model do not prove general\n  grapheme/terminal correctness.\n- Content-bounded loops and the large-input example do not establish hard\n  runtime, allocation or cancellation limits. Table buffering does not\n  demonstrate the older design's general streaming characterization.\n- The observation summary does not enumerate every R-032 assertion.\nNo intent or observed record was changed to hide these evidence gaps."
     purpose: "Preserve independent evidence and human arbitration"
     expected_outcome: "Observed behavior and discrepancies documented without self-certification"
     kind: compliance-review
-    context: |-
-      Independent table-observer derived the scoped IMPL.md supplement solely
-      from source/tests, excluding intent, queues, prior records/reviews and Git.
-      Its independent runs passed 5 solver, 17 table-rendering and 5 viewer tests.
-      Separate table-intent-comparison read only local intent and that supplement,
-      plus author execution evidence; it inspected no source or test source.
-      The comparison found scoped support for R-029 through R-032, not general
-      proof, human acceptance, or whole-component certification.
-
-      Findings retained for human arbitration:
-      - The exact objective is minimax row height when fitting, otherwise minimum
-        width followed by maximum row height; total height is not optimized.
-      - The visual guarantee assumes the fixed 1:2 terminal-cell font model.
-      - Prepared cells preserve newlines, but parser Text events normalize them;
-        the mapping of every intended explicit break is not established by the
-        observation. Hard-break events and br variants have a preserving path.
-      - Unicode examples and the character-based PTY model do not prove general
-        grapheme/terminal correctness.
-      - Content-bounded loops and the large-input example do not establish hard
-        runtime, allocation or cancellation limits. Table buffering does not
-        demonstrate the older design's general streaming characterization.
-      - The observation summary does not enumerate every R-032 assertion.
-      No intent or observed record was changed to hide these evidence gaps.
     status: completed
-    depends_on: [blad-table-security-audit]
-    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-032"]
-    timestamps: {created_at: "2026-10-20T21:31:22Z", updated_at: "2026-10-20T21:43:39Z", completed_at: "2026-10-20T21:43:39Z"}
+    depends_on:
+      - "blad-table-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-029"
+      - "REQUIREMENTS.md#R-030"
+      - "REQUIREMENTS.md#R-031"
+      - "REQUIREMENTS.md#R-032"
+    timestamps:
+      created_at: "2026-10-20T21:31:22Z"
+      updated_at: "2026-10-20T21:43:39Z"
+      completed_at: "2026-10-20T21:43:39Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-component-structure-test
+  - id: "blad-component-structure-test"
     title: "Verify component structure and build"
     description: "Confirm component directory, Cargo.toml, and basic build work"
+    context: "Build and dependency resolution validated for initial scaffolding"
     purpose: "Validate component scaffolding before implementation"
     expected_outcome: "Component builds successfully with correct dependencies"
     kind: test
-    context: "Build and dependency resolution validated for initial scaffolding"
     status: completed
     depends_on: []
     requirements: []
-    timestamps: {created_at: "2026-10-10T09:00:00Z", updated_at: "2026-10-10T09:30:00Z", completed_at: "2026-10-10T09:30:00Z"}
+    timestamps:
+      created_at: "2026-10-10T09:00:00Z"
+      updated_at: "2026-10-10T09:30:00Z"
+      completed_at: "2026-10-10T09:30:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-component-setup
+  - id: "blad-component-setup"
     title: "Blad component scaffolding"
     description: "Create blad/ directory with Cargo.toml and basic structure"
+    context: "Component directory and Cargo.toml created with required dependencies"
     purpose: "Establish component structure"
     expected_outcome: "Working component skeleton with build configuration"
     kind: implementation
-    context: "Component directory and Cargo.toml created with required dependencies"
     status: completed
-    depends_on: [blad-component-structure-test]
+    depends_on:
+      - "blad-component-structure-test"
     requirements: []
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T10:30:00Z", completed_at: "2026-10-10T10:30:00Z"}
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T10:30:00Z"
+      completed_at: "2026-10-10T10:30:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-cli-framework
+  - id: "blad-cli-framework"
     title: "Blad CLI framework"
     description: "Implement CLI parsing for list, show, stream, view, export commands"
+    context: "Clap-based CLI with all commands implemented"
     purpose: "Provide command-line interface"
     expected_outcome: "Functional CLI with subcommands"
     kind: implementation
-    context: "Clap-based CLI with all commands implemented"
     status: completed
-    depends_on: [blad-component-setup]
+    depends_on:
+      - "blad-component-setup"
     requirements: []
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T11:00:00Z", completed_at: "2026-10-10T11:00:00Z"}
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T11:00:00Z"
+      completed_at: "2026-10-10T11:00:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-session-listing
+  - id: "blad-session-listing"
     title: "Blad session listing"
     description: "Implement list command with metadata"
+    context: "Session listing reads skott runs directory and displays metadata"
     purpose: "List recent sessions"
     expected_outcome: "Users can list sessions with metadata"
     kind: implementation
-    context: "Session listing reads skott runs directory and displays metadata"
     status: completed
-    depends_on: [blad-cli-framework]
-    requirements: ["REQUIREMENTS.md#R-001"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T11:30:00Z", completed_at: "2026-10-10T11:30:00Z"}
+    depends_on:
+      - "blad-cli-framework"
+    requirements:
+      - "REQUIREMENTS.md#R-001"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T11:30:00Z"
+      completed_at: "2026-10-10T11:30:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-session-display
+  - id: "blad-session-display"
     title: "Blad session display"
     description: "Implement show command with markdown rendering"
+    context: "Session display loads and renders all messages with Markdown formatting"
     purpose: "View completed session transcripts"
     expected_outcome: "Users can view session transcripts interactively"
     kind: implementation
-    context: "Session display loads and renders all messages with Markdown formatting"
     status: completed
-    depends_on: [blad-cli-framework]
-    requirements: ["REQUIREMENTS.md#R-002"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T12:00:00Z", completed_at: "2026-10-10T12:00:00Z"}
+    depends_on:
+      - "blad-cli-framework"
+    requirements:
+      - "REQUIREMENTS.md#R-002"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T12:00:00Z"
+      completed_at: "2026-10-10T12:00:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-streaming
+  - id: "blad-streaming"
     title: "Blad session streaming"
     description: "Implement stream command for active sessions"
+    context: "Streaming polls for new messages in active sessions"
     purpose: "Follow live/active sessions"
     expected_outcome: "Users can follow active session transcripts"
     kind: implementation
     status: completed
-    context: "Streaming polls for new messages in active sessions"
-    depends_on: [blad-session-display]
-    requirements: ["REQUIREMENTS.md#R-003"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T12:30:00Z", completed_at: "2026-10-10T12:30:00Z"}
+    depends_on:
+      - "blad-session-display"
+    requirements:
+      - "REQUIREMENTS.md#R-003"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T12:30:00Z"
+      completed_at: "2026-10-10T12:30:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-export
+  - id: "blad-export"
     title: "Blad session export"
     description: "Implement export command producing combined Markdown"
+    context: "Export combines all messages into a single Markdown document"
     purpose: "Export session transcripts"
     expected_outcome: "Users can export sessions to Markdown documents"
     kind: implementation
-    context: "Export combines all messages into a single Markdown document"
     status: completed
-    depends_on: [blad-session-display]
-    requirements: ["REQUIREMENTS.md#R-004"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T13:00:00Z", completed_at: "2026-10-10T13:00:00Z"}
+    depends_on:
+      - "blad-session-display"
+    requirements:
+      - "REQUIREMENTS.md#R-004"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T13:00:00Z"
+      completed_at: "2026-10-10T13:00:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-file-viewing
+  - id: "blad-file-viewing"
     title: "Blad file viewing"
     description: "Implement view command with interactive viewer and dump mode"
+    context: "File viewing with interactive viewer and non-interactive dump mode"
     purpose: "View standalone Markdown files"
     expected_outcome: "Users can view any Markdown file with interactive navigation"
     kind: implementation
-    context: "File viewing with interactive viewer and non-interactive dump mode"
     status: completed
-    depends_on: [blad-cli-framework]
-    requirements: ["REQUIREMENTS.md#R-006", "REQUIREMENTS.md#R-007"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T13:30:00Z", completed_at: "2026-10-10T13:30:00Z"}
+    depends_on:
+      - "blad-cli-framework"
+    requirements:
+      - "REQUIREMENTS.md#R-006"
+      - "REQUIREMENTS.md#R-007"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T13:30:00Z"
+      completed_at: "2026-10-10T13:30:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-markdown-rendering
+  - id: "blad-markdown-rendering"
     title: "Blad markdown rendering"
     description: "Implement CommonMark + GFM rendering with syntax highlighting"
+    context: "Uses pulldown-cmark for parsing and syntect for syntax highlighting"
     purpose: "Rich Markdown rendering"
     expected_outcome: "Full CommonMark and GFM support with syntax highlighting"
     kind: implementation
-    context: "Uses pulldown-cmark for parsing and syntect for syntax highlighting"
     status: completed
-    depends_on: [blad-cli-framework]
-    requirements: ["REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-016"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T14:00:00Z", completed_at: "2026-10-10T14:00:00Z"}
+    depends_on:
+      - "blad-cli-framework"
+    requirements:
+      - "REQUIREMENTS.md#R-014"
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-016"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T14:00:00Z"
+      completed_at: "2026-10-10T14:00:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-interactive-viewer
+  - id: "blad-interactive-viewer"
     title: "Blad interactive viewer"
     description: "Implement interactive viewer with navigation and status bar"
+    context: "Uses crossterm for terminal interaction with scroll, navigation and status bar"
     purpose: "Interactive navigation"
     expected_outcome: "Full interactive viewer with keyboard navigation and status bar"
     kind: implementation
-    context: "Uses crossterm for terminal interaction with scroll, navigation and status bar"
     status: completed
-    depends_on: [blad-file-viewing]
-    requirements: ["REQUIREMENTS.md#R-009", "REQUIREMENTS.md#R-010", "REQUIREMENTS.md#R-012", "REQUIREMENTS.md#R-013"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T14:30:00Z", completed_at: "2026-10-10T14:30:00Z"}
+    depends_on:
+      - "blad-file-viewing"
+    requirements:
+      - "REQUIREMENTS.md#R-009"
+      - "REQUIREMENTS.md#R-010"
+      - "REQUIREMENTS.md#R-012"
+      - "REQUIREMENTS.md#R-013"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T14:30:00Z"
+      completed_at: "2026-10-10T14:30:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-search
+  - id: "blad-search"
     title: "Blad search functionality"
     description: "Implement search with / key, highlight, match navigation"
+    context: "Search on rendered content with highlight and match navigation"
     purpose: "Search within documents"
     expected_outcome: "Users can search and navigate between matches"
     kind: implementation
-    context: "Search on rendered content with highlight and match navigation"
     status: completed
-    depends_on: [blad-interactive-viewer]
-    requirements: ["REQUIREMENTS.md#R-011"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T15:00:00Z", completed_at: "2026-10-10T15:00:00Z"}
+    depends_on:
+      - "blad-interactive-viewer"
+    requirements:
+      - "REQUIREMENTS.md#R-011"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T15:00:00Z"
+      completed_at: "2026-10-10T15:00:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-edit-mode
+  - id: "blad-edit-mode"
     title: "Blad edit mode"
     description: "Implement edit mode with e key to open in $EDITOR"
+    context: "Edit mode opens file in $EDITOR and re-renders after save"
     purpose: "Edit files from viewer"
     expected_outcome: "Users can edit files and re-render"
     kind: implementation
-    context: "Edit mode opens file in $EDITOR and re-renders after save"
     status: completed
-    depends_on: [blad-interactive-viewer]
-    requirements: ["REQUIREMENTS.md#R-008"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T15:30:00Z", completed_at: "2026-10-10T15:30:00Z"}
+    depends_on:
+      - "blad-interactive-viewer"
+    requirements:
+      - "REQUIREMENTS.md#R-008"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T15:30:00Z"
+      completed_at: "2026-10-10T15:30:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-mermaid
+  - id: "blad-mermaid"
     title: "Blad mermaid support"
     description: "Detect and attempt to render mermaid diagrams via mmdc"
+    context: "Optional mmdc integration with fallback to plain text"
     purpose: "Mermaid diagram rendering"
     expected_outcome: "Mermaid diagrams render or fall back gracefully"
     kind: implementation
-    context: "Optional mmdc integration with fallback to plain text"
     status: completed
-    depends_on: [blad-markdown-rendering]
-    requirements: ["REQUIREMENTS.md#R-017"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T16:00:00Z", completed_at: "2026-10-10T16:00:00Z"}
+    depends_on:
+      - "blad-markdown-rendering"
+    requirements:
+      - "REQUIREMENTS.md#R-017"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T16:00:00Z"
+      completed_at: "2026-10-10T16:00:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-math
+  - id: "blad-math"
     title: "Blad math support"
     description: "Render inline and display math expressions"
+    context: "LaTeX math expressions rendered with distinct styling"
     purpose: "Math expression rendering"
     expected_outcome: "Inline and display math renders with distinct styling"
     kind: implementation
-    context: "LaTeX math expressions rendered with distinct styling"
     status: completed
-    depends_on: [blad-markdown-rendering]
-    requirements: ["REQUIREMENTS.md#R-018"]
-    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T16:30:00Z", completed_at: "2026-10-10T16:30:00Z"}
+    depends_on:
+      - "blad-markdown-rendering"
+    requirements:
+      - "REQUIREMENTS.md#R-018"
+    timestamps:
+      created_at: "2026-10-10T10:00:00Z"
+      updated_at: "2026-10-10T16:30:00Z"
+      completed_at: "2026-10-10T16:30:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-ci-write-tests
+  - id: "blad-ci-write-tests"
     title: "Reproduce inherited-terminal viewer failures"
     description: "All four PTY viewer regressions fail under an inherited 120x40 controlling terminal and pass without one; preserve exact screen assertions."
+    context: "PTY viewer regressions identified and reproduced under inherited 120x40 terminal"
     purpose: "Reproduce and pin terminal inheritance regressions"
     expected_outcome: "Reproducible test failures for PTY inheritance issues"
     kind: test
-    context: "PTY viewer regressions identified and reproduced under inherited 120x40 terminal"
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
-    timestamps: {created_at: "2026-10-14T08:00:00Z", updated_at: "2026-10-14T08:30:00Z", completed_at: "2026-10-14T08:30:00Z"}
+    requirements:
+      - "REQUIREMENTS.md#R-026"
+      - "REQUIREMENTS.md#R-028"
+    timestamps:
+      created_at: "2026-10-14T08:00:00Z"
+      updated_at: "2026-10-14T08:30:00Z"
+      completed_at: "2026-10-14T08:30:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-ci-implement-code
+  - id: "blad-ci-implement-code"
     title: "Give viewer fixtures their own controlling PTY"
     description: "Launch through Linux setsid with the PTY slave as controlling terminal, without unsafe code or changing production rendering."
+    context: "Linux setsid approach with PTY slave as controlling terminal"
     purpose: "Fix PTY inheritance in tests"
     expected_outcome: "Viewer tests pass with dedicated controlling PTY"
     kind: implementation
-    context: "Linux setsid approach with PTY slave as controlling terminal"
     status: completed
-    depends_on: [blad-ci-write-tests]
-    requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
-    timestamps: {created_at: "2026-10-14T08:00:00Z", updated_at: "2026-10-14T09:00:00Z", completed_at: "2026-10-14T09:00:00Z"}
+    depends_on:
+      - "blad-ci-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-026"
+      - "REQUIREMENTS.md#R-028"
+    timestamps:
+      created_at: "2026-10-14T08:00:00Z"
+      updated_at: "2026-10-14T09:00:00Z"
+      completed_at: "2026-10-14T09:00:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-ci-security-audit
+  - id: "blad-ci-security-audit"
     title: "Audit PTY subprocess ownership"
     description: "Independent scoped review of terminal ownership, signal targeting and child cleanup."
+    context: "Independent clean-slate scoped review completed"
     purpose: "Verify PTY subprocess handling"
     expected_outcome: "Security findings documented and addressed"
     kind: security-audit
-    context: "Independent clean-slate scoped review completed"
     status: completed
-    depends_on: [blad-ci-implement-code]
-    requirements: ["REQUIREMENTS.md#R-026"]
-    timestamps: {created_at: "2026-10-14T08:00:00Z", updated_at: "2026-10-14T09:30:00Z", completed_at: "2026-10-14T09:30:00Z"}
+    depends_on:
+      - "blad-ci-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#R-026"
+    timestamps:
+      created_at: "2026-10-14T08:00:00Z"
+      updated_at: "2026-10-14T09:30:00Z"
+      completed_at: "2026-10-14T09:30:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: blad-ci-compliance-review
+  - id: "blad-ci-compliance-review"
     title: "Compare independent viewer evidence"
     description: "Clean-slate observed supplement and separate source-blind comparison; no acceptance or blanket certification."
+    context: "Clean-slate observed supplement and separate source-blind comparison completed"
     purpose: "Independent compliance verification"
     expected_outcome: "Compliance findings documented"
     kind: compliance-review
-    context: "Clean-slate observed supplement and separate source-blind comparison completed"
     status: completed
-    depends_on: [blad-ci-security-audit]
-    requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
-    timestamps: {created_at: "2026-10-14T08:00:00Z", updated_at: "2026-10-14T10:00:00Z", completed_at: "2026-10-14T10:00:00Z"}
+    depends_on:
+      - "blad-ci-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-026"
+      - "REQUIREMENTS.md#R-028"
+    timestamps:
+      created_at: "2026-10-14T08:00:00Z"
+      updated_at: "2026-10-14T10:00:00Z"
+      completed_at: "2026-10-14T10:00:00Z"
     blocked_reason: null
     recovery_state: null

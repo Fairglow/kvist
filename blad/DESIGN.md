@@ -9,6 +9,10 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+Blad is an interactive terminal Markdown viewer with search, navigation, tabs,
+and optional external editing. It uses crossterm for terminal interaction and
+pulldown-cmark for parsing.
+
 ### First inline table styling subset (2026-10-25)
 
 Generalize the existing table-link token projection into one private

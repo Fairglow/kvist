@@ -37,6 +37,8 @@ request MUST fail closed.
 
 ## Functional requirements
 
+The following requirements define mandatory behavior of the enforcement component.
+
 ### SR-REQ-NO-NESTING
 
 Every sandbox MUST contain an immutable namespace-local marker. Request and

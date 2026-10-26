@@ -1,490 +1,693 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1"
-  contract_revision: "sha256:5bbc03186226e97133864e23cf673f35d39f6d976249ca8d2d60613a136c8c07"
-  design_revision: "sha256:8b7981bfee185f38dd611308f617e8c0640e70ebe2e7e434652a18b946ffcbee"
+  requirements_revision: sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1
+  contract_revision: sha256:5bbc03186226e97133864e23cf673f35d39f6d976249ca8d2d60613a136c8c07
+  design_revision: sha256:8b7981bfee185f38dd611308f617e8c0640e70ebe2e7e434652a18b946ffcbee
   parent_contract: null
   revalidation:
     state: stale
-    checked_at: "2026-10-02T10:27:11Z"
-    stale_since: "2026-10-02T10:27:11Z"
+    checked_at: '2026-10-02T10:27:11Z'
+    stale_since: '2026-10-02T10:27:11Z'
     causes:
-      - kind: component-requirements-revision-changed
-        path: "REQUIREMENTS.md"
-        expected_revision: "sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1"
-        observed_revision: "sha256:1323af464fc004721bafc8fd3a0a524eaafb99fc078ea313570d7a04f46660e8"
+    - kind: component-requirements-revision-changed
+      path: REQUIREMENTS.md
+      expected_revision: sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1
+      observed_revision: sha256:1323af464fc004721bafc8fd3a0a524eaafb99fc078ea313570d7a04f46660e8
 tasks:
-  - id: nesting-regression-write-tests
-    title: "write_tests: independently reproduce both nesting failures"
-    description: "Exercise probe and request separately with cleared environment and open stdin, retaining both failures."
-    kind: test
-    status: completed
-    context: "2026-10-25: reproduced probe status 0 and request stdin timeout before restoring either guard. Existing SR-REQ-NO-NESTING remains authoritative; no product behavior change."
-    depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
-  - id: nesting-regression-implement-code
-    title: "implement_code: restore early nesting rejection"
-    description: "Check the marker before probe backend discovery and before request stdin reads."
-    kind: implementation
-    status: completed
-    context: "Restored both early guards without changing validation or mount authority. All 80 default Galla tests pass with two existing opt-in trials ignored; all-feature workspace strict lint and formatting pass."
-    depends_on: [nesting-regression-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
-  - id: nesting-regression-security-audit
-    title: "security_audit: inspect restored guard ordering"
-    description: "Inspect marker handling, early failure, empty stdout and unchanged grant authority."
-    kind: security-audit
-    status: completed
-    context: "Bounded implementer inspection: existing non-following marker detection remains fail-closed, both execution paths reject before input/backend work with status 3 and empty stdout, and no grant or host-execution authority changes. Independent source-only observations are retained in IMPL.md; no runner-wide audit claim."
-    depends_on: [nesting-regression-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
-  - id: nesting-regression-compliance-review
-    title: "compliance_review: independently compare nesting repair evidence"
-    description: "Derive a clean-slate source-only record and separately compare it with local intent and execution evidence."
-    kind: compliance-review
-    status: completed
-    context: "Independent source-only nesting-source-observer supplement and separate source-blind nesting-intent-comparator comparison retained in IMPL.md. No concrete post-repair scoped mismatch identified; runtime all-phase, direct-library, metadata-error and exhaustive interleaving limits remain explicit. Review activity is complete, not component acceptance or runner-wide certification."
-    depends_on: [nesting-regression-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
-  - id: nested-sandbox-write-tests
-    title: "write_tests: nested sandbox rejection"
-    description: "Pin reserved destinations and native probe/request rejection with cleared environment and open stdin."
-    kind: test
-    status: completed
-    context: "Reserved-path and real Bubblewrap regressions failed first. Native cleared-environment probe/request guards now return 3 before waiting for stdin."
-    depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
-  - id: nested-sandbox-implement-code
-    title: "implement_code: namespace-local nesting guard"
-    description: "Create an immutable marker and reject nesting before input or backend work."
-    kind: implementation
-    status: completed
-    context: "Read-only tmpfs marker, CLI and library guards implemented; all default Galla tests and strict lint pass."
-    depends_on: [nested-sandbox-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
-  - id: nested-sandbox-security-audit
-    title: "security_audit: marker authority"
-    description: "Inspect mount ordering, host non-mutation and diagnostic-only scope."
-    kind: security-audit
-    status: completed
-    context: "Scoped implementer inspection: reserved disjoint path prevents grant mutation; marker is namespace-only and diagnostic, not authority. Independent observation follows in the release-readiness review."
-    depends_on: [nested-sandbox-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
-  - id: nested-sandbox-compliance-review
-    title: "compliance_review: independent nesting evidence"
-    description: "Derive source-only observations and compare source-blind with local intent."
-    kind: compliance-review
-    status: completed
-    context: "Independent source observations/supplement and separate source-blind comparison retained in IMPL.md. Later explicitly labelled native execution confirms both inner protocol modes return 3 with cleared environment and open stdin. No whole-runner certification or acceptance."
-    depends_on: [nested-sandbox-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NO-NESTING"]
-  - id: "portable-toolchain-write-tests"
-    title: "Pin host-independent Cargo subprocess execution"
-    description: "Reproduce missing rustc with a linker-only sandbox PATH, then require private proxy execution of Cargo unit/doctests and a build script for every installed version."
-    context: "Human requests CI/local diagnosis and repair. Explicit advisory exception while receipt enforcement is unavailable. Proxy-free Cargo PATH reproduced the exact CI rustc -vV ENOENT locally before repair; final unit/doctest/build-script fixture passes on all eight installed versions."
-    purpose: "Remove reliance on local System Rust proxies."
-    expected_outcome: "The CI failure is reproduced locally before the runtime repair."
-    kind: test
-    status: completed
-    depends_on: []
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
-    timestamps:
-      created_at: "2026-10-14T22:00:00Z"
-      updated_at: "2026-10-14T22:17:30Z"
-      completed_at: "2026-10-14T22:17:30Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "portable-toolchain-implement-code"
-    title: "Resolve and expose complete native tool runtimes"
-    description: "Detect host tools, generate read-only sandbox Rust proxies, log host/mount/inside execution evidence and correct consumer-specific environment guidance."
-    context: "Detected host paths and private read-only proxies replace System-proxy assumptions; full host/mount/inside logs are retained locally and wired into both CI jobs. All 79 Galla tests passed; final four native/detection tests pass on stable and MSRV, including alternate HOME and explicit RUSTUP_HOME. Skott 22 and maerg 7 native tests pass. No new consumer authority or remote success claimed."
-    purpose: "Support local and CI layouts without copying assumptions between namespaces."
-    expected_outcome: "All native programs and Rust subprocesses execute with actionable location evidence."
-    kind: implementation
-    status: completed
-    depends_on:
-      - "portable-toolchain-write-tests"
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
-    timestamps:
-      created_at: "2026-10-14T22:00:00Z"
-      updated_at: "2026-10-14T22:17:30Z"
-      completed_at: "2026-10-14T22:17:30Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "portable-toolchain-security-audit"
-    title: "Inspect explicit native runtime authority"
-    description: "Independently inspect the scoped fixture for host mutation, broad mounts, secret logging and unintended consumer-authority changes."
-    context: "Independent source-only portable-runtime-observer identified no concrete scoped host-mutation, broad-mount-authority or ambient-secret logging regression. Its CI pipefail finding was fixed with explicit Bash and independently observed by runtime-guard-observer. Unredacted tool diagnostics, snapshot/setup-failure limits and existing System visibility remain explicit in IMPL.md; this is not a full runner audit."
-    purpose: "Retain independent authority observations."
-    expected_outcome: "Any scoped discrepancy remains explicit."
-    kind: security-audit
-    status: completed
-    depends_on:
-      - "portable-toolchain-implement-code"
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
-    timestamps:
-      created_at: "2026-10-14T22:00:00Z"
-      updated_at: "2026-10-14T22:17:30Z"
-      completed_at: "2026-10-14T22:17:30Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "portable-toolchain-compliance-review"
-    title: "Compare independent portable toolchain evidence"
-    description: "Derive a source-only implementation record, then compare it with local intent in a separate source-blind context."
-    context: "Separate source-blind portable-runtime-comparator found no concrete scoped portability mismatch. It retained that whole-suite evidence predates final mapping guards, subsequent final native reruns pass, source observers executed no tests, and remote rerun/future-host coverage remain unverified. Corrected environment-guide scope aligns with explicit grants. No component acceptance, blanket certification or replacement of blocked runner-wide review."
-    purpose: "Avoid self-certification and retain host coverage limits."
-    expected_outcome: "Observed behavior, discrepancies and unverified future hosts are stated honestly."
-    kind: compliance-review
-    status: completed
-    depends_on:
-      - "portable-toolchain-security-audit"
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
-    timestamps:
-      created_at: "2026-10-14T22:00:00Z"
-      updated_at: "2026-10-14T22:17:30Z"
-      completed_at: "2026-10-14T22:17:30Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "bin-only-system-write-tests"
-    title: "Pin administrative directory exclusion"
-    description: "Test filtered layout, merged-bin aliases, denied PATH and overmounts, native access denial and host non-mutation."
-    context: "Human explicitly approved sbin exclusion; deliberate advisory exception while receipt enforcement is unavailable. Final workspace includes passing layout-boundary, alias, lexical PATH/grant and native host-non-mutation evidence."
-    purpose: "Define exclusion before implementation."
-    expected_outcome: "Native administrative-directory access and overmount regressions fail before repair."
-    kind: test
-    status: completed
-    depends_on: []
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
-    timestamps:
-      created_at: "2026-10-14T06:59:01Z"
-      updated_at: "2026-10-14T07:35:16Z"
-      completed_at: "2026-10-14T07:35:16Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "bin-only-system-implement-code"
-    title: "Enforce a filtered bin-only System view"
-    description: "Filter usr and usr/local without following administrative aliases, reserve inaccessible sbin mounts, reject covering grants and retain filtered self-grants."
-    context: "No host mutation, new mount authority or binary-classification claim. Updated the opt-in fixture's retired sbin PATH after validation correctly rejected it; all six opt-in native trials pass."
-    purpose: "Apply exclusion in all execution phases."
-    expected_outcome: "All three standard administrative paths are inaccessible while ordinary bins remain usable."
-    kind: implementation
-    status: completed
-    depends_on:
-      - "bin-only-system-write-tests"
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
-    timestamps:
-      created_at: "2026-10-14T06:59:01Z"
-      updated_at: "2026-10-14T07:35:16Z"
-      completed_at: "2026-10-14T07:35:16Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "bin-only-system-security-audit"
-    title: "Audit filtered System resource authority"
-    description: "Independently inspect symlink preservation, administrative aliases, read-only roots, reserved overmounts, bounds and errors."
-    context: "Independent bin-policy-observer established no concrete high-confidence scoped regression. Path-based exclusion is not binary classification or race-resistant resolution; limits remain in IMPL.md."
-    purpose: "Retain independent findings."
-    expected_outcome: "Findings are fixed or explicitly retained."
-    kind: security-audit
-    status: completed
-    depends_on:
-      - "bin-only-system-implement-code"
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
-    timestamps:
-      created_at: "2026-10-14T06:59:01Z"
-      updated_at: "2026-10-14T07:35:16Z"
-      completed_at: "2026-10-14T07:35:16Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "bin-only-system-compliance-review"
-    title: "Compare independent System exclusion evidence"
-    description: "Source-only observation followed by separate source-blind comparison with intent and execution evidence."
-    context: "Separate source-blind bin-policy-comparator found scoped alignment, not exhaustive all-phase proof. Final stable and Rust 1.95 workspace runs each pass 1405 tests with 12 ignored; six opt-in trials subsequently pass. No acceptance or blanket certification."
-    purpose: "Prevent self-certification."
-    expected_outcome: "Scoped discrepancies and limits remain explicit."
-    kind: compliance-review
-    status: completed
-    depends_on:
-      - "bin-only-system-security-audit"
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
-    timestamps:
-      created_at: "2026-10-14T06:59:01Z"
-      updated_at: "2026-10-14T07:35:16Z"
-      completed_at: "2026-10-14T07:35:16Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "workspace-vendor-mask-write-tests"
-    title: "Pin inaccessible workspace vendor evidence"
-    description: "Define native alias-read/write/chmod denial, snapshot resolution, host non-mutation and unaffected generic requests."
-    context: "Human explicitly requests hiding .kvist/vendored in the sandbox; per-bundle advisory exception while receipt enforcement is unavailable. Native alias-denial assertion failed before implementation; two mask unit tests, all 14 Skott native environment tests and both opt-in Galla native toolchain trials now pass."
-    purpose: "Define behavior before enforcement."
-    expected_outcome: "Native assertions fail before the mask exists."
-    kind: test
-    status: completed
-    depends_on: []
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"
-    timestamps:
-      created_at: "2026-10-14T05:50:27Z"
-      updated_at: "2026-10-14T06:04:00Z"
-      completed_at: "2026-10-14T06:04:00Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "workspace-vendor-mask-implement-code"
-    title: "Mask the mutable workspace registry"
-    description: "Add fixed prepared-Rust masking after binds, without changing the protocol or relaxing disjoint grants."
-    context: "No host changes or arbitrary masking capability."
-    purpose: "Expose one usable vendor view."
-    expected_outcome: "The workspace alias is inaccessible while the snapshot remains usable."
-    kind: implementation
-    status: completed
-    depends_on:
-      - "workspace-vendor-mask-write-tests"
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"
-    timestamps:
-      created_at: "2026-10-14T05:50:27Z"
-      updated_at: "2026-10-14T06:04:00Z"
-      completed_at: "2026-10-14T06:04:00Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "workspace-vendor-mask-security-audit"
-    title: "Audit restrictive mount masking"
-    description: "Independently review mask scope, symlinks, mount ordering, privilege denial and host non-mutation."
-    context: "Independent mask-observer reported no high-confidence new scoped regression. Pathname inspection is not descriptor-pinned and does not exclude external replacement races; this limit remains explicit in IMPL.md."
-    purpose: "Retain independent findings."
-    expected_outcome: "Findings are corrected or explicitly retained."
-    kind: security-audit
-    status: completed
-    depends_on:
-      - "workspace-vendor-mask-implement-code"
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"
-    timestamps:
-      created_at: "2026-10-14T05:50:27Z"
-      updated_at: "2026-10-14T06:04:00Z"
-      completed_at: "2026-10-14T06:04:00Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "workspace-vendor-mask-compliance-review"
-    title: "Compare independent mask evidence"
-    description: "Source-only observation followed by separate source-blind comparison."
-    context: "Separate source-blind mask-comparator reported no new scoped discrepancy. Full workspace subsequently passed with 1399 passed, 0 failed and 12 ignored. No acceptance or blanket certification."
-    purpose: "Prevent self-certification."
-    expected_outcome: "Scoped discrepancies and verification limits remain explicit."
-    kind: compliance-review
-    status: completed
-    depends_on:
-      - "workspace-vendor-mask-security-audit"
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"
-    timestamps:
-      created_at: "2026-10-14T05:50:27Z"
-      updated_at: "2026-10-14T06:04:00Z"
-      completed_at: "2026-10-14T06:04:00Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "galla-write-tests"
-    title: "Define sandbox runner protocol tests"
-    description: "Write native failing tests for the redefined version-one probe and request, strict typed grants, Bubblewrap identity and namespace enforcement, resource bounds, process cleanup, and fail-closed behavior."
-    context: "The buildable scaffold intentionally implements no runner protocol or operating-system enforcement."
-    purpose: "Establish executable negative and positive evidence before any request can cause effects."
-    expected_outcome: "Tests reject malformed and retired requests, aliases, links, overlapping grants, backend substitution, resource escape, and host fallback while defining the accepted Bubblewrap path."
-    kind: test
-    status: completed
-    depends_on: []
-    requirements:
-      - "CONTRACT.md#Compatibility-and-verification"
-      - "DESIGN.md#Verification-strategy"
-      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
-      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-    timestamps:
-      created_at: "2026-09-01T21:04:20Z"
-      updated_at: "2026-09-02T08:00:00Z"
-      completed_at: "2026-09-02T08:00:00Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "galla-implement-code"
-    title: "Implement Bubblewrap sandbox runner"
-    description: "Implement the accepted bounded version-one protocol, independent typed-grant validation, verified Bubblewrap execution, Linux namespace and resource enforcement, and complete process cleanup without importing maerg types."
-    context: "Only the scaffold exists; it fails closed and cannot execute an approved task."
-    purpose: "Provide the independently installed enforcement boundary required for supervised Kvist execution."
-    expected_outcome: "The runner satisfies the preceding native tests and never degrades to the host or retired request shape."
-    kind: implementation
-    status: completed
-    depends_on:
-      - "galla-write-tests"
-    requirements:
-      - "CONTRACT.md#Behavioral-guarantees"
-      - "DESIGN.md#Interactions-and-state"
-      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
-      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-    timestamps:
-      created_at: "2026-09-01T21:04:20Z"
-      updated_at: "2026-09-02T08:00:00Z"
-      completed_at: "2026-09-02T08:00:00Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "galla-security-audit"
-    title: "Audit sandbox runner authority"
-    description: "Independently review request parsing, canonical paths, mount construction, namespace isolation, Bubblewrap substitution, environment and network denial, resource enforcement, process cleanup, and fallback resistance."
-    context: "The production runner will turn untrusted request data into operating-system effects."
-    purpose: "Identify every high-confidence path to authority escalation, disclosure, or false enforcement before installation."
-    expected_outcome: "Findings are corrected with native regression tests or retained as explicit blockers."
-    kind: security-audit
-    status: completed
-    depends_on:
-      - "galla-implement-code"
-    requirements:
-      - "DESIGN.md#Security-and-resource-design"
-      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-09-01T21:04:20Z"
-      updated_at: "2026-09-12T14:32:46Z"
-      completed_at: "2026-09-12T14:32:46Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "galla-compliance-review"
-    title: "Review sandbox runner compliance"
-    description: "Derive observed runner behavior from source and native tests in a clean-slate context, then compare the resulting implementation record with approved local and parent intent in a separate source-blind context."
-    context: "The runner implementer cannot certify the boundary that enforces task effects."
-    purpose: "Retain an independent disposition for every protocol, isolation, resource, and failure guarantee."
-    expected_outcome: "The review records satisfied clauses, discrepancies, unsupported behavior, and required arbitration before production promotion."
-    kind: compliance-review
-    status: completed
-    depends_on:
-      - "galla-security-audit"
-    requirements:
-      - "CONTRACT.md#Compatibility-and-verification"
-      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-09-01T21:04:20Z"
-      updated_at: "2026-09-12T14:32:54Z"
-      completed_at: "2026-09-12T14:32:54Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "galla-reverification-security-audit"
-    title: "Re-run sandbox runner security audit"
-    description: "Independently re-run the sandbox runner security audit in a genuine agent context, covering request parsing, canonical paths, mount construction, namespace isolation, Bubblewrap substitution, environment and network denial, resource enforcement, and fallback resistance."
-    context: "The branch review found the placeholder-era attempt logs for the completed sandbox runner security audit contain only echo-placeholder agent output, so the recorded completion is not valid independent evidence."
-    purpose: "Replace the placeholder-era security receipts with genuine independent findings before the runner is trusted as the enforcement boundary."
-    expected_outcome: "A genuine independent audit records or remediates every high-confidence finding, and its disposition is retained for human arbitration against the placeholder-era receipts."
-    kind: security-audit
-    status: blocked
-    depends_on:
-      - "galla-implement-code"
-    requirements:
-      - "CONTRACT.md#Security-and-authority"
-      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-28T22:32:35Z"
-      completed_at: null
-    blocked_reason: "agent execution exceeded the combined output limit while contacting the local model gateway. Bounded redacted logs are written to: /opt/proj/kvist/./galla/.kvist/logs/galla-reverification-security-audit_2026-09-28T22-32-13Z.log"
-    recovery_state: null
-  - id: "galla-reverification-compliance-review"
-    title: "Re-run sandbox runner compliance review"
-    description: "Re-derive the observed runner behavior from source and native tests in a clean-slate context, then compare the resulting implementation record with the approved local and parent intent in a separate source-blind context."
-    context: "The placeholder-era compliance receipts, including the committed COMPLIANCE_REVIEW.md, contain only echo-placeholder agent output, so the recorded completion is not valid independent evidence."
-    purpose: "Retain an independent disposition for every protocol, isolation, resource, and failure guarantee."
-    expected_outcome: "A clean-slate record and source-blind comparison classify every clause, retaining discrepancies for explicit human arbitration."
-    kind: compliance-review
-    status: pending
-    depends_on:
-      - "galla-reverification-security-audit"
-    requirements:
-      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
-      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "galla-toolchain-write-tests"
-    title: "Define native toolchain execution and inventory tests"
-    description: "Define real runner trials for system-language execution, all installed rustup versions, target and component parity, installed-target compilation, denied mutations and host state snapshots."
-    context: "Version-only and selected-toolchain consumer tests do not establish full installed inventory visibility."
-    purpose: "Make tool availability and host non-mutation measurable through explicit read-only grants."
-    expected_outcome: "Native trials fail on unavailable prerequisites, incomplete inventory, unusable tools, writable installations or host changes."
-    kind: test
-    status: completed
-    depends_on: []
-    requirements:
-      - "DESIGN.md#Verification-strategy"
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
-    timestamps:
-      created_at: "2026-10-10T16:09:07Z"
-      updated_at: "2026-10-10T16:15:17Z"
-      completed_at: "2026-10-10T16:15:17Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "galla-toolchain-implement-code"
-    title: "Implement native toolchain fixtures and CI execution"
-    description: "Implement the test harness and private multi-toolchain rustup registrations, wire strict native trials into CI, and document tested coverage and consumer-profile limitations without changing production mount authority."
-    context: "Tests use the real independently built executable and Bubblewrap; no host installation is performed by a test."
-    purpose: "Provide reproducible end-to-end evidence rather than silently skipped version probes."
-    expected_outcome: "System-language fixtures execute, all installed Rust versions and targets match host evidence, and snapshots remain unchanged."
-    kind: implementation
-    status: completed
-    depends_on:
-      - "galla-toolchain-write-tests"
-    requirements:
-      - "CONTRACT.md#Compatibility-and-verification"
-      - "DESIGN.md#Verification-strategy"
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
-    timestamps:
-      created_at: "2026-10-10T16:09:07Z"
-      updated_at: "2026-10-10T16:15:17Z"
-      completed_at: "2026-10-10T16:15:17Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "galla-toolchain-security-audit"
-    title: "Audit native toolchain test authority"
-    description: "Independently review private registration construction, read-only mount scope, host queries, mutation attempts, snapshot coverage and temporary fixture cleanup."
-    context: "Successful test execution is not independent security evidence."
-    purpose: "Check that the new native tests do not provision or mutate host installations."
-    expected_outcome: "Independent findings and remaining limits are retained for human disposition."
-    kind: security-audit
-    status: pending
-    depends_on:
-      - "galla-toolchain-implement-code"
-    requirements:
-      - "DESIGN.md#Security-and-resource-design"
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
-    timestamps:
-      created_at: "2026-10-10T16:09:07Z"
-      updated_at: "2026-10-10T16:15:17Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "galla-toolchain-compliance-review"
-    title: "Review native toolchain evidence independently"
-    description: "Derive observed test behavior in a clean-slate context and separately compare the implementation record and executable evidence against local intent without reading source."
-    context: "This testing review does not certify runner compliance or replace existing blocked re-verification."
-    purpose: "Retain independent discrepancies rather than having the test implementer certify its own work."
-    expected_outcome: "Coverage, unsupported installation shapes, host non-mutation limits and consumer-profile distinctions receive an independent disposition."
-    kind: compliance-review
-    status: pending
-    depends_on:
-      - "galla-toolchain-security-audit"
-    requirements:
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-10-10T16:09:07Z"
-      updated_at: "2026-10-10T16:15:17Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
+- id: nesting-regression-write-tests
+  title: 'write_tests: independently reproduce both nesting failures'
+  purpose: Reproduce probe status 0 and request stdin timeout failures before restoring
+    either guard.
+  expected_outcome: Both probe status 0 and request stdin timeout failures are reproduced
+    before repair.
+  description: Exercise probe and request separately with cleared environment and
+    open stdin, retaining both failures.
+  kind: test
+  status: completed
+  context: '2026-10-25: reproduced probe status 0 and request stdin timeout before
+    restoring either guard. Existing SR-REQ-NO-NESTING remains authoritative; no product
+    behavior change.'
+  depends_on: []
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-NO-NESTING
+  timestamps:
+    created_at: '2026-10-25T00:00:00Z'
+    updated_at: '2026-10-25T23:20:00Z'
+    completed_at: '2026-10-25T23:20:00Z'
+- id: nesting-regression-implement-code
+  title: 'implement_code: restore early nesting rejection'
+  description: Check the marker before probe backend discovery and before request
+    stdin reads.
+  kind: implementation
+  status: completed
+  context: Restored both early guards without changing validation or mount authority.
+    All 80 default Galla tests pass with two existing opt-in trials ignored; all-feature
+    workspace strict lint and formatting pass.
+  depends_on:
+  - nesting-regression-write-tests
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-NO-NESTING
+  purpose: Check the marker before probe backend discovery and before request stdin
+    reads.
+  expected_outcome: Check the marker before probe backend discovery and before request
+    stdin reads.
+  timestamps:
+    created_at: '2026-10-25T00:00:00Z'
+    updated_at: '2026-10-25T23:20:00Z'
+    completed_at: '2026-10-25T23:20:00Z'
+- id: nesting-regression-security-audit
+  title: 'security_audit: inspect restored guard ordering'
+  description: Inspect marker handling, early failure, empty stdout and unchanged
+    grant authority.
+  kind: security-audit
+  status: completed
+  context: 'Bounded implementer inspection: existing non-following marker detection
+    remains fail-closed, both execution paths reject before input/backend work with
+    status 3 and empty stdout, and no grant or host-execution authority changes. Independent
+    source-only observations are retained in IMPL.md; no runner-wide audit claim.'
+  depends_on:
+  - nesting-regression-implement-code
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-NO-NESTING
+  purpose: Inspect marker handling, early failure, empty stdout and unchanged grant
+    authority.
+  expected_outcome: Inspect marker handling, early failure, empty stdout and unchanged
+    grant authority.
+  timestamps:
+    created_at: '2026-10-25T00:00:00Z'
+    updated_at: '2026-10-25T23:20:00Z'
+    completed_at: '2026-10-25T23:20:00Z'
+- id: nesting-regression-compliance-review
+  title: 'compliance_review: independently compare nesting repair evidence'
+  description: Derive a clean-slate source-only record and separately compare it with
+    local intent and execution evidence.
+  kind: compliance-review
+  status: completed
+  context: Independent source-only nesting-source-observer supplement and separate
+    source-blind nesting-intent-comparator comparison retained in IMPL.md. No concrete
+    post-repair scoped mismatch identified; runtime all-phase, direct-library, metadata-error
+    and exhaustive interleaving limits remain explicit. Review activity is complete,
+    not component acceptance or runner-wide certification.
+  depends_on:
+  - nesting-regression-security-audit
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-NO-NESTING
+  purpose: Derive a clean-slate source-only record and separately compare it with
+    local intent and execution evidence.
+  expected_outcome: Derive a clean-slate source-only record and separately compare
+    it with local intent and execution evidence.
+  timestamps:
+    created_at: '2026-10-25T00:00:00Z'
+    updated_at: '2026-10-25T23:20:00Z'
+    completed_at: '2026-10-25T23:20:00Z'
+- id: nested-sandbox-write-tests
+  title: 'write_tests: nested sandbox rejection'
+  description: Pin reserved destinations and native probe/request rejection with cleared
+    environment and open stdin.
+  kind: test
+  status: completed
+  context: Reserved-path and real Bubblewrap regressions failed first. Native cleared-environment
+    probe/request guards now return 3 before waiting for stdin.
+  depends_on: []
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-NO-NESTING
+  purpose: Pin reserved destinations and native probe/request rejection with cleared
+    environment and open stdin.
+  expected_outcome: Pin reserved destinations and native probe/request rejection with
+    cleared environment and open stdin.
+  timestamps:
+    created_at: '2026-10-25T00:00:00Z'
+    updated_at: '2026-10-25T23:20:00Z'
+    completed_at: '2026-10-25T23:20:00Z'
+- id: nested-sandbox-implement-code
+  title: 'implement_code: namespace-local nesting guard'
+  description: Create an immutable marker and reject nesting before input or backend
+    work.
+  kind: implementation
+  status: completed
+  context: Read-only tmpfs marker, CLI and library guards implemented; all default
+    Galla tests and strict lint pass.
+  depends_on:
+  - nested-sandbox-write-tests
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-NO-NESTING
+  purpose: Create an immutable marker and reject nesting before input or backend work.
+  expected_outcome: Create an immutable marker and reject nesting before input or
+    backend work.
+  timestamps:
+    created_at: '2026-10-25T00:00:00Z'
+    updated_at: '2026-10-25T23:20:00Z'
+    completed_at: '2026-10-25T23:20:00Z'
+- id: nested-sandbox-security-audit
+  title: 'security_audit: marker authority'
+  description: Inspect mount ordering, host non-mutation and diagnostic-only scope.
+  kind: security-audit
+  status: completed
+  context: 'Scoped implementer inspection: reserved disjoint path prevents grant mutation;
+    marker is namespace-only and diagnostic, not authority. Independent observation
+    follows in the release-readiness review.'
+  depends_on:
+  - nested-sandbox-implement-code
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-NO-NESTING
+  purpose: Inspect mount ordering, host non-mutation and diagnostic-only scope.
+  expected_outcome: Inspect mount ordering, host non-mutation and diagnostic-only
+    scope.
+  timestamps:
+    created_at: '2026-10-25T00:00:00Z'
+    updated_at: '2026-10-25T23:20:00Z'
+    completed_at: '2026-10-25T23:20:00Z'
+- id: nested-sandbox-compliance-review
+  title: 'compliance_review: independent nesting evidence'
+  description: Derive source-only observations and compare source-blind with local
+    intent.
+  kind: compliance-review
+  status: completed
+  context: Independent source observations/supplement and separate source-blind comparison
+    retained in IMPL.md. Later explicitly labelled native execution confirms both
+    inner protocol modes return 3 with cleared environment and open stdin. No whole-runner
+    certification or acceptance.
+  depends_on:
+  - nested-sandbox-security-audit
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-NO-NESTING
+  purpose: Derive source-only observations and compare source-blind with local intent.
+  expected_outcome: Derive source-only observations and compare source-blind with
+    local intent.
+  timestamps:
+    created_at: '2026-10-25T00:00:00Z'
+    updated_at: '2026-10-25T23:20:00Z'
+    completed_at: '2026-10-25T23:20:00Z'
+- id: portable-toolchain-write-tests
+  title: Pin host-independent Cargo subprocess execution
+  description: Reproduce missing rustc with a linker-only sandbox PATH, then require
+    private proxy execution of Cargo unit/doctests and a build script for every installed
+    version.
+  context: Human requests CI/local diagnosis and repair. Explicit advisory exception
+    while receipt enforcement is unavailable. Proxy-free Cargo PATH reproduced the
+    exact CI rustc -vV ENOENT locally before repair; final unit/doctest/build-script
+    fixture passes on all eight installed versions.
+  purpose: Remove reliance on local System Rust proxies.
+  expected_outcome: The CI failure is reproduced locally before the runtime repair.
+  kind: test
+  status: completed
+  depends_on: []
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E
+  timestamps:
+    created_at: '2026-10-14T22:00:00Z'
+    updated_at: '2026-10-14T22:17:30Z'
+    completed_at: '2026-10-14T22:17:30Z'
+  blocked_reason: null
+  recovery_state: null
+- id: portable-toolchain-implement-code
+  title: Resolve and expose complete native tool runtimes
+  description: Detect host tools, generate read-only sandbox Rust proxies, log host/mount/inside
+    execution evidence and correct consumer-specific environment guidance.
+  context: Detected host paths and private read-only proxies replace System-proxy
+    assumptions; full host/mount/inside logs are retained locally and wired into both
+    CI jobs. All 79 Galla tests passed; final four native/detection tests pass on
+    stable and MSRV, including alternate HOME and explicit RUSTUP_HOME. Skott 22 and
+    maerg 7 native tests pass. No new consumer authority or remote success claimed.
+  purpose: Support local and CI layouts without copying assumptions between namespaces.
+  expected_outcome: All native programs and Rust subprocesses execute with actionable
+    location evidence.
+  kind: implementation
+  status: completed
+  depends_on:
+  - portable-toolchain-write-tests
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E
+  timestamps:
+    created_at: '2026-10-14T22:00:00Z'
+    updated_at: '2026-10-14T22:17:30Z'
+    completed_at: '2026-10-14T22:17:30Z'
+  blocked_reason: null
+  recovery_state: null
+- id: portable-toolchain-security-audit
+  title: Inspect explicit native runtime authority
+  description: Independently inspect the scoped fixture for host mutation, broad mounts,
+    secret logging and unintended consumer-authority changes.
+  context: Independent source-only portable-runtime-observer identified no concrete
+    scoped host-mutation, broad-mount-authority or ambient-secret logging regression.
+    Its CI pipefail finding was fixed with explicit Bash and independently observed
+    by runtime-guard-observer. Unredacted tool diagnostics, snapshot/setup-failure
+    limits and existing System visibility remain explicit in IMPL.md; this is not
+    a full runner audit.
+  purpose: Retain independent authority observations.
+  expected_outcome: Any scoped discrepancy remains explicit.
+  kind: security-audit
+  status: completed
+  depends_on:
+  - portable-toolchain-implement-code
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E
+  timestamps:
+    created_at: '2026-10-14T22:00:00Z'
+    updated_at: '2026-10-14T22:17:30Z'
+    completed_at: '2026-10-14T22:17:30Z'
+  blocked_reason: null
+  recovery_state: null
+- id: portable-toolchain-compliance-review
+  title: Compare independent portable toolchain evidence
+  description: Derive a source-only implementation record, then compare it with local
+    intent in a separate source-blind context.
+  context: Separate source-blind portable-runtime-comparator found no concrete scoped
+    portability mismatch. It retained that whole-suite evidence predates final mapping
+    guards, subsequent final native reruns pass, source observers executed no tests,
+    and remote rerun/future-host coverage remain unverified. Corrected environment-guide
+    scope aligns with explicit grants. No component acceptance, blanket certification
+    or replacement of blocked runner-wide review.
+  purpose: Avoid self-certification and retain host coverage limits.
+  expected_outcome: Observed behavior, discrepancies and unverified future hosts are
+    stated honestly.
+  kind: compliance-review
+  status: completed
+  depends_on:
+  - portable-toolchain-security-audit
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E
+  timestamps:
+    created_at: '2026-10-14T22:00:00Z'
+    updated_at: '2026-10-14T22:17:30Z'
+    completed_at: '2026-10-14T22:17:30Z'
+  blocked_reason: null
+  recovery_state: null
+- id: bin-only-system-write-tests
+  title: Pin administrative directory exclusion
+  description: Test filtered layout, merged-bin aliases, denied PATH and overmounts,
+    native access denial and host non-mutation.
+  context: Human explicitly approved sbin exclusion; deliberate advisory exception
+    while receipt enforcement is unavailable. Final workspace includes passing layout-boundary,
+    alias, lexical PATH/grant and native host-non-mutation evidence.
+  purpose: Define exclusion before implementation.
+  expected_outcome: Native administrative-directory access and overmount regressions
+    fail before repair.
+  kind: test
+  status: completed
+  depends_on: []
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM
+  timestamps:
+    created_at: '2026-10-14T06:59:01Z'
+    updated_at: '2026-10-14T07:35:16Z'
+    completed_at: '2026-10-14T07:35:16Z'
+  blocked_reason: null
+  recovery_state: null
+- id: bin-only-system-implement-code
+  title: Enforce a filtered bin-only System view
+  description: Filter usr and usr/local without following administrative aliases,
+    reserve inaccessible sbin mounts, reject covering grants and retain filtered self-grants.
+  context: No host mutation, new mount authority or binary-classification claim. Updated
+    the opt-in fixture's retired sbin PATH after validation correctly rejected it;
+    all six opt-in native trials pass.
+  purpose: Apply exclusion in all execution phases.
+  expected_outcome: All three standard administrative paths are inaccessible while
+    ordinary bins remain usable.
+  kind: implementation
+  status: completed
+  depends_on:
+  - bin-only-system-write-tests
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM
+  timestamps:
+    created_at: '2026-10-14T06:59:01Z'
+    updated_at: '2026-10-14T07:35:16Z'
+    completed_at: '2026-10-14T07:35:16Z'
+  blocked_reason: null
+  recovery_state: null
+- id: bin-only-system-security-audit
+  title: Audit filtered System resource authority
+  description: Independently inspect symlink preservation, administrative aliases,
+    read-only roots, reserved overmounts, bounds and errors.
+  context: Independent bin-policy-observer established no concrete high-confidence
+    scoped regression. Path-based exclusion is not binary classification or race-resistant
+    resolution; limits remain in IMPL.md.
+  purpose: Retain independent findings.
+  expected_outcome: Findings are fixed or explicitly retained.
+  kind: security-audit
+  status: completed
+  depends_on:
+  - bin-only-system-implement-code
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM
+  timestamps:
+    created_at: '2026-10-14T06:59:01Z'
+    updated_at: '2026-10-14T07:35:16Z'
+    completed_at: '2026-10-14T07:35:16Z'
+  blocked_reason: null
+  recovery_state: null
+- id: bin-only-system-compliance-review
+  title: Compare independent System exclusion evidence
+  description: Source-only observation followed by separate source-blind comparison
+    with intent and execution evidence.
+  context: Separate source-blind bin-policy-comparator found scoped alignment, not
+    exhaustive all-phase proof. Final stable and Rust 1.95 workspace runs each pass
+    1405 tests with 12 ignored; six opt-in trials subsequently pass. No acceptance
+    or blanket certification.
+  purpose: Prevent self-certification.
+  expected_outcome: Scoped discrepancies and limits remain explicit.
+  kind: compliance-review
+  status: completed
+  depends_on:
+  - bin-only-system-security-audit
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM
+  timestamps:
+    created_at: '2026-10-14T06:59:01Z'
+    updated_at: '2026-10-14T07:35:16Z'
+    completed_at: '2026-10-14T07:35:16Z'
+  blocked_reason: null
+  recovery_state: null
+- id: workspace-vendor-mask-write-tests
+  title: Pin inaccessible workspace vendor evidence
+  description: Define native alias-read/write/chmod denial, snapshot resolution, host
+    non-mutation and unaffected generic requests.
+  context: Human explicitly requests hiding .kvist/vendored in the sandbox; per-bundle
+    advisory exception while receipt enforcement is unavailable. Native alias-denial
+    assertion failed before implementation; two mask unit tests, all 14 Skott native
+    environment tests and both opt-in Galla native toolchain trials now pass.
+  purpose: Define behavior before enforcement.
+  expected_outcome: Native assertions fail before the mask exists.
+  kind: test
+  status: completed
+  depends_on: []
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK
+  timestamps:
+    created_at: '2026-10-14T05:50:27Z'
+    updated_at: '2026-10-14T06:04:00Z'
+    completed_at: '2026-10-14T06:04:00Z'
+  blocked_reason: null
+  recovery_state: null
+- id: workspace-vendor-mask-implement-code
+  title: Mask the mutable workspace registry
+  description: Add fixed prepared-Rust masking after binds, without changing the protocol
+    or relaxing disjoint grants.
+  context: No host changes or arbitrary masking capability.
+  purpose: Expose one usable vendor view.
+  expected_outcome: The workspace alias is inaccessible while the snapshot remains
+    usable.
+  kind: implementation
+  status: completed
+  depends_on:
+  - workspace-vendor-mask-write-tests
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK
+  timestamps:
+    created_at: '2026-10-14T05:50:27Z'
+    updated_at: '2026-10-14T06:04:00Z'
+    completed_at: '2026-10-14T06:04:00Z'
+  blocked_reason: null
+  recovery_state: null
+- id: workspace-vendor-mask-security-audit
+  title: Audit restrictive mount masking
+  description: Independently review mask scope, symlinks, mount ordering, privilege
+    denial and host non-mutation.
+  context: Independent mask-observer reported no high-confidence new scoped regression.
+    Pathname inspection is not descriptor-pinned and does not exclude external replacement
+    races; this limit remains explicit in IMPL.md.
+  purpose: Retain independent findings.
+  expected_outcome: Findings are corrected or explicitly retained.
+  kind: security-audit
+  status: completed
+  depends_on:
+  - workspace-vendor-mask-implement-code
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK
+  timestamps:
+    created_at: '2026-10-14T05:50:27Z'
+    updated_at: '2026-10-14T06:04:00Z'
+    completed_at: '2026-10-14T06:04:00Z'
+  blocked_reason: null
+  recovery_state: null
+- id: workspace-vendor-mask-compliance-review
+  title: Compare independent mask evidence
+  description: Source-only observation followed by separate source-blind comparison.
+  context: Separate source-blind mask-comparator reported no new scoped discrepancy.
+    Full workspace subsequently passed with 1399 passed, 0 failed and 12 ignored.
+    No acceptance or blanket certification.
+  purpose: Prevent self-certification.
+  expected_outcome: Scoped discrepancies and verification limits remain explicit.
+  kind: compliance-review
+  status: completed
+  depends_on:
+  - workspace-vendor-mask-security-audit
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK
+  timestamps:
+    created_at: '2026-10-14T05:50:27Z'
+    updated_at: '2026-10-14T06:04:00Z'
+    completed_at: '2026-10-14T06:04:00Z'
+  blocked_reason: null
+  recovery_state: null
+- id: galla-write-tests
+  title: Define sandbox runner protocol tests
+  description: Write native failing tests for the redefined version-one probe and
+    request, strict typed grants, Bubblewrap identity and namespace enforcement, resource
+    bounds, process cleanup, and fail-closed behavior.
+  context: The buildable scaffold intentionally implements no runner protocol or operating-system
+    enforcement.
+  purpose: Establish executable negative and positive evidence before any request
+    can cause effects.
+  expected_outcome: Tests reject malformed and retired requests, aliases, links, overlapping
+    grants, backend substitution, resource escape, and host fallback while defining
+    the accepted Bubblewrap path.
+  kind: test
+  status: completed
+  depends_on: []
+  requirements:
+  - CONTRACT.md#Compatibility-and-verification
+  - DESIGN.md#Verification-strategy
+  - REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER
+  - ROOT_CONTRACT.md#Non-negotiable-architecture
+  timestamps:
+    created_at: '2026-09-01T21:04:20Z'
+    updated_at: '2026-09-02T08:00:00Z'
+    completed_at: '2026-09-02T08:00:00Z'
+  blocked_reason: null
+  recovery_state: null
+- id: galla-implement-code
+  title: Implement Bubblewrap sandbox runner
+  description: Implement the accepted bounded version-one protocol, independent typed-grant
+    validation, verified Bubblewrap execution, Linux namespace and resource enforcement,
+    and complete process cleanup without importing maerg types.
+  context: Only the scaffold exists; it fails closed and cannot execute an approved
+    task.
+  purpose: Provide the independently installed enforcement boundary required for supervised
+    Kvist execution.
+  expected_outcome: The runner satisfies the preceding native tests and never degrades
+    to the host or retired request shape.
+  kind: implementation
+  status: completed
+  depends_on:
+  - galla-write-tests
+  requirements:
+  - CONTRACT.md#Behavioral-guarantees
+  - DESIGN.md#Interactions-and-state
+  - REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER
+  - ROOT_CONTRACT.md#Non-negotiable-architecture
+  timestamps:
+    created_at: '2026-09-01T21:04:20Z'
+    updated_at: '2026-09-02T08:00:00Z'
+    completed_at: '2026-09-02T08:00:00Z'
+  blocked_reason: null
+  recovery_state: null
+- id: galla-security-audit
+  title: Audit sandbox runner authority
+  description: Independently review request parsing, canonical paths, mount construction,
+    namespace isolation, Bubblewrap substitution, environment and network denial,
+    resource enforcement, process cleanup, and fallback resistance.
+  context: The production runner will turn untrusted request data into operating-system
+    effects.
+  purpose: Identify every high-confidence path to authority escalation, disclosure,
+    or false enforcement before installation.
+  expected_outcome: Findings are corrected with native regression tests or retained
+    as explicit blockers.
+  kind: security-audit
+  status: completed
+  depends_on:
+  - galla-implement-code
+  requirements:
+  - DESIGN.md#Security-and-resource-design
+  - REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER
+  - ROOT_CONTRACT.md#Change-and-compliance-rules
+  timestamps:
+    created_at: '2026-09-01T21:04:20Z'
+    updated_at: '2026-09-12T14:32:46Z'
+    completed_at: '2026-09-12T14:32:46Z'
+  blocked_reason: null
+  recovery_state: null
+- id: galla-compliance-review
+  title: Review sandbox runner compliance
+  description: Derive observed runner behavior from source and native tests in a clean-slate
+    context, then compare the resulting implementation record with approved local
+    and parent intent in a separate source-blind context.
+  context: The runner implementer cannot certify the boundary that enforces task effects.
+  purpose: Retain an independent disposition for every protocol, isolation, resource,
+    and failure guarantee.
+  expected_outcome: The review records satisfied clauses, discrepancies, unsupported
+    behavior, and required arbitration before production promotion.
+  kind: compliance-review
+  status: completed
+  depends_on:
+  - galla-security-audit
+  requirements:
+  - CONTRACT.md#Compatibility-and-verification
+  - REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER
+  - ROOT_CONTRACT.md#Change-and-compliance-rules
+  timestamps:
+    created_at: '2026-09-01T21:04:20Z'
+    updated_at: '2026-09-12T14:32:54Z'
+    completed_at: '2026-09-12T14:32:54Z'
+  blocked_reason: null
+  recovery_state: null
+- id: galla-reverification-security-audit
+  title: Re-run sandbox runner security audit
+  description: Independently re-run the sandbox runner security audit in a genuine
+    agent context, covering request parsing, canonical paths, mount construction,
+    namespace isolation, Bubblewrap substitution, environment and network denial,
+    resource enforcement, and fallback resistance.
+  context: The branch review found the placeholder-era attempt logs for the completed
+    sandbox runner security audit contain only echo-placeholder agent output, so the
+    recorded completion is not valid independent evidence.
+  purpose: Replace the placeholder-era security receipts with genuine independent
+    findings before the runner is trusted as the enforcement boundary.
+  expected_outcome: A genuine independent audit records or remediates every high-confidence
+    finding, and its disposition is retained for human arbitration against the placeholder-era
+    receipts.
+  kind: security-audit
+  status: blocked
+  depends_on:
+  - galla-implement-code
+  requirements:
+  - CONTRACT.md#Security-and-authority
+  - REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER
+  - ROOT_CONTRACT.md#Change-and-compliance-rules
+  timestamps:
+    created_at: '2026-09-15T13:15:00Z'
+    updated_at: '2026-09-28T22:32:35Z'
+    completed_at: null
+  blocked_reason: 'agent execution exceeded the combined output limit while contacting
+    the local model gateway. Bounded redacted logs are written to: /opt/proj/kvist/./galla/.kvist/logs/galla-reverification-security-audit_2026-09-28T22-32-13Z.log'
+  recovery_state: null
+- id: galla-reverification-compliance-review
+  title: Re-run sandbox runner compliance review
+  description: Re-derive the observed runner behavior from source and native tests
+    in a clean-slate context, then compare the resulting implementation record with
+    the approved local and parent intent in a separate source-blind context.
+  context: The placeholder-era compliance receipts, including the committed COMPLIANCE_REVIEW.md,
+    contain only echo-placeholder agent output, so the recorded completion is not
+    valid independent evidence.
+  purpose: Retain an independent disposition for every protocol, isolation, resource,
+    and failure guarantee.
+  expected_outcome: A clean-slate record and source-blind comparison classify every
+    clause, retaining discrepancies for explicit human arbitration.
+  kind: compliance-review
+  status: pending
+  depends_on:
+  - galla-reverification-security-audit
+  requirements:
+  - REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass
+  - REVIEW_RUNBOOK.md#Source-blind-compliance-pass
+  - ROOT_CONTRACT.md#Change-and-compliance-rules
+  timestamps:
+    created_at: '2026-09-15T13:15:00Z'
+    updated_at: '2026-09-15T13:15:00Z'
+    completed_at: null
+  blocked_reason: null
+  recovery_state: null
+- id: galla-toolchain-write-tests
+  title: Define native toolchain execution and inventory tests
+  description: Define real runner trials for system-language execution, all installed
+    rustup versions, target and component parity, installed-target compilation, denied
+    mutations and host state snapshots.
+  context: Version-only and selected-toolchain consumer tests do not establish full
+    installed inventory visibility.
+  purpose: Make tool availability and host non-mutation measurable through explicit
+    read-only grants.
+  expected_outcome: Native trials fail on unavailable prerequisites, incomplete inventory,
+    unusable tools, writable installations or host changes.
+  kind: test
+  status: completed
+  depends_on: []
+  requirements:
+  - DESIGN.md#Verification-strategy
+  - REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E
+  timestamps:
+    created_at: '2026-10-10T16:09:07Z'
+    updated_at: '2026-10-10T16:15:17Z'
+    completed_at: '2026-10-10T16:15:17Z'
+  blocked_reason: null
+  recovery_state: null
+- id: galla-toolchain-implement-code
+  title: Implement native toolchain fixtures and CI execution
+  description: Implement the test harness and private multi-toolchain rustup registrations,
+    wire strict native trials into CI, and document tested coverage and consumer-profile
+    limitations without changing production mount authority.
+  context: Tests use the real independently built executable and Bubblewrap; no host
+    installation is performed by a test.
+  purpose: Provide reproducible end-to-end evidence rather than silently skipped version
+    probes.
+  expected_outcome: System-language fixtures execute, all installed Rust versions
+    and targets match host evidence, and snapshots remain unchanged.
+  kind: implementation
+  status: completed
+  depends_on:
+  - galla-toolchain-write-tests
+  requirements:
+  - CONTRACT.md#Compatibility-and-verification
+  - DESIGN.md#Verification-strategy
+  - REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E
+  timestamps:
+    created_at: '2026-10-10T16:09:07Z'
+    updated_at: '2026-10-10T16:15:17Z'
+    completed_at: '2026-10-10T16:15:17Z'
+  blocked_reason: null
+  recovery_state: null
+- id: galla-toolchain-security-audit
+  title: Audit native toolchain test authority
+  description: Independently review private registration construction, read-only mount
+    scope, host queries, mutation attempts, snapshot coverage and temporary fixture
+    cleanup.
+  context: Successful test execution is not independent security evidence.
+  purpose: Check that the new native tests do not provision or mutate host installations.
+  expected_outcome: Independent findings and remaining limits are retained for human
+    disposition.
+  kind: security-audit
+  status: pending
+  depends_on:
+  - galla-toolchain-implement-code
+  requirements:
+  - DESIGN.md#Security-and-resource-design
+  - REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E
+  timestamps:
+    created_at: '2026-10-10T16:09:07Z'
+    updated_at: '2026-10-10T16:15:17Z'
+    completed_at: null
+  blocked_reason: null
+  recovery_state: null
+- id: galla-toolchain-compliance-review
+  title: Review native toolchain evidence independently
+  description: Derive observed test behavior in a clean-slate context and separately
+    compare the implementation record and executable evidence against local intent
+    without reading source.
+  context: This testing review does not certify runner compliance or replace existing
+    blocked re-verification.
+  purpose: Retain independent discrepancies rather than having the test implementer
+    certify its own work.
+  expected_outcome: Coverage, unsupported installation shapes, host non-mutation limits
+    and consumer-profile distinctions receive an independent disposition.
+  kind: compliance-review
+  status: pending
+  depends_on:
+  - galla-toolchain-security-audit
+  requirements:
+  - REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E
+  - ROOT_CONTRACT.md#Change-and-compliance-rules
+  timestamps:
+    created_at: '2026-10-10T16:09:07Z'
+    updated_at: '2026-10-10T16:15:17Z'
+    completed_at: null
+  blocked_reason: null
+  recovery_state: null
