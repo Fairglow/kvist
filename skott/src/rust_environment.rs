@@ -538,9 +538,13 @@ impl RustEnvironment {
                 "rustup must be a trusted system executable outside the writable workspace",
             ));
         }
-        let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
-            failure("HOME is required to resolve the installed host Rust selection")
-        })?;
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                failure("HOME is required to resolve the installed host Rust selection")
+            })?
+            .canonicalize()
+            .map_err(|e| io_error("canonicalize HOME for Rust resolution", None, e))?;
         if !inspect_path(&home)?.is_dir() || home.starts_with(&workspace) {
             return Err(failure(
                 "host HOME must be a canonical non-link directory outside the writable workspace",
