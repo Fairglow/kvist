@@ -17,7 +17,7 @@ vendor:
 build:
     cargo build --locked --workspace --all-features \
                 --message-format=json-diagnostic-rendered-ansi > .kvist/cargo-build.log
-    python3 tools/cargo_install_binaries.py .kvist/cargo-build.log
+    python3 tools/cargo_install_binaries.py .kvist/cargo-build.log target/debug
 
 fix:
     cargo clippy --fix --locked --workspace --all-targets --all-features
@@ -40,7 +40,7 @@ reformat:
 release:
     cargo build --locked --workspace --release --all-features \
                 --message-format=json-diagnostic-rendered-ansi > .kvist/cargo-release.log
-    python3 tools/cargo_install_binaries.py .kvist/cargo-release.log
+    python3 tools/cargo_install_binaries.py .kvist/cargo-release.log ~/.kvist/bin target/release
 
 # Print the target directory on the host
 target:
