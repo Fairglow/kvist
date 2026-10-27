@@ -17,6 +17,10 @@ pub(crate) struct Search {
 }
 
 impl Search {
+    pub fn active(&self) -> bool {
+        self.editing || !self.query.is_empty()
+    }
+
     pub fn begin(&mut self, backward: bool) {
         *self = Self {
             editing: true,
@@ -113,9 +117,31 @@ impl Search {
         } else if self.matches.is_empty() {
             "No matches".into()
         } else {
-            format!("{}/{} matches", self.index + 1, self.matches.len())
+            String::new()
         };
-        format!("{direction} [{mode}] {result}  {}", self.query)
+        let (phase, hints) = if self.editing {
+            ("FIND", "Esc:cancel Enter:search")
+        } else {
+            ("SEARCH", "Esc/q:exit n/N:move Enter:next")
+        };
+        let position = format!(
+            "{}/{}",
+            if self.matches.is_empty() {
+                0
+            } else {
+                self.index + 1
+            },
+            self.matches.len()
+        );
+        let detail = if result.is_empty() {
+            String::new()
+        } else {
+            format!("{result}  ")
+        };
+        format!(
+            "{phase} [{mode}] {position} {hints} {detail}{direction}{}",
+            self.query
+        )
     }
 }
 
@@ -140,6 +166,24 @@ mod tests {
         search.query = "[".into();
         search.update(&lines, 0);
         assert!(search.error.as_deref().unwrap().contains("Invalid regex"));
+    }
+
+    #[test]
+    fn footer_distinguishes_query_entry_from_confirmed_search_and_prioritizes_exit_hints() {
+        let mut search = Search {
+            editing: true,
+            query: "x".repeat(4096),
+            ..Search::default()
+        };
+        let editing = search.footer();
+        assert!(editing.starts_with("FIND "));
+        assert!(editing.find("Esc:cancel").unwrap() < editing.find(&search.query).unwrap());
+        assert!(editing.contains("Enter:search"));
+        search.editing = false;
+        let confirmed = search.footer();
+        assert!(confirmed.starts_with("SEARCH "));
+        assert!(confirmed.find("Esc/q:exit").unwrap() < confirmed.find(&search.query).unwrap());
+        assert!(confirmed.contains("n/N"));
     }
 
     #[test]

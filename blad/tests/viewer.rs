@@ -978,7 +978,10 @@ fn question_mark_opens_help_and_reverse_search_uses_only_n_or_angle_bracket() {
     viewer.keys_with_frame(b"?");
     viewer.keys_with_frame(b"/hit\r");
     assert!(
-        viewer.screen.line(29).starts_with("/ [literal] 1/3"),
+        viewer
+            .screen
+            .line(29)
+            .starts_with("SEARCH [literal] 1/3 Esc/q:exit n/N:move Enter:next"),
         "{}",
         viewer.screen.line(29)
     );
@@ -1012,9 +1015,19 @@ fn f5_is_inert_and_search_still_treats_question_mark_as_text() {
     assert!(viewer.raw.is_empty(), "retired reload key produced output");
     assert!(viewer.child.try_wait().unwrap().is_none());
     viewer.keys_with_frame(b"/hit?");
-    assert!(viewer.screen.line(11).starts_with("/ [literal] 1/1"));
+    assert!(
+        viewer
+            .screen
+            .line(11)
+            .starts_with("FIND [literal] 1/1 Esc:cancel Enter:search")
+    );
     viewer.keys_with_frame(b"\x12");
-    assert!(viewer.screen.line(11).starts_with("/ [regex] 1/2"));
+    assert!(
+        viewer
+            .screen
+            .line(11)
+            .starts_with("FIND [regex] 1/2 Esc:cancel Enter:search")
+    );
     viewer.exit_with(b"\x03");
 }
 
@@ -1027,17 +1040,238 @@ fn ctrl_r_starts_a_fresh_regex_search_and_toggles_in_the_prompt() {
     viewer.keys_with_frame(b"\t");
     assert!(viewer.screen.line(11).contains("Links: 1/1"));
     viewer.keys_with_frame(b"\x12hit?");
-    assert!(viewer.screen.line(11).starts_with("/ [regex] 1/2"));
+    assert!(
+        viewer
+            .screen
+            .line(11)
+            .starts_with("FIND [regex] 1/2 Esc:cancel Enter:search")
+    );
     viewer.keys_with_frame(b"\x12");
-    assert!(viewer.screen.line(11).starts_with("/ [literal] 1/1"));
+    assert!(
+        viewer
+            .screen
+            .line(11)
+            .starts_with("FIND [literal] 1/1 Esc:cancel Enter:search")
+    );
     viewer.keys(b"\r");
     viewer.keys_with_frame(b"\x12hit[0-9]");
-    assert!(viewer.screen.line(11).starts_with("/ [regex] 1/1"));
+    assert!(
+        viewer
+            .screen
+            .line(11)
+            .starts_with("FIND [regex] 1/1 Esc:cancel Enter:search")
+    );
     viewer.keys(b"\r");
     viewer.keys_with_frame(b"/hit?");
-    assert!(viewer.screen.line(11).starts_with("/ [literal] 1/1"));
+    assert!(
+        viewer
+            .screen
+            .line(11)
+            .starts_with("FIND [literal] 1/1 Esc:cancel Enter:search")
+    );
     viewer.keys_with_frame(b"\x1b");
     assert!(!viewer.screen.line(11).contains("Links:"));
+    viewer.quit();
+}
+
+#[test]
+fn search_feedback_distinguishes_current_matches_even_in_reversed_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("current.md");
+    std::fs::write(
+        &path,
+        "before **hit** gap `hit` after\n\n| hit | hit |\n|---|---|\n| hit | hit |\n\n界 hit e\u{301} hit",
+    )
+    .unwrap();
+    for args in [
+        vec!["--color", "never"],
+        vec!["--theme", "dark"],
+        vec!["--theme", "light"],
+        vec!["--theme", "terminal"],
+    ] {
+        let mut viewer = Viewer::start_with(&path, 100, 20, false, &args, &[]);
+        viewer.keys_with_frame(b"/hit");
+        assert!(viewer.screen.reversed[1][7..10].iter().all(|value| *value));
+        assert!(viewer.screen.reversed[1][15..18].iter().all(|value| !value));
+        for range in [7..10, 15..18] {
+            assert!(
+                viewer.screen.underlined[1][range]
+                    .iter()
+                    .all(|value| *value)
+            );
+        }
+        viewer.keys_with_frame(b"\rn");
+        assert!(viewer.screen.reversed[1][7..10].iter().all(|value| !value));
+        assert!(viewer.screen.reversed[1][15..18].iter().all(|value| *value));
+        assert!(
+            viewer.screen.emphasis[1][7..10]
+                .iter()
+                .all(|value| value[0])
+        );
+        viewer.keys_with_frame(b"n");
+        let row = (1..19)
+            .find(|row| viewer.screen.content_line(*row) == "hit | hit")
+            .unwrap();
+        assert!(viewer.screen.reversed[row][0..3].iter().all(|value| *value));
+        assert!(viewer.screen.reversed[row][6..9].iter().all(|value| !value));
+        assert!(viewer.screen.reversed[row][3..6].iter().all(|value| *value));
+        viewer.keys_with_frame(b"n");
+        assert!(viewer.screen.reversed[row][0..3].iter().all(|value| !value));
+        assert!(viewer.screen.reversed[row][6..9].iter().all(|value| *value));
+        viewer.resize(60, 20);
+        assert!(viewer.screen.reversed[row][0..3].iter().all(|value| !value));
+        assert!(viewer.screen.reversed[row][6..9].iter().all(|value| *value));
+        viewer.keys_with_frame(b"nnnn");
+        assert!(viewer.screen.line(19).contains("8/8"));
+        viewer.keys_with_frame(b"n");
+        assert!(viewer.screen.line(19).contains("1/8"));
+        assert!(viewer.screen.reversed[1][7..10].iter().all(|value| *value));
+        assert!(viewer.screen.reversed[1][15..18].iter().all(|value| !value));
+        viewer.keys_with_frame(b"\x1b");
+        assert!(viewer.screen.reversed[row][0..9].iter().all(|value| *value));
+        assert!(
+            viewer.screen.underlined[row][0..9]
+                .iter()
+                .all(|value| !value)
+        );
+        viewer.quit();
+    }
+}
+
+#[test]
+fn search_feedback_enter_and_safe_exit_preserve_tabs_until_normal_quit() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("search-mode.md");
+    let other = temp.path().join("other.md");
+    std::fs::write(&path, "hit hit\n\n[link](#target)\n\n# Target").unwrap();
+    std::fs::write(&other, "other document").unwrap();
+    for exit in [b"q".as_slice(), b"\x1b"] {
+        let mut viewer = Viewer::start_sources(&[&path, &other], 100, 18, false, &[], &[], false);
+        viewer.keys_with_frame(b"/hit");
+        assert!(viewer.screen.line(17).starts_with("FIND "));
+        assert!(viewer.screen.line(17).contains("Enter:search"));
+        assert!(viewer.screen.line(17).contains("Esc:cancel"));
+        viewer.keys_with_frame(b"\r");
+        assert!(viewer.screen.line(17).starts_with("SEARCH "));
+        assert!(viewer.screen.line(17).contains("Esc/q:exit"));
+        assert!(viewer.screen.line(17).contains("n/N"));
+        viewer.keys_with_frame(b"\r");
+        assert!(
+            viewer.screen.line(17).contains("2/2"),
+            "{}",
+            viewer.screen.line(17)
+        );
+        viewer.keys_with_frame(exit);
+        assert!(viewer.child.try_wait().unwrap().is_none());
+        assert!(viewer.screen.line(0).contains("[search-mode.md]"));
+        assert!(!viewer.screen.line(17).contains("SEARCH"));
+        assert!(viewer.screen.underlined[1].iter().all(|value| !value));
+        viewer.keys_with_frame(b"q");
+        assert!(viewer.screen.line(0).contains("[other.md]"));
+        viewer.quit();
+    }
+}
+
+#[test]
+fn search_feedback_handles_empty_errors_literal_q_and_help_precedence() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("search-errors.md");
+    std::fs::write(&path, "q q hit").unwrap();
+    let mut viewer = Viewer::start(&path, 100, 18, false);
+    viewer.keys_with_frame(b"/q");
+    assert!(viewer.screen.line(17).contains("1/2"));
+    viewer.keys_with_frame(b"\r");
+    viewer.keys_with_frame(b"?");
+    assert!(viewer.screen.line(0).contains("help"));
+    viewer.keys_with_frame(b"q");
+    assert!(viewer.screen.line(17).starts_with("SEARCH "));
+    viewer.keys_with_frame(b"q");
+    assert!(!viewer.screen.line(17).contains("SEARCH"));
+    for (query, diagnostic) in [
+        (b"/absent\r".as_slice(), "No matches"),
+        (b"/\x12[\r".as_slice(), "Invalid regex"),
+    ] {
+        viewer.keys_with_frame(query);
+        assert!(viewer.screen.line(17).starts_with("SEARCH "));
+        assert!(viewer.screen.line(17).contains(diagnostic));
+        viewer.keys(b"\r");
+        assert!(viewer.screen.line(17).contains(diagnostic));
+        viewer.keys_with_frame(b"\x1b");
+        assert!(viewer.child.try_wait().unwrap().is_none());
+        assert!(!viewer.screen.line(17).contains("SEARCH"));
+    }
+    viewer.keys_with_frame(b"/\r");
+    assert!(!viewer.screen.line(17).contains("FIND"));
+    assert!(!viewer.screen.line(17).contains("SEARCH"));
+    viewer.exit_with(b"q");
+    let mut viewer = Viewer::start(&path, 100, 18, false);
+    viewer.keys_with_frame(b"/hit\r");
+    viewer.exit_with(b"\x11");
+}
+
+#[test]
+fn search_feedback_enter_pauses_live_follow_and_reveals_the_next_match() {
+    let mut viewer = Viewer::start_stream(100, 12);
+    viewer.send_input(format!("hit top\n\n{}hit bottom", "filler\n\n".repeat(30)).as_bytes());
+    viewer.wait_for(|screen| (1..11).any(|row| screen.line(row).contains("hit bottom")));
+    viewer.keys_with_frame(b"/hit\r");
+    assert!(viewer.screen.line(11).contains("2/2"));
+    viewer.keys_with_frame(b"G");
+    assert!(viewer.screen.line(11).contains("FOLLOW"));
+    viewer.keys_with_frame(b"\r");
+    assert!(viewer.screen.line(11).contains("PAUSED"));
+    assert!(viewer.screen.line(11).contains("1/2"));
+    assert!(viewer.screen.line(1).contains("hit top"));
+    viewer.quit();
+}
+
+#[test]
+fn search_feedback_resize_keeps_a_visible_current_match_in_view() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("search-reflow.md");
+    std::fs::write(&path, format!("{}hit", "word ".repeat(50))).unwrap();
+    let mut viewer = Viewer::start(&path, 100, 18, false);
+    viewer.keys_with_frame(b"/hit\r");
+    assert!((1..17).any(|row| viewer.screen.line(row).contains("hit")));
+    viewer.resize(25, 10);
+    assert!((1..9).any(|row| viewer.screen.line(row).contains("hit")));
+    assert!(viewer.screen.line(9).contains("1/1"));
+    viewer.keys_with_frame(b"g");
+    viewer.resize(20, 10);
+    assert!(viewer.screen.line(1).starts_with("word"));
+    assert!(!(1..9).any(|row| viewer.screen.line(row).contains("hit")));
+    viewer.quit();
+}
+
+#[test]
+fn search_feedback_remains_current_after_live_input_and_file_reload() {
+    let mut viewer = Viewer::start_stream(100, 18);
+    viewer.send_input(b"hit hit");
+    viewer.wait_for(|screen| screen.line(1).contains("hit hit"));
+    viewer.keys_with_frame(b"/hit\rn");
+    assert!(viewer.screen.line(17).contains("2/2"));
+    assert!(viewer.screen.reversed[1][0..3].iter().all(|value| !value));
+    assert!(viewer.screen.reversed[1][4..7].iter().all(|value| *value));
+    viewer.send_input(b" hit");
+    viewer.wait_for(|screen| screen.line(17).contains("1/3"));
+    assert!(viewer.screen.line(17).contains("SEARCH"));
+    assert!(viewer.screen.reversed[1][0..3].iter().all(|value| *value));
+    assert!(viewer.screen.reversed[1][4..11].iter().all(|value| !value));
+    viewer.keys_with_frame(b"q");
+    assert!(viewer.screen.line(17).contains("PAUSED"));
+    assert!(!viewer.screen.line(17).contains("SEARCH"));
+    viewer.quit();
+
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("search-reload.md");
+    std::fs::write(&path, "hit hit").unwrap();
+    let mut viewer = Viewer::start(&path, 100, 18, true);
+    viewer.keys_with_frame(b"/hit\rn");
+    std::fs::write(&path, "hit hit hit").unwrap();
+    viewer.wait_for(|screen| screen.line(17).contains("1/3"));
+    assert!(viewer.screen.line(17).contains("SEARCH"));
+    assert!(viewer.screen.reversed[1][2..5].iter().all(|value| *value));
+    assert!(viewer.screen.reversed[1][6..13].iter().all(|value| !value));
     viewer.quit();
 }
 
@@ -1056,6 +1290,11 @@ fn occurrence_search_is_precise_wraps_and_supports_reverse_and_regex() {
     for column in 0..28 {
         assert_eq!(
             viewer.screen.reversed[1][column],
+            (7..10).contains(&column),
+            "column {column}"
+        );
+        assert_eq!(
+            viewer.screen.underlined[1][column],
             (7..10).contains(&column) || (15..18).contains(&column),
             "column {column}"
         );

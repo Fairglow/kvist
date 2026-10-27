@@ -529,17 +529,22 @@ table. Key-release events are ignored.
    prompt. Ctrl+C is the unambiguous global quit.
 5. **An open search prompt consumes keys.** Printable characters without
    Ctrl/Alt append; Backspace deletes; Ctrl+R toggles regex; Ctrl+U clears;
-   Enter keeps results and returns to normal mode; Esc clears the query/results
-   and returns to normal mode. Other keys are ignored (apart from global Ctrl+C).
+   Enter confirms a nonempty query into result navigation; an empty query returns
+   to normal viewing. Esc clears the query/results and returns to normal mode.
+   Other keys are ignored (apart from global Ctrl+C).
    `q`, `h`, `r`, `n`, `p`, `?` and `/` are query text there.
-6. Outside search, **Ctrl+Arrows selects spatial links**.
+6. **Confirmed search consumes Esc/q to clear search, and Enter to advance**,
+   never closing a tab or following a document link. `n`/`>` move forward and
+   `N`/`<` move backward. No-match and invalid-regex searches are also dismissible.
+   **Ctrl+Arrows selects spatial links** outside the query prompt.
 7. Remaining Ctrl keys use the page/half-page/repaint bindings; remaining keys
    use normal-mode bindings. Ctrl+R starts regex search; plain `p`, `f` and
    F5 have no action. There is no link mode.
 
-Thus normal-mode `q`/Esc closes a tab even with a directly selected link or
-committed search. **After Enter commits a search, Esc closes the active tab**;
-to clear committed highlights without closing, press `/` then Esc.
+Thus `q`/Esc closes a tab only after search has ended (including with a directly
+selected link). **After Enter confirms search, Esc or lowercase q clears its
+query, results and highlights without closing the tab.** The viewport and stdin
+follow/pause state are retained. A second normal-mode `q`/Esc closes the tab.
 
 Mouse wheel and left-click link handling remain active during search as well
 as normal navigation. Help ignores mouse input. Resize
@@ -602,8 +607,11 @@ table cells and bare URLs. Repeated bare URLs are independent occurrences.
 ### Search
 
 Press `/` for forward literal search or `Ctrl+R` for forward regex search.
-Type a query, then press `Enter`
-to exit search mode and keep the matches highlighted.
+The footer shows **FIND** with `Esc:cancel` and `Enter:search` while typing.
+Enter confirms a nonempty query into **SEARCH** result navigation; the footer
+changes to show `Esc/q:exit`, `n/N:move` and `Enter:next`. An empty query returns
+to normal viewing. Exit hints precede the query/error text, although very narrow
+terminals or a higher-priority persistent error can limit the visible footer.
 
 | Key | Action |
 |-----|--------|
@@ -612,21 +620,30 @@ to exit search mode and keep the matches highlighted.
 | Type text / `Backspace` | Append to / delete from query |
 | `Ctrl+R` | Toggle literal/regex in this prompt |
 | `Ctrl+U` | Clear the prompt |
-| `Enter` | Exit search, keep highlights |
+| `Enter` | Confirm the query; in SEARCH, move to the next occurrence |
 | `n` / `>` | Next occurrence in the search direction, wrapping |
 | `N` / `<` | Previous occurrence, wrapping |
-| `Esc` | Cancel only an open prompt; after Enter this closes the tab |
+| `Esc` | Clear search and return to normal viewing in either phase |
+| `q` | In SEARCH, clear search without closing; in FIND, literal query text |
 
-The footer shows mode, direction and occurrence position (e.g., "3/12 matches"),
+The footer shows phase, mode and occurrence position (e.g., "SEARCH [literal] 3/12"),
 or an explicit no-match/invalid-pattern diagnostic, even after Enter. Multiple
 matches on one row count separately. Only matching text is highlighted, across
-heading, emphasis and syntax resets. Reverse video and underline retain a
-non-color cue, including inside inline code and reversed table headers.
+heading, emphasis and syntax resets. All matches are underlined with the
+`search` palette color. Only the current occurrence is reversed; passive
+matches explicitly disable reversal even inside reversed table headers or
+inline code. Source appearance resumes exactly outside matched spans. This
+distinguishes the current occurrence even with color disabled.
 Forward search starts at the first occurrence at/below the viewport top,
 wrapping to the first if necessary. Subsequent `n`/`>` and `N`/`<` movement is
 occurrence-based and reveals horizontal matches. `?` opens help in normal
 mode, not backward search. Tab, spatial link selection and heading-jump keys
-clear search emphasis.
+clear search emphasis. Resize retains the current occurrence ordinal, clamped
+if wrapping changes the match count; source refreshes recalculate near the
+viewport as before. An already-visible current occurrence stays in view after
+reflow; manually scrolling it away prevents resize from jumping back to it.
+Enter navigation also pauses resumed stdin following, like `n`.
+This is not a source-anchored match-identity guarantee.
 
 Each new prompt clears the previous query. `/` starts in **case-insensitive
 literal mode**, so `a.b` searches for that exact text. `Ctrl+R` from normal

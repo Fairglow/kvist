@@ -25,6 +25,11 @@ First standalone crates.io release candidate, not yet published.
 - Diagnostic logging retains one descriptor, rejects blocking or
   linked destinations and reports initialization failures visibly.
 - Recompute existing matches immediately when toggling literal/regex search.
+- Distinguish the current search occurrence with reverse video while keeping
+  other matches underlined, including with color disabled and reversed source.
+  FIND/SEARCH footer hints show query entry, confirmation and safe exit.
+  Esc/q leave confirmed search instead of closing a tab; Enter advances after
+  confirmation. Resize retains the current match ordinal when possible.
 - Dark, light and terminal-native palettes; strict JSON palette overrides;
   explicit color policy and escape-free rendered dumps.
 - Footnote prose retains its theme across wrapped rows, paragraphs and inline

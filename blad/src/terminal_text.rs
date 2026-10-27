@@ -137,6 +137,18 @@ impl TerminalLine {
         ranges: &[std::ops::Range<usize>],
         overlay: &str,
     ) -> String {
+        self.clip_with_overlays(start, width, ranges, overlay, &[], "")
+    }
+
+    pub fn clip_with_overlays(
+        &self,
+        start: usize,
+        width: usize,
+        ranges: &[std::ops::Range<usize>],
+        overlay: &str,
+        active_ranges: &[std::ops::Range<usize>],
+        active_overlay: &str,
+    ) -> String {
         if width == 0 {
             return String::new();
         }
@@ -144,8 +156,9 @@ impl TerminalLine {
         let mut result = String::new();
         let mut styles = self.styles.iter().peekable();
         let mut source = SgrState::default();
-        let mut active = false;
+        let mut active = None;
         let mut range_index = 0;
+        let mut active_index = 0;
         let mut column = 0;
         for (offset, grapheme) in self.text.grapheme_indices(true) {
             let next = column + grapheme.width();
@@ -157,23 +170,21 @@ impl TerminalLine {
             {
                 result.push_str(style);
                 source.apply(style);
-                if active {
+                if let Some(overlay) = active {
                     result.push_str(overlay);
                 }
                 styles.next();
             }
-            while ranges
-                .get(range_index)
-                .is_some_and(|range| range.end <= column)
-            {
-                range_index += 1;
-            }
-            let highlight = ranges
-                .get(range_index)
-                .is_some_and(|range| range.start < next);
+            let highlight = if overlaps(active_ranges, &mut active_index, column, next) {
+                Some(active_overlay)
+            } else if overlaps(ranges, &mut range_index, column, next) {
+                Some(overlay)
+            } else {
+                None
+            };
             if active != highlight {
                 source.restore(&mut result);
-                if highlight {
+                if let Some(overlay) = highlight {
                     result.push_str(overlay);
                 }
                 active = highlight;
@@ -186,7 +197,7 @@ impl TerminalLine {
                     result.push_str(&self.text[part..*position]);
                     result.push_str(style);
                     source.apply(style);
-                    if active {
+                    if let Some(overlay) = active {
                         result.push_str(overlay);
                     }
                     part = *position;
@@ -199,7 +210,7 @@ impl TerminalLine {
                 {
                     result.push_str(style);
                     source.apply(style);
-                    if active {
+                    if let Some(overlay) = active {
                         result.push_str(overlay);
                     }
                     styles.next();
@@ -213,6 +224,18 @@ impl TerminalLine {
         result.push_str("\x1b[0m");
         result
     }
+}
+
+fn overlaps(
+    ranges: &[std::ops::Range<usize>],
+    index: &mut usize,
+    start: usize,
+    end: usize,
+) -> bool {
+    while ranges.get(*index).is_some_and(|range| range.end <= start) {
+        *index += 1;
+    }
+    ranges.get(*index).is_some_and(|range| range.start < end)
 }
 
 #[derive(Default)]
@@ -323,6 +346,77 @@ mod tests {
     fn styles_inside_a_grapheme_do_not_split_it() {
         assert_eq!(clipped("e\x1b[31m\u{301}x", 0, 1), "e\u{301}");
         assert_eq!(clipped("e\x1b[31m\u{301}x", 1, 1), "x");
+    }
+
+    #[test]
+    fn current_overlay_wins_and_restores_reversed_source_across_grapheme_styles() {
+        #[derive(Default)]
+        struct Attributes {
+            reverse: bool,
+            underline: bool,
+            text: Vec<(char, bool, bool)>,
+        }
+        impl vte::Perform for Attributes {
+            fn print(&mut self, character: char) {
+                self.text.push((character, self.reverse, self.underline));
+            }
+            fn csi_dispatch(&mut self, params: &vte::Params, _: &[u8], _: bool, action: char) {
+                if action == 'm' {
+                    for value in params.iter().map(|value| value[0]) {
+                        match value {
+                            0 => {
+                                self.reverse = false;
+                                self.underline = false;
+                            }
+                            7 => self.reverse = true,
+                            27 => self.reverse = false,
+                            4 => self.underline = true,
+                            24 => self.underline = false,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        let line = TerminalLine::new("\x1b[7ma界\x1b[0me\x1b[31m\u{301}b\x1b[7mz");
+        let passive = 1..5;
+        let current = 3..4;
+        for (start, width, expected) in [
+            (
+                0,
+                6,
+                vec![
+                    ('a', true, false),
+                    ('界', false, true),
+                    ('e', true, true),
+                    ('\u{301}', true, true),
+                    ('b', false, true),
+                    ('z', true, false),
+                ],
+            ),
+            (
+                2,
+                3,
+                vec![
+                    (' ', false, true),
+                    ('e', true, true),
+                    ('\u{301}', true, true),
+                    ('b', false, true),
+                ],
+            ),
+        ] {
+            let output = line.clip_with_overlays(
+                start,
+                width,
+                std::slice::from_ref(&passive),
+                "\x1b[27m\x1b[4m",
+                std::slice::from_ref(&current),
+                "\x1b[7m\x1b[4m",
+            );
+            let mut observed = Attributes::default();
+            vte::Parser::new().advance(&mut observed, output.as_bytes());
+            assert_eq!(observed.text, expected, "{output:?}");
+        }
     }
 
     #[test]

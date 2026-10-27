@@ -461,7 +461,7 @@ fn viewer_session(
             100.0
         };
 
-        let search_info = if search.editing || !search.query.is_empty() {
+        let search_info = if search.active() {
             search.footer()
         } else {
             "".to_string()
@@ -512,16 +512,12 @@ fn viewer_session(
             );
         let first_match = search.matches.partition_point(|span| span.row < start);
         let last_match = search.matches.partition_point(|span| span.row < end);
-        let mut highlights = search.matches[first_match..last_match].to_vec();
-        if let Some(index) = selected_link {
-            highlights.extend(
-                spans[index]
-                    .iter()
-                    .filter(|span| (start..end).contains(&span.row))
-                    .cloned(),
-            );
-        }
-        highlights.sort_by_key(|span| (span.row, span.start, span.end));
+        let highlights = &search.matches[first_match..last_match];
+        let active = if let Some(index) = selected_link {
+            spans[index].as_slice()
+        } else {
+            search.current().map_or(&[][..], std::slice::from_ref)
+        };
         painter.paint(
             &mut io::stdout().lock(),
             if help { &help_document } else { &document },
@@ -532,7 +528,8 @@ fn viewer_session(
                 x: if help { 0 } else { scroll_x },
                 header: if help { "Blad help" } else { title },
                 footer: if help { &help_footer } else { &footer },
-                matches: if help { &[] } else { &highlights },
+                matches: if help { &[] } else { highlights },
+                active: if help { &[] } else { active },
             },
         )?;
 
@@ -752,7 +749,8 @@ fn viewer_session(
                             search.begin(false);
                             selected_link = None;
                         }
-                        KeyCode::Char('n') | KeyCode::Char('>') if !search.matches.is_empty() => {
+                        KeyCode::Char('n' | '>') | KeyCode::Enter if search.active() => {
+                            position.following = false;
                             search.advance(false);
                             if let Some(span) = search.current() {
                                 reveal(
@@ -855,6 +853,9 @@ fn viewer_session(
                         }
                         KeyCode::Char('?' | 'h') | KeyCode::F(1) => help = true,
                         KeyCode::Char('Q') => return Ok(ViewerAction::Quit),
+                        KeyCode::Char('q') | KeyCode::Esc if search.active() => {
+                            search = Search::default();
+                        }
                         KeyCode::Char('q') | KeyCode::Esc => {
                             return Ok(ViewerAction::Close);
                         }
@@ -900,6 +901,11 @@ fn viewer_session(
             },
             Ok(Event::Resize(columns, height)) => {
                 let started = Instant::now();
+                let reveal_search = search.current().is_some_and(|span| {
+                    (scroll_offset..scroll_offset.saturating_add(visible_lines)).contains(&span.row)
+                        && span.start < scroll_x.saturating_add(document.content_width)
+                        && span.end > scroll_x
+                });
                 cols = columns;
                 rows = height;
                 visible_lines = usize::from(rows.saturating_sub(2));
@@ -918,7 +924,9 @@ fn viewer_session(
                     selected_link = None;
                     link_index = 0;
                 }
+                let search_index = search.index;
                 search.update(&document.lines, scroll_offset);
+                search.index = search_index.min(search.matches.len().saturating_sub(1));
                 spans = links
                     .iter()
                     .map(|link| link_spans(&document, link))
@@ -927,6 +935,14 @@ fn viewer_session(
                 if let Some(index) = selected_link
                     && let Some(span) = spans[index].first()
                 {
+                    reveal(
+                        span,
+                        &mut scroll_offset,
+                        &mut scroll_x,
+                        visible_lines,
+                        document.content_width,
+                    );
+                } else if reveal_search && let Some(span) = search.current() {
                     reveal(
                         span,
                         &mut scroll_offset,

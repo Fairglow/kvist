@@ -8,8 +8,9 @@ pub(crate) const HELP: &str = "\
 # Blad keyboard help
 
 / literal search; Ctrl+R starts regex or toggles while editing
-n / >: next match; N / <: previous match
-Esc cancels search; Enter confirms
+FIND: Enter confirms search; Esc cancels; q is query text
+SEARCH: n / > / Enter next; N / < previous; Esc/q exits
+Current match: reversed + underlined; others: underlined
 
 Tab / Shift+Tab: next / previous link; Enter: follow
 Ctrl+Arrows: spatial links; [ / ]: previous / next heading
@@ -24,7 +25,7 @@ b: back; e: editor; file saves reload automatically
 stdin streams automatically; scrolling up/search pauses following
 G / Ctrl+End resumes following; EOF keeps the document open
 
-q/Esc: close tab; Ctrl+Q or Ctrl+C: quit all; Ctrl+L: redraw
+q/Esc: close tab outside search; Ctrl+Q/Ctrl+C quit; Ctrl+L redraw
 ? / F1 / h: this help; Ctrl+C quits from any mode
 ";
 

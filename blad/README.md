@@ -110,8 +110,9 @@ redirected output; `--dump` always removes them. Closed downstream pipes exit qu
 | `Ctrl+R` (in search) | Toggle regex mode |
 | `n`/`>` | Next match |
 | `N`/`<` | Match in reverse search direction |
-| `Esc` | Cancel search |
-| `Enter` | Confirm search |
+| `Esc` | Leave search and clear highlights |
+| `q` (confirmed search) | Leave search without closing the tab |
+| `Enter` | Confirm the query; then move to the next match |
 
 ### Links
 
@@ -140,9 +141,14 @@ redirected output; `--dump` always removes them. Closed downstream pipes exit qu
 | `Q`/`Ctrl+Q` | Quit all tabs in normal mode |
 | `Ctrl+C` | Quit all tabs from any mode |
 
-The mouse wheel scrolls; left-click a link to follow it. In a search prompt,
-Esc cancels; after Enter confirms a search, Esc closes the active tab. In help,
-any key except Ctrl+C returns to the document.
+The mouse wheel scrolls; left-click a link to follow it. The footer shows
+**FIND** while entering a query and **SEARCH** after Enter confirms it, with
+exit/navigation hints. All matches are underlined; the current match also uses
+reverse video, including with color disabled. `n`/`N` move between matches;
+Enter also moves forward after confirmation. Esc leaves either search phase;
+`q` leaves confirmed search (and remains query text while typing). Both clear
+search without closing the document. Press `q`/Esc again in normal viewing to
+close the tab. In help, any key except Ctrl+C returns to the document.
 
 ## Rendering
 

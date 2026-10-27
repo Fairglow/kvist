@@ -181,13 +181,31 @@ Navigation: `↑`/`k`, `↓`/`j`, `PageUp`/`Ctrl+B` (full page up),
 Search: `/` starts a fresh forward literal search; normal-mode `Ctrl+R` starts
 a fresh forward regex search. Both are case insensitive. `Ctrl+R` toggles
 literal/regex in either prompt, `Ctrl+U` clears the prompt,
-`Enter` keeps results and returns to normal mode; `Esc` cancels an active search
-prompt. After Enter, normal-mode Esc closes the active tab rather than clearing
-retained results. `n`/`>` move forward and `N`/`<` move backward, wrapping at
+`Enter` confirms a nonempty query into search-result navigation. The footer
+distinguishes `FIND` (query editing) from `SEARCH` (confirmed results), with
+confirmation/navigation and exit hints. `Esc` clears either phase and returns
+to normal viewing; lowercase `q` also exits confirmed search, but remains query
+text while editing. Exiting clears query/results/highlights without closing a
+tab or changing the viewport/follow state. A subsequent normal-mode `q`/Esc
+closes the tab. Empty confirmation returns to normal viewing. In confirmed
+search, `Enter` advances like `n`, never follows a document link. `n`/`>` move
+forward and `N`/`<` move backward, wrapping at
 document boundaries. Plain `p` has no search action. Each nonempty,
 nonoverlapping occurrence counts separately. Search is per rendered line, not
 across soft wraps. Exact matching spans are highlighted; a partial grapheme
-match highlights its whole grapheme. Search begins at/near the viewport;
+match highlights its whole grapheme. Other matches are underlined with the
+search palette foreground and explicitly non-reversed; the current match is
+underlined and reversed, including when source text is already reversed.
+The distinction MUST survive source SGR resets, color-disabled output, clipping,
+reflow and input refresh. Overlays MUST end at their exact spans and restore
+source appearance afterward. Selected links keep their reversed/underlined
+selection style. Resize retains the current occurrence ordinal, clamped if
+reflow changes the match count; it does not promise source-anchored identity
+for matches lost or created at wrap boundaries. If the current occurrence
+intersects the document viewport before resize, it MUST be revealed after
+reflow; manually scrolling it out of view MUST NOT make resize jump back to it.
+Confirmed Enter, like `n`, MUST pause resumed stdin following before revealing
+the next occurrence. Search begins at/near the viewport;
 navigation reveals horizontal matches too. The footer shows mode, direction,
 current/total, invalid-regex diagnostics or no matches, including after Enter.
 Regex uses Rust `regex` syntax (no lookaround/backreferences), case insensitive

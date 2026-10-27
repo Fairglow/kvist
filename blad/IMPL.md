@@ -4,6 +4,116 @@
 
 Date: 2026-10-12
 
+## Scoped search feedback and safe exit increment - 2026-10-27
+
+Independent clean-slate `search-feedback-source-observer` read only current
+search, display, viewport, terminal text, navigation, output/theme source and
+focused test source. It excluded intent, queues, prior implementation records,
+reviews, session/chat history and Git history, ran no tests and made no
+compliance determination. Its source-derived observations:
+
+- Search is active during query editing or while its confirmed query is
+  nonempty. The footer distinguishes FIND from SEARCH, reports literal/regex
+  mode and current/total count, and places phase-specific controls before
+  query/diagnostic text. Empty confirmation becomes inactive; invalid or
+  unmatched nonempty confirmation remains SEARCH.
+- The prompt treats q and ? as text; Ctrl+R toggles regex, Ctrl+U clears,
+  Backspace removes one scalar, Enter confirms and Esc resets search. Ctrl+C
+  precedes all modes. Help consumes other keys without changing underlying
+  search. Outside the prompt, Ctrl+Q/Q retain explicit quit behavior.
+- Confirmed Enter takes precedence over document links and advances like n/>.
+  Esc/q reset search rather than closing; a later normal Esc/q closes the tab.
+  Link selection and heading navigation clear search. Search state is recreated
+  on tab/session transitions.
+- Matching remains case-insensitive, per rendered line, with literal escaping,
+  ignored zero-width matches and grapheme-expanded display-column ranges.
+  New input/reload recomputes near the viewport, retaining query/mode/phase.
+  Source wrapping can change matches, and distinct matches inside one grapheme
+  cannot receive visually distinct sub-grapheme highlighting.
+- Frames carry passive search spans and an active current-occurrence or
+  selected-link layer. Active ranges take precedence. Both use the existing
+  search foreground and underline; passive explicitly disables reverse and
+  active explicitly enables it, including on already-reversed source.
+- The shared clipper tracks source SGR independently, restores it when overlay
+  identity changes and reapplies overlays after source controls, including
+  controls inside graphemes. Wide graphemes clipped at an edge become spaces,
+  not partial text. Theme/palette settings feed reflow; no-color preserves the
+  non-color distinction. No public palette field is added.
+- Query bytes remain bounded at 4,096 and regex compilation/cache limits at
+  2 MiB each; those do not bound accumulated match count. Writer/event/render
+  failures propagate. Persistent status can override the search footer, and
+  stream information prefixes it. Very narrow terminals can clip hints.
+
+The observer described assertions for phase feedback, safe exits with retained
+tabs, literal q, help/quit precedence, error/empty confirmation, same-row and
+wrapped movement, current/passive effective attributes, themes/no-color,
+reversed table source, bold restoration, reflow, refresh and Unicode clipping.
+The PTY model tracks emphasis/reverse/underline rather than visual color fidelity.
+
+### Independent final next-occurrence and resize addendum
+
+The initial source observation identified two scoped gaps: Enter after resumed
+stdin following could be repinned away from its next match, and retained resize
+ordinals could move a formerly visible occurrence offscreen. Two additional
+regressions reproduced those behaviors before their production corrections.
+
+Separate clean-slate `search-viewport-source-observer` derived the final
+next-occurrence/resize addendum from only those source branches, search/reveal
+helpers and the two focused PTY tests, without intent, prior observations,
+records or history. It ran no tests and observed:
+
+- Active n/>/Enter explicitly clears following before advancing/revealing.
+  Advancement wraps; empty results are unchanged, and current lookup is checked.
+- Resize first records intersection of the old current span with the old
+  content viewport, including partial horizontal visibility. After reflow it
+  preserves the previous ordinal, clamped to the rebuilt list. This is ordinal
+  retention, not source-occurrence identity.
+- Existing selected-link reveal has precedence. Otherwise resize reveals the
+  refreshed search occurrence only if the previous one intersected the old
+  viewport, preserving a deliberate manual scroll away. Resize itself does not
+  change following. Shared reveal adjusts rows/columns; the outer viewer loop
+  clamps document offsets.
+- The Enter test asserts 2/2, resumed FOLLOW, then PAUSED/1/2 and the top match
+  after Enter, without appending later input. The resize test narrows a visible
+  match, then manually scrolls away and narrows again without jumping back.
+  These two fixtures do not specifically exercise multi-match count clamping,
+  horizontal-only visibility, selected-link precedence or every alias.
+
+### Attributed search execution evidence
+
+All five initial new selected regressions failed before production changes.
+The direct overlay-priority/restoration test was also added. The two final
+visibility/follow regressions failed before their corrections, then passed.
+An existing narrow Unicode footer test exposed hidden occurrence counts; the
+footer now places phase/mode/count before hints and unbounded query text.
+Existing assertions deliberately reflect passive underlining versus current
+reversal, rather than weakening exact spans or geometry.
+
+Final all-feature nextest passed 341 tests and standalone nextest passed 320.
+The three existing ignored tests remain excluded by runner policy; no skip or
+retry was added. Strict all-target/all-feature Clippy, formatting, whitespace
+checks and the all-feature library doctest pass. Component intent validates
+structurally. No component acceptance or approved-baseline change is claimed.
+
+### Independent source-blind search comparison
+
+Separate `search-feedback-intent-comparator` compared the local intended search
+and related viewport/output obligations with only this scoped supplement. It
+read no source/tests, execution logs, queues, prior reviews/records or history,
+and did not rerun checks. No concrete behavioral contradiction was established:
+the observed phase/key precedence, priority overlays, source-SGR restoration,
+refresh behavior and final conditional-reveal/follow mechanics support the
+intended increment.
+
+The comparison retained evidence gaps rather than certifying compliance.
+Direction indication and unchanged viewport/follow state on cancellation are
+not fully described by the broad observation. The final two fixtures do not
+cover multi-match count clamping, horizontal-only visibility, selected-link
+precedence, every alias or later producer input after resumed-follow Enter.
+PTY attribute assertions are not visual-color or universal-terminal evidence.
+Execution results remain attributed implementer evidence, not independent
+execution or human acceptance.
+
 ## Scoped general YAML frontmatter increment - 2026-10-27
 
 Independent clean-slate `frontmatter-source-observer` read only current

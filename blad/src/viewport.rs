@@ -18,6 +18,7 @@ pub(crate) struct Document {
     max_width: usize,
     chrome: String,
     search: String,
+    selection: String,
 }
 
 impl Document {
@@ -70,20 +71,25 @@ impl Document {
                     content_width,
                     gutter,
                     max_width,
-                    chrome: Self::style(options, options.palette().chrome, false)?,
-                    search: Self::style(options, options.palette().search, true)?,
+                    chrome: Self::style(options, options.palette().chrome, None)?,
+                    search: Self::style(options, options.palette().search, Some(false))?,
+                    selection: Self::style(options, options.palette().search, Some(true))?,
                 });
             }
             gutter = required;
         }
     }
 
-    fn style(options: &RenderOptions, color: crate::Color, reverse: bool) -> io::Result<String> {
+    fn style(
+        options: &RenderOptions,
+        color: crate::Color,
+        reverse: Option<bool>,
+    ) -> io::Result<String> {
         let mut bytes = Vec::new();
         let mut output = crate::output::Output::new(&mut bytes, options);
         color.write(&mut output, false)?;
-        if reverse {
-            write!(output, "\x1b[7m\x1b[4m")?;
+        if let Some(reverse) = reverse {
+            write!(output, "\x1b[{}m\x1b[4m", if reverse { 7 } else { 27 })?;
         }
         output.flush()?;
         String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
@@ -103,6 +109,7 @@ pub(crate) struct Frame<'a> {
     pub header: &'a str,
     pub footer: &'a str,
     pub matches: &'a [crate::render_writer::LinkSpan],
+    pub active: &'a [crate::render_writer::LinkSpan],
 }
 
 #[derive(Default)]
@@ -164,6 +171,7 @@ fn compose(document: &Document, frame: &Frame<'_>) -> Vec<String> {
     );
     let height = usize::from(frame.rows.saturating_sub(2));
     let mut match_index = frame.matches.partition_point(|span| span.row < frame.y);
+    let mut active_index = frame.active.partition_point(|span| span.row < frame.y);
     for (index, line) in document.lines.iter().enumerate().skip(frame.y).take(height) {
         let row = &mut rows[index - frame.y + 1];
         if document.gutter > 0 {
@@ -172,24 +180,15 @@ fn compose(document: &Document, frame: &Frame<'_>) -> Vec<String> {
                 &TerminalLine::new(&prefix).clip(0, usize::from(frame.columns.saturating_sub(1))),
             );
         }
-        let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
-        while let Some(span) = frame
-            .matches
-            .get(match_index)
-            .filter(|span| span.row == index)
-        {
-            if let Some(last) = ranges.last_mut().filter(|last| last.end >= span.start) {
-                last.end = last.end.max(span.end);
-            } else {
-                ranges.push(span.start..span.end);
-            }
-            match_index += 1;
-        }
-        row.push_str(&line.clip_with_spans(
+        let ranges = row_ranges(frame.matches, &mut match_index, index);
+        let active = row_ranges(frame.active, &mut active_index, index);
+        row.push_str(&line.clip_with_overlays(
             frame.x,
             document.content_width,
             &ranges,
             &document.search,
+            &active,
+            &document.selection,
         ));
     }
     if frame.rows > 1 {
@@ -219,6 +218,23 @@ fn compose(document: &Document, frame: &Frame<'_>) -> Vec<String> {
         }
     }
     rows
+}
+
+fn row_ranges(
+    spans: &[crate::render_writer::LinkSpan],
+    index: &mut usize,
+    row: usize,
+) -> Vec<std::ops::Range<usize>> {
+    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    while let Some(span) = spans.get(*index).filter(|span| span.row == row) {
+        if let Some(last) = ranges.last_mut().filter(|last| last.end >= span.start) {
+            last.end = last.end.max(span.end);
+        } else {
+            ranges.push(span.start..span.end);
+        }
+        *index += 1;
+    }
+    ranges
 }
 
 #[cfg(test)]
@@ -283,7 +299,8 @@ mod tests {
                     x: 0,
                     header: "title",
                     footer: "footer",
-                    matches: &[crate::render_writer::LinkSpan {
+                    matches: &[],
+                    active: &[crate::render_writer::LinkSpan {
                         row: 0,
                         start: 2,
                         end: 7,
@@ -338,6 +355,7 @@ mod tests {
             header: "title",
             footer: "footer",
             matches: &[],
+            active: &[],
         };
         assert_eq!(
             paint(&mut Failed, &document, frame).unwrap_err().kind(),
@@ -377,6 +395,7 @@ mod tests {
             header: "header",
             footer: "footer",
             matches: &[],
+            active: &[],
         };
         let mut painter = Painter::default();
         let mut output = Vec::new();

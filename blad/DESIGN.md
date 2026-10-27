@@ -13,6 +13,51 @@ Blad is an interactive terminal Markdown viewer with search, navigation, tabs,
 and optional external editing. It uses crossterm for terminal interaction and
 pulldown-cmark for parsing.
 
+### Search feedback and safe results mode (2026-10-27)
+
+Retain the existing search editing flag and nonempty-query state: editing is
+`FIND`, a nonempty confirmed query is `SEARCH`, and neither is normal viewing.
+Centralize their active-state predicate. Empty confirmation is normal viewing;
+nonempty no-match/invalid-regex searches still have a dismissible results phase.
+The footer must change on confirmation and put exit hints before query/error
+text so long input cannot hide the basic escape route. Preserve existing
+error-status precedence and global help/quit handling.
+
+In the normal-key branch, intercept Esc/lowercase q when search is active to
+reset only search. Prompt q remains literal input. Intercept Enter with an
+active confirmed query as next-occurrence navigation, including a no-op on
+zero results, before the document-link Enter path. Preserve Tab/spatial/heading
+exits, Q/Ctrl+Q outside prompts, global Ctrl+C, tab switching and paused stdin.
+
+Do not add palette fields or duplicate rendering: use the existing search
+color for underlined passive matches with explicit reverse-off, and the
+existing reversed/underlined selection style for the current occurrence.
+On resize, retain the previous occurrence index across recomputation, clamping
+to the new list; ordinary source updates keep the existing near-viewport policy.
+Before reflow, record whether the current span intersects the old content
+viewport. Reveal its refreshed span only in that case, preserving a deliberate
+manual scroll away. The next-occurrence branch explicitly pauses following so
+Enter cannot be undone by the live stream's bottom pin after `G` resumes it.
+Carry passive search spans and active search/link spans separately in a frame.
+The compositor keeps their ranges separate and grants active ranges priority.
+Generalize terminal-line clipping to two ordered overlays while retaining the
+single-overlay helper. Track source SGR independently, restoring it whenever
+overlay identity changes and reapplying the current overlay after source
+style controls, including inside a grapheme. Never paint gutters or split
+graphemes. Frame comparison must repaint both the old and new current spans.
+
+Write fail-first PTY regressions for phase feedback, safe q/Esc, errors, empty
+confirmation, Enter navigation, explicit quit/help precedence and current-match
+attributes across source resets and refresh. Add direct clipping/painting checks
+for overlay priority and independently restored source styles. Existing tests
+must deliberately assert the revised passive/current projection, not weaken
+span or geometry coverage.
+
+This user-directed interaction change uses a deliberate local advisory-review
+exception while exact-bundle receipts/enforcement are unavailable. Independent
+source-only observation and a separate source-blind comparison follow; no
+component acceptance or compliance certification is implied.
+
 ### General YAML frontmatter (2026-10-27)
 
 Use one private source-prefix/event adapter for the renderer, link extraction

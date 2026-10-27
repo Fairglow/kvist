@@ -514,6 +514,32 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     effective YAML token colors, CLI file/stdin and real streaming/viewer paths,
     including navigation after the header and EOF equivalence.
 
+### Search-mode feedback and safe exit
+
+76. **R-076 Search feedback:** Visually distinguish the current occurrence
+    from all other matches during query editing and confirmed-result navigation,
+    without relying on color alone. Preserve exact Unicode/grapheme spans,
+    source styling outside matches, themes, no-color output, horizontal clipping,
+    resize, reload and live-input refresh. Resize retains the current occurrence
+    ordinal when available, otherwise clamps it to the refreshed match list.
+    Keep an already-visible current occurrence in view after reflow; do not
+    pull a manually scrolled-away viewport back to an offscreen occurrence.
+    Confirmed Enter navigation must pause resumed stdin following just like `n`.
+    Selected links retain their existing
+    selection presentation. Show distinct query-entry and confirmed-search
+    indicators with the relevant confirmation/navigation/exit hints.
+    Enter confirms a nonempty query into result navigation, not normal viewing;
+    subsequent Enter moves forward like `n`. Esc cancels either search phase.
+    In confirmed search, lowercase `q` clears search rather than closing a tab;
+    in the query prompt it remains literal query text. Exiting clears query,
+    results and highlights while retaining the viewport and live-follow pause.
+    A later normal-mode `q`/Esc still closes the tab. Empty confirmation returns
+    to normal viewing. No-match and invalid-regex results remain safely
+    dismissible. Preserve global quit/help/tab-switch precedence and existing
+    link/heading navigation exits from search. Cover effective current/passive
+    attributes, same-row and wrapped navigation, styles/Unicode, search phases,
+    errors, multi-tab safety, refresh and quit behavior through persistent tests.
+
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).
 - **C-002 No new state format:** Blad reads skott's structured session

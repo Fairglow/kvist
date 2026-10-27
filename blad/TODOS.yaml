@@ -22,6 +22,58 @@ component:
         expected_revision: "sha256:08761e7f7519a1a1e7deb13af6f7e20fbb1de6344abec58c226cd2d697cbffda"
         observed_revision: "sha256:51eecaed05aab38d3101b538946214ffe459e956ee543fcf22ef14602e926c25"
 tasks:
+  - id: "blad-search-feedback-tests"
+    title: "write_tests: distinguish current matches and search phases"
+    description: "Pin effective current/passive attributes, clipping/style restoration, visible confirmation and safe search exits, with real PTY refresh and quit-precedence evidence."
+    context: "All five initial selected regressions failed before production changes. Direct overlay priority/restoration and two later fail-first visibility/follow regressions cover the final behavior; existing assertions deliberately track passive/current projection and compact phase/mode/count feedback."
+    purpose: "Prevent indistinguishable current matches and accidental document closure."
+    expected_outcome: "Persistent regressions fail before the interaction and overlay changes."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-076", "REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-055"]
+    timestamps: {created_at: "2026-10-27T17:49:15Z", updated_at: "2026-10-27T18:03:40Z", completed_at: "2026-10-27T18:03:40Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-search-feedback-code"
+    title: "implement_code: explicit results mode and priority overlays"
+    description: "Render passive/current spans separately, expose FIND/SEARCH hints, intercept confirmed-search exits and Enter, and update user documentation without new palette fields."
+    context: "Separate passive/current overlays, FIND/SEARCH hints and safe Enter/q/Esc behavior are wired without new palette fields. Resize retains/clamps the occurrence ordinal and keeps an already-visible match in view; Enter pauses resumed live following. All-feature nextest passes 341 tests, standalone 320, with strict Clippy, formatting and the library doctest passing."
+    purpose: "Make searching discoverable and safe without adding a separate rendering engine."
+    expected_outcome: "Focused regressions and existing affected suites pass in both feature modes."
+    kind: implementation
+    status: completed
+    depends_on: ["blad-search-feedback-tests"]
+    requirements: ["REQUIREMENTS.md#R-076", "REQUIREMENTS.md#R-062"]
+    timestamps: {created_at: "2026-10-27T17:49:15Z", updated_at: "2026-10-27T18:03:40Z", completed_at: "2026-10-27T18:03:40Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-search-feedback-audit"
+    title: "security_audit: independently observe search feedback"
+    description: "Derive a scoped implementation record and bounded risk observations from source/tests only, excluding intent, queues, prior records and history."
+    context: "Independent source-only search-feedback-source-observer described state, key precedence, priority overlays, normalization and evidence limits. It identified two visibility/follow gaps, reproduced before correction; a separate narrow source-only search-viewport-source-observer derived the final mechanics. IMPL.md retains scope and limits; no certification is implied."
+    purpose: "Retain independent observations of overlay boundaries and interaction precedence."
+    expected_outcome: "A clean-slate source-derived supplement is recorded in IMPL.md."
+    kind: security-audit
+    status: completed
+    depends_on: ["blad-search-feedback-code"]
+    requirements: ["REQUIREMENTS.md#R-076"]
+    timestamps: {created_at: "2026-10-27T17:49:15Z", updated_at: "2026-10-27T18:03:40Z", completed_at: "2026-10-27T18:03:40Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-search-feedback-review"
+    title: "compliance_review: compare search intent and evidence"
+    description: "Compare local intent with independently observed behavior and execution evidence in a separate source-blind context, retaining discrepancies for arbitration."
+    context: "Independent source-blind search-feedback-intent-comparator found no concrete contradiction. IMPL.md retains gaps in independently described direction/cancellation state, multi-match clamping, horizontal-only visibility, selected-link precedence, aliases and subsequent producer input, plus PTY/color limits. No acceptance or whole-component certification is implied."
+    purpose: "Keep implementation and independent intent comparison distinct."
+    expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
+    kind: compliance-review
+    status: completed
+    depends_on: ["blad-search-feedback-audit"]
+    requirements: ["REQUIREMENTS.md#R-076"]
+    timestamps: {created_at: "2026-10-27T17:49:15Z", updated_at: "2026-10-27T18:05:23Z", completed_at: "2026-10-27T18:05:23Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "blad-frontmatter-tests"
     title: "write_tests: general YAML frontmatter"
     description: "Pin literal YAML layout, token colors, prefix-only recognition, body offsets, CLI policies, errors and real viewer/streaming behavior before implementation."
