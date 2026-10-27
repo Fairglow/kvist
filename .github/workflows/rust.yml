@@ -106,13 +106,27 @@ jobs:
       - name: Test workspace
         env:
           KVIST_GALLA: /home/runner/kvist-target/debug/galla-runner
-        run: cargo test --locked --workspace --all-features
+          NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
+        run: |
+          python3 tools/profile_tests.py --output "$RUNNER_TEMP/kvist-test-profile" -- \
+            cargo nextest run --config-file tools/nextest.toml --offline --locked \
+            --workspace --all-features --test-threads num-cpus --no-fail-fast \
+            --message-format libtest-json-plus --message-format-version 0.1
+
+      - name: Retain workspace test performance diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-performance-stable
+          path: ${{ runner.temp }}/kvist-test-profile
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Test workspace documentation
+        run: cargo test --offline --locked --workspace --all-features --doc
 
       - name: Test the native Rust sandbox chain
         run: |
-          KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla-runner" \
-            cargo test --locked -p skott --test rust_build_environment -- \
-            --test-threads=1 --nocapture
           KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla-runner" \
             cargo test --locked -p kvist --test sandbox_toolchain -- \
             --ignored --test-threads=1 --nocapture
@@ -217,7 +231,24 @@ jobs:
       - name: Test workspace
         env:
           KVIST_GALLA: /home/runner/kvist-target/debug/galla-runner
-        run: cargo test --locked --workspace --all-features
+          NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
+        run: |
+          python3 tools/profile_tests.py --output "$RUNNER_TEMP/kvist-test-profile" -- \
+            cargo nextest run --config-file tools/nextest.toml --offline --locked \
+            --workspace --all-features --test-threads num-cpus --no-fail-fast \
+            --message-format libtest-json-plus --message-format-version 0.1
+
+      - name: Retain workspace test performance diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-performance-msrv
+          path: ${{ runner.temp }}/kvist-test-profile
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Test workspace documentation
+        run: cargo test --offline --locked --workspace --all-features --doc
 
       - name: Test native Galla toolchain execution
         shell: bash

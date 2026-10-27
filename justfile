@@ -1,8 +1,7 @@
-# Optional convenience recipes using only Cargo and Rustup.
+# Optional convenience recipes.
 #
 # `just` itself is optional; the equivalent Cargo commands are documented in
-# README.md. The default recipes do not depend on cargo-nextest, cargo-outdated,
-# unbuffer, nightly Rust, or generated log files.
+# README.md. Testing uses cargo-nextest; profiling additionally uses Python 3.11+.
 
 all: audit format lint build test
 
@@ -49,6 +48,10 @@ target:
 test:
     kvist vendor
     cargo nextest run --config-file tools/nextest.toml --locked --workspace --all-features --test-threads num-cpus --no-fail-fast
+
+test-profile:
+    kvist vendor
+    NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 python3 tools/profile_tests.py -- cargo nextest run --config-file tools/nextest.toml --offline --locked --workspace --all-features --test-threads num-cpus --no-fail-fast --message-format libtest-json-plus --message-format-version 0.1
 
 audit:
     cargo deny --all-features --locked check advisories bans licenses sources

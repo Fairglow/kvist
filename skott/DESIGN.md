@@ -620,6 +620,51 @@ that neither check requires sandbox-local files. Actual nextest start/finish eve
 verify exclusivity and retained ordinary parallelism. Separate invocations and
 unrelated writers remain uncoordinated. Interrupted-test scratch must be
 removed before rerunning; no scope-validation exception is introduced.
+Give both existing full-pool overrides priority 100, ahead of the long native
+inventory checks at priority 50 and ordinary tests at priority 0. This avoids
+late exclusive barriers followed by a newly started inventory straggler.
+Priority does not replace pool reservation. The repository trial prefixes
+nested Cargo commands with a dedicated workspace target; a bounded native
+regression holds all ordinary Cargo build/artifact/legacy target locks while
+compiling and testing a dependency-free fixture through the same command helper.
+
+The inventory test first enumerates metadata and literal symlink targets,
+then hashes regular files with at most eight scoped workers sharing an atomic
+work index. Merge results into the same sorted map used for before/after
+comparison. Do not follow links or omit files, metadata or either full snapshot.
+Test one and multiple workers against identical content and metadata.
+
+Repository-only profiling wraps an explicit argv without a shell, samples only
+its descendant process tree through Linux procfs, and captures nextest's
+versioned libtest JSON events separately from human stderr. Waited-child resource
+accounting includes short-lived children that sampling misses. Reconcile
+PID/start-time lifetimes recursively: own CPU plus live child subtrees plus the
+larger of waited CPU and observed ended subtrees. Namespace teardown can lose
+waited descendant accounting; retain observed work rather than flattening
+later intervals behind a transient peak. Expose both waited CPU and the
+reconciled sampled estimate, not a mathematically guaranteed lower bound:
+non-atomic reads and reaping can overlap, while unseen work can be lost.
+External build daemons and unseen orphaned
+processes are not attributed. Sample aggregate live RSS, storage bytes and
+kernel wait channels, including up to 256 threads per process so a leader
+waiting for workers does not hide their I/O waits. Include host pressure only
+as explicitly host-wide context.
+Persist timestamped samples and test events plus a versioned summary in a fresh
+private directory outside the checkout. Low-CPU intervals are diagnostic, not
+automatic failure: blocking tests are intentional. Preserve the command's exit
+status and bound cleanup of the owned original process group on interruption
+and ordinary command exit, even if its leader exits first. Restore signal
+handlers even on setup or cleanup failures. Report missing quota visibility;
+affinity alone may overestimate container capacity. Retain full samples on
+disk, but only metric scalars needed by the summary in memory.
+Build metadata always watches the existing build script and
+`SOURCE_DATE_EPOCH`. Resolve Git administrative paths through Git rather than
+a crate-local `.git/refs/heads`; watch existing HEAD/index/ref/packed-ref
+inputs and tracked workspace paths. Use existing parents for deleted tracked
+files, reject newline/non-UTF-8 watch paths and bound Git's file inventory.
+Exported sources retain unknown Git metadata without a missing-path watcher.
+Verify emitted inputs in ordinary and linked worktrees, tracked dirty-state
+changes, exports and an actual unchanged warmed Cargo build.
 Native runner discovery honors `KVIST_GALLA`, then the current test build's
 sibling runner before older installed binaries, so a workspace test exercises
 the matching enforcement implementation.

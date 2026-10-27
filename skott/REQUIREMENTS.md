@@ -112,6 +112,49 @@ checkout MUST retain the policy without the ignored, sandbox-local
 This scheduling guarantee does not coordinate separate runner invocations or
 unrelated host writers, and it does not excuse stale interrupted-test fixtures.
 
+## RUN-REQ-TEST-PERFORMANCE
+
+Repository test scheduling MUST run the existing whole-pool trials before
+ordinary parallel work, then start the long native inventory checks early.
+Exclusivity, native coverage, production deadlines and ordinary parallelism
+MUST remain intact. The shared harness MUST report tests still running every
+30 seconds and fail, not skip or retry, after five minutes. CI MUST select the
+same scheduling policy and retain separate doctest coverage.
+The repository sandbox trial's nested Cargo build MUST use
+a dedicated target beneath `/workspace/target`, independent of the enclosing
+build's target locks. A native regression MUST hold the ordinary target's
+Cargo locks and demonstrate successful isolated compilation and test execution.
+
+The host inventory trial MUST continue comparing every installed file's bytes
+and metadata before and after execution, excluding access times. Hashing MAY
+use a bounded worker pool; serial and parallel snapshots MUST agree, including
+empty files, nested directories and symbolic-link identities.
+
+Opt-in repository profiling MUST persist wall time, waited-child CPU time,
+sampled descendant CPU/RSS/I/O/wait states and per-test durations with a versioned
+summary. It MUST identify low-CPU intervals without equating waiting with
+deadlock, distinguish sampled aggregate RSS from a process high-water mark,
+preserve command failures and retain diagnostics on failure. Reports MUST be
+private, outside the checkout being tested, and MUST NOT record environment
+values or unrelated processes' command lines. Missing required profiling
+facilities MUST fail explicitly. Deterministic regressions MUST cover metric
+arithmetic, process-stat parsing, test-event parsing and failure propagation.
+Command exit and interruption MUST clean remaining members of the owned
+original process group with bounded escalation; escaped sessions remain outside
+this diagnostic supervisor's scope.
+No universal utilization threshold or CPU-bound claim follows from a passing
+suite: timeout, terminal, isolation and I/O tests legitimately wait.
+
+Build metadata MUST NOT register nonexistent Cargo rebuild inputs, which
+force unchanged builds to recompile. Git HEAD/ref/index changes, tracked
+workspace edits and `SOURCE_DATE_EPOCH` MUST remain rebuild inputs.
+Ordinary repositories, linked worktrees and exported sources without Git
+metadata MUST be covered. An unchanged, warmed build MUST be verified fresh.
+
+This human-requested performance repair has a deliberate advisory-review
+exception while receipt enforcement is unavailable; independent observation
+and source-blind comparison remain separate from acceptance.
+
 ## RUN-REQ-RUST-SANDBOX-CHAIN
 
 Rust workspace preparation MUST expose every safely validated installed

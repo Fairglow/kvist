@@ -216,6 +216,82 @@ fn checked_shell(executor: &SandboxExecutor, command: &str) -> skott::ToolOutcom
     result
 }
 
+fn repository_cargo(arguments: &str) -> String {
+    format!("env CARGO_TARGET_DIR=/workspace/target/repository-trial cargo {arguments}")
+}
+
+#[test]
+#[serial]
+fn repository_cargo_does_not_wait_for_enclosing_target_locks() {
+    use std::fs::OpenOptions;
+    use std::time::Duration;
+
+    let directory = fixture();
+    let workdir = directory.path().canonicalize().unwrap();
+    fs::create_dir(workdir.join("src")).unwrap();
+    fs::write(
+        workdir.join("Cargo.toml"),
+        "[package]\nname=\"target-lock-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
+    )
+    .unwrap();
+    fs::write(
+        workdir.join("Cargo.lock"),
+        "version=4\n[[package]]\nname=\"target-lock-trial\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(workdir.join("src/lib.rs"), "#[test] fn works() {}\n").unwrap();
+    fs::create_dir_all(workdir.join("target/debug")).unwrap();
+    let _locks: Vec<_> = [".cargo-lock", ".cargo-build-lock", ".cargo-artifact-lock"]
+        .iter()
+        .map(|name| {
+            let file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(workdir.join("target/debug").join(name))
+                .unwrap();
+            file.lock().unwrap();
+            file
+        })
+        .collect();
+    let executor = SandboxExecutor::new(
+        resolve(&workdir).unwrap(),
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir.clone(),
+    );
+    let cancellation = CancellationToken::new();
+    let result = std::thread::scope(|scope| {
+        let (done, finished) = std::sync::mpsc::channel();
+        let token = &cancellation;
+        scope.spawn(move || {
+            if finished.recv_timeout(Duration::from_secs(5)).is_err() {
+                token.cancel();
+            }
+        });
+        let result = executor.execute(
+            &ToolIntent {
+                id: "target-lock-trial".into(),
+                provider_id: None,
+                name: "shell".into(),
+                arguments: json!({"command": repository_cargo("test --lib")}),
+            },
+            &cancellation,
+        );
+        let _ = done.send(());
+        result.unwrap()
+    });
+    assert!(
+        !result.failed(),
+        "nested Cargo waited for an enclosing target lock: cancelled={}, stderr={}",
+        result.cancelled,
+        result.error_text(16384)
+    );
+    assert!(result.output_text(16384).contains("1 passed; 0 failed"));
+    assert!(workdir.join("target/repository-trial/debug/deps").is_dir());
+}
+
 #[derive(Clone)]
 struct LogCapture(Arc<Mutex<Vec<u8>>>);
 
@@ -329,7 +405,11 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
     );
     let result = checked_shell(
         &executor,
-        "stage metadata cargo metadata --format-version=1 --no-deps >/dev/null\nstage repository-tests cargo test -p galla --lib -- --test-threads=2",
+        &format!(
+            "stage metadata {} >/dev/null\nstage repository-tests {}",
+            repository_cargo("metadata --format-version=1 --no-deps"),
+            repository_cargo("test -p galla --lib -- --test-threads=2"),
+        ),
     );
     assert!(result.output_text(16384).contains("test result: ok"));
 }

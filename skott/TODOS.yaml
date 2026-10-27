@@ -5,11 +5,75 @@ component:
   design_revision: "sha256:aa715b2501aa6d380cc9cf3274208cd78214360133679e915c29719bff029204"
   parent_contract: null
   revalidation:
-    state: current
-    checked_at: "2026-10-17T17:30:00Z"
-    stale_since: null
-    causes: []
+    state: stale
+    checked_at: "2026-10-27T19:48:41Z"
+    stale_since: "2026-10-27T19:45:18Z"
+    causes:
+      - kind: component-requirements-revision-changed
+        path: REQUIREMENTS.md
+        expected_revision: "sha256:09b01ffb1f8b184ea3f21ab8494919c4e99b476a11e462508bb43188bb69d9a5"
+        observed_revision: "sha256:e5f518969b33ac4b154e7f64237a1d9e0db443c317da1036c480f1c5c10215e7"
+      - kind: component-contract-revision-changed
+        path: CONTRACT.md
+        expected_revision: "sha256:f9381908a1f3535128eeaa26c476bde9df81f98db4ccc403ee938a87edad65fe"
+        observed_revision: "sha256:fc1d38fbeb4e0abe8b1ff458e1b0062b0efd7590b829502a4175d587711d5fd0"
+      - kind: component-design-revision-changed
+        path: DESIGN.md
+        expected_revision: "sha256:aa715b2501aa6d380cc9cf3274208cd78214360133679e915c29719bff029204"
+        observed_revision: "sha256:f3f2207ddbc9399a66f808883affacb68f154e9b4a1e58dc8effdabee0b5ef99"
 tasks:
+  - id: test-performance-write-tests
+    title: "Pin isolated nested builds and performance evidence"
+    description: "Test held Cargo target locks, complete serial/parallel snapshots, scheduling, build watches and profiler metrics, failures and cleanup before implementation."
+    context: "Held target locks, missing rebuild inputs, CPU plateaus, absent-quota warnings and surviving descendants reproduced before their fixes. Explicit advisory exception; no receipt or acceptance."
+    purpose: "Prevent opaque lock waits and late test stragglers without dropping coverage."
+    expected_outcome: "Regressions expose missing isolation, scheduling and profiling behavior."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"]
+    timestamps: {created_at: "2026-10-27T19:05:00Z", updated_at: "2026-10-27T19:45:18Z", completed_at: "2026-10-27T19:45:18Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: test-performance-implement-code
+    title: "Remove late barriers and expose resource waits"
+    description: "Prioritize exclusive and long-running tests, isolate nested Cargo output, parallelize complete inventory hashing and add private repository-only profiling."
+    context: "Controlled warm old-policy runs 57.897/64.219s; new-policy runs 28.920/32.088/28.071s, each 1875 passed and 15 skipped. Native trial 3.4-3.6s. Original intermittent timeout not reproduced; held-lock stall was. Unchanged build verified fresh in 0.10s."
+    purpose: "Reduce the measured tail and make CPU, I/O and blocking time inspectable."
+    expected_outcome: "Measured parallel suite improvement with unchanged assertions and explicit profiling limits."
+    kind: implementation
+    status: completed
+    depends_on: [test-performance-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"]
+    timestamps: {created_at: "2026-10-27T19:05:00Z", updated_at: "2026-10-27T19:45:18Z", completed_at: "2026-10-27T19:45:18Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: test-performance-security-audit
+    title: "Observe profiling and test isolation independently"
+    description: "Derive source-only observations of target locks, worker ownership, profiler privacy, command failures and process cleanup without intent."
+    context: "Initial independent source-only observation found group-cleanup bypass after leader exit. Separate fresh profiler observation covers the repaired cleanup and explicit estimator/visibility limits. Both accounts distinguish source assertions from execution; no blanket security certification."
+    purpose: "Keep changed test and diagnostic boundaries independently inspectable."
+    expected_outcome: "Scoped IMPL observations and explicit limitations."
+    kind: security-audit
+    status: completed
+    depends_on: [test-performance-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"]
+    timestamps: {created_at: "2026-10-27T19:05:00Z", updated_at: "2026-10-27T19:45:18Z", completed_at: "2026-10-27T19:45:18Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: test-performance-compliance-review
+    title: "Compare performance intent with independent observations"
+    description: "Compare scoped intent with fresh source-only observations and attributed execution evidence without source access; retain discrepancies."
+    context: "docs/reviews/test-performance-comparison.md independently recomputes finite scheduling/timing evidence. Metadata field scope and raw-log privacy wording remain for human arbitration, with timeout/invalidation/cleanup verification limits retained. Review completed, not accepted; revisions remain stale."
+    purpose: "Expose disagreements for human arbitration."
+    expected_outcome: "Persistent scoped comparison with finite evidence."
+    kind: compliance-review
+    status: completed
+    depends_on: [test-performance-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"]
+    timestamps: {created_at: "2026-10-27T19:05:00Z", updated_at: "2026-10-27T19:52:06Z", completed_at: "2026-10-27T19:52:06Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: tool-ergonomics-write-tests
     title: "Pin continuation and bounded incremental mutations"
     description: "Test omitted offsets, interleaved paths, reset, EOF breaker, stale reads, UTF-8 pages, strict patches, append and unchanged helper authority before implementation."

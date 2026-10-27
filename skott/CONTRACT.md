@@ -207,6 +207,20 @@ writers are not participants in a transactional lock; preimage checks detect
 stale content but do not promise atomic compare-and-swap against arbitrary
 external writers.
 
+## Repository-only performance diagnostics
+
+The `test`/`test-profile` recipes and workspace CI jobs select
+`tools/nextest.toml`; local `msrv` retains Cargo's runner. Existing whole-pool
+trials retain exclusivity; scheduling priority is not additional authority.
+The repository sandbox trial builds beneath
+`/workspace/target/repository-trial`, not the enclosing Cargo target.
+`tools/profile_tests.py` is opt-in developer tooling, not a Skott CLI or
+library API. Its invocation, private report format and interpretation limits
+are documented in `tools/README.md`. It does not certify performance,
+compliance or the absence of deadlocks.
+About-dialog Git/build metadata is retained; rebuild-input discovery supports
+linked worktrees and exported sources rather than assuming a crate-local `.git`.
+
 ## Independent review extension
 
 `skott --headless PROMPT --review` appends a single independent review

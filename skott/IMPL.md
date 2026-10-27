@@ -1,6 +1,149 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Repository test performance and diagnostics (2026-10-27)
+
+### Independent source-only observations
+
+Two fresh contexts read source/tests/executable configuration only, excluding
+intent, queues, existing records, reviews, chat and Git history. Neither ran
+tests or certified compliance. The first covered the changed native fixtures,
+build script, profiler, scheduling, recipes and CI. The second independently
+observed the final profiler and its tests after a cleanup finding was repaired.
+The following scoped account is derived from those observations.
+
+Nested repository Cargo commands set
+`CARGO_TARGET_DIR=/workspace/target/repository-trial`. A native fixture holds
+the ordinary target's legacy/build/artifact locks while the shared helper
+compiles and tests a dependency-free crate; its watchdog cancels after five
+seconds. The actual repository trial executes Cargo metadata and Galla library
+tests through the isolated target.
+
+The host inventory fixture enumerates entries without following symlinks,
+records mode/length/nanosecond mtime/ctime and literal link targets, and hashes
+every regular file in 64 KiB chunks. Up to eight scoped workers take indices
+atomically and merge results into the existing sorted map. File metadata is
+rechecked after hashing. Fixture assertions compare one/two/eight workers,
+empty/binary/nested content, links and changed bytes. The real trial compares
+complete before/after recorded inventories despite a panic in its body.
+
+The two existing full-pool nextest rules have priority 100; native inventory
+checks have priority 50 without a pool reservation. Ordinary work retains
+priority zero. The shared harness reports slow tests every 30 seconds and
+terminates after ten periods. CI uses this policy for both workspace jobs,
+retains private diagnostics for seven days, and executes doctests separately.
+The local `msrv` recipe remains on Cargo's runner, outside nextest policy.
+
+The build script watches existing Git-resolved HEAD/index/refs/packed-refs and
+tracked workspace paths, plus its own source and `SOURCE_DATE_EPOCH`. Missing
+tracked files use an existing ancestor. Git inventory output is byte-bounded;
+non-UTF-8/newline watch paths fail explicitly. Linked worktrees resolve their
+administrative paths through Git. Exports retain unknown metadata. Epoch date
+arguments use a single `@SECONDS` operand. Fixture tests manually execute the
+compiled build script; actual Cargo freshness requires separate execution.
+
+The standard-library Linux profiler launches explicit argv, not a shell, with
+null stdin, redirected output and a new session. It creates fresh reports
+outside the checkout/current directory with private directory/file modes.
+It samples observable descendants, including bounded thread wait summaries,
+and streams full samples while retaining summary scalars in memory. Per-test
+durations come from validated completed nextest JSON events. Command failures
+and signals remain failures; setup/reporting failures produce incomplete
+diagnostics where possible.
+
+CPU identities include PID/start time. The tracker reconciles own, live-child,
+ended-child and waited CPU, retaining new observed own-CPU increments despite
+lost namespace accounting. The final output labels this a sampled estimate,
+not an exact or guaranteed lower-bound measurement. Waited user/system usage
+is separate. Missing quota visibility warns that affinity can overestimate
+capacity. Aggregate sampled RSS can duplicate shared pages; PSI is host-wide.
+
+The initial observer found that leader exit bypassed group cleanup and
+escalation. The final observer sees handlers installed before launch, cleanup
+on all protected exits, a bounded direct-child wait, remaining-group TERM/KILL
+escalation and nested handler restoration. Tests assert stopped ignoring
+descendants after both ordinary leader exit and interruption. Cleanup does not
+reap arbitrary descendants or contain escaped sessions; final group SIGKILL
+is not followed by a group-empty wait.
+
+Retained limitations: raw command logs are unredacted; report size, retained
+lifetimes/events and total runtime are not capped. Non-atomic CPU reads can
+overlap or miss work. Cgroup mount layouts/hidden limits are not fully resolved.
+Inventory comparison is not an atomic filesystem snapshot and records neither
+ownership, hardlink identity nor xattrs/ACLs. Deleted tracked paths can broaden
+Git watches. Git subprocess output bounds are not elapsed-time limits.
+Sampled lifetime I/O counters can miss work or overlap waited-child accounting;
+they are not unique physical I/O totals.
+
+### Implementer-executed evidence
+
+The original spontaneous timeout did not recur. Before target isolation, the
+held-lock fixture printed `Blocking waiting for file lock on build directory`
+and reached its five-second cancellation; after isolation it passed. A build
+metadata regression first failed on a nonexistent crate-local Git watch.
+Additional profiler regressions first exposed lost-accounting CPU plateaus,
+silent missing-quota fallback and surviving descendants in both exit modes.
+
+All runs below used offline/locked workspace/all-features nextest, the same
+20-thread pool, warmed builds and the same final Rust implementation. Only
+the selected scheduling policy differed. Order was counterbalanced:
+
+| Scheduling | Test-phase seconds | Passing / existing skips |
+| --- | --- | --- |
+| Old policy | 57.897, 64.219 | 1875 / 15 each |
+| New policy | 28.920, 32.088, 28.071 | 1875 / 15 each |
+
+Command walls were 58.339/64.659 and 29.508/32.816/28.526 seconds respectively.
+Sampled CPU estimates stayed near 93 seconds; average occupied cores rose from
+1.4–1.6 to 2.9–3.3. Raw candidate regressions were retained, not hidden; final
+reports warn about one invisible leaf quota. No sampling or event-parse errors
+were recorded. Host storage/cache conditions vary; these are finite observations,
+not a portable utilization threshold or a CPU-bound claim.
+
+Actual nextest filter selection and start/completion events showed all 34
+reserved trials with zero peer overlaps, ordinary concurrency reaching 20, and
+the native repository trial moving from executed start 1800 to 33 (zero-based).
+The inventory checks moved from late starts to 35–37. A separate inherited
+CI-profile run with three threads passed all 17 native tests, started its
+repository trial first without overlap and reached ordinary concurrency three.
+Analysis used counters for duplicated lib/bin test names and excluded ignored
+starts without execution, rather than misclassifying them as active work.
+
+The native repository trial took 3.414–3.588 seconds. The remaining longest
+inventory trial took 23.639–27.353 seconds under the new policy. Sampled thread
+waits included storage/journal waits and intentional sleeping/pipe waits.
+Parallel complete snapshots measured 2.332/2.366 seconds in the focused trial;
+the rejected path-key sorting variant was slower and was removed.
+
+After one 21.79-second full build, an identical unchanged no-run build finished
+in 0.10 seconds without compiling Skott. Strict all-target/all-feature Skott
+Clippy, Rust 1.95.0 all-target/all-feature Skott check, all workspace doctests,
+formatting and all 18 Python tooling tests passed. The final CPU fixture uses
+a process-CPU budget rather than a wall-clock busy loop and asserts actual
+waited CPU; this test-only refinement followed the source observation.
+
+These are implementer-run checks, not independent execution or acceptance.
+The accepted intent revisions remain untouched; revalidation is explicitly
+stale for the changed documents.
+
+### Independent source-blind comparison
+
+A separate source-blind context independently parsed the selected tests,
+runner events and arithmetic, and compared only scoped intent with these fresh
+observations and attributed execution logs. Its durable report is
+[`docs/reviews/test-performance-comparison.md`](../docs/reviews/test-performance-comparison.md).
+It confirmed the finite exclusivity/concurrency and timing results without
+claiming a portable performance bound or independently executing tests.
+
+The reviewer retained two intent questions for explicit human arbitration:
+whether "metadata" includes ownership/hardlink/xattr/ACL fields beyond the
+preserved representation, and whether the environment-value prohibition is
+intended to cover unredacted arbitrary child output. No actual disclosure is
+alleged. The five-minute runner limit and every Git invalidation transition were
+not dynamically exercised; cleanup/estimator limits remain explicit. Intent
+was not changed to conceal these findings. Review completion is not acceptance;
+the accepted revisions remain unchanged and revalidation remains stale.
+
 ## Prompt-local read continuation and incremental tools (2026-10-27)
 
 ### Independent source-only observation

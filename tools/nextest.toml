@@ -1,6 +1,10 @@
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 10 }
+
 [[profile.default.overrides]]
 filter = "package(=skott) & binary(=rust_build_environment) & test(=native_repository_tests_execute_inside_the_workspace_sandbox)"
 threads-required = "num-test-threads"
+priority = 100
 
 [[profile.default.overrides]]
 filter = """package(=kvist-blad) & (
@@ -14,5 +18,12 @@ filter = """package(=kvist-blad) & (
     (binary(=viewer) & test(=ascii_diagram_overflow_remains_scrollable_and_canonical_on_resize))
 )"""
 threads-required = "num-test-threads"
+priority = 100
+
+[[profile.default.overrides]]
+filter = """(package(=skott) & binary(=rustup_inventory)) |
+    (package(=kvist) & binary(=sandbox_toolchain) &
+     test(=rust_authoring_has_host_inventory_private_defaults_and_offline_builds))"""
+priority = 50
 
 [profile.ci]

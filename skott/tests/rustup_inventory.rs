@@ -6,6 +6,8 @@ use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 
 use sav::{CancellationToken, ToolIntent};
 use serde_json::json;
@@ -87,7 +89,48 @@ fn checked(executor: &SandboxExecutor, script: &str) -> Vec<u8> {
     outcome.stdout
 }
 
-type HostState = BTreeMap<PathBuf, (u32, u64, i64, i64, i64, i64, String)>;
+type HostEntry = (u32, u64, i64, i64, i64, i64, String);
+type HostState = BTreeMap<PathBuf, HostEntry>;
+
+#[test]
+fn host_snapshots_keep_all_bytes_metadata_and_links_across_worker_counts() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let mut empty = HostState::new();
+    snapshot_with_workers(root, &mut empty, 8);
+    assert_eq!(empty.len(), 1);
+    assert_eq!(empty[root].6, "directory");
+    fs::create_dir(root.join("nested")).unwrap();
+    fs::write(root.join("empty"), []).unwrap();
+    fs::write(root.join("nested/bytes"), b"\0\xffpayload").unwrap();
+    symlink("nested/bytes", root.join("link")).unwrap();
+    symlink("nested", root.join("directory-link")).unwrap();
+    symlink("/nonexistent/inventory-target", root.join("dangling")).unwrap();
+    let mut serial = HostState::new();
+    snapshot_with_workers(root, &mut serial, 1);
+    assert_eq!(serial.len(), 7);
+    assert_eq!(
+        serial[&root.join("nested/bytes")].6,
+        hex::encode(Sha256::digest(b"\0\xffpayload"))
+    );
+    assert_eq!(
+        serial[&root.join("empty")].6,
+        hex::encode(Sha256::digest([]))
+    );
+    assert_eq!(serial[&root.join("link")].6, "link:\"nested/bytes\"");
+    assert!(!serial.contains_key(&root.join("directory-link/bytes")));
+    for workers in [2, 8] {
+        let mut parallel = HostState::new();
+        snapshot_with_workers(root, &mut parallel, workers);
+        assert_eq!(parallel, serial);
+    }
+    fs::write(root.join("nested/bytes"), b"changed").unwrap();
+    let mut changed = HostState::new();
+    snapshot_with_workers(root, &mut changed, 2);
+    assert_ne!(changed, serial);
+}
 
 fn runner() -> PathBuf {
     if let Some(path) = std::env::var_os("KVIST_GALLA") {
@@ -134,40 +177,94 @@ fn runner() -> PathBuf {
 }
 
 fn snapshot(path: &Path, state: &mut HostState) {
+    let workers = std::thread::available_parallelism().unwrap().get().min(8);
+    let started = Instant::now();
+    eprintln!("host inventory snapshot: starting with {workers} hash workers");
+    snapshot_with_workers(path, state, workers);
+    eprintln!(
+        "host inventory snapshot: {} entries in {:.3}s",
+        state.len(),
+        started.elapsed().as_secs_f64()
+    );
+}
+
+fn snapshot_with_workers(path: &Path, state: &mut HostState, workers: usize) {
+    assert!((1..=8).contains(&workers));
+    let mut files = Vec::new();
+    enumerate_snapshot(path, state, &mut files);
+    let next = AtomicUsize::new(0);
+    let results = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers.min(files.len()))
+            .map(|_| {
+                let files = &files;
+                let next = &next;
+                scope.spawn(move || {
+                    let mut results = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(path) = files.get(index) else {
+                            break;
+                        };
+                        let mut hash = Sha256::new();
+                        let mut file = fs::File::open(path).unwrap();
+                        let mut buffer = [0; 65536];
+                        loop {
+                            let count = file.read(&mut buffer).unwrap();
+                            if count == 0 {
+                                break;
+                            }
+                            hash.update(&buffer[..count]);
+                        }
+                        results.push((path.clone(), hex::encode(hash.finalize())));
+                    }
+                    results
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    for (path, digest) in results {
+        let recorded = state.get_mut(&path).unwrap();
+        assert_eq!(
+            *recorded,
+            host_entry(&fs::symlink_metadata(&path).unwrap(), String::new()),
+            "host inventory changed while hashing {}",
+            path.display()
+        );
+        recorded.6 = digest;
+    }
+}
+
+fn host_entry(meta: &fs::Metadata, content: String) -> HostEntry {
+    (
+        meta.mode(),
+        meta.len(),
+        meta.mtime(),
+        meta.mtime_nsec(),
+        meta.ctime(),
+        meta.ctime_nsec(),
+        content,
+    )
+}
+
+fn enumerate_snapshot(path: &Path, state: &mut HostState, files: &mut Vec<PathBuf>) {
     let meta = fs::symlink_metadata(path).unwrap();
     let content = if meta.is_symlink() {
         format!("link:{:?}", fs::read_link(path).unwrap())
     } else if meta.is_file() {
-        let mut hash = Sha256::new();
-        let mut file = fs::File::open(path).unwrap();
-        let mut buffer = [0; 65536];
-        loop {
-            let count = file.read(&mut buffer).unwrap();
-            if count == 0 {
-                break;
-            }
-            hash.update(&buffer[..count]);
-        }
-        hex::encode(hash.finalize())
+        files.push(path.to_owned());
+        String::new()
     } else {
         assert!(meta.is_dir());
         "directory".into()
     };
-    state.insert(
-        path.to_owned(),
-        (
-            meta.mode(),
-            meta.len(),
-            meta.mtime(),
-            meta.mtime_nsec(),
-            meta.ctime(),
-            meta.ctime_nsec(),
-            content,
-        ),
-    );
+    state.insert(path.to_owned(), host_entry(&meta, content));
     if meta.is_dir() {
         for entry in fs::read_dir(path).unwrap() {
-            snapshot(&entry.unwrap().path(), state);
+            enumerate_snapshot(&entry.unwrap().path(), state, files);
         }
     }
 }

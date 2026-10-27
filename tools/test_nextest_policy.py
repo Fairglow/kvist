@@ -48,6 +48,25 @@ class NextestPolicyTests(unittest.TestCase):
 
     def test_ci_inherits_default_reservations_without_overriding_them(self):
         self.assertEqual(self.profiles["ci"].get("overrides", []), [])
+        self.assertNotIn("slow-timeout", self.profiles["ci"])
+        self.assertEqual(self.profiles["default"]["slow-timeout"],
+                         {"period": "30s", "terminate-after": 10})
+
+    def test_exclusive_trials_precede_long_parallel_inventory_checks(self):
+        rules = self.profiles["default"]["overrides"]
+        exclusive = [rule for rule in rules
+                     if rule.get("threads-required") == "num-test-threads"]
+        self.assertEqual(len(exclusive), 2)
+        self.assertTrue(all(rule.get("priority") == 100 for rule in exclusive))
+        inventories = [rule for rule in rules if rule.get("priority") == 50]
+        self.assertEqual(len(inventories), 1)
+        self.assertEqual(
+            normalized(inventories[0]["filter"]),
+            normalized("""(package(=skott) & binary(=rustup_inventory)) |
+                (package(=kvist) & binary(=sandbox_toolchain) &
+                 test(=rust_authoring_has_host_inventory_private_defaults_and_offline_builds))"""),
+        )
+        self.assertNotIn("threads-required", inventories[0])
 
 
 if __name__ == "__main__":
