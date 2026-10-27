@@ -1,30 +1,39 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:6b58102a094e9e0ccd1beaa546f5f4765e89e145c3b713266d9bb6a618901cbc"
-  contract_revision: "sha256:d884e30baaa6e9626262fc24aebfe9ffb8e0afdc7687d4126179f22f5b20347f"
-  design_revision: "sha256:08761e7f7519a1a1e7deb13af6f7e20fbb1de6344abec58c226cd2d697cbffda"
+  requirements_revision: "sha256:a35608d2f5e1a450d9d6423f6bb86a5867dcb32f5eff5fe5cbd86674f2381d10"
+  contract_revision: "sha256:2a470c3e9799640482928b9fe72b2a9b70a4e39c415acf4593815840778cebd0"
+  design_revision: "sha256:103a80db8f5534a3b1ca08bc9e868530fc59f848c2ae6077867847fed21648ba"
   parent_contract: null
   revalidation:
-    state: stale
-    checked_at: "2026-10-27T17:21:43Z"
-    stale_since: "2026-10-27T17:21:43Z"
-    causes:
-      - kind: component-requirements-revision-changed
-        path: REQUIREMENTS.md
-        expected_revision: "sha256:6b58102a094e9e0ccd1beaa546f5f4765e89e145c3b713266d9bb6a618901cbc"
-        observed_revision: "sha256:401241b59304f50ad60b0e8885cc0d045886330ef4679186ec4ec35f590a0cba"
-      - kind: component-contract-revision-changed
-        path: CONTRACT.md
-        expected_revision: "sha256:d884e30baaa6e9626262fc24aebfe9ffb8e0afdc7687d4126179f22f5b20347f"
-        observed_revision: "sha256:461d4c29b41c1a2d9953e4085d6d8ed53bced65baacb884c183af1b7bfbd5fa6"
-      - kind: component-design-revision-changed
-        path: DESIGN.md
-        expected_revision: "sha256:08761e7f7519a1a1e7deb13af6f7e20fbb1de6344abec58c226cd2d697cbffda"
-        observed_revision: "sha256:51eecaed05aab38d3101b538946214ffe459e956ee543fcf22ef14602e926c25"
+    state: current
+    checked_at: "2026-10-27T21:22:43Z"
+    stale_since: null
+    causes: []
 tasks:
-  # Pending useful-subset backlog, ordered by product priority, not conformance.
-  # Requirement links identify affected existing intent, not implemented support.
-  # The intent task gates all six independent test/code/audit/review workstreams.
+  - id: "blad-markdown-subset-intent-tests"
+    title: "write_tests: pin the current useful-subset baseline"
+    description: "Before bounding the backlog, pin the currently supported Markdown subset and its terminal projection so intent changes have a stable fail-first baseline."
+    context: "Baseline regression over the existing supported subset; claims no new intent."
+    purpose: "Give the intent task a stable test predecessor to bound the backlog against."
+    expected_outcome: "A baseline test suite passes against the current implementation before intent changes."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-014"
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-073"
+      - "REQUIREMENTS.md#R-074"
+      - "REQUIREMENTS.md#R-075"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "blad-markdown-subset-intent"
     title: "define_intent: bound the useful Markdown subset backlog"
     description: "Define and obtain approval for local requirements, contract, design and atomic task definitions for autolinks, table inline code/link colors, bounded HTML text preservation, definition lists, footnote navigation and TOML frontmatter before tests or code."
@@ -33,9 +42,21 @@ tasks:
     expected_outcome: "Approved local intent defines syntax, terminal projection, navigation, streaming, errors, bounds and verification for each workstream. Preserve text-only/offline/read-only defaults; exclude full conformance, browser engines, CSS/JavaScript, executable MDX/JSX, templates, image protocols, merged HTML cells and full TeX/Mermaid compatibility. Other ecosystem dialects remain deferred."
     kind: implementation
     status: pending
-    depends_on: []
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-075"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-markdown-subset-intent-tests"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-014"
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-073"
+      - "REQUIREMENTS.md#R-074"
+      - "REQUIREMENTS.md#R-075"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-autolink-subset-tests"
@@ -46,9 +67,15 @@ tasks:
     expected_outcome: "Fail-first fixtures cover exact displayed labels/destinations and PTY selection, mouse hitboxes, resize and plain/color behavior."
     kind: test
     status: pending
-    depends_on: ["blad-markdown-subset-intent"]
-    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-markdown-subset-intent"
+    requirements:
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-041"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-autolink-subset-code"
@@ -59,9 +86,15 @@ tasks:
     expected_outcome: "Targeted fixtures pass across library, CLI, viewer, resize and streaming with preserved existing links."
     kind: implementation
     status: pending
-    depends_on: ["blad-autolink-subset-tests"]
-    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-autolink-subset-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-041"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-autolink-subset-audit"
@@ -72,9 +105,15 @@ tasks:
     expected_outcome: "A source-derived implementation supplement retains findings and evidence limits."
     kind: security-audit
     status: pending
-    depends_on: ["blad-autolink-subset-code"]
-    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-autolink-subset-code"
+    requirements:
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-041"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-autolink-subset-review"
@@ -85,9 +124,15 @@ tasks:
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
     status: pending
-    depends_on: ["blad-autolink-subset-audit"]
-    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-autolink-subset-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-041"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-table-code-links-tests"
@@ -98,9 +143,18 @@ tasks:
     expected_outcome: "Fail-first effective-attribute, exact-layout and PTY fixtures cover headers, zebra rows, quotes, monochrome/plain output, selection, clipping and resize."
     kind: test
     status: pending
-    depends_on: ["blad-markdown-subset-intent"]
-    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-076"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-markdown-subset-intent"
+    requirements:
+      - "REQUIREMENTS.md#R-033"
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-073"
+      - "REQUIREMENTS.md#R-074"
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-table-code-links-code"
@@ -111,9 +165,18 @@ tasks:
     expected_outcome: "Focused rendering and viewer regressions pass with documented code semantics and preserved table invariants."
     kind: implementation
     status: pending
-    depends_on: ["blad-table-code-links-tests"]
-    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-076"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-table-code-links-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-033"
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-073"
+      - "REQUIREMENTS.md#R-074"
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-table-code-links-audit"
@@ -124,9 +187,16 @@ tasks:
     expected_outcome: "A source-derived supplement retains risks, behavior and finite evidence limits."
     kind: security-audit
     status: pending
-    depends_on: ["blad-table-code-links-code"]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-074"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-table-code-links-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-073"
+      - "REQUIREMENTS.md#R-074"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-table-code-links-review"
@@ -137,9 +207,18 @@ tasks:
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
     status: pending
-    depends_on: ["blad-table-code-links-audit"]
-    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-076"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-table-code-links-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-033"
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-073"
+      - "REQUIREMENTS.md#R-074"
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-html-text-tests"
@@ -150,9 +229,17 @@ tasks:
     expected_outcome: "Fail-first fixtures cover inline/block boundaries, entities, malformed/nested input, controls, resource limits, writer/cancellation errors, navigation, search, plain output, resize and provisional streaming."
     kind: test
     status: pending
-    depends_on: ["blad-markdown-subset-intent"]
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-041"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-markdown-subset-intent"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-014"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-041"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-html-text-code"
@@ -163,9 +250,17 @@ tasks:
     expected_outcome: "Approved HTML text fixtures pass across library, CLI, viewer and streaming without hidden effects or weakened limits."
     kind: implementation
     status: pending
-    depends_on: ["blad-html-text-tests"]
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-041"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-html-text-tests"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-014"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-041"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-html-text-audit"
@@ -176,9 +271,16 @@ tasks:
     expected_outcome: "A source-derived supplement records admitted behavior, failure paths and bounded risk observations."
     kind: security-audit
     status: pending
-    depends_on: ["blad-html-text-code"]
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-038"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-html-text-code"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-014"
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-html-text-review"
@@ -189,9 +291,17 @@ tasks:
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
     status: pending
-    depends_on: ["blad-html-text-audit"]
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-041"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-html-text-audit"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-014"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-041"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-definition-lists-tests"
@@ -202,9 +312,16 @@ tasks:
     expected_outcome: "Fail-first fixtures cover exact layout, links, search, Unicode, code, tiny widths, plain/color output, resize and streaming."
     kind: test
     status: pending
-    depends_on: ["blad-markdown-subset-intent"]
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-markdown-subset-intent"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-041"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-definition-lists-code"
@@ -215,9 +332,16 @@ tasks:
     expected_outcome: "Targeted definition-list and existing list/navigation regressions pass with documented syntax and limitations."
     kind: implementation
     status: pending
-    depends_on: ["blad-definition-lists-tests"]
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-definition-lists-tests"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-041"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-definition-lists-audit"
@@ -228,9 +352,15 @@ tasks:
     expected_outcome: "A source-derived supplement records behavior, risks and finite evidence limits."
     kind: security-audit
     status: pending
-    depends_on: ["blad-definition-lists-code"]
-    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-038"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-definition-lists-code"
+    requirements:
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-definition-lists-review"
@@ -241,9 +371,15 @@ tasks:
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
     status: pending
-    depends_on: ["blad-definition-lists-audit"]
-    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-definition-lists-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-041"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-navigation-tests"
@@ -254,9 +390,17 @@ tasks:
     expected_outcome: "Fail-first renderer/navigation and PTY fixtures cover styled/plain output, quoted/table markers, Unicode, mouse selection, resize, reload and later streamed definitions."
     kind: test
     status: pending
-    depends_on: ["blad-markdown-subset-intent"]
-    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-043", "REQUIREMENTS.md#R-076"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-markdown-subset-intent"
+    requirements:
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-043"
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-navigation-code"
@@ -267,9 +411,17 @@ tasks:
     expected_outcome: "Focused fixtures pass with correct jumps/returns and preserved search, link and tab behavior."
     kind: implementation
     status: pending
-    depends_on: ["blad-footnote-navigation-tests"]
-    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-043", "REQUIREMENTS.md#R-076"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-footnote-navigation-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-043"
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-navigation-audit"
@@ -280,9 +432,16 @@ tasks:
     expected_outcome: "A source-derived supplement records findings, behavior and evidence limits."
     kind: security-audit
     status: pending
-    depends_on: ["blad-footnote-navigation-code"]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-076"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-footnote-navigation-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-navigation-review"
@@ -293,9 +452,17 @@ tasks:
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
     status: pending
-    depends_on: ["blad-footnote-navigation-audit"]
-    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-043", "REQUIREMENTS.md#R-076"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-footnote-navigation-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-015"
+      - "REQUIREMENTS.md#R-041"
+      - "REQUIREMENTS.md#R-043"
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-toml-frontmatter-tests"
@@ -306,9 +473,17 @@ tasks:
     expected_outcome: "Fail-first library, CLI and PTY fixtures cover effective token styles, plain/color policies, search, horizontal overflow, resize, streaming and writer/cancellation errors."
     kind: test
     status: pending
-    depends_on: ["blad-markdown-subset-intent"]
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-016", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-075"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-markdown-subset-intent"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-016"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-075"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-toml-frontmatter-code"
@@ -319,9 +494,17 @@ tasks:
     expected_outcome: "Focused TOML regressions and existing YAML/navigation fixtures pass with preserved body semantics and no hidden effects."
     kind: implementation
     status: pending
-    depends_on: ["blad-toml-frontmatter-tests"]
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-016", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-075"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-toml-frontmatter-tests"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-016"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-075"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-toml-frontmatter-audit"
@@ -332,9 +515,16 @@ tasks:
     expected_outcome: "A source-derived supplement records behavior, risks and evidence limits."
     kind: security-audit
     status: pending
-    depends_on: ["blad-toml-frontmatter-code"]
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-075"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-toml-frontmatter-code"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-075"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-toml-frontmatter-review"
@@ -345,9 +535,17 @@ tasks:
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
     status: pending
-    depends_on: ["blad-toml-frontmatter-audit"]
-    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-016", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-075"]
-    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    depends_on:
+      - "blad-toml-frontmatter-audit"
+    requirements:
+      - "REQUIREMENTS.md#C-004"
+      - "REQUIREMENTS.md#R-016"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-075"
+    timestamps:
+      created_at: "2026-10-27T18:34:49Z"
+      updated_at: "2026-10-27T18:34:49Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "blad-search-feedback-tests"
@@ -359,8 +557,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-076", "REQUIREMENTS.md#R-048", "REQUIREMENTS.md#R-055"]
-    timestamps: {created_at: "2026-10-27T17:49:15Z", updated_at: "2026-10-27T18:03:40Z", completed_at: "2026-10-27T18:03:40Z"}
+    requirements:
+      - "REQUIREMENTS.md#R-048"
+      - "REQUIREMENTS.md#R-055"
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T17:49:15Z"
+      updated_at: "2026-10-27T18:03:40Z"
+      completed_at: "2026-10-27T18:03:40Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-search-feedback-code"
@@ -371,9 +575,15 @@ tasks:
     expected_outcome: "Focused regressions and existing affected suites pass in both feature modes."
     kind: implementation
     status: completed
-    depends_on: ["blad-search-feedback-tests"]
-    requirements: ["REQUIREMENTS.md#R-076", "REQUIREMENTS.md#R-062"]
-    timestamps: {created_at: "2026-10-27T17:49:15Z", updated_at: "2026-10-27T18:03:40Z", completed_at: "2026-10-27T18:03:40Z"}
+    depends_on:
+      - "blad-search-feedback-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-062"
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T17:49:15Z"
+      updated_at: "2026-10-27T18:03:40Z"
+      completed_at: "2026-10-27T18:03:40Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-search-feedback-audit"
@@ -384,9 +594,14 @@ tasks:
     expected_outcome: "A clean-slate source-derived supplement is recorded in IMPL.md."
     kind: security-audit
     status: completed
-    depends_on: ["blad-search-feedback-code"]
-    requirements: ["REQUIREMENTS.md#R-076"]
-    timestamps: {created_at: "2026-10-27T17:49:15Z", updated_at: "2026-10-27T18:03:40Z", completed_at: "2026-10-27T18:03:40Z"}
+    depends_on:
+      - "blad-search-feedback-code"
+    requirements:
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T17:49:15Z"
+      updated_at: "2026-10-27T18:03:40Z"
+      completed_at: "2026-10-27T18:03:40Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-search-feedback-review"
@@ -397,9 +612,14 @@ tasks:
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
     status: completed
-    depends_on: ["blad-search-feedback-audit"]
-    requirements: ["REQUIREMENTS.md#R-076"]
-    timestamps: {created_at: "2026-10-27T17:49:15Z", updated_at: "2026-10-27T18:05:23Z", completed_at: "2026-10-27T18:05:23Z"}
+    depends_on:
+      - "blad-search-feedback-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-076"
+    timestamps:
+      created_at: "2026-10-27T17:49:15Z"
+      updated_at: "2026-10-27T18:05:23Z"
+      completed_at: "2026-10-27T18:05:23Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-frontmatter-tests"
@@ -411,8 +631,12 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-075"]
-    timestamps: {created_at: "2026-10-27T17:34:36Z", updated_at: "2026-10-27T17:45:11Z", completed_at: "2026-10-27T17:45:11Z"}
+    requirements:
+      - "REQUIREMENTS.md#R-075"
+    timestamps:
+      created_at: "2026-10-27T17:34:36Z"
+      updated_at: "2026-10-27T17:45:11Z"
+      completed_at: "2026-10-27T17:45:11Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-frontmatter-code"
@@ -423,9 +647,15 @@ tasks:
     expected_outcome: "All targeted regressions pass with preserved existing Markdown behavior."
     kind: implementation
     status: completed
-    depends_on: ["blad-frontmatter-tests"]
-    requirements: ["REQUIREMENTS.md#R-075", "REQUIREMENTS.md#R-062"]
-    timestamps: {created_at: "2026-10-27T17:34:36Z", updated_at: "2026-10-27T17:45:11Z", completed_at: "2026-10-27T17:45:11Z"}
+    depends_on:
+      - "blad-frontmatter-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-062"
+      - "REQUIREMENTS.md#R-075"
+    timestamps:
+      created_at: "2026-10-27T17:34:36Z"
+      updated_at: "2026-10-27T17:45:11Z"
+      completed_at: "2026-10-27T17:45:11Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-frontmatter-audit"
@@ -436,9 +666,14 @@ tasks:
     expected_outcome: "A clean-slate source-derived supplement is recorded in IMPL.md."
     kind: security-audit
     status: completed
-    depends_on: ["blad-frontmatter-code"]
-    requirements: ["REQUIREMENTS.md#R-075"]
-    timestamps: {created_at: "2026-10-27T17:34:36Z", updated_at: "2026-10-27T17:45:11Z", completed_at: "2026-10-27T17:45:11Z"}
+    depends_on:
+      - "blad-frontmatter-code"
+    requirements:
+      - "REQUIREMENTS.md#R-075"
+    timestamps:
+      created_at: "2026-10-27T17:34:36Z"
+      updated_at: "2026-10-27T17:45:11Z"
+      completed_at: "2026-10-27T17:45:11Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-frontmatter-review"
@@ -449,9 +684,14 @@ tasks:
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
     status: completed
-    depends_on: ["blad-frontmatter-audit"]
-    requirements: ["REQUIREMENTS.md#R-075"]
-    timestamps: {created_at: "2026-10-27T17:34:36Z", updated_at: "2026-10-27T17:45:11Z", completed_at: "2026-10-27T17:45:11Z"}
+    depends_on:
+      - "blad-frontmatter-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-075"
+    timestamps:
+      created_at: "2026-10-27T17:34:36Z"
+      updated_at: "2026-10-27T17:45:11Z"
+      completed_at: "2026-10-27T17:45:11Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-theme-tests"
@@ -463,8 +703,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-027", "REQUIREMENTS.md#R-028", "REQUIREMENTS.md#R-043"]
-    timestamps: {created_at: "2026-10-27T17:18:23Z", updated_at: "2026-10-27T17:18:23Z", completed_at: "2026-10-27T17:18:23Z"}
+    requirements:
+      - "REQUIREMENTS.md#R-027"
+      - "REQUIREMENTS.md#R-028"
+      - "REQUIREMENTS.md#R-043"
+    timestamps:
+      created_at: "2026-10-27T17:18:23Z"
+      updated_at: "2026-10-27T17:18:23Z"
+      completed_at: "2026-10-27T17:18:23Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-theme-code"
@@ -475,9 +721,14 @@ tasks:
     expected_outcome: "Every footnote prose span reestablishes its theme and following prose remains unthemed."
     kind: implementation
     status: completed
-    depends_on: ["blad-footnote-theme-tests"]
-    requirements: ["REQUIREMENTS.md#R-043"]
-    timestamps: {created_at: "2026-10-27T17:18:23Z", updated_at: "2026-10-27T17:21:43Z", completed_at: "2026-10-27T17:21:43Z"}
+    depends_on:
+      - "blad-footnote-theme-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-043"
+    timestamps:
+      created_at: "2026-10-27T17:18:23Z"
+      updated_at: "2026-10-27T17:21:43Z"
+      completed_at: "2026-10-27T17:21:43Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-theme-audit"
@@ -488,9 +739,14 @@ tasks:
     expected_outcome: "Independent source-derived observations are recorded in IMPL.md."
     kind: security-audit
     status: completed
-    depends_on: ["blad-footnote-theme-code"]
-    requirements: ["REQUIREMENTS.md#R-043"]
-    timestamps: {created_at: "2026-10-27T17:18:23Z", updated_at: "2026-10-27T17:21:43Z", completed_at: "2026-10-27T17:21:43Z"}
+    depends_on:
+      - "blad-footnote-theme-code"
+    requirements:
+      - "REQUIREMENTS.md#R-043"
+    timestamps:
+      created_at: "2026-10-27T17:18:23Z"
+      updated_at: "2026-10-27T17:21:43Z"
+      completed_at: "2026-10-27T17:21:43Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-theme-review"
@@ -501,9 +757,16 @@ tasks:
     expected_outcome: "Source-blind scoped comparison and its limits are durable."
     kind: compliance-review
     status: completed
-    depends_on: ["blad-footnote-theme-audit"]
-    requirements: ["REQUIREMENTS.md#R-027", "REQUIREMENTS.md#R-028", "REQUIREMENTS.md#R-043"]
-    timestamps: {created_at: "2026-10-27T17:18:23Z", updated_at: "2026-10-27T17:22:26Z", completed_at: "2026-10-27T17:22:26Z"}
+    depends_on:
+      - "blad-footnote-theme-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-027"
+      - "REQUIREMENTS.md#R-028"
+      - "REQUIREMENTS.md#R-043"
+    timestamps:
+      created_at: "2026-10-27T17:18:23Z"
+      updated_at: "2026-10-27T17:22:26Z"
+      completed_at: "2026-10-27T17:22:26Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-mermaid-policy-tests"
@@ -515,8 +778,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
-    timestamps: {created_at: "2026-10-27T15:17:17Z", updated_at: "2026-10-27T15:17:17Z", completed_at: "2026-10-27T15:17:17Z"}
+    requirements:
+      - "REQUIREMENTS.md#R-033"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-27T15:17:17Z"
+      updated_at: "2026-10-27T15:17:17Z"
+      completed_at: "2026-10-27T15:17:17Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-mermaid-policy-code"
@@ -527,9 +796,16 @@ tasks:
     expected_outcome: "Native-engine fixtures reserve the pool and unrelated tests remain parallel."
     kind: implementation
     status: completed
-    depends_on: ["blad-mermaid-policy-tests"]
-    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
-    timestamps: {created_at: "2026-10-27T15:17:17Z", updated_at: "2026-10-27T15:27:38Z", completed_at: "2026-10-27T15:27:38Z"}
+    depends_on:
+      - "blad-mermaid-policy-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-033"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-27T15:17:17Z"
+      updated_at: "2026-10-27T15:27:38Z"
+      completed_at: "2026-10-27T15:27:38Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-mermaid-policy-audit"
@@ -540,9 +816,15 @@ tasks:
     expected_outcome: "Source-only implementation observations with explicit finite scope."
     kind: security-audit
     status: completed
-    depends_on: ["blad-mermaid-policy-code"]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
-    timestamps: {created_at: "2026-10-27T15:17:17Z", updated_at: "2026-10-27T15:27:38Z", completed_at: "2026-10-27T15:27:38Z"}
+    depends_on:
+      - "blad-mermaid-policy-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-27T15:17:17Z"
+      updated_at: "2026-10-27T15:27:38Z"
+      completed_at: "2026-10-27T15:27:38Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-mermaid-policy-review"
@@ -553,9 +835,16 @@ tasks:
     expected_outcome: "Persistent diagnostic comparison and any discrepancies for arbitration."
     kind: compliance-review
     status: completed
-    depends_on: ["blad-mermaid-policy-audit"]
-    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
-    timestamps: {created_at: "2026-10-27T15:17:17Z", updated_at: "2026-10-27T15:32:07Z", completed_at: "2026-10-27T15:32:07Z"}
+    depends_on:
+      - "blad-mermaid-policy-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-033"
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-27T15:17:17Z"
+      updated_at: "2026-10-27T15:32:07Z"
+      completed_at: "2026-10-27T15:32:07Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-mermaid-deadline-tests"
@@ -567,8 +856,13 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
-    timestamps: {created_at: "2026-10-27T13:22:29Z", updated_at: "2026-10-27T13:29:54Z", completed_at: "2026-10-27T13:29:54Z"}
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-27T13:22:29Z"
+      updated_at: "2026-10-27T13:29:54Z"
+      completed_at: "2026-10-27T13:29:54Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-mermaid-deadline-code"
@@ -579,9 +873,15 @@ tasks:
     expected_outcome: "Default and CI scheduling select exactly five instances and repeated assertions pass with unchanged limits."
     kind: implementation
     status: completed
-    depends_on: ["blad-mermaid-deadline-tests"]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
-    timestamps: {created_at: "2026-10-27T13:22:29Z", updated_at: "2026-10-27T13:29:54Z", completed_at: "2026-10-27T13:29:54Z"}
+    depends_on:
+      - "blad-mermaid-deadline-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-27T13:22:29Z"
+      updated_at: "2026-10-27T13:29:54Z"
+      completed_at: "2026-10-27T13:29:54Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-mermaid-deadline-audit"
@@ -592,9 +892,14 @@ tasks:
     expected_outcome: "Scoped observations and remaining host-contention limits are durable."
     kind: security-audit
     status: completed
-    depends_on: ["blad-mermaid-deadline-code"]
-    requirements: ["REQUIREMENTS.md#R-038"]
-    timestamps: {created_at: "2026-10-27T13:22:29Z", updated_at: "2026-10-27T13:29:54Z", completed_at: "2026-10-27T13:29:54Z"}
+    depends_on:
+      - "blad-mermaid-deadline-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+    timestamps:
+      created_at: "2026-10-27T13:22:29Z"
+      updated_at: "2026-10-27T13:29:54Z"
+      completed_at: "2026-10-27T13:29:54Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-mermaid-deadline-review"
@@ -605,9 +910,15 @@ tasks:
     expected_outcome: "Independent comparison and finite-evidence limits are recorded."
     kind: compliance-review
     status: completed
-    depends_on: ["blad-mermaid-deadline-audit"]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
-    timestamps: {created_at: "2026-10-27T13:22:29Z", updated_at: "2026-10-27T13:29:54Z", completed_at: "2026-10-27T13:29:54Z"}
+    depends_on:
+      - "blad-mermaid-deadline-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-27T13:22:29Z"
+      updated_at: "2026-10-27T13:29:54Z"
+      completed_at: "2026-10-27T13:29:54Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-table-emphasis-tests"

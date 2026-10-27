@@ -6,7 +6,7 @@ component:
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-26T22:15:29Z"
+    checked_at: "2026-10-27T21:23:10Z"
     stale_since: null
     causes: []
 tasks:

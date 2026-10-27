@@ -1,28 +1,16 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:b79d7e4e17a002cba6c8bbf4bffd9231c7d294375bb9a452b1a038c8a40d2780"
-  contract_revision: "sha256:66a80725990f8f19a074ef3088bf512041bba4fd90d43aca57dae0d04b908532"
-  design_revision: "sha256:b629358ac60133fe3b5ed12150e4f6f6bfbd47a78d1a3db5ddbe7c44c0321943"
+  requirements_revision: "sha256:9ff3c186909107d80f66be90505889c91bf1abbe126a0ac6a080c9945b482986"
+  contract_revision: "sha256:6a588c19af95d9c84b5539a52d9d9f01ec7dea2b8f9b702ea6007dfe6dd842a3"
+  design_revision: "sha256:57213b3d9ab1289a500d36f2b5d3269c958f714e88854124a6bdd0b3f2eab2ae"
   parent_contract: null
   revalidation:
-    state: stale
-    checked_at: "2026-10-02T10:27:11Z"
-    stale_since: "2026-10-02T09:17:04Z"
-    causes:
-      - kind: component-requirements-revision-changed
-        path: REQUIREMENTS.md
-        expected_revision: "sha256:b79d7e4e17a002cba6c8bbf4bffd9231c7d294375bb9a452b1a038c8a40d2780"
-        observed_revision: "sha256:5a099f5183965f301596596051835250024952cf1450201884093f4638f5db2a"
-      - kind: component-contract-revision-changed
-        path: CONTRACT.md
-        expected_revision: "sha256:66a80725990f8f19a074ef3088bf512041bba4fd90d43aca57dae0d04b908532"
-        observed_revision: "sha256:cf5301d2b165e86a2f337fdc5c73acba2e0d0c0d321b95b61377f60218047133"
-      - kind: component-design-revision-changed
-        path: DESIGN.md
-        expected_revision: "sha256:b629358ac60133fe3b5ed12150e4f6f6bfbd47a78d1a3db5ddbe7c44c0321943"
-        observed_revision: "sha256:fbdbd8bea631741dc443154617e3d940346059b2a3492164eb4fe17749f21167"
+    state: current
+    checked_at: "2026-10-27T21:23:38Z"
+    stale_since: null
+    causes: []
 tasks:
-  - id: shared-runtime-write-tests
+  - id: "shared-runtime-write-tests"
     title: "Pin shared registry, runtime controls and observation"
     description: "Write deterministic failing tests for shared profile resolution, backend distinctions, native control handoff, live journals, malformed input, bounds and failure propagation."
     context: "Human approved ADR 0015 on 2026-10-23. Deterministic registry, runtime_controls, observation and external_supervision regressions cover malformed input, pinning, bounds, quiet generation, backoff, effects, final-answer races, recording failure and budget preservation. The refreshed offline locked full workspace suite passed. Advisory receipts are unavailable; this records test work, not acceptance or certification."
@@ -31,11 +19,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-23T22:00:00Z"
+      updated_at: "2026-10-23T22:53:20Z"
+      completed_at: "2026-10-23T22:53:20Z"
     blocked_reason: null
     recovery_state: null
-  - id: shared-runtime-implement-code
+  - id: "shared-runtime-implement-code"
     title: "Consolidate reusable agent mechanisms"
     description: "Implement the shared registry/resolver, native mechanisms, external-agent adapter and live diagnostic/control interfaces without terminal or maerg dependencies."
     context: "Independent findings drove tests-first CLI retry/resource, empty-tool and accounting repairs in 9372168, then shared native selector validation in 5cb86cb. The final workspace passed 1746 tests with 14 existing ignores; strict all-target Clippy, formatting, release and documentation gates passed. Exact evidence and limits: docs/reviews/0015-validation.md. No receipt or certification."
@@ -43,12 +35,17 @@ tasks:
     expected_outcome: "Consumers use shared mechanisms and deterministic regression tests pass."
     kind: implementation
     status: completed
-    depends_on: [shared-runtime-write-tests]
-    requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-24T00:00:55Z", completed_at: "2026-10-24T00:00:55Z"}
+    depends_on:
+      - "shared-runtime-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-23T22:00:00Z"
+      updated_at: "2026-10-24T00:00:55Z"
+      completed_at: "2026-10-24T00:00:55Z"
     blocked_reason: null
     recovery_state: null
-  - id: shared-runtime-security-audit
+  - id: "shared-runtime-security-audit"
     title: "Inspect shared runtime authority and bounds"
     description: "Independently inspect registry, control authorization, recording, process cleanup, budgets and absence of effect replay."
     context: "An independent source-only observer derived and refreshed IMPL.md, including the final shared selector repair. The process-global signal-group concurrency limitation remains explicit; per-run controls and supervision are separately observed. This completes scoped audit activity, not blanket certification."
@@ -56,12 +53,17 @@ tasks:
     expected_outcome: "Concrete findings and limitations are recorded."
     kind: security-audit
     status: completed
-    depends_on: [shared-runtime-implement-code]
-    requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-24T00:00:55Z", completed_at: "2026-10-24T00:00:55Z"}
+    depends_on:
+      - "shared-runtime-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-23T22:00:00Z"
+      updated_at: "2026-10-24T00:00:55Z"
+      completed_at: "2026-10-24T00:00:55Z"
     blocked_reason: null
     recovery_state: null
-  - id: shared-runtime-compliance-review
+  - id: "shared-runtime-compliance-review"
     title: "Compare independent runtime evidence"
     description: "Derive source-only observations then compare with intent in a separate source-blind context."
     context: "A separate source-blind diagnostic comparison is persisted at docs/reviews/0015-sav-comparison.md and refreshed after the selector and ownership clarification. It retains broader targets and evidence limits. Formal sign-off is blocked rather than represented as acceptance."
@@ -69,38 +71,52 @@ tasks:
     expected_outcome: "Observed behavior and comparison limits persist beside the component."
     kind: compliance-review
     status: blocked
-    depends_on: [shared-runtime-security-audit]
-    requirements: ["REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-24T00:00:55Z", completed_at: null}
+    depends_on:
+      - "shared-runtime-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-23T22:00:00Z"
+      updated_at: "2026-10-24T00:00:55Z"
+      completed_at: null
     blocked_reason: "Formal review readiness is blocked by pre-existing project queue/toolchain diagnostics and retained requirement discrepancies requiring human arbitration. Diagnostic comparison is complete; no compliance pass, waiver or receipt."
     recovery_state: null
-  - id: active-model-write-tests
+  - id: "active-model-write-tests"
     title: "Reproduce router loaded-model discovery"
     description: "Test real router metadata, loaded status, standalone aliases, malformed input and shared cancellation."
-    kind: test
     context: "Router, standalone alias and malformed-catalog regressions failed before repair. Five loaded-model tests and existing capacity tests now pass."
     purpose: "Pin actual router wire metadata rather than a synthetic model field."
     expected_outcome: "Read-only discovery identifies a loaded entry and retains cancellation and metadata bounds."
+    kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"]
-    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:37:00Z", completed_at: "2026-10-17T13:37:00Z"}
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"
+    timestamps:
+      created_at: "2026-10-17T13:25:48Z"
+      updated_at: "2026-10-17T13:37:00Z"
+      completed_at: "2026-10-17T13:37:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: active-model-implement-code
+  - id: "active-model-implement-code"
     title: "Discover the router's loaded model"
     description: "Read bounded router status under one cancellable deadline without inference or switching."
-    kind: implementation
     context: "Router status discovery and standalone identity fallback are implemented. Initial component nextest: 602 passed, 3 pre-existing skipped; after Skott follow-up corrections, 54 targeted tests, strict Clippy, formatting and release build pass. Actual configured router reuse is observed without inference."
     purpose: "Reuse an active model without triggering inference or loading."
     expected_outcome: "Loaded status is read under one cancellable deadline."
+    kind: implementation
     status: completed
-    depends_on: [active-model-write-tests]
-    requirements: ["REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"]
-    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:37:00Z", completed_at: "2026-10-17T13:37:00Z"}
+    depends_on:
+      - "active-model-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"
+    timestamps:
+      created_at: "2026-10-17T13:25:48Z"
+      updated_at: "2026-10-17T13:37:00Z"
+      completed_at: "2026-10-17T13:37:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: active-model-security-audit
+  - id: "active-model-security-audit"
     title: "Inspect metadata discovery boundaries"
     description: "Independently inspect read-only endpoint authority, bounds and cancellation."
     context: "Independent clean-slate lifecycle-observer inspected metadata bounds, shared deadline, numeric-loopback authority and cancellation without running tests. One loaded identity per endpoint remains a documented limitation; no blanket certification."
@@ -108,12 +124,17 @@ tasks:
     expected_outcome: "Concrete regressions are corrected or explicitly retained."
     kind: security-audit
     status: completed
-    depends_on: [active-model-implement-code]
-    requirements: ["REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"]
-    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:49:19Z", completed_at: "2026-10-17T13:49:19Z"}
+    depends_on:
+      - "active-model-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"
+    timestamps:
+      created_at: "2026-10-17T13:25:48Z"
+      updated_at: "2026-10-17T13:49:19Z"
+      completed_at: "2026-10-17T13:49:19Z"
     blocked_reason: null
     recovery_state: null
-  - id: active-model-compliance-review
+  - id: "active-model-compliance-review"
     title: "Compare independent discovery evidence"
     description: "Compare intended behavior with source-only observations in a separate source-blind context."
     context: "Separate source-blind lifecycle-comparator found no concrete unresolved scoped discrepancy against new observations and attributed runtime evidence. Older IMPL entries were inadvertently displayed but excluded; source blindness remained. Aggregate test results do not independently establish every malformed-metadata or authority branch. No acceptance or blanket compliance claim."
@@ -121,12 +142,17 @@ tasks:
     expected_outcome: "A source-blind comparison records discrepancies and verification limits without accepting the bundle."
     kind: compliance-review
     status: completed
-    depends_on: [active-model-security-audit]
-    requirements: ["REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"]
-    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:49:19Z", completed_at: "2026-10-17T13:49:19Z"}
+    depends_on:
+      - "active-model-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"
+    timestamps:
+      created_at: "2026-10-17T13:25:48Z"
+      updated_at: "2026-10-17T13:49:19Z"
+      completed_at: "2026-10-17T13:49:19Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-vendor-write-tests
+  - id: "ci-vendor-write-tests"
     title: "Pin the read-only Cargo vendor path"
     description: "Assert the shared wrapper uses a disjoint immutable vendor destination."
     context: "Requested repair; explicit advisory exception while receipt enforcement is unavailable. Wrapper regression failed before repair and passes afterward; full workspace validation reports 1399 passed, 0 failed and 12 ignored."
@@ -135,11 +161,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
-    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"
+    timestamps:
+      created_at: "2026-10-14T05:23:13Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-vendor-implement-code
+  - id: "ci-vendor-implement-code"
     title: "Restore immutable vendor resolution"
     description: "Point the fixed Cargo wrapper at the caller-provided /rust/vendor mount."
     context: "Callers retain all mount authority."
@@ -147,12 +177,17 @@ tasks:
     expected_outcome: "Cargo retains offline and locked flags with a read-only registry."
     kind: implementation
     status: completed
-    depends_on: [ci-vendor-write-tests]
-    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
-    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    depends_on:
+      - "ci-vendor-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"
+    timestamps:
+      created_at: "2026-10-14T05:23:13Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-vendor-security-audit
+  - id: "ci-vendor-security-audit"
     title: "Audit fixed wrapper resource paths"
     description: "Independently inspect fixed interpolation and consumer grant compatibility."
     context: "Independent repair-observer inspected fixed wrapper paths and caller authority; scoped observations are retained in IMPL.md, not blanket certification."
@@ -160,12 +195,17 @@ tasks:
     expected_outcome: "Findings are corrected or explicitly retained."
     kind: security-audit
     status: completed
-    depends_on: [ci-vendor-implement-code]
-    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
-    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    depends_on:
+      - "ci-vendor-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"
+    timestamps:
+      created_at: "2026-10-14T05:23:13Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-vendor-compliance-review
+  - id: "ci-vendor-compliance-review"
     title: "Compare independent wrapper evidence"
     description: "Source-only observation followed by separate source-blind comparison."
     context: "Separate source-blind repair-comparator reported no new scoped discrepancy. No acceptance or blanket certification."
@@ -173,12 +213,17 @@ tasks:
     expected_outcome: "Scoped discrepancies and limits are explicit."
     kind: compliance-review
     status: completed
-    depends_on: [ci-vendor-security-audit]
-    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
-    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    depends_on:
+      - "ci-vendor-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"
+    timestamps:
+      created_at: "2026-10-14T05:23:13Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: offline-rust-write-tests
+  - id: "offline-rust-write-tests"
     title: "Pin shared offline Rust runtime scripts"
     description: "Verify fixed scratch initialization, closed tools, active selection and Cargo offline flags through ordinary tests and consumer native regressions."
     context: "Human requests Skott first and maerg parity; no sandbox installation."
@@ -187,11 +232,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
-    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"
+    timestamps:
+      created_at: "2026-10-10T20:49:42Z"
+      updated_at: "2026-10-10T20:49:42Z"
+      completed_at: "2026-10-10T20:49:42Z"
     blocked_reason: null
     recovery_state: null
-  - id: offline-rust-implement-code
+  - id: "offline-rust-implement-code"
     title: "Share fixed offline Rust runtime scripts"
     description: "Provide sandbox-local initialization and selection-aware wrappers without owning host preparation or grants."
     context: "Per-bundle advisory exception for the requested repair; receipt enforcement is unimplemented."
@@ -199,12 +248,17 @@ tasks:
     expected_outcome: "Consumers use the same private selection and offline wrappers."
     kind: implementation
     status: completed
-    depends_on: [offline-rust-write-tests]
-    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
-    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    depends_on:
+      - "offline-rust-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"
+    timestamps:
+      created_at: "2026-10-10T20:49:42Z"
+      updated_at: "2026-10-10T20:49:42Z"
+      completed_at: "2026-10-10T20:49:42Z"
     blocked_reason: null
     recovery_state: null
-  - id: offline-rust-security-audit
+  - id: "offline-rust-security-audit"
     title: "Audit shared offline script authority"
     description: "Independently inspect fixed paths, selection arguments and installation non-mutation."
     context: "Independent final audit found local target-discovery omissions; live source/test aliases and a native newly-authored integration-test regression address them. No blanket certification."
@@ -212,12 +266,17 @@ tasks:
     expected_outcome: "Findings corrected or explicitly retained."
     kind: security-audit
     status: completed
-    depends_on: [offline-rust-implement-code]
-    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
-    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    depends_on:
+      - "offline-rust-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"
+    timestamps:
+      created_at: "2026-10-10T20:49:42Z"
+      updated_at: "2026-10-10T20:49:42Z"
+      completed_at: "2026-10-10T20:49:42Z"
     blocked_reason: null
     recovery_state: null
-  - id: offline-rust-compliance-review
+  - id: "offline-rust-compliance-review"
     title: "Compare observed runtime with intended behavior"
     description: "Derive a clean-slate observation and conduct a separate source-blind comparison."
     context: "Final clean-slate observer independently ran ordinary native suites; separate source-blind comparator found no new scoped runtime mismatch. Coverage limits remain explicit. No acceptance or broader certification."
@@ -225,12 +284,17 @@ tasks:
     expected_outcome: "Scoped discrepancies remain explicit."
     kind: compliance-review
     status: completed
-    depends_on: [offline-rust-security-audit]
-    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
-    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:53:41Z", completed_at: "2026-10-10T20:53:41Z"}
+    depends_on:
+      - "offline-rust-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"
+    timestamps:
+      created_at: "2026-10-10T20:49:42Z"
+      updated_at: "2026-10-10T20:53:41Z"
+      completed_at: "2026-10-10T20:53:41Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-capacity-write-tests
+  - id: "model-capacity-write-tests"
     title: "Pin serving capacity and streaming usage"
     description: "Test model-qualified capacity, absent/malformed values, bounded discovery and requested streaming usage before code."
     context: "Human requested remediation of the artificial 8192 runner limit and misleading zero usage."
@@ -239,11 +303,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-02T09:17:04Z"
+      updated_at: "2026-10-02T10:27:11Z"
+      completed_at: "2026-10-02T10:27:11Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-capacity-implement-code
+  - id: "model-capacity-implement-code"
     title: "Expose bounded serving capacity and usage"
     description: "Add local-only selected-model discovery and include_usage without changing tool authority."
     context: "Transport regressions precede code."
@@ -251,12 +319,17 @@ tasks:
     expected_outcome: "Provider fixtures pass."
     kind: implementation
     status: completed
-    depends_on: [model-capacity-write-tests]
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    depends_on:
+      - "model-capacity-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-02T09:17:04Z"
+      updated_at: "2026-10-02T10:27:11Z"
+      completed_at: "2026-10-02T10:27:11Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-capacity-security-audit
+  - id: "model-capacity-security-audit"
     title: "Audit capacity metadata boundaries"
     description: "Independently inspect endpoint restrictions, query escaping, bounds and nullable usage; review the narrow signal-installation documentation and diagnostic correction after human unsafe-policy arbitration."
     context: "Audit follows transport implementation."
@@ -264,12 +337,18 @@ tasks:
     expected_outcome: "Scoped independent review recorded."
     kind: security-audit
     status: completed
-    depends_on: [model-capacity-implement-code]
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT", "REQUIREMENTS.md#quality-requirements-and-constraints"]
-    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    depends_on:
+      - "model-capacity-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+      - "REQUIREMENTS.md#quality-requirements-and-constraints"
+    timestamps:
+      created_at: "2026-10-02T09:17:04Z"
+      updated_at: "2026-10-02T10:27:11Z"
+      completed_at: "2026-10-02T10:27:11Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-capacity-compliance-review
+  - id: "model-capacity-compliance-review"
     title: "Compare capacity observations with intent"
     description: "Source-only IMPL derivation and separate source-blind intent comparison. Human arbitration permits necessary, minimally scoped unsafe with documented invariants, verification and independent review; reassess the signal-installation policy clarification."
     context: "Source-only observer 81ad5b9f-d2f0-42f6-8bb7-06a95490397c refreshed IMPL; source-blind comparator 1a13da35-ba48-43ba-a3d1-d39911423c5f supports the scoped capacity remediation and resolves the unsafe-policy contradiction after explicit human arbitration. Audit a3a9fdf7-68f4-4190-9853-feb581f736af found no vulnerabilities. Two native signal tests exercise installation and forwarding, not general signal-safety proof. Comparison completed without formal component acceptance or renewed maerg approval; revisions remain stale."
@@ -277,12 +356,17 @@ tasks:
     expected_outcome: "Discrepancies retained for human arbitration."
     kind: compliance-review
     status: completed
-    depends_on: [model-capacity-security-audit]
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    depends_on:
+      - "model-capacity-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-02T09:17:04Z"
+      updated_at: "2026-10-02T10:27:11Z"
+      completed_at: "2026-10-02T10:27:11Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-stream-integrity-write-tests
+  - id: "model-stream-integrity-write-tests"
     title: "Pin finish and semantic cadence boundaries"
     description: "Reproduce inconsistent/missing/malformed finishes and heartbeat-delayed stalls; exercise meaningful tool-fragment progress."
     context: "Independent comparison identified finish normalization and byte-cadence gaps."
@@ -291,11 +375,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-02T00:08:15Z"
+      updated_at: "2026-10-02T00:08:15Z"
+      completed_at: "2026-10-02T00:08:15Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-stream-integrity-implement-code
+  - id: "model-stream-integrity-implement-code"
     title: "Preserve finishes and decoded generation progress"
     description: "Preserve explicit llama finishes, reject malformed reasons, retain valid native Ollama classification and separate semantic cadence from HTTP/body progress."
     context: "Provider wire regressions and local intent precede repairs."
@@ -303,12 +391,17 @@ tasks:
     expected_outcome: "Provider fixtures pass without weakening caller deadlines or cancellation."
     kind: implementation
     status: completed
-    depends_on: [model-stream-integrity-write-tests]
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    depends_on:
+      - "model-stream-integrity-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-02T00:08:15Z"
+      updated_at: "2026-10-02T00:08:15Z"
+      completed_at: "2026-10-02T00:08:15Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-stream-integrity-security-audit
+  - id: "model-stream-integrity-security-audit"
     title: "Audit finish and watchdog repairs"
     description: "Independently inspect malformed wire input, bounded decoding, semantic progress, callback limits and caller deadline propagation."
     context: "Provider stream repairs are implemented."
@@ -316,12 +409,17 @@ tasks:
     expected_outcome: "Recorded scoped audit and any corrections."
     kind: security-audit
     status: completed
-    depends_on: [model-stream-integrity-implement-code]
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:27:08Z", completed_at: "2026-10-02T00:27:08Z"}
+    depends_on:
+      - "model-stream-integrity-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-02T00:08:15Z"
+      updated_at: "2026-10-02T00:27:08Z"
+      completed_at: "2026-10-02T00:27:08Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-stream-integrity-compliance-review
+  - id: "model-stream-integrity-compliance-review"
     title: "Compare provider stream observations with intent"
     description: "Compare independently derived current behavior and named wire-test evidence in a separate source-blind context."
     context: "Provider security audit follows implementation."
@@ -329,12 +427,17 @@ tasks:
     expected_outcome: "Independent comparison rather than implementer certification."
     kind: compliance-review
     status: completed
-    depends_on: [model-stream-integrity-security-audit]
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    depends_on:
+      - "model-stream-integrity-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-02T00:08:15Z"
+      updated_at: "2026-10-02T02:11:34Z"
+      completed_at: "2026-10-02T02:11:34Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-output-bound-write-tests
+  - id: "model-output-bound-write-tests"
     title: "Define provider output-bound tests"
     description: "Write failing llama-server and Ollama fixtures for positive bounded max_output_tokens, absent bounds and invalid pre-I/O rejection."
     context: "The skott needs an enforced response reserve."
@@ -343,11 +446,16 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["CONTRACT.md#Data-and-schemas", "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    requirements:
+      - "CONTRACT.md#Data-and-schemas"
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-01T22:43:19Z"
+      updated_at: "2026-10-01T23:37:34Z"
+      completed_at: "2026-10-01T23:37:34Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-output-bound-implement-code
+  - id: "model-output-bound-implement-code"
     title: "Implement canonical provider output bounds"
     description: "Add optional max_output_tokens and translate to llama-server max_tokens and Ollama options.num_predict without changing absent-bound behavior."
     context: "Defined provider output-bound fixtures."
@@ -355,12 +463,18 @@ tasks:
     expected_outcome: "Output-bound fixtures and existing transport tests pass."
     kind: implementation
     status: completed
-    depends_on: [model-output-bound-write-tests]
-    requirements: ["CONTRACT.md#Data-and-schemas", "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    depends_on:
+      - "model-output-bound-write-tests"
+    requirements:
+      - "CONTRACT.md#Data-and-schemas"
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-01T22:43:19Z"
+      updated_at: "2026-10-01T23:37:34Z"
+      completed_at: "2026-10-01T23:37:34Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-output-bound-security-audit
+  - id: "model-output-bound-security-audit"
     title: "Audit provider output bounds"
     description: "Independently inspect bounds, wire translation and invalid-input network behavior."
     context: "Output bounds are implemented."
@@ -368,12 +482,17 @@ tasks:
     expected_outcome: "Recorded audit findings and corrections."
     kind: security-audit
     status: completed
-    depends_on: [model-output-bound-implement-code]
-    requirements: ["CONTRACT.md#Data-and-schemas"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    depends_on:
+      - "model-output-bound-implement-code"
+    requirements:
+      - "CONTRACT.md#Data-and-schemas"
+    timestamps:
+      created_at: "2026-10-01T22:43:19Z"
+      updated_at: "2026-10-01T23:37:34Z"
+      completed_at: "2026-10-01T23:37:34Z"
     blocked_reason: null
     recovery_state: null
-  - id: model-output-bound-compliance-review
+  - id: "model-output-bound-compliance-review"
     title: "Review provider output-bound compliance"
     description: "Compare intended output bounds with independent source-only implementation and source-blind review evidence."
     context: "Security audit follows provider implementation."
@@ -381,9 +500,14 @@ tasks:
     expected_outcome: "Independent evidence and explicit unresolved discrepancies."
     kind: compliance-review
     status: completed
-    depends_on: [model-output-bound-security-audit]
-    requirements: ["CONTRACT.md#Data-and-schemas"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    depends_on:
+      - "model-output-bound-security-audit"
+    requirements:
+      - "CONTRACT.md#Data-and-schemas"
+    timestamps:
+      created_at: "2026-10-01T22:43:19Z"
+      updated_at: "2026-10-02T02:11:34Z"
+      completed_at: "2026-10-02T02:11:34Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-01-write-tests"

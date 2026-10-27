@@ -1,28 +1,16 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:09b01ffb1f8b184ea3f21ab8494919c4e99b476a11e462508bb43188bb69d9a5"
-  contract_revision: "sha256:f9381908a1f3535128eeaa26c476bde9df81f98db4ccc403ee938a87edad65fe"
-  design_revision: "sha256:aa715b2501aa6d380cc9cf3274208cd78214360133679e915c29719bff029204"
+  requirements_revision: "sha256:e5f518969b33ac4b154e7f64237a1d9e0db443c317da1036c480f1c5c10215e7"
+  contract_revision: "sha256:fc1d38fbeb4e0abe8b1ff458e1b0062b0efd7590b829502a4175d587711d5fd0"
+  design_revision: "sha256:f3f2207ddbc9399a66f808883affacb68f154e9b4a1e58dc8effdabee0b5ef99"
   parent_contract: null
   revalidation:
-    state: stale
-    checked_at: "2026-10-27T19:48:41Z"
-    stale_since: "2026-10-27T19:45:18Z"
-    causes:
-      - kind: component-requirements-revision-changed
-        path: REQUIREMENTS.md
-        expected_revision: "sha256:09b01ffb1f8b184ea3f21ab8494919c4e99b476a11e462508bb43188bb69d9a5"
-        observed_revision: "sha256:e5f518969b33ac4b154e7f64237a1d9e0db443c317da1036c480f1c5c10215e7"
-      - kind: component-contract-revision-changed
-        path: CONTRACT.md
-        expected_revision: "sha256:f9381908a1f3535128eeaa26c476bde9df81f98db4ccc403ee938a87edad65fe"
-        observed_revision: "sha256:fc1d38fbeb4e0abe8b1ff458e1b0062b0efd7590b829502a4175d587711d5fd0"
-      - kind: component-design-revision-changed
-        path: DESIGN.md
-        expected_revision: "sha256:aa715b2501aa6d380cc9cf3274208cd78214360133679e915c29719bff029204"
-        observed_revision: "sha256:f3f2207ddbc9399a66f808883affacb68f154e9b4a1e58dc8effdabee0b5ef99"
+    state: current
+    checked_at: "2026-10-27T21:23:41Z"
+    stale_since: null
+    causes: []
 tasks:
-  - id: test-performance-write-tests
+  - id: "test-performance-write-tests"
     title: "Pin isolated nested builds and performance evidence"
     description: "Test held Cargo target locks, complete serial/parallel snapshots, scheduling, build watches and profiler metrics, failures and cleanup before implementation."
     context: "Held target locks, missing rebuild inputs, CPU plateaus, absent-quota warnings and surviving descendants reproduced before their fixes. Explicit advisory exception; no receipt or acceptance."
@@ -31,11 +19,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"]
-    timestamps: {created_at: "2026-10-27T19:05:00Z", updated_at: "2026-10-27T19:45:18Z", completed_at: "2026-10-27T19:45:18Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"
+    timestamps:
+      created_at: "2026-10-27T19:05:00Z"
+      updated_at: "2026-10-27T19:45:18Z"
+      completed_at: "2026-10-27T19:45:18Z"
     blocked_reason: null
     recovery_state: null
-  - id: test-performance-implement-code
+  - id: "test-performance-implement-code"
     title: "Remove late barriers and expose resource waits"
     description: "Prioritize exclusive and long-running tests, isolate nested Cargo output, parallelize complete inventory hashing and add private repository-only profiling."
     context: "Controlled warm old-policy runs 57.897/64.219s; new-policy runs 28.920/32.088/28.071s, each 1875 passed and 15 skipped. Native trial 3.4-3.6s. Original intermittent timeout not reproduced; held-lock stall was. Unchanged build verified fresh in 0.10s."
@@ -43,12 +35,17 @@ tasks:
     expected_outcome: "Measured parallel suite improvement with unchanged assertions and explicit profiling limits."
     kind: implementation
     status: completed
-    depends_on: [test-performance-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"]
-    timestamps: {created_at: "2026-10-27T19:05:00Z", updated_at: "2026-10-27T19:45:18Z", completed_at: "2026-10-27T19:45:18Z"}
+    depends_on:
+      - "test-performance-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"
+    timestamps:
+      created_at: "2026-10-27T19:05:00Z"
+      updated_at: "2026-10-27T19:45:18Z"
+      completed_at: "2026-10-27T19:45:18Z"
     blocked_reason: null
     recovery_state: null
-  - id: test-performance-security-audit
+  - id: "test-performance-security-audit"
     title: "Observe profiling and test isolation independently"
     description: "Derive source-only observations of target locks, worker ownership, profiler privacy, command failures and process cleanup without intent."
     context: "Initial independent source-only observation found group-cleanup bypass after leader exit. Separate fresh profiler observation covers the repaired cleanup and explicit estimator/visibility limits. Both accounts distinguish source assertions from execution; no blanket security certification."
@@ -56,12 +53,17 @@ tasks:
     expected_outcome: "Scoped IMPL observations and explicit limitations."
     kind: security-audit
     status: completed
-    depends_on: [test-performance-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"]
-    timestamps: {created_at: "2026-10-27T19:05:00Z", updated_at: "2026-10-27T19:45:18Z", completed_at: "2026-10-27T19:45:18Z"}
+    depends_on:
+      - "test-performance-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"
+    timestamps:
+      created_at: "2026-10-27T19:05:00Z"
+      updated_at: "2026-10-27T19:45:18Z"
+      completed_at: "2026-10-27T19:45:18Z"
     blocked_reason: null
     recovery_state: null
-  - id: test-performance-compliance-review
+  - id: "test-performance-compliance-review"
     title: "Compare performance intent with independent observations"
     description: "Compare scoped intent with fresh source-only observations and attributed execution evidence without source access; retain discrepancies."
     context: "docs/reviews/test-performance-comparison.md independently recomputes finite scheduling/timing evidence. Metadata field scope and raw-log privacy wording remain for human arbitration, with timeout/invalidation/cleanup verification limits retained. Review completed, not accepted; revisions remain stale."
@@ -69,12 +71,17 @@ tasks:
     expected_outcome: "Persistent scoped comparison with finite evidence."
     kind: compliance-review
     status: completed
-    depends_on: [test-performance-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"]
-    timestamps: {created_at: "2026-10-27T19:05:00Z", updated_at: "2026-10-27T19:52:06Z", completed_at: "2026-10-27T19:52:06Z"}
+    depends_on:
+      - "test-performance-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TEST-PERFORMANCE"
+    timestamps:
+      created_at: "2026-10-27T19:05:00Z"
+      updated_at: "2026-10-27T19:52:06Z"
+      completed_at: "2026-10-27T19:52:06Z"
     blocked_reason: null
     recovery_state: null
-  - id: tool-ergonomics-write-tests
+  - id: "tool-ergonomics-write-tests"
     title: "Pin continuation and bounded incremental mutations"
     description: "Test omitted offsets, interleaved paths, reset, EOF breaker, stale reads, UTF-8 pages, strict patches, append and unchanged helper authority before implementation."
     context: "Five incremental-tool regressions and omitted-offset loop regression failed before implementation. Final coverage includes EOF/empty files, interleaved cursors, stale failures/restart, strict patches, append, binary/size bounds and helper routing. Explicit advisory exception in RUN-REQ-TOOL-ERGONOMICS; no acceptance receipt."
@@ -83,11 +90,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"]
-    timestamps: {created_at: "2026-10-27T13:44:28Z", updated_at: "2026-10-27T14:04:21Z", completed_at: "2026-10-27T14:04:21Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"
+    timestamps:
+      created_at: "2026-10-27T13:44:28Z"
+      updated_at: "2026-10-27T14:04:21Z"
+      completed_at: "2026-10-27T14:04:21Z"
     blocked_reason: null
     recovery_state: null
-  - id: tool-ergonomics-implement-code
+  - id: "tool-ergonomics-implement-code"
     title: "Implement run-owned cursors and atomic incremental tools"
     description: "Add validated read continuation, EOF repetition policy, append and strict single-file patch tools; document tool selection and deferred acquisition."
     context: "Prompt-local validated read cursors, EOF breaker, digest-bound append and strict path-free patch reuse the existing helper and sandbox grants. Sourced recommendations and deferred acquisition prerequisites are in docs/agent-toolkit.md. All 360 affected tests, the real sandbox trial, all-target strict Clippy, formatting and whitespace checks passed. No dependencies or network authority added."
@@ -95,12 +106,17 @@ tasks:
     expected_outcome: "Targeted regressions and quality gates pass."
     kind: implementation
     status: completed
-    depends_on: [tool-ergonomics-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"]
-    timestamps: {created_at: "2026-10-27T13:44:28Z", updated_at: "2026-10-27T14:04:21Z", completed_at: "2026-10-27T14:04:21Z"}
+    depends_on:
+      - "tool-ergonomics-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"
+    timestamps:
+      created_at: "2026-10-27T13:44:28Z"
+      updated_at: "2026-10-27T14:04:21Z"
+      completed_at: "2026-10-27T14:04:21Z"
     blocked_reason: null
     recovery_state: null
-  - id: tool-ergonomics-security-audit
+  - id: "tool-ergonomics-security-audit"
     title: "Inspect incremental tool boundaries independently"
     description: "Derive scoped source/test observations without intent and inspect cursor bounds, patch parsing, preimage guards, helper routing and unchanged authority."
     context: "Clean-slate source-only observations are summarized in IMPL.md. No concrete defect was identified in the new cursor/append/patch algorithms. Two existing-code findings (host long-script staging and new-write temporary-name collision) remain explicitly retained outside this change, not certified away. Additional tests and prompt/error wording followed the observation; final execution evidence is distinguished. No broad security certification."
@@ -108,12 +124,17 @@ tasks:
     expected_outcome: "Scoped IMPL evidence and explicit findings."
     kind: security-audit
     status: completed
-    depends_on: [tool-ergonomics-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"]
-    timestamps: {created_at: "2026-10-27T13:44:28Z", updated_at: "2026-10-27T14:04:21Z", completed_at: "2026-10-27T14:04:21Z"}
+    depends_on:
+      - "tool-ergonomics-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"
+    timestamps:
+      created_at: "2026-10-27T13:44:28Z"
+      updated_at: "2026-10-27T14:04:21Z"
+      completed_at: "2026-10-27T14:04:21Z"
     blocked_reason: null
     recovery_state: null
-  - id: tool-ergonomics-compliance-review
+  - id: "tool-ergonomics-compliance-review"
     title: "Compare incremental tool intent and observations"
     description: "Compare this scoped intent with independently derived observations and test evidence in a source-blind context; retain discrepancies."
     context: "Separate source-blind comparison is persisted in docs/reviews/tool-ergonomics-comparison.md. It finds substantial scoped correspondence with no concrete new-algorithm contradiction, while retaining no-op patch policy underspecification, finite evidence/coverage gaps and two existing-code findings for human arbitration. This completes the diagnostic comparison, not acceptance or formal compliance. Intent was not automatically changed to hide findings."
@@ -121,12 +142,17 @@ tasks:
     expected_outcome: "Persistent scoped comparison, not blanket compliance."
     kind: compliance-review
     status: completed
-    depends_on: [tool-ergonomics-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"]
-    timestamps: {created_at: "2026-10-27T13:44:28Z", updated_at: "2026-10-27T14:08:59Z", completed_at: "2026-10-27T14:08:59Z"}
+    depends_on:
+      - "tool-ergonomics-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"
+    timestamps:
+      created_at: "2026-10-27T13:44:28Z"
+      updated_at: "2026-10-27T14:08:59Z"
+      completed_at: "2026-10-27T14:08:59Z"
     blocked_reason: null
     recovery_state: null
-  - id: repository-config-write-tests
+  - id: "repository-config-write-tests"
     title: "Pin checkout-independent scheduling configuration"
     description: "Reproduce the clean-checkout failure, retain the exact full-pool assertion and pin explicit recipe configuration selection."
     context: "Human requests PR #10 Quality/MSRV repair. Deliberate advisory exception for this CI-only repair while receipt enforcement is unavailable; no acceptance claimed. The tracked-only HEAD archive reproduced the missing local-file failure; both new-location and recipe-selection checks failed before repair."
@@ -135,11 +161,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
-    timestamps: {created_at: "2026-10-25T23:14:04Z", updated_at: "2026-10-25T23:20:00Z", completed_at: "2026-10-25T23:20:00Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-25T23:14:04Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: repository-config-implement-code
+  - id: "repository-config-implement-code"
     title: "Separate shared scheduling from sandbox settings"
     description: "Track tools/nextest.toml, explicitly select it in just test and document its relationship to the ignored local file."
     context: "Exact selector, dynamic full-pool reservation and inherited CI profile preserved. Stable/MSRV all-feature checks and tracked-only archive checks pass. Full native binary passes 16 tests under both default/four-thread and CI/three-thread nextest runs. Recipe dry run, formatting and strict targeted Clippy pass. Local config remains ignored and untouched; no production code changed."
@@ -147,12 +177,17 @@ tasks:
     expected_outcome: "Stable and MSRV regressions pass without .config/nextest.toml."
     kind: implementation
     status: completed
-    depends_on: [repository-config-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
-    timestamps: {created_at: "2026-10-25T23:14:04Z", updated_at: "2026-10-25T23:20:00Z", completed_at: "2026-10-25T23:20:00Z"}
+    depends_on:
+      - "repository-config-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-25T23:14:04Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: repository-config-security-audit
+  - id: "repository-config-security-audit"
     title: "Inspect scheduling authority independently"
     description: "Derive scoped implementation observations from the configuration, recipe and regression source in a clean-slate context."
     context: "Clean-slate configuration/native-trial observation and separate narrowed recipe-test observation are recorded in IMPL.md. Initial unrelated-recipe coverage gap was fixed and verified with an isolated negative control. Static assertions are not new native scheduler-overlap evidence; no production authority changed."
@@ -160,12 +195,17 @@ tasks:
     expected_outcome: "No hidden local-file dependency, expanded authority or relaxed isolation is introduced."
     kind: security-audit
     status: completed
-    depends_on: [repository-config-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
-    timestamps: {created_at: "2026-10-25T23:14:04Z", updated_at: "2026-10-25T23:20:00Z", completed_at: "2026-10-25T23:20:00Z"}
+    depends_on:
+      - "repository-config-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-25T23:14:04Z"
+      updated_at: "2026-10-25T23:20:00Z"
+      completed_at: "2026-10-25T23:20:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: repository-config-compliance-review
+  - id: "repository-config-compliance-review"
     title: "Compare checkout-independent scheduling evidence"
     description: "Compare scoped intent with the clean-slate observations and execution evidence in a separate source-blind context."
     context: "Separate source-blind comparison found no concrete implementation contradiction but requested fresh runtime evidence. A narrower independent event-stream comparison then verified 16 starts/completions/passes per profile, zero native-trial overlap and ordinary concurrency peaks of four and three. Both reports and finite scope are retained in IMPL.md; no acceptance or blanket certification."
@@ -173,12 +213,17 @@ tasks:
     expected_outcome: "Scoped discrepancies are explicit; no blanket certification or acceptance receipt."
     kind: compliance-review
     status: completed
-    depends_on: [repository-config-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
-    timestamps: {created_at: "2026-10-25T23:14:04Z", updated_at: "2026-10-25T23:24:38Z", completed_at: "2026-10-25T23:24:38Z"}
+    depends_on:
+      - "repository-config-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-25T23:14:04Z"
+      updated_at: "2026-10-25T23:24:38Z"
+      completed_at: "2026-10-25T23:24:38Z"
     blocked_reason: null
     recovery_state: null
-  - id: shared-runtime-write-tests
+  - id: "shared-runtime-write-tests"
     title: "Pin shared profiles and independent run inspection"
     description: "Test shared configuration consumption, headless parity, read-only journal attachment and explicitly authorized controls before code."
     context: "Human approved ADR 0015. shared_registry, inspection_cli, live_journal, external_agent, runtime_ipc, startup_lifecycle and existing native loop/context tests cover profiles, inspection, actual interactive/headless controls, private capability lifetime, backend distinctions and preserved authority. The refreshed offline locked full workspace suite passed."
@@ -187,11 +232,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-23T22:00:00Z"
+      updated_at: "2026-10-23T22:53:20Z"
+      completed_at: "2026-10-23T22:53:20Z"
     blocked_reason: null
     recovery_state: null
-  - id: shared-runtime-implement-code
+  - id: "shared-runtime-implement-code"
     title: "Consume shared mechanisms and inspect live runs"
     description: "Use Sav registry/native mechanisms, retain workspace executors, expose setup and independent observation/control clients."
     context: "Independent source-only findings drove five initially failing recording regressions and private descriptor-relative, no-clobber, atomic transcript repair. Shared defaults and duplicate-free listing have targeted coverage. Active steering versus idle/bootstrap replacement is clarified. Final workspace: 1746 passed, 14 existing ignores; strict lint, format, release and documentation passed. See docs/reviews/0015-validation.md; ancillary findings remain separate."
@@ -199,12 +248,17 @@ tasks:
     expected_outcome: "Shared behavior and attachment tests pass."
     kind: implementation
     status: completed
-    depends_on: [shared-runtime-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-24T00:00:55Z", completed_at: "2026-10-24T00:00:55Z"}
+    depends_on:
+      - "shared-runtime-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-23T22:00:00Z"
+      updated_at: "2026-10-24T00:00:55Z"
+      completed_at: "2026-10-24T00:00:55Z"
     blocked_reason: null
     recovery_state: null
-  - id: shared-runtime-security-audit
+  - id: "shared-runtime-security-audit"
     title: "Inspect observer and control boundaries"
     description: "Independently inspect bounded inputs, private control authority, detachment, explicit backend behavior and unchanged tool grants."
     context: "Independent source-only IMPL.md covers native controls, read-only inspection, opaque-host boundaries and repaired recording. A real PTY inspector smoke exercised guide, cancel and detach through correlated sockets without changing the journal. Ancillary host-script/theme limits remain explicit; no blanket certification."
@@ -212,12 +266,17 @@ tasks:
     expected_outcome: "Findings are corrected or explicitly retained."
     kind: security-audit
     status: completed
-    depends_on: [shared-runtime-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T23:39:56Z", completed_at: "2026-10-23T23:39:56Z"}
+    depends_on:
+      - "shared-runtime-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-23T22:00:00Z"
+      updated_at: "2026-10-23T23:39:56Z"
+      completed_at: "2026-10-23T23:39:56Z"
     blocked_reason: null
     recovery_state: null
-  - id: shared-runtime-compliance-review
+  - id: "shared-runtime-compliance-review"
     title: "Compare independent client observations"
     description: "Source-only IMPL derivation followed by separate source-blind intent comparison."
     context: "A separate source-blind diagnostic comparison is persisted at docs/reviews/0015-skott-comparison.md, including the active-task/bootstrap clarification. It retains broader authority, reliability and review-mode discrepancies. Formal sign-off remains blocked, not automatically accepted."
@@ -225,9 +284,14 @@ tasks:
     expected_outcome: "Persistent scoped observations and comparison."
     kind: compliance-review
     status: blocked
-    depends_on: [shared-runtime-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-24T00:00:55Z", completed_at: null}
+    depends_on:
+      - "shared-runtime-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-23T22:00:00Z"
+      updated_at: "2026-10-24T00:00:55Z"
+      completed_at: null
     blocked_reason: "Formal readiness is blocked by pre-existing lifecycle task timestamps and managed-toolchain diagnostics, plus retained discrepancies for human arbitration. The diagnostic comparison does not mint a compliance pass or waiver."
     recovery_state: null
   - id: "lifecycle-write-tests"
