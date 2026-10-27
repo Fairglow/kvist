@@ -48,7 +48,7 @@ target:
 
 test:
     kvist vendor
-    cargo nextest run --config-file tools/nextest.toml --locked --workspace --all-features --test-threads num-cpus
+    cargo nextest run --config-file tools/nextest.toml --locked --workspace --all-features --test-threads num-cpus --no-fail-fast
 
 audit:
     cargo deny --all-features --locked check advisories bans licenses sources
