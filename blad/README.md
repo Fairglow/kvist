@@ -197,15 +197,47 @@ revise the earlier display. `+++` metadata is not supported.
 
 ### Markdown profile
 
-Blad uses CommonMark parsing with selected extensions, not full CommonMark or
-GFM conformance. Tables support width-aware whole-word wrapping and delimiter
-alignment: `:---` left, `:---:` center, `---:` right; unspecified alignment is
-left. Long tokens or minimum column widths can require horizontal scrolling.
-Table cells preserve bold, italic and strikethrough, including combinations;
-links remain navigable. Inline code has no dedicated cell styling and uses
-ordinary cell whitespace/wrapping rules. HTML tables and merged cells are not
-supported. Raw HTML is omitted, except table-cell `<br>` line breaks, and images
-show alt text only.
+Blad uses a CommonMark parser with documented extensions and a text-only
+terminal renderer. It does not claim complete CommonMark/GFM conformance.
+The principal limitations are raw HTML omission, alt-text-only images,
+incomplete extended autolinking, and reduced inline-code presentation in tables.
+Parsing Markdown structure and projecting it into terminal text are separate
+concerns; browser-equivalent appearance is not the goal.
+
+Tables support width-aware whole-word wrapping and delimiter alignment:
+`:---` left, `:---:` center, `---:` right; unspecified alignment is left.
+Long tokens or minimum column widths can require horizontal scrolling.
+Table cells preserve bold, italic and strikethrough, including combinations.
+Links remain navigable but lack the normal dedicated link color. Inline code
+has no dedicated cell styling and uses ordinary cell whitespace/wrapping rules.
+HTML tables and merged cells are not supported.
+
+Inline/reference links, bracketed autolinks and bare HTTP(S) URLs are supported,
+but not the full GFM extended-autolink grammar for bare `www` addresses, email
+addresses and URL punctuation/parentheses. Footnotes have matching visual
+markers, not reference-to-definition navigation. Definition lists and TOML
+frontmatter are not supported.
+
+Raw HTML is omitted, except table-cell `<br>` line breaks; this can hide whole
+HTML-only sections, including `<details>` content. Images show alt text only,
+without downloading or displaying graphics. Math and Mermaid have documented
+subsets with visible source fallback for unsupported constructs; see the
+[user guide](docs/USAGE.md).
+
+Formal GFM extends CommonMark with tables, task lists, strikethrough, extended
+autolinks and disallowed-HTML rules. Footnotes, alerts, math, Mermaid and metadata
+are additional conventions or languages, not all part of that formal
+specification. Superscript/subscript are also dialect extensions. See the
+[CommonMark](https://spec.commonmark.org/0.31.2/) and
+[GFM](https://github.github.com/gfm/) specifications.
+
+The pending [Markdown subset backlog](TODOS.yaml) prioritizes autolink and table
+gaps, bounded HTML text preservation, then definition lists, footnote navigation
+and TOML frontmatter. These are planned improvements, not current support.
+The goal is a useful, predictable text-only subset, not full conformance or a
+browser engine. Full HTML/CSS/JavaScript, executable MDX/JSX, template expansion,
+terminal graphics, merged HTML table cells and complete TeX/Mermaid compatibility
+are not goals of this backlog. Competing ecosystem dialects remain deferred.
 
 ## Architecture
 

@@ -22,6 +22,334 @@ component:
         expected_revision: "sha256:08761e7f7519a1a1e7deb13af6f7e20fbb1de6344abec58c226cd2d697cbffda"
         observed_revision: "sha256:51eecaed05aab38d3101b538946214ffe459e956ee543fcf22ef14602e926c25"
 tasks:
+  # Pending useful-subset backlog, ordered by product priority, not conformance.
+  # Requirement links identify affected existing intent, not implemented support.
+  # The intent task gates all six independent test/code/audit/review workstreams.
+  - id: "blad-markdown-subset-intent"
+    title: "define_intent: bound the useful Markdown subset backlog"
+    description: "Define and obtain approval for local requirements, contract, design and atomic task definitions for autolinks, table inline code/link colors, bounded HTML text preservation, definition lists, footnote navigation and TOML frontmatter before tests or code."
+    context: "The user approved this bounded backlog on 2026-10-27, not implementation details or a full-conformance goal. Current contracts still omit HTML, defer dedicated table-code semantics and reject TOML. Resolve those deliberate behavior changes in intent before execution; refine requirement traceability per workstream and provide advisory review or an explicit exception without inventing receipts or acceptance."
+    purpose: "Keep planned improvements distinct from current support and establish approved behavior before syntax or implementation."
+    expected_outcome: "Approved local intent defines syntax, terminal projection, navigation, streaming, errors, bounds and verification for each workstream. Preserve text-only/offline/read-only defaults; exclude full conformance, browser engines, CSS/JavaScript, executable MDX/JSX, templates, image protocols, merged HTML cells and full TeX/Mermaid compatibility. Other ecosystem dialects remain deferred."
+    kind: implementation
+    status: pending
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-075"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-autolink-subset-tests"
+    title: "write_tests: extended autolink boundaries"
+    description: "From approved intent, pin bare www/email recognition, HTTP(S) boundary and balanced-parenthesis/punctuation rules, false positives and literal code/metadata exclusions."
+    context: "Current bare-link scanning only handles HTTP(S) and is not the complete GFM extended-autolink grammar. Use relevant GFM examples as fixtures without claiming full conformance; test renderer/extractor agreement, repeated links, Unicode, wrapped labels, table cells and streaming."
+    purpose: "Prevent link recognition from swallowing prose, truncating valid URLs or disagreeing with navigation."
+    expected_outcome: "Fail-first fixtures cover exact displayed labels/destinations and PTY selection, mouse hitboxes, resize and plain/color behavior."
+    kind: test
+    status: pending
+    depends_on: ["blad-markdown-subset-intent"]
+    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-autolink-subset-code"
+    title: "implement_code: consistent extended autolinks"
+    description: "Implement the approved autolink subset through shared recognition for rendering and navigation; preserve source-owned identities and explicit-only destination opening."
+    context: "Reuse existing parser/navigation boundaries rather than separate renderer and extractor heuristics. Keep code, frontmatter and existing links literal or non-nested as specified; update the README and user guide with exact supported rules and remaining limits."
+    purpose: "Close useful GFM-style autolink gaps without introducing automatic network or subprocess effects."
+    expected_outcome: "Targeted fixtures pass across library, CLI, viewer, resize and streaming with preserved existing links."
+    kind: implementation
+    status: pending
+    depends_on: ["blad-autolink-subset-tests"]
+    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-autolink-subset-audit"
+    title: "security_audit: independently observe autolink boundaries"
+    description: "Independently inspect source/tests for recognition bounds, untrusted destinations, inert controls and absence of implicit launches; derive a scoped IMPL.md record without intent, queue, prior records or history."
+    context: "Pending independent source-only work, not an existing audit or certification."
+    purpose: "Record actual recognition, navigation and failure behavior independently."
+    expected_outcome: "A source-derived implementation supplement retains findings and evidence limits."
+    kind: security-audit
+    status: pending
+    depends_on: ["blad-autolink-subset-code"]
+    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-autolink-subset-review"
+    title: "compliance_review: compare autolink intent and evidence"
+    description: "In a separate source-blind context, compare approved requirements, contract and design against the independent implementation record and test evidence; retain discrepancies for human arbitration."
+    context: "Pending comparison; passing fixtures do not establish full GFM conformance or human acceptance."
+    purpose: "Keep implementation observation and intent comparison independent."
+    expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
+    kind: compliance-review
+    status: pending
+    depends_on: ["blad-autolink-subset-audit"]
+    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-code-links-tests"
+    title: "write_tests: table inline code and link presentation"
+    description: "Pin approved table-code styling, whitespace and atomic-span semantics plus normal link colors, including nested emphasis, linked code, Unicode, explicit breaks and overflow."
+    context: "Currently table code uses ordinary normalized whitespace/wrapping and lacks dedicated styling; links remain navigable without normal link color. Test intentional geometry changes separately from unchanged table layout and alignment guarantees."
+    purpose: "Prevent styling changes from corrupting cell geometry, backgrounds, search or navigation."
+    expected_outcome: "Fail-first effective-attribute, exact-layout and PTY fixtures cover headers, zebra rows, quotes, monochrome/plain output, selection, clipping and resize."
+    kind: test
+    status: pending
+    depends_on: ["blad-markdown-subset-intent"]
+    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-076"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-code-links-code"
+    title: "implement_code: compose table code and link styles"
+    description: "Extend the existing typed table-span and wrapping pipeline with approved code semantics and link colors; compose code/link/search/selection attributes without leaking into padding, separators or adjacent cells."
+    context: "Reuse the table solver and source-owned navigation rather than adding a second layout engine. Preserve alignment, horizontal overflow, quoted/numbered viewports and color/plain geometry policies; document deliberate changes to current code whitespace and wrapping."
+    purpose: "Close table presentation gaps while retaining reliable layout and navigation."
+    expected_outcome: "Focused rendering and viewer regressions pass with documented code semantics and preserved table invariants."
+    kind: implementation
+    status: pending
+    depends_on: ["blad-table-code-links-tests"]
+    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-076"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-code-links-audit"
+    title: "security_audit: independently observe table span composition"
+    description: "Independently inspect source/tests for span bounds, Unicode clipping, inert controls, fallible writes and resource behavior; derive a scoped IMPL.md record excluding intent, queue, prior records and history."
+    context: "Pending independent source-only work; include observed style precedence and geometry limitations."
+    purpose: "Record actual table-code/link behavior without self-certification."
+    expected_outcome: "A source-derived supplement retains risks, behavior and finite evidence limits."
+    kind: security-audit
+    status: pending
+    depends_on: ["blad-table-code-links-code"]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-074"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-table-code-links-review"
+    title: "compliance_review: compare table code/link evidence"
+    description: "Separately compare approved local intent with the independent implementation record and tests in a source-blind context, retaining geometry, style and navigation discrepancies for human arbitration."
+    context: "Pending comparison, not acceptance or a full table-conformance claim."
+    purpose: "Keep observed behavior and intended table semantics independently comparable."
+    expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
+    kind: compliance-review
+    status: pending
+    depends_on: ["blad-table-code-links-audit"]
+    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-073", "REQUIREMENTS.md#R-074", "REQUIREMENTS.md#R-076"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-html-text-tests"
+    title: "write_tests: bounded HTML text preservation"
+    description: "Pin the approved inert HTML subset for line breaks, emphasis, keyboard labels, anchors and visible details/summary bodies, including readable-content fallback for unsupported markup."
+    context: "Current HTML omission can hide whole sections. Freeze element/attribute admission, malformed-input handling, active-content treatment, source fallback and byte/depth/work/output bounds before these tests. Render details expanded; interactive folding remains deferred."
+    purpose: "Recover useful text without introducing a browser, executing active content or silently losing sections."
+    expected_outcome: "Fail-first fixtures cover inline/block boundaries, entities, malformed/nested input, controls, resource limits, writer/cancellation errors, navigation, search, plain output, resize and provisional streaming."
+    kind: test
+    status: pending
+    depends_on: ["blad-markdown-subset-intent"]
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-041"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-html-text-code"
+    title: "implement_code: inert bounded HTML text projection"
+    description: "Implement the approved subset through bounded structural parsing, not regex tag stripping; retain readable content/source with explicit unsupported and resource-limit handling."
+    context: "Preserve renderer/navigation agreement and existing table-cell breaks. Do not fetch resources, apply CSS, execute JavaScript/templates, expand includes, display graphics or implement merged HTML tables. Keep details/summary expanded and document supported elements, active-content handling and remaining limits."
+    purpose: "Replace avoidable HTML text loss with predictable terminal projection."
+    expected_outcome: "Approved HTML text fixtures pass across library, CLI, viewer and streaming without hidden effects or weakened limits."
+    kind: implementation
+    status: pending
+    depends_on: ["blad-html-text-tests"]
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-041"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-html-text-audit"
+    title: "security_audit: independently observe HTML projection boundaries"
+    description: "Independently inspect source/tests for parser bounds, malformed input, active-content isolation, URL/control handling and absence of resource fetching or execution; derive a scoped IMPL.md record without intent, queue, prior records or history."
+    context: "Pending independent source-only work; assess any justified parser dependency and preserve evidence limits rather than claiming sanitization or browser conformance."
+    purpose: "Make the actual untrusted-HTML boundary independently inspectable."
+    expected_outcome: "A source-derived supplement records admitted behavior, failure paths and bounded risk observations."
+    kind: security-audit
+    status: pending
+    depends_on: ["blad-html-text-code"]
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-038"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-html-text-review"
+    title: "compliance_review: compare HTML preservation intent and evidence"
+    description: "In a separate source-blind context, compare approved element/fallback/resource semantics against the independent implementation record and tests; retain lost-content or authority discrepancies for human arbitration."
+    context: "Pending comparison, not approval of arbitrary HTML or full CommonMark/GFM conformance."
+    purpose: "Verify the bounded text-preservation goal independently of implementation."
+    expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
+    kind: compliance-review
+    status: pending
+    depends_on: ["blad-html-text-audit"]
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-041"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-definition-lists-tests"
+    title: "write_tests: definition-list terminal projection"
+    description: "Pin the approved definition-list dialect, term/definition indentation and wrapping, multiple terms/definitions, nested blocks and literal non-matches."
+    context: "Definition lists are not currently enabled. The existing parser offers an extension, but turning it on alone does not provide renderer layout or consistent link/heading navigation."
+    purpose: "Define a useful text-first glossary layout without reinterpreting unrelated prose."
+    expected_outcome: "Fail-first fixtures cover exact layout, links, search, Unicode, code, tiny widths, plain/color output, resize and streaming."
+    kind: test
+    status: pending
+    depends_on: ["blad-markdown-subset-intent"]
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-definition-lists-code"
+    title: "implement_code: render the approved definition-list dialect"
+    description: "Enable the approved parser extension consistently and implement definition-list events through existing block/inline layout, preserving source-owned navigation and plain output."
+    context: "Reuse wrapping and style machinery, handle nested boundaries explicitly and document the selected dialect rather than claiming universal Markdown compatibility."
+    purpose: "Make technical definitions and glossaries readable in a terminal."
+    expected_outcome: "Targeted definition-list and existing list/navigation regressions pass with documented syntax and limitations."
+    kind: implementation
+    status: pending
+    depends_on: ["blad-definition-lists-tests"]
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-definition-lists-audit"
+    title: "security_audit: independently observe definition-list handling"
+    description: "Independently inspect source/tests for nesting, resource use, control handling, source ranges and fallible output; derive a scoped IMPL.md record excluding intent, queue, prior records and history."
+    context: "Pending independent source-only work, not an existing compliance result."
+    purpose: "Record actual parsing and layout boundaries independently."
+    expected_outcome: "A source-derived supplement records behavior, risks and finite evidence limits."
+    kind: security-audit
+    status: pending
+    depends_on: ["blad-definition-lists-code"]
+    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-038"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-definition-lists-review"
+    title: "compliance_review: compare definition-list intent and evidence"
+    description: "Separately compare approved dialect/layout/navigation intent with the independent implementation record and tests in a source-blind context; retain discrepancies for human arbitration."
+    context: "Pending comparison; support is limited to the approved dialect, not full extension conformance."
+    purpose: "Keep intended definition-list behavior and observed evidence independently comparable."
+    expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
+    kind: compliance-review
+    status: pending
+    depends_on: ["blad-definition-lists-audit"]
+    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-footnote-navigation-tests"
+    title: "write_tests: footnote jumps and return behavior"
+    description: "Pin approved reference-to-definition jumps and return semantics, repeated references, missing definitions, link-selection order and interactions with existing Enter/search behavior."
+    context: "Footnotes currently have matching visual markers but no navigable footnote links. Define destination ownership and return behavior explicitly; do not silently repurpose existing file-history or tab keys."
+    purpose: "Make footnotes usable in long documents without regressing safe search and link navigation."
+    expected_outcome: "Fail-first renderer/navigation and PTY fixtures cover styled/plain output, quoted/table markers, Unicode, mouse selection, resize, reload and later streamed definitions."
+    kind: test
+    status: pending
+    depends_on: ["blad-markdown-subset-intent"]
+    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-043", "REQUIREMENTS.md#R-076"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-footnote-navigation-code"
+    title: "implement_code: footnote destinations and return navigation"
+    description: "Wire approved footnote reference/definition identities into existing renderer-owned navigation and explicit return behavior, retaining marker/prose styling and actionable missing-target errors."
+    context: "Preserve duplicate/repeated-reference identity through reflow and streaming, existing normal-link actions and search Enter precedence. Update help, key precedence and user documentation without adding document writes."
+    purpose: "Provide predictable footnote navigation using the existing viewer model."
+    expected_outcome: "Focused fixtures pass with correct jumps/returns and preserved search, link and tab behavior."
+    kind: implementation
+    status: pending
+    depends_on: ["blad-footnote-navigation-tests"]
+    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-043", "REQUIREMENTS.md#R-076"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-footnote-navigation-audit"
+    title: "security_audit: independently observe footnote navigation"
+    description: "Independently inspect source/tests for target identity, stale positions, bounded return state, malformed input, error propagation and lack of unintended external actions; derive a scoped IMPL.md record without intent, queue, prior records or history."
+    context: "Pending independent source-only work; include resize/reload/streaming state boundaries."
+    purpose: "Record actual navigation and recovery behavior independently."
+    expected_outcome: "A source-derived supplement records findings, behavior and evidence limits."
+    kind: security-audit
+    status: pending
+    depends_on: ["blad-footnote-navigation-code"]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-076"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-footnote-navigation-review"
+    title: "compliance_review: compare footnote navigation evidence"
+    description: "Compare approved jump/return and key-precedence intent with the independent implementation record and tests in a separate source-blind context; retain discrepancies for human arbitration."
+    context: "Pending comparison, not certification or acceptance."
+    purpose: "Keep footnote implementation observation separate from intent comparison."
+    expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
+    kind: compliance-review
+    status: pending
+    depends_on: ["blad-footnote-navigation-audit"]
+    requirements: ["REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-043", "REQUIREMENTS.md#R-076"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-toml-frontmatter-tests"
+    title: "write_tests: leading TOML frontmatter"
+    description: "Pin the approved leading +++ recognition, exact metadata source preservation and TOML highlighting, including empty/malformed headers, BOM/CRLF, trailing delimiter whitespace and unclosed/live candidates."
+    context: "TOML is currently unsupported. Preserve the general YAML display-only model and prefix boundary; test literal Markdown in metadata, body source offsets and exclusion from links/headings/reference definitions."
+    purpose: "Add a clearly delimited metadata format without configuration effects or ambiguous general JSON detection."
+    expected_outcome: "Fail-first library, CLI and PTY fixtures cover effective token styles, plain/color policies, search, horizontal overflow, resize, streaming and writer/cancellation errors."
+    kind: test
+    status: pending
+    depends_on: ["blad-markdown-subset-intent"]
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-016", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-075"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-toml-frontmatter-code"
+    title: "implement_code: source-preserving TOML metadata"
+    description: "Extend the shared source-prefix/event projection with approved TOML recognition and syntax highlighting across rendering, links and headings, reusing code panels and explicit source-offset remapping."
+    context: "Verify available highlighting assets and justify any required dependency/assets separately. Keep metadata literal, searchable and unwrapped; do not deserialize, sort, execute, apply configuration or implicitly recognize later blocks. Document exact syntax, streaming behavior and remaining exclusions."
+    purpose: "Support useful TOML frontmatter consistently with general YAML handling."
+    expected_outcome: "Focused TOML regressions and existing YAML/navigation fixtures pass with preserved body semantics and no hidden effects."
+    kind: implementation
+    status: pending
+    depends_on: ["blad-toml-frontmatter-tests"]
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-016", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-075"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-toml-frontmatter-audit"
+    title: "security_audit: independently observe TOML metadata isolation"
+    description: "Independently inspect source/tests for prefix recognition, source ranges, control normalization, input/work bounds and absence of metadata authority; derive a scoped IMPL.md record excluding intent, queue, prior records and history."
+    context: "Pending independent source-only work; retain highlighting, cancellation and raw-versus-normalized offset limitations."
+    purpose: "Record actual TOML rendering and navigation isolation independently."
+    expected_outcome: "A source-derived supplement records behavior, risks and evidence limits."
+    kind: security-audit
+    status: pending
+    depends_on: ["blad-toml-frontmatter-code"]
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-075"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-toml-frontmatter-review"
+    title: "compliance_review: compare TOML frontmatter intent and evidence"
+    description: "In a separate source-blind context, compare approved recognition/display/isolation intent against the independent implementation record and tests; retain discrepancies for human arbitration."
+    context: "Pending comparison; metadata display does not imply TOML validation, application-schema support or acceptance."
+    purpose: "Keep source observation and intended metadata semantics independently comparable."
+    expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
+    kind: compliance-review
+    status: pending
+    depends_on: ["blad-toml-frontmatter-audit"]
+    requirements: ["REQUIREMENTS.md#C-004", "REQUIREMENTS.md#R-016", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-075"]
+    timestamps: {created_at: "2026-10-27T18:34:49Z", updated_at: "2026-10-27T18:34:49Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
   - id: "blad-search-feedback-tests"
     title: "write_tests: distinguish current matches and search phases"
     description: "Pin effective current/passive attributes, clipping/style restoration, visible confirmation and safe search exits, with real PTY refresh and quit-precedence evidence."
