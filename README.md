@@ -4,17 +4,32 @@
 [![License: AGPL v3+](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
 Kvist is a filesystem-native, architecture-driven tool for human-directed AI
-development. Its durable hierarchy is `VISION.md` -> `ARCHITECTURE.md` ->
-per-component `REQUIREMENTS.md` + `CONTRACT.md` + `DESIGN.md` ->
-`TODOS.yaml` -> `IMPL.md`. Its current interface is command-line based;
-graphical and editor integrations are planned without changing that model.
-Kvist currently builds and runs on Linux only. macOS and Windows support is
-intentionally deferred until native maintainers and test environments can
-validate their execution boundaries.
+development. The project is still a work in progress; [Status](#status)
+describes what is ready today. Its durable hierarchy is `VISION.md` ->
+`ARCHITECTURE.md` -> per-component `REQUIREMENTS.md` + `CONTRACT.md` +
+`DESIGN.md` -> `TODOS.yaml` -> `IMPL.md`. Its current interface is
+command-line based; graphical and editor integrations are planned without
+changing that model. Kvist currently builds and runs on Linux only. macOS and
+Windows support is intentionally deferred until native maintainers and test
+environments can validate their execution boundaries.
 The product vision is defined in [`VISION.md`](VISION.md), the approved system
 structure in [`ARCHITECTURE.md`](ARCHITECTURE.md), detailed strategy in
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md),
 and the standards posture in [`docs/standards.md`](docs/standards.md).
+
+## Status
+
+Kvist is a work in progress. Several parts build and run today, and the
+`kvist` CLI already enforces queue ordering and durable transitions, but the
+project as a whole is not yet ready for production use.
+
+The only component that is ready and released is **blad**, the terminal
+Markdown viewer and streaming pager for skott session transcripts and
+standalone files. It is published on crates.io as
+[`kvist-blad`](https://crates.io/crates/kvist-blad). The remaining components
+(`maerg`, `sav`, `galla`, and `skott`) are still under active development. See
+[Intended lifecycle and current scope](#intended-lifecycle-and-current-scope)
+for what the CLI does and does not yet automate.
 
 ## Why Kvist
 
@@ -53,13 +68,13 @@ five-artifact intent set (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`,
 `TODOS.yaml`, `IMPL.md`) and its own README. The approved decomposition is
 the canonical component table in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-| Component | Directory | Binary          | Role                                                                                                       |
-| --------- | --------- | --------------- | ---------------------------------------------------------------------------------------------------------- |
-| **maerg** | `maerg/`  | `kvist`         | The CLI and workflow engine: project artifacts, discovery, status, queues, task lifecycle, policy, evidence. |
-| **sav**   | `sav/`    | `sav-run`       | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport.     |
-| **galla** | `galla/`  | `galla-runner`  | Independent Linux enforcement boundary: request validation and Bubblewrap isolation.                        |
-| **skott** | `skott/`  | `skott`         | Interactive/headless sandboxed workspace agent shell.                                                      |
-| **blad**  | `blad/`   | `blad`          | Terminal Markdown viewer for skott session transcripts and standalone files.                               |
+| Component | Directory | Binary         | Role                                                                                                         | Status                  |
+| --------- | --------- | -------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| **maerg** | `maerg/`  | `kvist`        | The CLI and workflow engine: project artifacts, discovery, status, queues, task lifecycle, policy, evidence. | In progress             |
+| **sav**   | `sav/`    | `sav-run`      | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport.      | In progress             |
+| **galla** | `galla/`  | `galla-runner` | Independent Linux enforcement boundary: request validation and Bubblewrap isolation.                         | In progress             |
+| **skott** | `skott/`  | `skott`        | Interactive/headless sandboxed workspace agent shell.                                                        | In progress             |
+| **blad**  | `blad/`   | `blad`         | Terminal Markdown viewer and streaming pager for skott session transcripts and standalone files.             | Released (`kvist-blad`) |
 
 **Dependency direction.** `maerg` (the `kvist` CLI) depends on `sav` as a
 library and speaks to `galla` only through the versioned sandbox protocol.
