@@ -43,6 +43,15 @@ the agent-readable journal. Controls are drained through the shared bounded
 runtime mailbox at safe boundaries; a currently executing effect completes
 before guidance invalidates remaining stale proposals.
 
+Live accounting fixtures synchronize guidance with an in-flight synthetic
+runner effect, after the provider's first response has been consumed and its
+usage retained. Sending guidance before writing that response instead tests
+generation cancellation, where usage is legitimately unavailable. Exercise
+that unknown-attempt charge separately. Cancellation evidence fixtures likewise
+wait for a subsequent inference request before cancelling, so earlier completed
+usage is not dependent on socket scheduling. Synthetic runners are test gates,
+not isolation evidence; production budgets and control behavior are unchanged.
+
 | Area              | Modules                                                                                                            | Responsibility                                                                                                                      |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | CLI boundary      | `cli`, `main`, `error`, `help`                                                                                     | Typed grammar, dispatch, JSON/text output, domain errors, guided help tour and concept topics                                       |

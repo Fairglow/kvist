@@ -174,6 +174,28 @@ sys.exit(7)
                 self.assertIn("profile_tests:", result.stderr)
         self.assertFalse((ROOT / "target/profiler-forbidden").exists())
 
+    def test_fast_failures_are_reported_beyond_the_five_slowest_tests(self):
+        with tempfile.TemporaryDirectory(prefix="kvist-profiler-test-") as directory:
+            command = """import json,sys
+for index in range(6):
+    print(json.dumps({'type':'test','event':'ok','name':f'slow${index}','exec_time':10+index}))
+for name in ['fast$first','fast$second']:
+    print(json.dumps({'type':'test','event':'failed','name':name,'exec_time':0.01,
+                      'stdout':'private failure details'}))
+sys.exit(100)
+"""
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "tools/profile_tests.py"),
+                 "--output", str(pathlib.Path(directory) / "report"),
+                 "--", sys.executable, "-c", command],
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 100, result.stderr)
+            for name in ["fast$first", "fast$second"]:
+                self.assertEqual(result.stderr.count(f"failed {name}"), 1, result.stderr)
+            self.assertIn("ok slow$5", result.stderr)
+            self.assertNotIn("private failure details", result.stderr)
+
     def test_termination_is_forwarded_to_the_owned_command(self):
         with tempfile.TemporaryDirectory(prefix="kvist-profiler-test-") as directory:
             ready = pathlib.Path(directory) / "ready"

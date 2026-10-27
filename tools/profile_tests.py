@@ -413,7 +413,10 @@ def profile(command, directory):
     print(f"profile_tests: exit={status}, wall={wall:.3f}s, attributed CPU~{cpu.total:.3f}s "
           f"({summary['average_cores']:.2f} cores; {summary['capacity_percent']:.1f}% of capacity)",
           file=sys.stderr)
-    for test in tests[:5]:
+    for test in tests:
+        if test["event"] == "failed":
+            print(f"profile_tests: {test['seconds']}s failed {test['name']}", file=sys.stderr)
+    for test in [test for test in tests if test["event"] != "failed"][:5]:
         print(f"profile_tests: {test['seconds']}s {test['event']} {test['name']}", file=sys.stderr)
     if errors or event_errors or warnings:
         print("profile_tests: report contains sampling/event warnings; inspect summary.json",

@@ -80,7 +80,9 @@ directory**. The report directory is mode 0700 and its files mode 0600:
 
 Other explicit argv commands can also be profiled without a shell; per-test
 timings are available only when stdout contains the supported nextest events.
-The original command's nonzero exit or signal is preserved. Profiler setup
+The original command's nonzero exit or signal is preserved. Profiler summaries
+print every failed test name plus the five slowest non-failing tests; full
+captured diagnostics remain in the private logs. Profiler setup
 errors fail explicitly; an incomplete summary and existing logs are retained
 when possible. SIGINT/SIGTERM are forwarded to the owned command group, with
 a two-second kill escalation. Remaining original-group members are also

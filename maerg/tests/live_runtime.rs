@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
@@ -378,8 +379,28 @@ fn accept_request(listener: &TcpListener) -> (std::net::TcpStream, serde_json::V
 }
 
 fn respond(stream: &mut std::net::TcpStream, input: u64, output: u64) {
+    respond_with_tools(stream, input, output, serde_json::json!([]));
+}
+
+fn respond_with_effect(stream: &mut std::net::TcpStream, input: u64, output: u64) {
+    respond_with_tools(
+        stream,
+        input,
+        output,
+        serde_json::json!([{"function":{"name":"write_file","arguments":{
+            "destination":"src/observed.rs","content":"// fixture"
+        }}}]),
+    );
+}
+
+fn respond_with_tools(
+    stream: &mut std::net::TcpStream,
+    input: u64,
+    output: u64,
+    tools: serde_json::Value,
+) {
     let body = serde_json::json!({
-        "model":"fixture","message":{"role":"assistant","content":"observed answer"},
+        "model":"fixture","message":{"role":"assistant","content":"observed answer","tool_calls":tools},
         "done":true,"done_reason":"stop","prompt_eval_count":input,"eval_count":output
     })
     .to_string();
@@ -389,6 +410,94 @@ fn respond(stream: &mut std::net::TcpStream, input: u64, output: u64) {
         body.len()
     )
     .expect("response");
+}
+
+struct EffectGate {
+    _directory: tempfile::TempDir,
+    listener: TcpListener,
+    config: SandboxConfig,
+    identity: kvist::sandbox::RunnerIdentity,
+    probe: kvist::sandbox::SandboxProbe,
+}
+
+impl EffectGate {
+    fn new(workdir: &Path) -> Self {
+        fs::create_dir(workdir.join("src")).expect("authoring root");
+        for artifact in [
+            "REQUIREMENTS.md",
+            "CONTRACT.md",
+            "DESIGN.md",
+            "TODOS.yaml",
+            "IMPL.md",
+        ] {
+            fs::write(workdir.join(artifact), "fixture").expect("component context");
+        }
+        let directory = tempfile::tempdir().expect("external runner directory");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("effect gate");
+        listener.set_nonblocking(true).expect("nonblocking gate");
+        let runner = directory.path().join("runner");
+        // This synthetic runner gates an effect; it does not claim isolation.
+        fs::write(
+            &runner,
+            format!(
+                r#"#!/bin/bash
+set -eu
+[ "$1" = "--kvist-sandbox-request-v1" ]
+/bin/cat >/dev/null
+exec 3<>/dev/tcp/127.0.0.1/{}
+printf 'ready\n' >&3
+IFS= read -r -t 10 release <&3
+[ "$release" = "continue" ]
+"#,
+                listener.local_addr().expect("gate address").port()
+            ),
+        )
+        .expect("runner");
+        fs::set_permissions(&runner, fs::Permissions::from_mode(0o755)).expect("executable");
+        let config = SandboxConfig {
+            runner: runner.to_string_lossy().into_owned(),
+            backend: "/usr/bin/true".into(),
+            environment_allowlist: vec![],
+            acquisition: Default::default(),
+        };
+        let identity = kvist::sandbox::runner_identity(&config, workdir, VcsSelection::Git)
+            .expect("runner identity");
+        let probe = kvist::sandbox::SandboxProbe {
+            runner_path: identity.canonical_path.clone(),
+            runner_digest: identity.digest.clone(),
+            backend: kvist::sandbox::backend_identity(&config, workdir, VcsSelection::Git)
+                .expect("backend identity"),
+        };
+        Self {
+            _directory: directory,
+            listener,
+            config,
+            identity,
+            probe,
+        }
+    }
+
+    fn release(&self, before_release: impl FnOnce()) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut stream = loop {
+            match self.listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "effect was not dispatched");
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("accept effect gate: {error}"),
+            }
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .expect("gate deadline");
+        let mut ready = [0; 6];
+        stream.read_exact(&mut ready).expect("effect started");
+        assert_eq!(&ready, b"ready\n");
+        before_release();
+        stream.write_all(b"continue\n").expect("release effect");
+    }
 }
 
 fn shared_profile(endpoint: &str, context_limit: usize) -> AgentProfile {
@@ -495,55 +604,57 @@ fn steering_retains_whole_run_usage_and_cumulative_token_limit() {
         let endpoint = format!("http://{}", listener.local_addr().expect("address"));
         let mailbox = sav::runtime::ControlMailbox::default();
         let controls = mailbox.clone();
-        let provider = thread::spawn(move || {
-            let mut inference = 0;
-            loop {
-                let (mut stream, request) = accept_request(&listener);
-                inference += 1;
-                if inference == 1 {
-                    controls.steer("continue with guidance").expect("guidance");
-                    respond(&mut stream, if limited { 6500 } else { 11 }, 7);
-                    if limited {
+        let gate = EffectGate::new(dir.path());
+        let gate_ref = &gate;
+        let result = thread::scope(|scope| {
+            let provider = scope.spawn(move || {
+                let mut inference = 0;
+                loop {
+                    let (mut stream, request) = accept_request(&listener);
+                    inference += 1;
+                    if inference == 1 {
+                        respond_with_effect(&mut stream, if limited { 6500 } else { 11 }, 7);
+                        gate_ref.release(|| {
+                            controls.steer("continue with guidance").expect("guidance");
+                        });
+                        if limited {
+                            break;
+                        }
+                    } else {
+                        assert!(request.to_string().contains("continue with guidance"));
+                        respond(&mut stream, 13, 5);
                         break;
                     }
-                } else {
-                    assert!(request.to_string().contains("continue with guidance"));
-                    respond(&mut stream, 13, 5);
-                    break;
                 }
-            }
+            });
+            let mut selected = shared_profile(&endpoint, 8192);
+            // This tests accounting, not durable-recording latency under parallel load.
+            selected.timeout_seconds = 60;
+            selected.token_limit = limited.then_some(7000);
+            let result = kvist::agent::execute_agent_controlled(
+                &selected,
+                &gate.config,
+                Some(&gate.identity),
+                Some(&gate.probe),
+                AgentExecutionRequest {
+                    project_root: dir.path(),
+                    vcs_selection: VcsSelection::Git,
+                    prompt: "fixture task",
+                    context_paths: &[],
+                    read_only_mounts: &[],
+                    target_dir: dir.path(),
+                    task_id: "usage-task",
+                    stream_output: false,
+                    role: Role::Developer,
+                    policy_identity: "fixture",
+                },
+                &mailbox,
+                &sav::CancellationToken::new(),
+            )
+            .expect("recorded outcome");
+            provider.join().expect("provider");
+            result
         });
-        let mut selected = shared_profile(&endpoint, 8192);
-        // This tests accounting, not durable-recording latency under parallel load.
-        selected.timeout_seconds = 60;
-        selected.token_limit = limited.then_some(7000);
-        let result = kvist::agent::execute_agent_controlled(
-            &selected,
-            &SandboxConfig {
-                runner: "/usr/bin/true".into(),
-                backend: "/usr/bin/true".into(),
-                environment_allowlist: vec![],
-                acquisition: Default::default(),
-            },
-            None,
-            None,
-            AgentExecutionRequest {
-                project_root: dir.path(),
-                vcs_selection: VcsSelection::Git,
-                prompt: "fixture task",
-                context_paths: &[],
-                read_only_mounts: &[],
-                target_dir: dir.path(),
-                task_id: "usage-task",
-                stream_output: false,
-                role: Role::Developer,
-                policy_identity: "fixture",
-            },
-            &mailbox,
-            &sav::CancellationToken::new(),
-        )
-        .expect("recorded outcome");
-        provider.join().expect("provider");
         assert_eq!(result.success, !limited);
         assert_eq!(result.tokens_input, Some(if limited { 6500 } else { 24 }));
         assert_eq!(result.tokens_output, Some(if limited { 7 } else { 12 }));
@@ -562,6 +673,59 @@ fn steering_retains_whole_run_usage_and_cumulative_token_limit() {
                 if *total_tokens == if limited {6507} else {36}
         )));
     }
+}
+
+#[test]
+fn steering_before_usage_is_reported_keeps_unknown_attempt_separate() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+    let endpoint = format!("http://{}", listener.local_addr().expect("address"));
+    let mailbox = sav::runtime::ControlMailbox::default();
+    let controls = mailbox.clone();
+    let provider = thread::spawn(move || {
+        let (mut stream, _) = accept_request(&listener);
+        controls.steer("continue").expect("guidance");
+        let mut byte = [0];
+        assert_eq!(stream.read(&mut byte).expect("interrupted response"), 0);
+        let (mut stream, request) = accept_request(&listener);
+        assert!(request.to_string().contains("continue"));
+        respond(&mut stream, 10, 4);
+    });
+    let mut selected = shared_profile(&endpoint, 8192);
+    selected.timeout_seconds = 60;
+    selected.token_limit = Some(7000);
+    let result = kvist::agent::execute_agent_controlled(
+        &selected,
+        &SandboxConfig {
+            runner: "/usr/bin/true".into(),
+            backend: "/usr/bin/true".into(),
+            environment_allowlist: vec![],
+            acquisition: Default::default(),
+        },
+        None,
+        None,
+        AgentExecutionRequest {
+            project_root: dir.path(),
+            vcs_selection: VcsSelection::Git,
+            prompt: "fixture task",
+            context_paths: &[],
+            read_only_mounts: &[],
+            target_dir: dir.path(),
+            task_id: "unknown-usage",
+            stream_output: false,
+            role: Role::Developer,
+            policy_identity: "fixture",
+        },
+        &mailbox,
+        &sav::CancellationToken::new(),
+    )
+    .expect("recorded outcome");
+    provider.join().expect("provider");
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(result.tokens_input, Some(10));
+    assert_eq!(result.tokens_output, Some(4));
+    let log = fs::read_to_string(result.log_path).expect("log");
+    assert!(log.contains("conservatively charged/unknown attempts=1"));
 }
 
 #[test]
@@ -609,53 +773,51 @@ fn cancelled_generation_keeps_earlier_turn_evidence_and_usage() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
     let endpoint = format!("http://{}", listener.local_addr().expect("address"));
     let mailbox = sav::runtime::ControlMailbox::default();
-    let controls = mailbox.clone();
+    let gate = EffectGate::new(dir.path());
+    let gate_ref = &gate;
     let token = sav::CancellationToken::new();
     let cancel = token.clone();
-    let provider = thread::spawn(move || {
-        let mut inference = 0;
-        loop {
-            let (mut stream, _) = accept_request(&listener);
-            inference += 1;
-            if inference == 1 {
-                controls.steer("continue").expect("guidance");
-                respond(&mut stream, 11, 7);
-            } else {
-                cancel.cancel();
-                break;
+    thread::scope(|scope| {
+        let provider = scope.spawn(move || {
+            let mut inference = 0;
+            loop {
+                let (mut stream, _) = accept_request(&listener);
+                inference += 1;
+                if inference == 1 {
+                    respond_with_effect(&mut stream, 11, 7);
+                    gate_ref.release(|| {});
+                } else {
+                    cancel.cancel();
+                    break;
+                }
             }
-        }
+        });
+        let mut selected = shared_profile(&endpoint, 8192);
+        selected.timeout_seconds = 60;
+        let error = kvist::agent::execute_agent_controlled(
+            &selected,
+            &gate.config,
+            Some(&gate.identity),
+            Some(&gate.probe),
+            AgentExecutionRequest {
+                project_root: dir.path(),
+                vcs_selection: VcsSelection::Git,
+                prompt: "original task",
+                context_paths: &[],
+                read_only_mounts: &[],
+                target_dir: dir.path(),
+                task_id: "cancel-evidence",
+                stream_output: false,
+                role: Role::Developer,
+                policy_identity: "fixture",
+            },
+            &mailbox,
+            &token,
+        )
+        .expect_err("cancellation must not become a success-shaped result");
+        assert!(error.to_string().contains("cancel"));
+        provider.join().expect("provider");
     });
-    let mut selected = shared_profile(&endpoint, 8192);
-    selected.timeout_seconds = 60;
-    let error = kvist::agent::execute_agent_controlled(
-        &selected,
-        &SandboxConfig {
-            runner: "/usr/bin/true".into(),
-            backend: "/usr/bin/true".into(),
-            environment_allowlist: vec![],
-            acquisition: Default::default(),
-        },
-        None,
-        None,
-        AgentExecutionRequest {
-            project_root: dir.path(),
-            vcs_selection: VcsSelection::Git,
-            prompt: "original task",
-            context_paths: &[],
-            read_only_mounts: &[],
-            target_dir: dir.path(),
-            task_id: "cancel-evidence",
-            stream_output: false,
-            role: Role::Developer,
-            policy_identity: "fixture",
-        },
-        &mailbox,
-        &token,
-    )
-    .expect_err("cancellation must not become a success-shaped result");
-    assert!(error.to_string().contains("cancel"));
-    provider.join().expect("provider");
     let log = fs::read_dir(dir.path().join(".kvist/logs"))
         .expect("logs")
         .next()

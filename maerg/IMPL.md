@@ -466,3 +466,39 @@ workspace-wide test, Clippy, or rustdoc pass is claimed.
 This bounded observation does not establish exhaustive race coverage,
 crash/power-loss durability, universal secret filtering, exact billing for
 unreported provider work, or absence of other defects.
+
+## Source-only test/helper observation (2026-10-27)
+
+Observed only `maerg/tests/live_runtime.rs`, `tools/profile_tests.py`, and
+`tools/test_profile_tests.py`; no files changed or tests executed by this
+observer.
+
+- **Effect gate:** A synthetic Bash runner consumes its request, connects to an
+  ephemeral loopback TCP port, announces readiness, and waits for `continue`.
+  Tests inject guidance before release or release before cancelling the
+  subsequent generation. This synchronizes effect execution; it neither
+  performs the requested file write nor demonstrates sandbox isolation.
+- **Usage evidence:** Assertions retain completed-turn usage across steering:
+  24 input/12 output tokens, with trajectory total 36. The token-limited case
+  fails while retaining known usage 6500/7 and total 6507; these tests alone do
+  not establish the budget calculation. Steering before any usage arrives
+  records one conservatively charged/unknown attempt separately from the later
+  known 10/4 tokens. Cancellation preserves earlier answer text, known 11/7
+  usage, and an unsuccessful trajectory ending with total 18.
+- **Profiler failures:** Completed failed-test events are retained and printed
+  individually before up to five slowest nonfailed events. A fixture checks
+  two fast failures remain visible despite six slower successes, without
+  printing their embedded failure details. Command exit status is preserved;
+  malformed event data becomes report diagnostics.
+- **Scope and limitations:** Gate waits have explicit deadlines, but thread
+  joins and some older listener accepts lack independent deadlines; request
+  accumulation has no size cap. Helpers require Unix paths and permissions,
+  Bash `/dev/tcp`, and external executables. Most sockets are loopback-only;
+  the forbidden-endpoint fixture briefly binds all interfaces. The profiler
+  launches explicit argument vectors in a new session, cleans up that process
+  group, and creates private reports outside the checkout; escaping
+  descendants are not contained. It scans host-visible process metadata,
+  retains raw command output, and imposes no overall runtime or report-size
+  limit. Linux sampling can miss brief/reparented processes and peaks. Coverage
+  is synthetic and source-observed, not proof of portability, isolation,
+  compliance, or acceptance.

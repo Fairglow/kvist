@@ -10,6 +10,77 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "live-accounting-race-write-tests"
+    title: "write_tests: distinguish known usage from interrupted attempts"
+    description: "Reproduce run 173's guidance-before-response race and pin unknown-attempt charging independently from completed-turn accounting."
+    context: "Run 173 supplied the failing known-usage assertion: tokens_input=None instead of Some(6500). A deterministic interrupted-generation fixture now waits for socket closure before serving the guided request and asserts known 10/4 usage plus one separately charged unknown attempt. The profiler fast-failure visibility regression failed before repair."
+    purpose: "Keep accounting evidence independent of scheduler timing."
+    expected_outcome: "A deliberately interrupted response contributes no known usage; the later known 10/4 usage and one conservative unknown-attempt charge remain distinct."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-27T21:42:00Z"
+      updated_at: "2026-10-27T21:49:14Z"
+      completed_at: "2026-10-27T21:49:14Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "live-accounting-race-implement-code"
+    title: "implement_code: synchronize completed-turn fixtures"
+    description: "Gate guidance behind an in-flight synthetic effect after completed usage; cancel only a later inference in the retained-evidence fixture. Expose failed test names in profiler summaries."
+    context: "All nine live_runtime tests passed in 25 nextest stress iterations (225 cases), plus 39 coupled agent unit tests and 19 Python helper/policy tests. Scoped Clippy and formatting passed. No production Rust code, runtime budget, accounting rule, retry or scheduling policy changed."
+    purpose: "Remove the race without weakening known-usage or cumulative-limit assertions."
+    expected_outcome: "Known-usage and cancellation regressions pass repeatedly; fast failures remain visible in CI summaries."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "live-accounting-race-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-27T21:42:00Z"
+      updated_at: "2026-10-27T21:49:14Z"
+      completed_at: "2026-10-27T21:49:14Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "live-accounting-race-security-audit"
+    title: "security_audit: inspect fixture scope"
+    description: "Inspect bounded loopback gates, external temporary runner placement and unchanged production authority."
+    context: "Independent source-only accounting-source-observer recorded bounded loopback gates and external temporary runner placement in the IMPL.md supplement. Synthetic effects do not execute writes or demonstrate isolation. Older unbounded accepts/joins, uncapped request accumulation and profiler limitations remain explicit; no whole-component audit or certification."
+    purpose: "Avoid introducing unbounded fixture waits or runtime authority changes."
+    expected_outcome: "Scoped observations and limitations are recorded."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "live-accounting-race-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-27T21:42:00Z"
+      updated_at: "2026-10-27T21:49:14Z"
+      completed_at: "2026-10-27T21:49:14Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "live-accounting-race-compliance-review"
+    title: "compliance_review: compare scoped accounting observations"
+    description: "Derive source-only observations independently, then compare them with local intent in a separate source-blind context."
+    context: "Separate source-blind accounting-intent-comparator found no concrete repair-scoped discrepancy between local intent, the independently derived IMPL.md supplement and supplied execution evidence. Synthetic gates establish neither file effects nor isolation; no fresh full-workspace CI run, whole-component compliance or human acceptance is claimed. Accepted intent revision metadata remains unchanged."
+    purpose: "Keep fixture repair evidence distinct from implementer self-certification."
+    expected_outcome: "Scoped discrepancies and evidence limits remain explicit."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "live-accounting-race-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-27T21:42:00Z"
+      updated_at: "2026-10-27T21:49:14Z"
+      completed_at: "2026-10-27T21:49:14Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "rust-inventory-parity-write-tests"
     title: "write_tests: reproduce extra private Rust registration"
     description: "Require exact host inventory parity and reject a synthetic default registration in the native authoring test."
