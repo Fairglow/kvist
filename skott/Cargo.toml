@@ -22,9 +22,9 @@ name = "skott-file-tool"
 path = "src/bin/file_tool.rs"
 
 [dependencies]
-blad = { package = "kvist-blad", version = "=0.3.1", path = "../blad" }
-sav = { version = "=0.3.0", path = "../sav" }
-galla = { version = "=0.3.0", path = "../galla" }
+blad = { package = "kvist-blad", version = "0.3", path = "../blad" }
+sav = { version = "0.3", path = "../sav" }
+galla = { version = "0.3", path = "../galla" }
 clap = { version = "4.6", features = ["derive"] }
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 crossterm = "0.29"
