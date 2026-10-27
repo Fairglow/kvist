@@ -424,6 +424,65 @@ mod tests {
     }
 
     #[test]
+    fn footnote_rows_restore_prose_color_after_link_and_search_overlays_on_reflow() {
+        let source = "intro[^1]\n\n[^1]: muted words [linked label](#target) restored prose with enough words to wrap\n\nordinary\n\n# target";
+        let link = crate::links::extract_links(source).remove(0);
+        for columns in [14, 30, 80] {
+            for numbers in [false, true] {
+                let document = Document::render(source, columns, numbers, None).unwrap();
+                let spans = &document.navigation.links[&link.navigation_id()];
+                let labels: Vec<_> = spans
+                    .iter()
+                    .map(|span| {
+                        let clipped =
+                            document.lines[span.row].clip(span.start, span.end - span.start);
+                        assert!(clipped.contains("\x1b[96m"), "{clipped:?}");
+                        TerminalLine::new(&clipped).plain().to_owned()
+                    })
+                    .collect();
+                assert_eq!(labels.join(" "), "linked label");
+                let mut footnote_rows = 0;
+                for line in document.lines.iter().skip(2) {
+                    if line.plain() == "ordinary" {
+                        let clipped = line.clip(0, document.content_width);
+                        assert!(!clipped.contains("\x1b[90m"), "{clipped:?}");
+                        break;
+                    }
+                    for word in line
+                        .plain()
+                        .split_whitespace()
+                        .filter(|word| !matches!(*word, "linked" | "label"))
+                    {
+                        let offset = line.plain().find(word).unwrap();
+                        let start = unicode_width::UnicodeWidthStr::width(&line.plain()[..offset]);
+                        let width = unicode_width::UnicodeWidthStr::width(word);
+                        let range = start..start + width;
+                        let highlighted = line.clip_with_spans(
+                            start,
+                            width,
+                            std::slice::from_ref(&range),
+                            "\x1b[7m\x1b[4m",
+                        );
+                        let position = highlighted.find(word).unwrap();
+                        let prefix = &highlighted[..position];
+                        assert!(
+                            prefix.rfind("\x1b[90m") > prefix.rfind("\x1b[0m"),
+                            "{columns} columns, numbers {numbers}: {highlighted:?}"
+                        );
+                    }
+                    if !line.plain().is_empty() {
+                        footnote_rows += 1;
+                    }
+                }
+                assert!(footnote_rows > 0);
+                if columns == 14 {
+                    assert!(footnote_rows > 1);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn wrapped_unicode_table_links_are_precise_in_quotes_and_after_reflow() {
         let source = "> | label | other |\n> | --- | --- |\n> | prefix [界 wide label **words**](#target) tail | x |\n\nE=mc^2^ https://example.test";
         let links = crate::links::extract_links(source);

@@ -5,11 +5,75 @@ component:
   design_revision: "sha256:08761e7f7519a1a1e7deb13af6f7e20fbb1de6344abec58c226cd2d697cbffda"
   parent_contract: null
   revalidation:
-    state: current
-    checked_at: "2026-10-26T22:14:34Z"
-    stale_since: null
-    causes: []
+    state: stale
+    checked_at: "2026-10-27T17:21:43Z"
+    stale_since: "2026-10-27T17:21:43Z"
+    causes:
+      - kind: component-requirements-revision-changed
+        path: REQUIREMENTS.md
+        expected_revision: "sha256:6b58102a094e9e0ccd1beaa546f5f4765e89e145c3b713266d9bb6a618901cbc"
+        observed_revision: "sha256:401241b59304f50ad60b0e8885cc0d045886330ef4679186ec4ec35f590a0cba"
+      - kind: component-contract-revision-changed
+        path: CONTRACT.md
+        expected_revision: "sha256:d884e30baaa6e9626262fc24aebfe9ffb8e0afdc7687d4126179f22f5b20347f"
+        observed_revision: "sha256:461d4c29b41c1a2d9953e4085d6d8ed53bced65baacb884c183af1b7bfbd5fa6"
+      - kind: component-design-revision-changed
+        path: DESIGN.md
+        expected_revision: "sha256:08761e7f7519a1a1e7deb13af6f7e20fbb1de6344abec58c226cd2d697cbffda"
+        observed_revision: "sha256:51eecaed05aab38d3101b538946214ffe459e956ee543fcf22ef14602e926c25"
 tasks:
+  - id: "blad-footnote-theme-tests"
+    title: "write_tests: retain effective footnote prose styling"
+    description: "Pin effective footnote colors across wrapping, breaks, paragraphs and inline spans, with palette/plain coverage and independently painted viewer rows."
+    context: "All three integration regressions failed before production changes; the corrected viewer regression also failed on terminal-default color for restored prose. All four pass after the fix."
+    purpose: "Prevent one-time ANSI styling from masquerading as persistent footnote theming."
+    expected_outcome: "Effective attributes and exact styled/plain geometry are pinned by persistent regressions."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-027", "REQUIREMENTS.md#R-028", "REQUIREMENTS.md#R-043"]
+    timestamps: {created_at: "2026-10-27T17:18:23Z", updated_at: "2026-10-27T17:18:23Z", completed_at: "2026-10-27T17:18:23Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-footnote-theme-code"
+    title: "implement_code: track footnote prose style"
+    description: "Resolve muted footnote prose through typed inline styles, retain semantic overrides and clear state at the definition boundary without changing geometry."
+    context: "Definition state now supplies a muted fallback in typed inline styles, with existing semantic precedence and explicit scope exit. All 200 selected all-feature renderer/layout/viewer tests pass; strict all-target/all-feature Clippy and formatting pass. No acceptance or revised baseline is claimed."
+    purpose: "Keep a definition visually coherent without overriding dedicated inline colors."
+    expected_outcome: "Every footnote prose span reestablishes its theme and following prose remains unthemed."
+    kind: implementation
+    status: completed
+    depends_on: ["blad-footnote-theme-tests"]
+    requirements: ["REQUIREMENTS.md#R-043"]
+    timestamps: {created_at: "2026-10-27T17:18:23Z", updated_at: "2026-10-27T17:21:43Z", completed_at: "2026-10-27T17:21:43Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-footnote-theme-audit"
+    title: "security_audit: observe footnote rendering changes"
+    description: "Derive a scoped source-only implementation record and risk observations independently, without reading intent, queues, prior records or history."
+    context: "Independent footnote-source-observer inspected only current source/tests, derived the IMPL.md supplement and retained finite scope, pre-existing atomic-reference overflow, context-dependent color precedence and test-oracle limits. No tests were executed by that observer; no security certification is implied."
+    purpose: "Keep observed behavior and bounded risk inspection separate from intent."
+    expected_outcome: "Independent source-derived observations are recorded in IMPL.md."
+    kind: security-audit
+    status: completed
+    depends_on: ["blad-footnote-theme-code"]
+    requirements: ["REQUIREMENTS.md#R-043"]
+    timestamps: {created_at: "2026-10-27T17:18:23Z", updated_at: "2026-10-27T17:21:43Z", completed_at: "2026-10-27T17:21:43Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-footnote-theme-review"
+    title: "compliance_review: compare footnote style evidence"
+    description: "Compare local intent with independently observed behavior and execution evidence in a separate source-blind context; retain discrepancies without claiming acceptance."
+    context: "Separate source-blind footnote-intent-comparator found no new scoped mismatch. IMPL.md retains pre-existing quote/link precedence ambiguity and atomic-reference overflow, plus limits of clipping-only viewer evidence, whitespace/first-occurrence assertions and renderer-to-renderer geometry comparisons. No acceptance or whole-component compliance is claimed."
+    purpose: "Retain discrepancies for human arbitration rather than silently reconciling evidence."
+    expected_outcome: "Source-blind scoped comparison and its limits are durable."
+    kind: compliance-review
+    status: completed
+    depends_on: ["blad-footnote-theme-audit"]
+    requirements: ["REQUIREMENTS.md#R-027", "REQUIREMENTS.md#R-028", "REQUIREMENTS.md#R-043"]
+    timestamps: {created_at: "2026-10-27T17:18:23Z", updated_at: "2026-10-27T17:22:26Z", completed_at: "2026-10-27T17:22:26Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "blad-mermaid-policy-tests"
     title: "write_tests: pin native Mermaid scheduling coverage"
     description: "Reproduce the missing color-geometry allocation and add a persistent repository regression for native-engine fixture coverage, whole-pool slots and CI inheritance."

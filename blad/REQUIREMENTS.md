@@ -201,6 +201,12 @@ processes, concurrent runners or arbitrary configurations.
 43. **R-043 Rendering polish:** Preserve parent ordered-list counters across
     nested lists; retain alternating bullets, matching superscript footnote tags,
     visible alert colors, syntax highlighting and code-panel cap rows.
+    Footnote prose retains its muted theme across wrapped rows, explicit breaks,
+    paragraphs and inline-style boundaries. Links and math retain their semantic
+    colors; emphasis and inline code compose with the surrounding footnote
+    theme. Ending a footnote must not theme subsequent ordinary prose.
+    Verify effective attributes, independently painted rows, resize, custom
+    palettes and color/plain policies without changing text geometry.
     Blockquotes have a persistent left edge and optional palette background
     across their content rows, without duplicate surrounding blank lines.
     Theme and color changes must not alter text geometry.

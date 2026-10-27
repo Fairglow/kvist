@@ -236,6 +236,7 @@ fn render_markdown_theme(
     // begin at 1 is enumerated from its actual first number.
     let mut list_starts: Vec<Option<usize>> = Vec::new();
     let mut in_heading = false;
+    let mut in_footnote = false;
 
     let mut in_table = false;
     let mut table_alignments = Vec::new();
@@ -278,6 +279,7 @@ fn render_markdown_theme(
                     .last()
                     .copied()
                     .or_else(|| (links > 0).then_some(palette.link))
+                    .or_else(|| in_footnote.then_some(palette.muted))
             },
             link: link_source,
             ..Style::default()
@@ -757,6 +759,7 @@ fn render_markdown_theme(
             }
             Event::Start(Tag::FootnoteDefinition(id)) => {
                 inline.finish(w)?;
+                in_footnote = true;
                 inline.reset(0, 0);
                 if !at_start {
                     writeln!(w)?;
@@ -772,10 +775,10 @@ fn render_markdown_theme(
                         ..Style::default()
                     },
                 )?;
-                palette.muted.write(w, false)?;
             }
             Event::End(TagEnd::FootnoteDefinition) => {
                 inline.finish(w)?;
+                in_footnote = false;
                 write!(w, "\x1b[0m")?;
                 writeln!(w)?;
                 inline.reset(0, 0);

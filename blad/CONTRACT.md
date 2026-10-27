@@ -290,6 +290,13 @@ appearance and nonbreaking/whitespace semantics, and table link colors, remain
 unsupported. HTML tables and merged cells are outside this profile. Script,
 math and alert extensions are Blad's documented dialect.
 
+Footnote definitions use the palette's muted color for ordinary prose and
+matching definition tags, including continuation rows and paragraphs. Inline
+links and math keep their semantic colors; bold, italic, strikethrough and
+inline-code reversal compose with the footnote's prose color. After each inline
+span, footnote prose resumes its muted color. Styling ends with the definition,
+does not leak into following prose, and does not change wrapping or plain text.
+
 ### Optional Kvist/Skott integration reliability
 
 `sessions` is an opt-in published feature, not a private Cargo feature or a

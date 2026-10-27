@@ -4,6 +4,88 @@
 
 Date: 2026-10-12
 
+## Scoped footnote prose styling follow-up - 2026-10-27
+
+Independent clean-slate `footnote-source-observer` inspected only current
+rendering and test source, excluding all intent, queues, prior records/reviews,
+session history and Git history. It ran no tests, edited no files and made no
+compliance determination. Its source-derived observations:
+
+- Render-local `in_footnote` state becomes active at definition start and is
+  cleared after buffered content finishes. Definition markers explicitly use
+  `palette.muted`; prose carries muted foreground in each typed inline style
+  rather than relying on persistent terminal state. Definition end resets SGR.
+- Foreground precedence is heading, innermost quote/alert, explicit link,
+  footnote muted, then terminal default. Bold/italic/strike compose independently;
+  inline code adds reversal. Bare URLs, non-table reference markers and inline
+  math explicitly override foreground with link/math colors.
+- State spans paragraphs and block constructs, but headings, list/task markers,
+  fenced code, display math and tables retain separate styling paths. No
+  footnote-specific hanging indent or reference-to-definition navigation is added.
+- Inline words retain styled byte spans. Each nondefault emitted span or wrapped
+  slice resets and reapplies its own style. Soft/hard breaks and grapheme splitting
+  retain the existing line-breaking behavior. Quotes restore their background
+  after resets; viewport rows are parsed independently and clipping restores
+  source SGR around overlays while preserving whole graphemes.
+- Built-in muted foreground is ANSI 8 for all three themes; host palettes
+  override it. No-color removes colors but retains attributes; plain output
+  removes renderer SGR.
+
+The observer inspected three integration tests: prose at widths 1/12/25/80 and
+unlimited with soft/hard breaks, multiple paragraphs/definitions, named markers,
+combining/CJK/ZWJ text and following prose; inline composition at widths
+8/28/80 and unlimited with nested emphasis, strike, reversed code, explicit/
+reference/automatic/bare links, math, scripts and adjacent punctuation; and all
+three themes by four color depths plus custom RGB colors. Tests parse both
+continuous and independently reset rows, and compare styled/plain text geometry.
+The viewport test covers widths 14/30/80, numbering on/off, source-owned link
+labels/colors, clipped prose/search-overlay color restoration and following
+ordinary prose. It tests clipping directly, not footnote frame painting.
+
+Retained limits: references make the entire pending whitespace-delimited word
+atomic, including adjacent prose; such words may overflow narrow widths. This
+pre-existing behavior is not repaired here. Quote foreground outranks explicit
+links while bare URLs force link color; table references inherit current style.
+Effective-style assertions ignore whitespace and use the first matching text
+occurrence. Styled/plain equality is not an independent layout oracle. Nested
+blocks within definitions, table-footnote combinations, custom-palette
+quantization and full footnote frame painting are not specifically verified by
+these focused tests. No whole-component safety or compliance claim is made.
+
+### Attributed footnote execution evidence
+
+Implementer execution reproduced all three integration failures before the
+production fix. The viewport regression initially had a byte/column indexing
+error; after correction it failed specifically on missing muted foreground for
+`restored`, then passed with the production fix. All four added regressions pass.
+The all-feature nextest selection (library plus footnotes, polish, render-options,
+layout and viewer binaries) passed 200 tests, with one pre-existing ignored
+characterization excluded by the normal runner policy. No skips/retries were
+added. Strict all-target/all-feature Clippy, Blad formatting and whitespace
+checks passed. Component intent validates structurally; no component acceptance
+or revised approved baseline is claimed. The queue retains its prior approved
+revisions with explicit stale-state evidence for the changed intent.
+
+### Independent source-blind footnote comparison
+
+Separate `footnote-intent-comparator` compared the scoped R-027/R-028/R-043,
+Terminal Markdown profile and rendering design with only this footnote
+supplement. It read no source/tests, configuration source, queues, Git/session
+history or prior reviews and did not rerun execution. It found no new scoped
+mismatch: observed typed muted styling, inline composition, semantic overrides,
+per-span restoration and definition-end cleanup support the correction.
+
+It retained two pre-existing arbitration points rather than silently reconciling
+intent: quote foreground overriding explicit links is ambiguous against broad
+semantic-link-color promises, though the design preserves that precedence;
+atomic reference-containing words may overflow despite not being an explicitly
+named R-027 exception. Neither is repaired or introduced by this correction.
+Clipping/reflow/overlay tests are not full footnote frame-painting evidence;
+nested blocks, table combinations and palette quantization lack focused
+verification. Whitespace/first-occurrence assertions and renderer-to-renderer
+geometry equality remain finite evidence, not independent layout proof.
+This comparison grants neither human acceptance nor whole-component compliance.
+
 ## Scoped native-Mermaid scheduling follow-up - 2026-10-27
 
 Independent clean-slate `mermaid-policy-observer` read only the scheduling

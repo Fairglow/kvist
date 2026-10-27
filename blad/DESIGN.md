@@ -13,6 +13,30 @@ Blad is an interactive terminal Markdown viewer with search, navigation, tabs,
 and optional external editing. It uses crossterm for terminal interaction and
 pulldown-cmark for parsing.
 
+### Footnote prose style retention (2026-10-27)
+
+Track whether the parser is inside a footnote definition. Resolve the muted
+footnote prose color in the same typed `Style` value as emphasis, inline-code
+reversal and source-owned links, rather than emitting a one-time raw SGR before
+the definition body. Preserve existing heading, quote, link and math color
+precedence; footnote prose is the fallback before terminal-default prose.
+Flush pending inline content before entering or leaving the definition, and
+clear footnote state only after its final content has been emitted. Leave
+block-code/table presentation, geometry and definition-tag semantics unchanged.
+
+Every emitted word or wrapped word fragment then reestablishes its own style,
+so both finite output and independently clipped/painted viewer rows retain the
+theme after resets. Tests must inspect effective SGR state, not just the presence
+of a muted escape somewhere in the document. Cover word and grapheme wrapping,
+hard/soft breaks, multiple paragraphs/definitions, inline links and bare URLs,
+emphasis combinations, code, math, scripts, following prose, palette/color/plain
+policies, and viewer reflow with source-owned link/search overlays.
+
+Advisory intent-review exception: this user-requested rendering correction
+uses the existing R-043 theming intent with the explicit clarifications above.
+No advisory receipt or component acceptance is claimed; the planned exact-bundle
+review gate is not implemented.
+
 ### First inline table styling subset (2026-10-25)
 
 Generalize the existing table-link token projection into one private

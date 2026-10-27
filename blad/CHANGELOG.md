@@ -27,6 +27,8 @@ First standalone crates.io release candidate, not yet published.
 - Recompute existing matches immediately when toggling literal/regex search.
 - Dark, light and terminal-native palettes; strict JSON palette overrides;
   explicit color policy and escape-free rendered dumps.
+- Footnote prose retains its theme across wrapped rows, paragraphs and inline
+  links, emphasis, code and math, without leaking into following prose.
 - Syntax highlighting, wrapped tables, task completion markers, bounded
   mathematical text and five-family text-only Mermaid diagrams.
 - Table delimiter left/center/right alignment in headers and wrapped cells,
