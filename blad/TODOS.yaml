@@ -22,6 +22,58 @@ component:
         expected_revision: "sha256:08761e7f7519a1a1e7deb13af6f7e20fbb1de6344abec58c226cd2d697cbffda"
         observed_revision: "sha256:51eecaed05aab38d3101b538946214ffe459e956ee543fcf22ef14602e926c25"
 tasks:
+  - id: "blad-frontmatter-tests"
+    title: "write_tests: general YAML frontmatter"
+    description: "Pin literal YAML layout, token colors, prefix-only recognition, body offsets, CLI policies, errors and real viewer/streaming behavior before implementation."
+    context: "Ten of eleven new selected regressions failed before production changes; writer-error/pre-cancellation coverage already passed. Failures covered literal layout, recognition, token presentation, metadata exclusion, offsets, CLI and both real PTY cases."
+    purpose: "Prevent metadata from being interpreted as Markdown or changing body navigation."
+    expected_outcome: "Persistent regressions fail before the production adapter exists."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-075"]
+    timestamps: {created_at: "2026-10-27T17:34:36Z", updated_at: "2026-10-27T17:45:11Z", completed_at: "2026-10-27T17:45:11Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-frontmatter-code"
+    title: "implement_code: source-prefix YAML event projection"
+    description: "Share conservative prefix recognition and offset-preserving events across rendering, links and headings; reuse YAML code panels and document the behavior."
+    context: "The shared prefix/event adapter preserves literal YAML and suffix source ranges without enabling global metadata parsing. All eleven focused regressions pass, including BOM/CRLF/control navigation. All-feature nextest passed 333 tests and standalone nextest 312; strict all-target/all-feature Clippy and formatting pass. Public docs describe exact recognition, display-only semantics and streaming fallback."
+    purpose: "Provide general metadata rendering without new dependencies, configuration authority or a second highlighter."
+    expected_outcome: "All targeted regressions pass with preserved existing Markdown behavior."
+    kind: implementation
+    status: completed
+    depends_on: ["blad-frontmatter-tests"]
+    requirements: ["REQUIREMENTS.md#R-075", "REQUIREMENTS.md#R-062"]
+    timestamps: {created_at: "2026-10-27T17:34:36Z", updated_at: "2026-10-27T17:45:11Z", completed_at: "2026-10-27T17:45:11Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-frontmatter-audit"
+    title: "security_audit: independently observe frontmatter projection"
+    description: "Derive a scoped implementation record and bounded risk observations from source/tests only, excluding intent, queues, prior records and history."
+    context: "Independent frontmatter-source-observer derived the IMPL.md supplement from current source/tests only. It retained cooperative-cancellation/buffering limits and the raw-versus-sanitized coordinate caveat; attributed implementer follow-up confirms actual viewer callsites normalize and adds passing BOM/CRLF/control navigation coverage. No certification is implied."
+    purpose: "Record actual recognition, isolation, output and failure behavior independently."
+    expected_outcome: "A clean-slate source-derived supplement is recorded in IMPL.md."
+    kind: security-audit
+    status: completed
+    depends_on: ["blad-frontmatter-code"]
+    requirements: ["REQUIREMENTS.md#R-075"]
+    timestamps: {created_at: "2026-10-27T17:34:36Z", updated_at: "2026-10-27T17:45:11Z", completed_at: "2026-10-27T17:45:11Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-frontmatter-review"
+    title: "compliance_review: compare frontmatter intent and evidence"
+    description: "Compare local intent with independently observed behavior and execution evidence in a separate source-blind context; retain discrepancies for arbitration."
+    context: "Independent source-blind frontmatter-intent-comparator found no concrete new mismatch. IMPL.md retains the attributed downstream-normalization evidence, shared-renderer layout oracle limits, visible-row rather than complete EOF/navigation equivalence, and unproven mid-render cancellation responsiveness. No acceptance or whole-component certification is implied."
+    purpose: "Keep independent comparison distinct from implementation and observation."
+    expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
+    kind: compliance-review
+    status: completed
+    depends_on: ["blad-frontmatter-audit"]
+    requirements: ["REQUIREMENTS.md#R-075"]
+    timestamps: {created_at: "2026-10-27T17:34:36Z", updated_at: "2026-10-27T17:45:11Z", completed_at: "2026-10-27T17:45:11Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "blad-footnote-theme-tests"
     title: "write_tests: retain effective footnote prose styling"
     description: "Pin effective footnote colors across wrapping, breaks, paragraphs and inline spans, with palette/plain coverage and independently painted viewer rows."

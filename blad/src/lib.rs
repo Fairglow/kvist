@@ -50,6 +50,8 @@
 //! line-break exception), images show alternative text only, and table cells
 //! have no dedicated inline-code appearance or nonbreaking code spans. Tables
 //! honor delimiter alignment and bold/italic/strikethrough combinations.
+//! A leading YAML frontmatter block is displayed as literal highlighted YAML,
+//! including delimiters, without schema validation or configuration effects.
 //! Math and spatial Mermaid diagrams have bounded
 //! subset profiles and visible source fallback, not full TeX/Mermaid support.
 //! Authored terminal controls are made inert.
@@ -82,6 +84,7 @@ pub use theme::{
 mod browser;
 mod diagram;
 mod file_input;
+mod frontmatter;
 mod inline;
 pub mod logging;
 mod math;

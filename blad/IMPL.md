@@ -4,6 +4,101 @@
 
 Date: 2026-10-12
 
+## Scoped general YAML frontmatter increment - 2026-10-27
+
+Independent clean-slate `frontmatter-source-observer` read only current
+frontmatter, rendering, link/script/terminal/navigation source and the focused
+test source. It excluded intent, queues, prior records/reviews, session/chat
+history and Git history, ran no tests and made no compliance judgment. Its
+source-derived observations:
+
+- One optional initial UTF-8 BOM precedes a first-line, unindented `---`.
+  Recognition strips LF with an optional preceding CR and trailing ASCII
+  spaces/tabs from delimiter lines only. The first later unindented `---` or
+  `...` closes the header, including at EOF without a newline. Empty and
+  initially blank headers qualify. Without a closer the original input remains
+  Markdown; later blocks are ordinary Markdown.
+- The prefix becomes synthetic fenced-`yaml` start/text/end events. Literal
+  text includes both delimiters and excludes the BOM. The suffix alone enters
+  the Markdown parser; event ranges shift by the consumed prefix length.
+  Offsets refer to the supplied string, not universally to original file bytes.
+- Rendering, link extraction and heading discovery share this adapter.
+  Code-event state excludes metadata URLs; metadata cannot generate Markdown
+  headings, links or definitions, consume duplicate-anchor names or define
+  body reference/footnote targets. Scripts, math, entities and HTML-looking
+  header text stay literal.
+- Rendering first makes source controls inert, normalizing CRLF to LF and
+  escaping other controls and selected bidi controls while preserving LF/tabs.
+  Metadata reuses cached Syntect syntax/themes and the existing code path:
+  no YAML object loading, validation, alias expansion or custom-tag execution.
+  Syntax lookup/highlighting retain shared visible plain-text fallbacks;
+  unknown explicit syntax themes fail with `InvalidInput`.
+- Code lines stay unwrapped and retain indentation/blank lines; configured
+  widths add padding and cap rows, while unlimited output adds a trailing blank
+  row. Tabs use eight-column measurement/viewport expansion. Existing viewport
+  clipping preserves graphemes and renderer styling. Plain output removes
+  renderer SGR; no-color depth can retain non-color attributes.
+- Writer/flush errors propagate. Cancellation checks occur before rendering,
+  at event boundaries and after flushing, and return `Interrupted`. The prefix
+  scan, sanitization, heading collection and shared code-line/highlighting loop
+  have no internal checkpoints. A header is one accumulated text payload:
+  no local size or hard latency guarantee is introduced, and plain output still
+  traverses highlighting.
+
+The observer read assertions for literal layout, recognition/fallback variants,
+malformed-YAML visibility, inert controls, body-link offsets, writer errors,
+pre-cancelled output, CLI file/stdin policy, theme/depth/plain equivalence,
+effective truecolor token distinctions, viewport spans and real PTY
+search/overflow/resize/streaming. Renderer-to-fenced-renderer comparisons are
+shared-path equivalence, not independent layout proof. PTY comparisons sample
+trimmed visible rows, not every retained row or terminal/font implementation.
+No focused test establishes mid-render cancellation responsiveness.
+
+### Attributed normalization clarification and execution
+
+The source-only observer warned that pairing raw `extract_links` offsets with
+sanitized renderer IDs can mismatch after CRLF/control normalization; it did
+not inspect downstream callers. Implementer inspection of `display.rs` confirms
+initial, live, reload and resize extraction use the same inert-normalized source
+as rendering. A subsequent focused viewport extension pairs normalized
+extraction with raw document rendering across BOM/CRLF and escaped metadata
+controls, widths 20/40/80 and numbering on/off. The file PTY case also uses
+BOM/CRLF and an authored escape before the body link. Both pass; this is
+attributed implementer follow-up evidence, not an independent downstream
+source observation. Raw extraction coordinates remain relative to its input.
+
+Before production changes, ten of the eleven new selected regressions failed;
+writer-error/pre-cancellation coverage already passed. Initial test assumptions
+about unwrapped prose, joining split URLs and scrolling a short document to its
+anchor were corrected without changing production behavior. The final focused
+selection passes all eleven tests, including the normalization extensions.
+All-feature nextest passed 333 tests; standalone nextest passed 312 tests.
+The three existing ignored tests remain excluded by runner policy; no skip or
+retry was added. Strict all-target/all-feature Clippy, formatting and whitespace
+checks passed. Component intent validates structurally. No component acceptance
+or revised approved baseline is claimed.
+
+### Independent source-blind frontmatter comparison
+
+Separate `frontmatter-intent-comparator` compared the local intended YAML and
+related rendering/navigation semantics with only this scoped supplement. It read
+no source/tests, manifests, queues, older implementation records, reviews,
+Git/session history or observer session artifacts, and did not rerun execution.
+It found no concrete newly introduced mismatch: the observed prefix recognition,
+literal synthetic code events, suffix-only parsing and range shifting support
+the intended display and isolation.
+
+The comparison retained evidence limits rather than certifying compliance.
+Actual downstream normalization is attributed implementer follow-up, not part
+of the independent source observation. Shared-renderer equivalence does not
+independently establish panel layout; trimmed visible-row PTY equality does not
+prove every retained row/navigation state or terminal implementation. Only
+pre-cancellation is explicitly verified; the linear scan and shared code path
+have no hard cancellation/latency guarantee. These are evidence reservations,
+not demonstrated new contract violations. The existing library doctest also
+passes in the all-feature configuration. No acceptance or approved-baseline
+change is implied.
+
 ## Scoped footnote prose styling follow-up - 2026-10-27
 
 Independent clean-slate `footnote-source-observer` inspected only current

@@ -31,6 +31,10 @@ First standalone crates.io release candidate, not yet published.
   links, emphasis, code and math, without leaking into following prose.
 - Syntax highlighting, wrapped tables, task completion markers, bounded
   mathematical text and five-family text-only Mermaid diagrams.
+- General YAML frontmatter highlighting with literal source layout, searchable
+  unwrapped code panels, prefix-only detection and preserved body navigation.
+  Supports empty headers, BOM/CRLF and `---`/`...` closers without YAML execution
+  or skill-schema validation; streaming snapshots update when a header closes.
 - Table delimiter left/center/right alignment in headers and wrapped cells,
   with Unicode-aware padding and precise aligned link selection/hitboxes.
 - Bold/italic/strikethrough combinations in table cells, preserving wrapping,

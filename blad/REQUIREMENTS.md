@@ -492,6 +492,28 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     enclosing emphasis may style their displayed text without adding those
     separate semantics. Terminal/font attribute support is not guaranteed.
 
+### General YAML frontmatter
+
+75. **R-075 YAML frontmatter:** Recognize a single YAML header at the start of
+    any Markdown document, independent of filename or Agent Skills fields.
+    Preserve its delimiters, indentation, comments, ordering, blank lines,
+    multiline scalars and literal Markdown as syntax-highlighted YAML in the
+    existing code-panel presentation. Support empty headers, optional initial
+    UTF-8 BOM, LF/CRLF, trailing horizontal delimiter whitespace and `---` or
+    `...` closing lines. Only an unindented opening `---` on the first line
+    qualifies. Unclosed candidates retain normal Markdown parsing, including
+    provisional streaming snapshots; later input may complete the header.
+    Do not validate, deserialize, reformat or execute YAML, expand aliases or
+    interpret fields as configuration/permissions. Invalid YAML within a closed
+    header remains visible as source. Later separators and fenced/quoted
+    examples keep their normal Markdown meaning. Metadata contributes no
+    Markdown headings, links, reference definitions or footnotes.
+    Preserve body source offsets and navigation, searchability, unwrapped
+    horizontal overflow, reflow, theme/color/plain policy, inert controls,
+    cancellation and writer-error propagation. Verify exact source/geometry,
+    effective YAML token colors, CLI file/stdin and real streaming/viewer paths,
+    including navigation after the header and EOF equivalence.
+
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).
 - **C-002 No new state format:** Blad reads skott's structured session

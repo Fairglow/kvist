@@ -510,6 +510,58 @@ mod tests {
     }
 
     #[test]
+    fn frontmatter_excludes_navigation_but_preserves_body_spans_after_reflow() {
+        let source = "---\n# Duplicate\nurl: https://metadata.test\nlink: '[hidden](#duplicate)'\n---\n\n# Duplicate\n\n[界 body link](#duplicate) https://body.test";
+        let controlled = format!(
+            "\u{feff}{}",
+            source
+                .replace("url:", "control: \x1b[2J\u{202e}\nurl:")
+                .replace('\n', "\r\n")
+        );
+        for source in [source, controlled.as_str()] {
+            let links = crate::links::extract_links(&crate::terminal_text::inert_source(source));
+            assert_eq!(links.len(), 2);
+            for columns in [20, 40, 80] {
+                for numbers in [false, true] {
+                    let document = Document::render(source, columns, numbers, None).unwrap();
+                    assert_eq!(document.navigation.anchors.len(), 1);
+                    let heading_row = document.navigation.anchors["duplicate"];
+                    assert!(
+                        document.lines[heading_row]
+                            .plain()
+                            .starts_with("# Duplicate")
+                    );
+                    assert!(heading_row > 5);
+                    assert_eq!(document.navigation.links.len(), 2);
+                    for link in &links {
+                        let spans = &document.navigation.links[&link.navigation_id()];
+                        let text: Vec<_> = spans
+                            .iter()
+                            .map(|span| {
+                                assert!(span.row > heading_row);
+                                TerminalLine::new(
+                                    &document.lines[span.row]
+                                        .clip(span.start, span.end - span.start),
+                                )
+                                .plain()
+                                .to_owned()
+                            })
+                            .collect();
+                        assert_eq!(
+                            if link.is_url() {
+                                text.concat()
+                            } else {
+                                text.join(" ")
+                            },
+                            link.text
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn aligned_table_link_spans_exclude_padding_after_numbered_quoted_reflow() {
         let source = "> | [界](#header-center) | [e\u{301}](#header-right) |\n> | :---: | ---: |\n> | prefix [界 wide label **words**](#target) tail | [短](#short) |\n> | longer heading value | longest second column value |";
         let links = crate::links::extract_links(source);

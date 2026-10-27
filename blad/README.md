@@ -8,6 +8,7 @@ A terminal Markdown viewer and streaming pager with tabbed browsing, link naviga
 - **Interactive navigation** — Follow links, jump between headings, spatial link selection
 - **Search** — Forward search with regex support, navigate matches
 - **Rich rendering** — Syntax-highlighted code blocks, math notation, Mermaid diagrams
+- **YAML frontmatter** — Source-preserving metadata highlighting in any Markdown document
 - **Theming** — Dark, light, and terminal-native themes with custom JSON theme support
 - **Editor integration** — Open documents in your external editor and reload changes
 - **Automatic reload** — See file saves without losing your scroll position; inactive tabs refresh when revisited
@@ -151,9 +152,44 @@ Blad renders:
 - Lists (ordered, unordered, task lists)
 - Blockquotes, links, footnotes, tables
 - Syntax-highlighted code blocks (via syntect)
+- Leading YAML frontmatter, including Agent Skills `SKILL.md` metadata
 - Math notation (Unicode output with source fallback)
 - Mermaid diagrams (text-only rendering)
 - Alert callouts (NOTE, TIP, IMPORTANT, WARNING, CAUTION)
+
+### YAML frontmatter
+
+A document starting with an unindented `---` line and closed by an unindented
+`---` or `...` line displays that header as syntax-highlighted YAML:
+
+```markdown
+---
+title: Example document
+metadata:
+  author: Someone
+description: |
+  Indentation, comments and literal **Markdown** stay intact.
+---
+
+# Document body
+```
+
+This works for any filename and metadata fields, not just Agent Skills.
+Delimiters, comments, ordering, blank lines and multiline values are preserved,
+not reformatted or sorted. Empty headers, LF/CRLF, an initial UTF-8 BOM and
+trailing spaces/tabs on delimiters are supported. The header uses the code-panel
+theme, stays unwrapped for horizontal scrolling and remains searchable.
+`--dump` keeps the YAML text without terminal escapes.
+
+Metadata is display-only: Blad does not validate YAML or skill schemas, expand
+aliases, interpret permissions, follow metadata links or create headings from
+YAML comments. Invalid YAML stays visible. The following body renders normally.
+Only the first line can open frontmatter; later separators and fenced/quoted
+examples retain their Markdown meaning. An unclosed header uses normal Markdown
+rendering, including during live stdin paging; completing its delimiter can
+revise the earlier display. `+++` metadata is not supported.
+
+### Markdown profile
 
 Blad uses CommonMark parsing with selected extensions, not full CommonMark or
 GFM conformance. Tables support width-aware whole-word wrapping and delimiter

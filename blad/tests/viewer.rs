@@ -415,6 +415,86 @@ impl Viewer {
 }
 
 #[test]
+fn frontmatter_search_overflow_resize_and_body_navigation_work_in_the_viewer() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("frontmatter.md");
+    let source = format!(
+        "---\n# Duplicate\nurl: https://metadata.test\nwide: \x1b[2J{} NEEDLE\n---\n\n# Duplicate\n\n[body](#duplicate)\n\n{}",
+        "x".repeat(75),
+        "tail paragraph\n\n".repeat(30)
+    );
+    std::fs::write(&path, format!("\u{feff}{}", source.replace('\n', "\r\n"))).unwrap();
+    let mut viewer = Viewer::start(&path, 45, 18, true);
+    assert!(viewer.screen.line(2).contains("---"));
+    assert!((1..17).any(|row| {
+        viewer
+            .screen
+            .line(row)
+            .contains("url: https://metadata.test")
+    }));
+    viewer.keys(b"/NEEDLE\r");
+    let (row, column) = (1..17)
+        .find_map(|row| {
+            viewer
+                .screen
+                .line(row)
+                .find("NEEDLE")
+                .map(|column| (row, column))
+        })
+        .unwrap();
+    assert!(
+        viewer.screen.underlined[row][column..column + 6]
+            .iter()
+            .all(|value| *value)
+    );
+    viewer.resize(55, 20);
+    assert!((1..19).any(|row| viewer.screen.line(row).contains("NEEDLE")));
+    viewer.keys(b"\t");
+    assert!(viewer.screen.line(19).contains("Links: 1/1"));
+    viewer.keys(b"\r");
+    assert!(viewer.screen.line(1).contains("# Duplicate"));
+    assert_eq!(viewer.screen.scrolls, 0);
+    viewer.quit();
+}
+
+#[test]
+fn frontmatter_streaming_completes_split_delimiters_and_matches_finite_viewing() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut viewer = Viewer::start_stream(90, 24);
+    let first = "---\nname: **literal**";
+    viewer.send_input(first.as_bytes());
+    viewer.wait_for(|screen| (1..23).any(|row| screen.line(row).contains("name: literal")));
+    let rest = "\nmetadata:\n  url: https://metadata.test\n--";
+    viewer.send_input(rest.as_bytes());
+    viewer.wait_for(|screen| (1..23).any(|row| screen.line(row).contains("https://metadata.test")));
+    let last = "-\n\n# Body\n\n[body](#body)\n";
+    viewer.send_input(last.as_bytes());
+    viewer.wait_for(|screen| (1..23).any(|row| screen.line(row).contains("name: **literal**")));
+    let tail = "\nTail\n\n".repeat(30);
+    viewer.send_input(tail.as_bytes());
+    viewer.input.take();
+    viewer.wait_for(|screen| screen.line(23).contains("EOF"));
+    viewer.keys_with_frame(b"g");
+    let path = temp.path().join("complete.md");
+    std::fs::write(&path, format!("{first}{rest}{last}{tail}")).unwrap();
+    let mut complete = Viewer::start(&path, 90, 24, false);
+    for row in 1..23 {
+        assert_eq!(
+            viewer.screen.content_line(row),
+            complete.screen.content_line(row),
+            "row {row}"
+        );
+    }
+    viewer.keys(b"\t");
+    assert!(viewer.screen.line(23).contains("Links: 1/1"));
+    viewer.keys(b"\r");
+    assert!(viewer.screen.line(1).starts_with("# Body"));
+    assert_eq!(viewer.screen.scrolls, 0);
+    viewer.quit();
+    complete.quit();
+}
+
+#[test]
 fn live_stdin_starts_without_bytes_and_quits_without_waiting_for_eof() {
     let mut viewer = Viewer::start_stream(90, 14);
     assert!(viewer.screen.line(13).contains("LIVE"));

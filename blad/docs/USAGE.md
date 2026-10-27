@@ -305,6 +305,41 @@ See the [library API and examples](https://docs.rs/kvist-blad).
 
 ## Text Rendering
 
+### YAML frontmatter
+
+Blad displays one leading YAML metadata header as syntax-highlighted source,
+in any document, including Agent Skills `SKILL.md`:
+
+```markdown
+---
+title: Example
+metadata:
+  author: Someone
+description: |
+  Preserve comments, indentation and **literal Markdown**.
+---
+
+# Markdown body
+```
+
+The unindented opening `---` must be on the first line (an initial UTF-8 BOM
+is allowed). An unindented `---` or `...` closes the header; trailing spaces
+and tabs are allowed on delimiter lines. Empty headers, blank metadata lines,
+LF/CRLF and a closing line without a final newline are supported. Both delimiters
+remain visible, while the BOM is omitted. Comments, key order, multiline values
+and indentation are preserved rather than reformatted. Existing code-panel
+themes/color policy apply; `--dump` is escape-free. Long metadata lines remain
+unwrapped and horizontally scrollable, and search includes their displayed text.
+
+Metadata is display-only, without YAML/schema validation, alias expansion,
+permission/configuration effects or executable tags. Malformed YAML remains
+visible. Markdown links/headings/reference definitions/footnotes inside the
+header are not interpreted; body navigation works normally. A header without a
+closer retains normal Markdown rendering, including provisional stdin snapshots.
+When its closer arrives, the whole header becomes YAML. Later separators and
+quoted/fenced examples retain ordinary Markdown semantics. Leading blank lines,
+indented openers and `+++` metadata are not recognized as frontmatter.
+
 ### Unicode script notation
 
 Blad recognizes both standalone `^2^`/`~2~` and adjacent `E=mc^2^`/`H~2~O`,

@@ -10,8 +10,9 @@
 //! - Task lists
 //! - Fenced code blocks with language tags
 //! - Autolinks
+//! - Leading YAML frontmatter (literal, syntax-highlighted metadata)
 
-use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Tag, TagEnd};
 use std::io::Write;
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
@@ -215,7 +216,7 @@ fn render_markdown_theme(
     let md = safe_source.as_ref();
     let options = crate::links::parser_options();
 
-    let parser = crate::scripts::events(md, Parser::new_ext(md, options).into_offset_iter());
+    let parser = crate::scripts::events(md, crate::frontmatter::events(md, options));
     let mut heading_anchors = crate::links::heading_anchors(md);
 
     let mut in_code_block = false;

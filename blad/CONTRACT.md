@@ -297,6 +297,35 @@ inline-code reversal compose with the footnote's prose color. After each inline
 span, footnote prose resumes its muted color. Styling ends with the definition,
 does not leak into following prose, and does not change wrapping or plain text.
 
+### YAML frontmatter
+
+All Markdown inputs, including library strings and stdin, recognize one leading
+YAML frontmatter block. The first line MUST be an unindented `---`, optionally
+preceded by a UTF-8 BOM. A subsequent unindented `---` or `...` closes the block;
+delimiter lines MAY have trailing spaces/tabs. LF and CRLF, an empty body or
+leading blank lines within the header, and a closing line without a final
+newline are supported. The BOM is not displayed. No filename or metadata schema
+is required. Blank lines before the opener, indented delimiters and later
+blocks are not frontmatter. `+++` metadata is not supported.
+
+The header, including both delimiters, MUST be displayed as literal YAML through
+the same syntax highlighting, background/cap rows, unwrapped overflow and
+color/plain policy as a fenced `yaml` code block. Authored layout and text
+remain intact except existing inert-control and LF output normalization.
+There is no YAML parsing/validation, key sorting, reserialization, alias
+expansion, schema enforcement or configuration/permission effect. Malformed
+YAML in a closed block remains visible. Metadata MUST NOT create Markdown
+headings, links, reference definitions or footnotes; its rendered text remains
+searchable. The following body retains source-owned link/heading offsets and
+normal Markdown semantics.
+
+Without a closing delimiter, the entire input retains normal Markdown parsing,
+not an implicitly closed or hidden metadata block. This also applies to live
+stdin snapshots; completing the delimiter MAY revise previous output. EOF MUST
+match finite rendering at the same width/options. Ordinary separators elsewhere
+and fenced/quoted examples retain their existing meaning. No option or new
+dependency is required.
+
 ### Optional Kvist/Skott integration reliability
 
 `sessions` is an opt-in published feature, not a private Cargo feature or a

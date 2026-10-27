@@ -13,6 +13,39 @@ Blad is an interactive terminal Markdown viewer with search, navigation, tabs,
 and optional external editing. It uses crossterm for terminal interaction and
 pulldown-cmark for parsing.
 
+### General YAML frontmatter (2026-10-27)
+
+Use one private source-prefix/event adapter for the renderer, link extraction
+and heading-anchor discovery. Detect only a first-line opener (after an optional
+BOM), scan complete lines for an unindented closer, and leave the source
+untouched when none exists. Trim only trailing horizontal delimiter whitespace
+and CRLF line endings for recognition, never authored YAML contents. An empty
+header and blank first metadata line are valid display inputs. A closer at EOF
+is valid without its newline.
+
+Do not globally enable pulldown-cmark's YAML metadata option: the locked parser
+also recognizes later blocks and rejects empty/initially blank metadata. Instead
+project the detected full prefix, excluding the BOM but including both
+delimiters, as synthetic fenced-`yaml` start/text/end events. Parse the remainder
+with the existing Markdown options and shift all event ranges by the consumed
+prefix length. This reuses the established code highlighter/panel, literal-code
+handling and navigation exclusion without duplicating YAML logic or rendering.
+Reference resolution consequently never sees definitions inside metadata.
+Scripts/math/HTML/Markdown constructs in the prefix remain literal.
+
+Keep detection stateless and linear, without YAML deserialization, alias
+expansion, new dependencies or persistent caches. Live stdin continues to
+re-render whole provisional snapshots; an unclosed candidate stays Markdown
+until its closer arrives, including across chunk boundaries. Test exact panel
+equivalence against a fenced YAML block, effective token colors and policy
+geometry, malformed/empty input, offsets, ordinary separators, inert controls,
+writer/cancellation failures and real PTY search/overflow/resize/streaming.
+
+This user-directed increment uses a deliberate local advisory-review exception
+while exact-bundle receipts/enforcement are unavailable. No receipt, component
+acceptance or compliance certification is claimed. Independent source-only
+observation and a separate source-blind comparison follow implementation.
+
 ### Footnote prose style retention (2026-10-27)
 
 Track whether the parser is inside a footnote definition. Resolve the muted

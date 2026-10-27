@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, Options, Tag, TagEnd};
 
 /// The class of a link destination, used to decide how to follow it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,7 +146,7 @@ pub fn resolve_file(base: Option<&Path>, destination: &str) -> PathBuf {
 /// Inline code and emphasis inside a link label are captured as text, so the
 /// label of ``[`foo.rs`](foo.rs)`` is `foo.rs` rather than an empty string.
 pub fn extract_links(source: &str) -> Vec<Link> {
-    let parser = Parser::new_ext(source, parser_options());
+    let parser = crate::frontmatter::events(source, parser_options());
     let mut links = Vec::new();
     let mut current_text = String::new();
     let mut in_link = false;
@@ -155,7 +155,7 @@ pub fn extract_links(source: &str) -> Vec<Link> {
     let mut link_line = 0;
     let mut link_offset = 0;
 
-    for (event, range) in crate::scripts::events(source, parser.into_offset_iter()) {
+    for (event, range) in crate::scripts::events(source, parser) {
         match event {
             Event::Start(Tag::Link { dest_url, .. }) => {
                 in_link = true;
@@ -275,7 +275,7 @@ pub(crate) fn heading_anchors(source: &str) -> std::collections::BTreeMap<usize,
     let mut suffixes = std::collections::BTreeMap::<String, usize>::new();
     let mut heading = None;
     let mut label = String::new();
-    for (event, range) in Parser::new_ext(source, parser_options()).into_offset_iter() {
+    for (event, range) in crate::frontmatter::events(source, parser_options()) {
         match event {
             Event::Start(Tag::Heading { id, .. }) => {
                 heading = Some((range.start, id.map(|id| id.to_string())));
