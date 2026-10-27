@@ -350,10 +350,6 @@ impl RustEnvironment {
                     0,
                 )?;
             }
-            // The default (selected) toolchain goes to /rust/toolchain (singular).
-            // All other toolchains go to /rust/toolchains/N (plural, indexed).
-            // A /rust/toolchains/default symlink always points at /rust/toolchain
-            // so rustup-style "default" resolution works inside the sandbox.
             let destination = if name.as_str() == selected_name {
                 "/rust/toolchain".to_owned()
             } else {
@@ -364,14 +360,6 @@ impl RustEnvironment {
                 staging.path().join("rustup-home/toolchains").join(name),
             )
             .map_err(|e| sandbox_error(config, "register sandbox-native Rust installation", e))?;
-            if name.as_str() == selected_name {
-                // Create the /rust/toolchains/default symlink for rustup compatibility.
-                symlink(
-                    "/rust/toolchain",
-                    staging.path().join("rustup-home/toolchains/default"),
-                )
-                .map_err(|e| sandbox_error(config, "register default toolchain symlink", e))?;
-            }
             let canonical_root = root
                 .canonicalize()
                 .map_err(|e| sandbox_error(config, "canonicalize installed Rust toolchain", e))?;
@@ -462,9 +450,9 @@ impl RustEnvironment {
                     if bytes.len() > 1 << 20 {
                         return Err(failure(config, "local Rust metadata grew beyond 1 MiB"));
                     }
-                    let canonical_path = path
-                        .canonicalize()
-                        .map_err(|e| sandbox_error(config, "canonicalize local Rust metadata", e))?;
+                    let canonical_path = path.canonicalize().map_err(|e| {
+                        sandbox_error(config, "canonicalize local Rust metadata", e)
+                    })?;
                     grants.push(SandboxGrant {
                         source: canonical_path.to_string_lossy().into_owned(),
                         destination: format!("/workspace/component/{name}"),

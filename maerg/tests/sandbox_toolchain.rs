@@ -238,15 +238,13 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
     // Skip if the runner is inside the worktree (development environment).
     // The sandbox requires the runner to be outside the worktree, which is
     // not possible inside the sandbox where the worktree is the entire filesystem.
-    if let (Some(runner), Some(worktree)) = (&runner, &worktree) {
-        if let Ok(canonical_runner) = runner.canonicalize() {
-            if let Ok(canonical_worktree) = worktree.canonicalize() {
-                if canonical_runner.starts_with(&canonical_worktree) {
-                    eprintln!("skipping: runner is inside the worktree");
-                    return;
-                }
-            }
-        }
+    if let (Some(runner), Some(worktree)) = (&runner, &worktree)
+        && let Ok(canonical_runner) = runner.canonicalize()
+        && let Ok(canonical_worktree) = worktree.canonicalize()
+        && canonical_runner.starts_with(&canonical_worktree)
+    {
+        eprintln!("skipping: runner is inside the worktree");
+        return;
     }
 
     let runner = runner.expect("build galla-runner outside the worktree");
@@ -384,6 +382,7 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
     test "$CARGO_TARGET_DIR" = /tmp/target && test "$CARGO_NET_OFFLINE" = true
     test "$RUSTUP_AUTO_INSTALL" = 0 && test ! -e /home && test ! -e /root
     test ! -w "$RUSTUP_HOME/toolchains" && test ! -w Cargo.toml && test ! -w Cargo.lock
+    test ! -e "$RUSTUP_HOME/toolchains/default"
     rustup default | cmp - tests/expected/default
     rustup toolchain list | cut -d' ' -f1 | sort > /tmp/names
     sort tests/expected/names | cmp - /tmp/names

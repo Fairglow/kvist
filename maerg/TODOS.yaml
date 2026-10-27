@@ -14,6 +14,82 @@ component:
       expected_revision: sha256:3d971935e8b59ab1d977550b5c2146caff46dc7af0dc6c15c7b18d414d0ccae5
       observed_revision: sha256:e27ae1c3224da961bd30030a6a838b9da2c0f52f58524f5a59fe273fde2445f5
 tasks:
+- id: rust-inventory-parity-write-tests
+  title: 'write_tests: reproduce extra private Rust registration'
+  description: Require exact host inventory parity and reject a synthetic default
+    registration in the native authoring test.
+  context: The existing ordinary native test reproduces the inventory mismatch before
+    repair. This restores existing REQ-LANGUAGE-SUPPORT behavior; no new intent or
+    acceptance is implied.
+  purpose: Keep invocation-local default selection distinct from installed inventory.
+  expected_outcome: The extra default registration fails explicitly before builds.
+  kind: test
+  status: completed
+  depends_on: []
+  requirements:
+  - REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT
+  timestamps:
+    created_at: '2026-10-27T12:45:05Z'
+    updated_at: '2026-10-27T12:45:05Z'
+    completed_at: '2026-10-27T12:45:05Z'
+- id: rust-inventory-parity-implement-code
+  title: 'implement_code: preserve exact Rust registrations'
+  description: Remove the synthetic registration while retaining the selected mount,
+    private settings, read-only installations and offline builds.
+  context: Native parity and workspace-build tests pass after removing only the
+    synthetic registration; the selected installation mount is unchanged.
+  purpose: Restore the existing installed inventory contract.
+  expected_outcome: The ordinary native parity and build test passes without skips.
+  kind: implementation
+  status: completed
+  depends_on:
+  - rust-inventory-parity-write-tests
+  requirements:
+  - REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT
+  timestamps:
+    created_at: '2026-10-27T12:45:05Z'
+    updated_at: '2026-10-27T12:45:05Z'
+    completed_at: '2026-10-27T12:45:05Z'
+- id: rust-inventory-parity-security-audit
+  title: 'security_audit: inspect private selection repair'
+  description: Inspect unchanged mount authority, host non-mutation and offline behavior.
+  context: Independent source-only rust-inventory-observer confirmed original-name
+    registrations, private selection settings, read-only installation mounts and
+    offline wrappers. Pre-existing custom-home, digest coverage and native-fixture
+    limits remain explicit in IMPL.md; no whole-component certification.
+  purpose: Retain scoped authority evidence without whole-component certification.
+  expected_outcome: Scoped findings and limits are recorded.
+  kind: security-audit
+  status: completed
+  depends_on:
+  - rust-inventory-parity-implement-code
+  requirements:
+  - REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT
+  timestamps:
+    created_at: '2026-10-27T12:45:05Z'
+    updated_at: '2026-10-27T12:50:54Z'
+    completed_at: '2026-10-27T12:50:54Z'
+- id: rust-inventory-parity-compliance-review
+  title: 'compliance_review: compare independent parity observations'
+  description: Derive source-only observations and separately compare local intent
+    with the observed record and native execution evidence.
+  context: Separate source-blind rust-inventory-comparator identified no concrete
+    repair-scoped mismatch. Native coverage, custom-home and pre-existing indexed-mount
+    wording limits remain explicit in IMPL.md. The full nextest run passed 1833 of
+    1834 tests; an unrelated Skott sandbox-preflight timeout prevents a workspace
+    success claim. This records review activity, not acceptance or certification.
+  purpose: Avoid implementer self-certification.
+  expected_outcome: Scoped discrepancies and evidence limits remain explicit.
+  kind: compliance-review
+  status: completed
+  depends_on:
+  - rust-inventory-parity-security-audit
+  requirements:
+  - REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT
+  timestamps:
+    created_at: '2026-10-27T12:45:05Z'
+    updated_at: '2026-10-27T12:55:03Z'
+    completed_at: '2026-10-27T12:55:03Z'
 - id: model-budget-regression-write-tests
   title: 'write_tests: classify expired and cancelled model turns'
   purpose: Reproduce zero remaining budget reported as InvalidModelTransport before

@@ -2,4 +2,8 @@
 filter = "package(=skott) & binary(=rust_build_environment) & test(=native_repository_tests_execute_inside_the_workspace_sandbox)"
 threads-required = "num-test-threads"
 
+[[profile.default.overrides]]
+filter = "package(=kvist-blad) & (test(=markdown::tests::test_mermaid_block_is_processed) | test(=mermaid::budget_tests::engine_work_grid_and_output_limits_are_hard_errors) | test(=mermaid::budget_tests::encoded_output_is_admitted_at_its_exact_byte_boundary))"
+threads-required = "num-test-threads"
+
 [profile.ci]

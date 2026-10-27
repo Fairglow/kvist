@@ -8,9 +8,18 @@ by the [justfile](../justfile), not by Cargo directly.
 Shared repository scheduling policy. `just test` explicitly selects this file;
 direct nextest runs should also pass `--config-file tools/nextest.toml`.
 It reserves the complete test-thread pool for the native repository-wide
-sandbox trial while ordinary tests stay parallel. The CI profile inherits
-the default rule. This tracked policy does not depend on the ignored,
-sandbox-local `.config/nextest.toml`.
+sandbox trial while ordinary tests stay parallel. It also reserves the pool for
+Blad's `markdown::tests::test_mermaid_block_is_processed` and the two
+`mermaid::budget_tests` work/grid/output and exact-byte-boundary regressions,
+including their copies in the `mermaid_backend` binary. Those five instances
+retain a 500 ms cooperative wall-clock render deadline; cold engine initialization
+and CPU scheduling count against it. They must not compete with other suite
+work merely to test diagram semantics and deterministic resource boundaries.
+
+The CI profile inherits both default rules. No assertion, production limit,
+retry or skip is changed. Pool reservation coordinates only this nextest
+invocation, not unrelated host processes or another test runner. This tracked
+policy does not depend on the ignored, sandbox-local `.config/nextest.toml`.
 
 ## `cargo_install_binaries.py`
 

@@ -5,6 +5,59 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped Rust inventory parity repair - 2026-10-27
+
+Independent clean-slate `rust-inventory-observer` read only the authoring Rust
+environment, native toolchain tests and shared runtime script source. It read
+no intent, queue, prior record, review or Git history, ran no tests and made no
+compliance determination. Its source-derived observations are:
+
+- Preparation requires agreement between rustup's installed names and the
+  host installation directory entries. Private registrations preserve those
+  names exactly; no synthetic `default` registration is created.
+- The selected installation is mounted read-only at `/rust/toolchain`;
+  others use `/rust/toolchains/{sorted-index}`. Generated settings choose the
+  selected name. Initialization copies settings into scratch and links the
+  read-only registrations. Its separate `/rust/toolchains/default` alias is
+  outside the registration directory.
+- Wrappers select through rustup or an explicit leading `+name`; Cargo and
+  cargo-clippy inject offline/locked resolution against `/rust/vendor`.
+- The native trial compares host and sandbox inventory/default, compiler,
+  rustdoc, targets and components; changes private defaults; compiles each
+  installed target; and runs library tests and doctests. It asserts no
+  synthetic registration, read-only installations, failed uninstall and
+  unavailable selection, and compares recursive host state snapshots.
+- These are finite source assertions, not execution evidence. The trial
+  assumes multiple toolchains including `stable`, does not exercise pins or
+  registry dependencies, and retains its pre-existing in-worktree-runner skip.
+  Preparation uses `$HOME/.rustup` while the test helper honors `RUSTUP_HOME`;
+  custom-home parity is not established. Executable digests and metadata
+  rechecks are not whole-resource content authentication.
+
+Implementer-attributed execution reproduced the inventory mismatch before the
+repair and the explicit synthetic-registration assertion before removal.
+After removal, all three ordinary `sandbox_toolchain` tests pass, including
+the native parity/build/non-mutation and read-only workspace-provider trials;
+four existing opt-in tests remain ignored. Strict all-target/all-feature
+Clippy for maerg and Blad, workspace formatting and whitespace checks pass.
+The three reported Blad failures did not reproduce in default/all-feature or
+unoptimized library runs, 100 repeated library runs, or CPU-count nextest.
+No Blad rendering behavior or production resource limit was changed.
+
+The standalone all-feature CPU-count nextest run executed 1834 tests:
+1833 passed, with 15 existing skips. The remaining failure was Skott's
+`native_repository_tests_execute_inside_the_workspace_sandbox`, which exceeded
+the sandbox preflight budget; whole-workspace success is not claimed.
+
+Separate source-blind `rust-inventory-comparator` compared this supplement and
+attributed execution with local intent and the root contract, without reading
+source or test source. It identified no concrete repair-scoped mismatch.
+Pins, registry dependencies, custom homes and the pre-existing skip versus
+mandatory native coverage remain evidence gaps. The contract's all-indexed
+mount wording versus the selected singular destination is pre-existing and
+explicitly accommodated by design, not introduced by registration removal.
+This is a scoped comparison, not acceptance or whole-component certification.
+
 ## Scoped model-budget regression repair - 2026-10-25
 
 Independent clean-slate `budget-source-observer` inspected only the budget,

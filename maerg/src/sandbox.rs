@@ -679,13 +679,15 @@ fn toolchain_root_for_executable(config: &SandboxConfig, executable_path: &str) 
     // parent of that 'bin/' directory. This covers user installations like
     // ~/.cargo/bin/cargo (toolchain root: ~/.cargo) and rustup installations.
     let root_path = if parent.file_name().and_then(|n| n.to_str()) == Some("bin") {
-        parent.parent().ok_or_else(|| KvistError::SandboxUnavailable {
-            runner: config.runner.clone(),
-            reason: format!(
-                "cannot determine toolchain root for executable in `{}`/bin",
-                parent.display()
-            ),
-        })?
+        parent
+            .parent()
+            .ok_or_else(|| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!(
+                    "cannot determine toolchain root for executable in `{}`/bin",
+                    parent.display()
+                ),
+            })?
     } else {
         parent
     };

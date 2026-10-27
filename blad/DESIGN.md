@@ -917,6 +917,16 @@ engine's deterministic work budget and cancellation control must also be set;
 numeric backend-specific values are recorded with its evaluation.
 Do not admit an unbounded layout algorithm by checking only its final output.
 
+The functional Mermaid unit regression and exact work/grid/output admission
+tests retain the production 500 ms cooperative wall-clock deadline. Nextest
+starts each in a cold process, unlike a shared libtest process; CPU scheduling
+and initialization consume that deadline too. Repository nextest policy reserves
+the whole current test pool for these named tests, including their copies in
+`mermaid_backend`, so unrelated suite work cannot starve the assertions.
+Do not increase deadlines, retry failures or reclassify cancellation as a
+resource error to satisfy these tests. This scheduling policy does not reserve
+host CPU against another runner or unrelated processes.
+
 Source-mode bypasses conversion. Unsupported/malformed content gets a visible
 diagnostic and its unmodified source (except inert control presentation).
 Resource limits have distinct diagnostics; oversized source fallback is bounded

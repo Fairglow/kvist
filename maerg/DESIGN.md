@@ -94,6 +94,10 @@ Rust authoring mounts the validated project vendor registry read-only at
 `/rust/vendor`, outside the writable component grants. An absent registry gets
 an empty staged directory at the same destination, so offline resolution fails
 explicitly without consulting ambient host caches.
+Private rustup registrations contain exactly the validated host inventory.
+The selected installation may use `/rust/toolchain` as its mount destination,
+but selection is recorded in private settings, never as an extra `default`
+registration.
 Unlike Skott's fully writable workspace, protected maerg authoring retains
 `/tmp/target` invocation scratch; `/workspace/target` is outside its approved
 writable component source/test roots.

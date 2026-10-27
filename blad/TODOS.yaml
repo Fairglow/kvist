@@ -10,6 +10,58 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "blad-mermaid-deadline-tests"
+    title: "write_tests: diagnose concurrent Mermaid deadlines"
+    description: "Use supplied deadline failures, effective nextest scheduling and existing cancellation/budget assertions to distinguish scheduling starvation from resource-admission defects."
+    context: "The supplied failures report deadline_exceeded after 0.58-0.61 seconds, not resource errors. Effective nextest configuration places all five instances of the three named tests in ordinary parallel scheduling. Existing cancellation, geometry and exact-byte assertions remain authoritative."
+    purpose: "Establish the actual failure category before changing test execution."
+    expected_outcome: "The original scheduling configuration fails the required whole-pool reservation check."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    timestamps: {created_at: "2026-10-27T13:22:29Z", updated_at: "2026-10-27T13:29:54Z", completed_at: "2026-10-27T13:29:54Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-mermaid-deadline-code"
+    title: "implement_code: isolate deadline-sensitive Mermaid tests"
+    description: "Reserve the entire nextest pool for the three exact test names, including both budget-test binaries, and document runner/host limits without changing production rendering."
+    context: "The original scheduling check failed before the override. Event traces changed from five overlapping starts to none across 20 CPU-count iterations; default and inherited CI profiles each passed 120 selected/control instances. All 318 all-feature Blad nextest tests and the prior sandbox inventory repair pass. No rendering source, assertions, limits, retries or skips changed."
+    purpose: "Keep wall-clock scheduling contention separate from resource-boundary evidence."
+    expected_outcome: "Default and CI scheduling select exactly five instances and repeated assertions pass with unchanged limits."
+    kind: implementation
+    status: completed
+    depends_on: ["blad-mermaid-deadline-tests"]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    timestamps: {created_at: "2026-10-27T13:22:29Z", updated_at: "2026-10-27T13:29:54Z", completed_at: "2026-10-27T13:29:54Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-mermaid-deadline-audit"
+    title: "security_audit: inspect unchanged rendering bounds"
+    description: "Independently observe scheduling scope and retained cancellation, resource limits and assertions."
+    context: "Independent source-only mermaid-deadline-observer confirmed exact scheduling scope, current production deadline placement and boundary/cancellation assertions. Implementer inspection confirms no rendering-source changes. External-host contention, cooperative checks and alternate-runner limits remain explicit in IMPL.md; no whole-component audit or safety certification."
+    purpose: "Prevent a test-scheduling repair from weakening production boundaries."
+    expected_outcome: "Scoped observations and remaining host-contention limits are durable."
+    kind: security-audit
+    status: completed
+    depends_on: ["blad-mermaid-deadline-code"]
+    requirements: ["REQUIREMENTS.md#R-038"]
+    timestamps: {created_at: "2026-10-27T13:22:29Z", updated_at: "2026-10-27T13:29:54Z", completed_at: "2026-10-27T13:29:54Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-mermaid-deadline-review"
+    title: "compliance_review: compare independent scheduling evidence"
+    description: "Compare local intent with a clean-slate source-derived supplement and attributed execution in a separate source-blind context."
+    context: "Separate source-blind mermaid-deadline-comparator identified no concrete scoped mismatch. Original host-contention causation was not measured, and timing failures were not locally reproduced. External-load, alternate-runner and cooperative-check limits remain in IMPL.md. No acceptance, universal timing guarantee or review receipt is implied."
+    purpose: "Retain scoped discrepancies without implementer self-certification."
+    expected_outcome: "Independent comparison and finite-evidence limits are recorded."
+    kind: compliance-review
+    status: completed
+    depends_on: ["blad-mermaid-deadline-audit"]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    timestamps: {created_at: "2026-10-27T13:22:29Z", updated_at: "2026-10-27T13:29:54Z", completed_at: "2026-10-27T13:29:54Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "blad-table-emphasis-tests"
     title: "write_tests: first table emphasis subset"
     description: "Pin effective bold/italic/strike state, nesting, normalized spaces, event boundaries, Unicode, wrapping/breaks, row-style preservation and styled link search/selection."

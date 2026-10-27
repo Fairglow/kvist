@@ -4,6 +4,68 @@
 
 Date: 2026-10-12
 
+## Scoped Mermaid deadline scheduling observation - 2026-10-27
+
+Independent clean-slate `mermaid-deadline-observer` read only nextest policy,
+the Mermaid adapter, the Markdown render helper/regression, and the backend
+module import/cancellation assertions. It read no intent, queues, prior
+records, reviews or Git history, ran no tests and made no compliance judgment.
+Adjacent test-source search context was also visible, not intent context.
+Its source-derived observations are:
+
+- The default nextest override selects the Blad package and the exact
+  Markdown Mermaid test plus two work/grid/output and exact-byte budget-test
+  names. Each reserves `num-test-threads`. There is no binary restriction, so
+  importing the adapter in `mermaid_backend` includes both budget-test copies.
+- The production 500 ms child deadline starts before preflight, engine
+  initialization/possible `OnceLock` waiting, parsing, model admission, layout
+  and output. Checks are cooperative, not preemption; final projection/text
+  checks follow the last checkpoint.
+- Assertions cover five-family resource errors, successful reuse after
+  rejection, exact encoded-byte acceptance versus one-byte-short rejection,
+  spatial Markdown output, pre-cancelled/expired controls, repeated successful
+  reuse and cancellation through a clone. The clone is cancelled and joined
+  before rendering, not during an active render.
+- Pool reservation does not isolate external host load, bound initialization
+  waits or govern another runner/configuration. Deadline failures remain
+  possible under those conditions. No whole-component certification follows.
+
+### Attributed diagnosis and execution
+
+The supplied failure logs show `deadline_exceeded` after 0.58-0.61 seconds,
+not work/grid/output admission failures. Local repetition before this repair
+did not reproduce those deadline failures. A configuration assertion failed
+before the new override and passed afterward; no rendering source or test
+assertions were changed.
+
+Implementer execution used `--offline --locked`. Nextest event traces for the
+original policy showed five overlapping starts among six selected instances.
+With the override, 20 default-profile iterations at CPU-count concurrency
+passed all 120 instances without overlapping starts. Twenty inherited-CI
+iterations with four workers also passed 120 instances. Each iteration
+included all five affected instances and one ordinary Markdown control.
+This demonstrates scheduling, not immunity to unrelated host contention.
+
+The full all-feature Blad nextest run passed 318 tests, with three existing
+ignored characterizations. The libtest run passed 110 library, ten diagram
+and sixteen backend tests, with one existing ignored characterization.
+The previously repaired maerg inventory test passed again. Workspace format
+and whitespace checks passed; no new whole-workspace result is claimed.
+
+### Independent source-blind scheduling comparison
+
+Separate `mermaid-deadline-comparator` compared the new observation and
+attributed execution with local intent and the root contract, without source,
+test source, nextest configuration, prior records or Git history. It identified
+no concrete scoped mismatch in selecting five instances through three exact
+names while retaining production cancellation/deadline/resource semantics and
+all assertions. It retained that the original timing failures were not locally
+reproduced and their host-contention cause was not measured. Initialization
+waits, external load, alternate runners and active-render cancellation remain
+outside the demonstrated scheduling evidence. This comparison does not imply
+universal timing reliability, complete R-037--R-040 coverage, new workspace
+verification or acceptance.
+
 ## Scoped table emphasis source observation - 2026-10-25
 
 **Scope.** Derived from the specified Rust source and tests only. No files were changed or tests executed here. This is an implementation observation, not acceptance or whole-component compliance certification.
