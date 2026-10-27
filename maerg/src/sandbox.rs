@@ -678,25 +678,29 @@ fn toolchain_root_for_executable(config: &SandboxConfig, executable_path: &str) 
     // If the executable is in a 'bin/' subdirectory, the toolchain root is the
     // parent of that 'bin/' directory. This covers user installations like
     // ~/.cargo/bin/cargo (toolchain root: ~/.cargo) and rustup installations.
-    if parent.file_name().and_then(|n| n.to_str()) == Some("bin") {
-        let toolchain_root = parent
-            .parent()
-            .ok_or_else(|| KvistError::SandboxUnavailable {
-                runner: config.runner.clone(),
-                reason: format!(
-                    "cannot determine toolchain root for executable in `{}`/bin",
-                    parent.display()
-                ),
-            })?
-            .to_string_lossy()
-            .into_owned();
-        return Ok(toolchain_root);
-    }
+    let root_path = if parent.file_name().and_then(|n| n.to_str()) == Some("bin") {
+        parent.parent().ok_or_else(|| KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: format!(
+                "cannot determine toolchain root for executable in `{}`/bin",
+                parent.display()
+            ),
+        })?
+    } else {
+        parent
+    };
 
-    // Not in a 'bin/' subdirectory — use the parent directory as the toolchain
-    // root. This covers system-wide installations (e.g., /usr/bin/cargo -> /usr)
-    // and custom toolchain layouts (e.g., /opt/rust/rustc -> /opt/rust).
-    Ok(parent.to_string_lossy().into_owned())
+    // Canonicalize the toolchain root so the runner accepts it.
+    let canonical = root_path
+        .canonicalize()
+        .map_err(|e| sandbox_error(config, "canonicalize toolchain root", e))?;
+    Ok(canonical
+        .to_str()
+        .ok_or_else(|| KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: "canonicalized toolchain root is not valid UTF-8".to_owned(),
+        })?
+        .to_owned())
 }
 
 /// Resolves a bare program name against an explicit `PATH` value, returning the

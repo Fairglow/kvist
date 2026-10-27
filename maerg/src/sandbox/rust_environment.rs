@@ -350,14 +350,33 @@ impl RustEnvironment {
                     0,
                 )?;
             }
-            let destination = format!("/rust/toolchains/{index}");
+            // The default (selected) toolchain goes to /rust/toolchain (singular).
+            // All other toolchains go to /rust/toolchains/N (plural, indexed).
+            // A /rust/toolchains/default symlink always points at /rust/toolchain
+            // so rustup-style "default" resolution works inside the sandbox.
+            let destination = if name.as_str() == selected_name {
+                "/rust/toolchain".to_owned()
+            } else {
+                format!("/rust/toolchains/{index}")
+            };
             symlink(
                 &destination,
                 staging.path().join("rustup-home/toolchains").join(name),
             )
             .map_err(|e| sandbox_error(config, "register sandbox-native Rust installation", e))?;
+            if name.as_str() == selected_name {
+                // Create the /rust/toolchains/default symlink for rustup compatibility.
+                symlink(
+                    "/rust/toolchain",
+                    staging.path().join("rustup-home/toolchains/default"),
+                )
+                .map_err(|e| sandbox_error(config, "register default toolchain symlink", e))?;
+            }
+            let canonical_root = root
+                .canonicalize()
+                .map_err(|e| sandbox_error(config, "canonicalize installed Rust toolchain", e))?;
             grants.push(SandboxGrant {
-                source: root.to_string_lossy().into_owned(),
+                source: canonical_root.to_string_lossy().into_owned(),
                 destination,
                 access: "read-only",
                 purpose: "toolchain",
@@ -372,8 +391,13 @@ impl RustEnvironment {
         )
         .map_err(|e| sandbox_error(config, "write generated private Rust settings", e))?;
         for resource in ["runtime", "rustup-home"] {
+            let resource_path = staging
+                .path()
+                .join(resource)
+                .canonicalize()
+                .map_err(|e| sandbox_error(config, "canonicalize staged Rust resource", e))?;
             grants.push(SandboxGrant {
-                source: staging.path().join(resource).to_string_lossy().into_owned(),
+                source: resource_path.to_string_lossy().into_owned(),
                 destination: format!("/rust/{resource}"),
                 access: "read-only",
                 purpose: "toolchain",
@@ -401,8 +425,11 @@ impl RustEnvironment {
                 return Err(sandbox_error(config, "inspect authoring vendor", error));
             }
         };
+        let canonical_vendor = vendor
+            .canonicalize()
+            .map_err(|e| sandbox_error(config, "canonicalize authoring vendor", e))?;
         grants.push(SandboxGrant {
-            source: vendor.to_string_lossy().into_owned(),
+            source: canonical_vendor.to_string_lossy().into_owned(),
             destination: "/rust/vendor".into(),
             access: "read-only",
             purpose: "toolchain",
@@ -435,8 +462,11 @@ impl RustEnvironment {
                     if bytes.len() > 1 << 20 {
                         return Err(failure(config, "local Rust metadata grew beyond 1 MiB"));
                     }
+                    let canonical_path = path
+                        .canonicalize()
+                        .map_err(|e| sandbox_error(config, "canonicalize local Rust metadata", e))?;
                     grants.push(SandboxGrant {
-                        source: path.to_string_lossy().into_owned(),
+                        source: canonical_path.to_string_lossy().into_owned(),
                         destination: format!("/workspace/component/{name}"),
                         access: "read-only",
                         purpose: "context",
