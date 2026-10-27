@@ -674,6 +674,34 @@ small Rust helper through the same sandbox executor. Payload staging MUST be
 host-owned, private, outside the writable workspace, unrelated to provider
 call IDs, and cleaned on every return path.
 
+### RUN-REQ-TOOL-ERGONOMICS
+
+Within one prompt run, an omitted `read_file.offset` MUST continue that path's
+last successful page, including across interleaved files and changed limits.
+Explicit offsets MUST override the cursor; zero restarts. Cursor advancement
+MUST use the actual returned byte boundary, not the requested limit, and occur
+only after a successful validated result. Continuations MUST reject changed
+preimages with an actionable restart diagnostic. New prompts start fresh.
+Advancing reads MUST NOT trigger identical-action detection; repeated terminal
+reads MUST receive the existing bounded correction/circuit-breaker behavior.
+
+Provide digest-bound atomic append and strict single-file unified-diff updates
+through the existing native helper and executor. They MUST preserve unrelated
+bytes and file modes, reject stale input, malformed/ambiguous patches,
+out-of-scope paths and linked mutation paths, and leave the original unchanged
+on validation failure. Patch paths MUST NOT select additional effect targets;
+no fuzz, shell patch interpreter, multi-file transaction or new authority.
+Tests MUST cover EOF, empty files, UTF-8/escaping, interleaving, reset, stale
+continuation, malformed arguments, patch coordinates/counts, CRLF and missing
+newlines, mutation bounds and sandbox/host helper routing.
+
+Networked dependency installation remains deferred: do not advertise a package
+installation tool without an approved source-bound acquisition phase, exact
+request/lock/vendor binding and re-prepared read-only build resources. Document
+the available tools, conservative limitations and explicit host provisioning.
+This human-requested intent bundle has an explicit advisory-review exception
+while receipt enforcement is unavailable; no acceptance or compliance is claimed.
+
 ### RUN-REQ-HEADLESS
 
 Provide terminal-free execution over the same loop with

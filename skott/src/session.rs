@@ -1,4 +1,8 @@
 //! Skott adapters for Sav's host-neutral native runtime.
+mod read_cursor;
+
+use std::sync::Mutex;
+
 use crate::{
     config::Model,
     context::ContextManager,
@@ -181,7 +185,10 @@ impl Skott {
             .run_controlled(
                 &mut session.0,
                 transport,
-                &ExecutorBridge(executor),
+                &ExecutorBridge {
+                    executor,
+                    reads: Mutex::new(read_cursor::ReadCursors::default()),
+                },
                 &SinkBridge(sink),
                 cancellation,
                 &mut context.0,
@@ -191,27 +198,42 @@ impl Skott {
             .map_err(Error::from)
     }
 }
-struct ExecutorBridge<'a, E>(&'a E);
+struct ExecutorBridge<'a, E> {
+    executor: &'a E,
+    reads: Mutex<read_cursor::ReadCursors>,
+}
+
+impl<E> ExecutorBridge<'_, E> {
+    fn reads(&self) -> Result<std::sync::MutexGuard<'_, read_cursor::ReadCursors>> {
+        self.reads.lock().map_err(|_| Error::ToolRender {
+            tool: "read_file".into(),
+            reason: "prompt read cursor state is poisoned".into(),
+        })
+    }
+}
+
 impl<E: ToolExecutor> sav::runtime::ToolExecutor for ExecutorBridge<'_, E> {
     fn execute(
         &self,
         intent: &ToolIntent,
         token: &CancellationToken,
     ) -> sav::runtime::Result<ToolOutcome> {
-        self.0.execute(intent, token).map_err(Into::into)
+        let resolved = self.reads()?.resolve(intent)?;
+        let outcome = self.executor.execute(&resolved, token)?;
+        self.reads()?.observe(&resolved, &outcome)?;
+        Ok(outcome)
     }
     fn describe(&self, intent: &ToolIntent) -> String {
         crate::tools::describe_tool_call(intent)
     }
     fn repeatable(&self, intent: &ToolIntent) -> bool {
+        if intent.name == "read_file" {
+            return self.reads().is_ok_and(|reads| reads.repeatable(intent));
+        }
         matches!(
             intent.name.as_str(),
-            "read_file" | "list_dir" | "find_files" | "search_files"
+            "list_dir" | "find_files" | "search_files"
         )
-    }
-    fn repeated_observation_notice(&self, intent: &ToolIntent) -> Option<String> {
-        (intent.name == "read_file" && intent.arguments.get("offset").is_none()).then(||
-            "Repeated read_file omitted offset, so it requests byte page 0 again. To continue, supply the previous result's actual next_offset; offsets are bytes, not lines.".into())
     }
 }
 struct SinkBridge<'a, S>(&'a S);

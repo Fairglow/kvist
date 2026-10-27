@@ -163,10 +163,24 @@ impl ToolExecutor for RecordingExecutor {
             .lock()
             .unwrap()
             .push((intent.name.clone(), result.to_string()));
+        let stdout = if intent.name == "read_file" {
+            let offset = intent
+                .arguments
+                .get("offset")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            serde_json::to_vec(&serde_json::json!({
+                "content":"ok", "sha256":format!("sha256:{}", "0".repeat(64)),
+                "offset":offset, "next_offset":offset + 2, "total_bytes":1048576,
+            }))
+            .unwrap()
+        } else {
+            result.as_bytes().to_vec()
+        };
         Ok(ToolOutcome {
             exited: true,
             status: Some(0),
-            stdout: result.as_bytes().to_vec(),
+            stdout,
             stderr: vec![],
             timed_out: false,
             output_limit_exceeded: false,

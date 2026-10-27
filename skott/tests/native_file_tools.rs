@@ -1403,7 +1403,9 @@ fn bare_registry_defers_helper_location_but_production_resolution_supplies_it() 
             "list_dir",
             "find_files",
             "search_files",
-            "edit_file"
+            "edit_file",
+            "append_file",
+            "apply_patch"
         ]
     );
 }

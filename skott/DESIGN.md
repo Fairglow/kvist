@@ -453,8 +453,9 @@ before any turn, so a held prompt is not lost from the session log.
 
 ### Tool rendering
 
-The registry exposes seven tools, in stable order: `shell`, `read_file`,
-`write_file`, `list_dir`, `find_files`, `search_files`, `edit_file`.
+The registry exposes nine tools, in stable order: `shell`, `read_file`,
+`write_file`, `list_dir`, `find_files`, `search_files`, `edit_file`,
+`append_file`, `apply_patch`.
 Each is rendered to an argv whose `[0]` is an absolute
 canonical path, so the sandbox accepts it and no shell globbing or PATH lookup
 happens on our argv.
@@ -495,6 +496,26 @@ happens on our argv.
   rejecting overlapping matches. CRLF and unrelated/missing-newline bytes stay
   unchanged. External writers do not participate in a transactional lock:
   stale checks do not promise atomic compare-and-swap against arbitrary writers.
+
+The per-run executor bridge owns a mutex-protected, bounded map of exact path
+read cursors (at most 4096 distinct paths, then explicit refusal). This is local runtime
+state, not filesystem authority or durable workflow evidence. It resolves
+omitted offsets immediately before execution, adds the prior digest on
+continuation and validates successful JSON page metadata before advancing.
+It never reads host files to discover cursor state. Explicit zero resets;
+explicit other offsets replace the cursor only on success. EOF keeps the
+terminal byte position. Only reads not already at a known terminal position
+are repeatable; EOF observations enter Sav's unchanged repeat detector.
+Malformed helper output fails explicitly. New prompt runs get a fresh bridge.
+
+Append and patch reuse the existing descriptor-relative replacement path and
+digest checks. A typed mutation selects whole replacement, exact edit, append
+or patch; all compute/validate the new bytes before creating a temporary file.
+The private patch parser accepts only single-file unified hunks with checked
+numeric ranges, exact old/context bytes and consistent new coordinates/counts.
+It constructs the full result in memory within the 1-MiB file bound, preserving
+line endings and explicit missing-newline markers; there is no subprocess,
+header-path interpretation or fuzzy fallback.
 
 `bash` is resolved once to its canonical path at request construction. The
 registry renders the sandbox-relative path the agent passes (typically under the

@@ -10,6 +10,58 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: tool-ergonomics-write-tests
+    title: "Pin continuation and bounded incremental mutations"
+    description: "Test omitted offsets, interleaved paths, reset, EOF breaker, stale reads, UTF-8 pages, strict patches, append and unchanged helper authority before implementation."
+    context: "Five incremental-tool regressions and omitted-offset loop regression failed before implementation. Final coverage includes EOF/empty files, interleaved cursors, stale failures/restart, strict patches, append, binary/size bounds and helper routing. Explicit advisory exception in RUN-REQ-TOOL-ERGONOMICS; no acceptance receipt."
+    purpose: "Prevent no-progress loops without blocking page advancement."
+    expected_outcome: "Regressions fail against the previous runtime."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"]
+    timestamps: {created_at: "2026-10-27T13:44:28Z", updated_at: "2026-10-27T14:04:21Z", completed_at: "2026-10-27T14:04:21Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: tool-ergonomics-implement-code
+    title: "Implement run-owned cursors and atomic incremental tools"
+    description: "Add validated read continuation, EOF repetition policy, append and strict single-file patch tools; document tool selection and deferred acquisition."
+    context: "Prompt-local validated read cursors, EOF breaker, digest-bound append and strict path-free patch reuse the existing helper and sandbox grants. Sourced recommendations and deferred acquisition prerequisites are in docs/agent-toolkit.md. All 360 affected tests, the real sandbox trial, all-target strict Clippy, formatting and whitespace checks passed. No dependencies or network authority added."
+    purpose: "Support common model workflows without broadening authority."
+    expected_outcome: "Targeted regressions and quality gates pass."
+    kind: implementation
+    status: completed
+    depends_on: [tool-ergonomics-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"]
+    timestamps: {created_at: "2026-10-27T13:44:28Z", updated_at: "2026-10-27T14:04:21Z", completed_at: "2026-10-27T14:04:21Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: tool-ergonomics-security-audit
+    title: "Inspect incremental tool boundaries independently"
+    description: "Derive scoped source/test observations without intent and inspect cursor bounds, patch parsing, preimage guards, helper routing and unchanged authority."
+    context: "Clean-slate source-only observations are summarized in IMPL.md. No concrete defect was identified in the new cursor/append/patch algorithms. Two existing-code findings (host long-script staging and new-write temporary-name collision) remain explicitly retained outside this change, not certified away. Additional tests and prompt/error wording followed the observation; final execution evidence is distinguished. No broad security certification."
+    purpose: "Keep implementer and independent evidence separate."
+    expected_outcome: "Scoped IMPL evidence and explicit findings."
+    kind: security-audit
+    status: completed
+    depends_on: [tool-ergonomics-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"]
+    timestamps: {created_at: "2026-10-27T13:44:28Z", updated_at: "2026-10-27T14:04:21Z", completed_at: "2026-10-27T14:04:21Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: tool-ergonomics-compliance-review
+    title: "Compare incremental tool intent and observations"
+    description: "Compare this scoped intent with independently derived observations and test evidence in a source-blind context; retain discrepancies."
+    context: "Separate source-blind comparison is persisted in docs/reviews/tool-ergonomics-comparison.md. It finds substantial scoped correspondence with no concrete new-algorithm contradiction, while retaining no-op patch policy underspecification, finite evidence/coverage gaps and two existing-code findings for human arbitration. This completes the diagnostic comparison, not acceptance or formal compliance. Intent was not automatically changed to hide findings."
+    purpose: "Expose disagreements for human arbitration."
+    expected_outcome: "Persistent scoped comparison, not blanket compliance."
+    kind: compliance-review
+    status: completed
+    depends_on: [tool-ergonomics-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-ERGONOMICS"]
+    timestamps: {created_at: "2026-10-27T13:44:28Z", updated_at: "2026-10-27T14:08:59Z", completed_at: "2026-10-27T14:08:59Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: repository-config-write-tests
     title: "Pin checkout-independent scheduling configuration"
     description: "Reproduce the clean-checkout failure, retain the exact full-pool assertion and pin explicit recipe configuration selection."

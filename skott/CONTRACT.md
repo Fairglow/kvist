@@ -112,9 +112,9 @@ wall/token limits. Final answers require an ordinary complete stop.
 Compaction preserves outstanding user requests verbatim until a successful
 answer ends that task, uses a 75% trigger and capacity-based retention target,
 and labels summaries as lossy history. Tool previews bound serialized cost and
-mark binary/truncated content. Native reads may repeat; opaque/effectful
-actions retain a finite repeat breaker with consecutive-stall reset on a
-successful distinct action.
+mark binary/truncated content. Advancing native reads may repeat; terminal
+reads and opaque/effectful actions retain a finite repeat breaker with
+consecutive-stall reset on a successful distinct action.
 
 Native search/discovery default to excluding generated dependency/build/VCS
 and runner-log directories, expose `include_generated` to include them, and
@@ -507,14 +507,16 @@ except `/`. Digests are `sha256:` plus 64 lowercase hexadecimal digits.
 | Tool           | Required arguments                                         | Optional arguments                                                                                                  |
 | -------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `shell`        | `command`: nonblank, NUL-free, at most 16384 bytes         | None. Commands over 4096 bytes execute as a staged `/context/0` script file, so the full bound is always executable |
-| `read_file`    | `path`                                                     | `offset=0` (0..=1048576 bytes), `limit=4096` (1..=16384 bytes)                                                      |
+| `read_file`    | `path`                                                     | `offset` (0..=1048576 bytes), `limit=4096` (1..=16384 bytes), `expected_sha256`                                    |
 | `write_file`   | `path`, `content`                                          | `expected_sha256`                                                                                                   |
 | `list_dir`     | `path`                                                     | `offset=0` (0..=4096 entries), `limit=100` (1..=256 entries)                                                        |
 | `find_files`   | `path`, `pattern` (literal substring, empty matches all)   | Same pagination as listing; `include_generated=false`                                                               |
 | `search_files` | `path`, `query` (nonempty literal substring)               | Same pagination as listing; `include_generated=false`, optional literal `file_pattern`                              |
 | `edit_file`    | `path`, nonempty `old_text`, `new_text`, `expected_sha256` | None                                                                                                                |
+| `append_file`  | `path`, `content`, `expected_sha256`                      | None; requires an existing UTF-8 file; no implicit newline                                                          |
+| `apply_patch`  | `path`, `patch`, `expected_sha256`                        | None; strict single-file unified hunks; no file headers                                                            |
 
-Content/old/new text each fit 65536 bytes; pattern/query/file_pattern fit 1024 bytes and
+Content/old/new/patch text each fit 65536 bytes; pattern/query/file_pattern fit 1024 bytes and
 reject NUL. Explicit null is not omission. Native request JSON fits 262144
 bytes. Complete reads, mutation preimages, scanned files and resulting edits
 fit 1048576 bytes/file. Complete native stdout, including LF, fits 7000 bytes.
@@ -526,7 +528,7 @@ Result objects:
 | Operation  | JSON fields                                                                                                                                                                                                                                                                      |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Read       | `content`, `sha256`, `offset`, `next_offset`, `total_bytes`                                                                                                                                                                                                                      |
-| Write/edit | `path`, `sha256`, `total_bytes`                                                                                                                                                                                                                                                  |
+| Write/edit/append/patch | `path`, `sha256`, `total_bytes`                                                                                                                                                                                                                                       |
 | List       | `entries:[{name,kind}]`, `offset`, `next_offset`, `total`                                                                                                                                                                                                                        |
 | Find       | `files:[absolute_path]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_generated`, `visited_entries`, `complete`                                                                                                                                                |
 | Search     | `matches:[{path,line,match_byte_offset,content,truncated}]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_binary`, `skipped_generated`, `skipped_oversized`, `excluded_files`, `visited_entries`, `scanned_bytes`, `complete`, `scope` (`file` or `directory`) |
@@ -540,6 +542,17 @@ Directory operations reject linked ancestors, list links and skip/count links
 in recursive traversal. Results sort by name/path, with search then by line.
 Search uses one-based line numbers and a first byte offset per matching line;
 previews exclude LF, retain CR and are bounded to 1024 UTF-8 bytes.
+
+In `Skott::run`/`run_controlled`, omitted read offsets start at zero once, then
+continue the last successful page for that exact path. Cursors are per prompt,
+not global, and survive context compaction/steering. Explicit `offset` wins;
+`offset: 0` restarts. Changing `limit` does not reset a cursor. Automatic
+continuation supplies the last full-file digest; a changed file fails and asks
+for an explicit restart. Supplied digests must match as well. Failed reads do
+not advance. After EOF, omission requests an empty page at `total_bytes`,
+never restarts; repeated terminal proposals enter the ordinary repeat breaker.
+Direct stateless `FileRequest`/executor calls still default omission to zero;
+the run adapter owns continuation and its returned page metadata is journaled.
 
 Listing caps 4096 entries/directory. Recursive operations cap 4096 visited
 descendants and depth 32. Search caps 8388608 scanned bytes and 4096 matching
@@ -561,6 +574,17 @@ write creates or replaces; supplying a digest requires an existing matching
 file. Exact edit requires existing UTF-8 and precisely one occurrence,
 including rejecting overlapping matches. Atomic replacement is per file;
 arbitrary external writers are not locked transactionally.
+
+Append requires an existing UTF-8 preimage and adds content verbatim, without a
+newline or create-on-missing fallback. Patch requires an existing UTF-8 preimage
+and one or more ordered `@@ -old_start[,count] +new_start[,count] @@` hunks
+(optional section text). Counts default to one; zero-count ranges identify an
+insertion/deletion boundary. Context/removal lines must match exact bytes at
+the stated coordinates, and new coordinates/counts must agree. Hunk bodies use
+space/`-`/`+` prefixes and `\ No newline at end of file` markers. Patch transport
+lines end in LF; CR before LF remains file content. No headers, embedded paths,
+renames, binary patches, fuzzy matching or multi-file operations are accepted.
+All hunks validate before the existing per-file atomic replacement.
 
 ### `Tool profiles, settings, and detection`
 

@@ -17,6 +17,8 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result, io_error};
 
+mod patch;
+
 /// Maximum encoded helper request, checked before parsing.
 pub const MAX_REQUEST_BYTES: usize = 256 * 1024;
 /// Maximum complete file size for reads, edits and scanned files.
@@ -48,6 +50,12 @@ struct ReadArgs {
     offset: usize,
     #[serde(default = "default_read_limit")]
     limit: usize,
+    #[serde(
+        default,
+        deserialize_with = "optional_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    expected_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,6 +129,22 @@ struct EditArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppendArgs {
+    path: String,
+    content: String,
+    expected_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PatchArgs {
+    path: String,
+    patch: String,
+    expected_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "tool",
     content = "arguments",
@@ -134,6 +158,8 @@ enum Operation {
     SearchFiles(SearchArgs),
     WriteFile(WriteArgs),
     EditFile(EditArgs),
+    AppendFile(AppendArgs),
+    ApplyPatch(PatchArgs),
 }
 
 impl Operation {
@@ -145,6 +171,8 @@ impl Operation {
             Self::SearchFiles(a) => &a.path,
             Self::WriteFile(a) => &a.path,
             Self::EditFile(a) => &a.path,
+            Self::AppendFile(a) => &a.path,
+            Self::ApplyPatch(a) => &a.path,
         }
     }
 
@@ -156,6 +184,8 @@ impl Operation {
             Self::SearchFiles(a) => &mut a.path,
             Self::WriteFile(a) => &mut a.path,
             Self::EditFile(a) => &mut a.path,
+            Self::AppendFile(a) => &mut a.path,
+            Self::ApplyPatch(a) => &mut a.path,
         }
     }
 }
@@ -201,7 +231,10 @@ impl FileRequest {
         })?;
         if matches!(
             request.operation,
-            Operation::WriteFile(_) | Operation::EditFile(_)
+            Operation::WriteFile(_)
+                | Operation::EditFile(_)
+                | Operation::AppendFile(_)
+                | Operation::ApplyPatch(_)
         ) {
             request.validate_mutation(request.operation.path())
                 .map_err(|_| denial("mutation target must be strictly inside the write root; outside and sibling paths are forbidden"))?;
@@ -252,7 +285,12 @@ impl FileRequest {
         canonical_path(&self.write_root)?;
         canonical_path(self.operation.path())?;
         match &self.operation {
-            Operation::ReadFile(a) => page_bounds(a.offset, a.limit, 16384, MAX_FILE_BYTES)?,
+            Operation::ReadFile(a) => {
+                page_bounds(a.offset, a.limit, 16384, MAX_FILE_BYTES)?;
+                if let Some(expected) = &a.expected_sha256 {
+                    validate_digest(expected)?;
+                }
+            }
             Operation::ListDir(a) => page_bounds(a.offset, a.limit, 256, MAX_ENTRIES)?,
             Operation::FindFiles(a) => {
                 page_bounds(a.offset, a.limit, 256, MAX_ENTRIES)?;
@@ -279,6 +317,16 @@ impl FileRequest {
                 if a.old_text.is_empty() {
                     return Err(failure("old_text must be nonempty"));
                 }
+                validate_digest(&a.expected_sha256)?;
+            }
+            Operation::AppendFile(a) => {
+                self.validate_mutation(&a.path)?;
+                text_bound(&a.content)?;
+                validate_digest(&a.expected_sha256)?;
+            }
+            Operation::ApplyPatch(a) => {
+                self.validate_mutation(&a.path)?;
+                text_bound(&a.patch)?;
                 validate_digest(&a.expected_sha256)?;
             }
         }
@@ -348,7 +396,7 @@ fn literal(text: &str, label: &str, empty_allowed: bool) -> Result<()> {
     }
 }
 
-fn validate_digest(value: &str) -> Result<()> {
+pub(crate) fn validate_digest(value: &str) -> Result<()> {
     let valid = value.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
             && hex
@@ -397,15 +445,25 @@ pub fn execute_file_request(request: &FileRequest) -> Result<Value> {
         Operation::WriteFile(a) => replace(
             request,
             &a.path,
-            Some(&a.content),
-            None,
+            Mutation::Write(&a.content),
             a.expected_sha256.as_deref(),
         )?,
         Operation::EditFile(a) => replace(
             request,
             &a.path,
-            None,
-            Some((&a.old_text, &a.new_text)),
+            Mutation::Edit(&a.old_text, &a.new_text),
+            Some(&a.expected_sha256),
+        )?,
+        Operation::AppendFile(a) => replace(
+            request,
+            &a.path,
+            Mutation::Append(&a.content),
+            Some(&a.expected_sha256),
+        )?,
+        Operation::ApplyPatch(a) => replace(
+            request,
+            &a.path,
+            Mutation::Patch(&a.patch),
             Some(&a.expected_sha256),
         )?,
     };
@@ -470,6 +528,16 @@ fn open_read(path: &str, nofollow: bool) -> Result<File> {
 
 fn read_page(args: &ReadArgs) -> Result<Value> {
     let bytes = bounded_read(open_read(&args.path, false)?)?;
+    let digest = sha256(&bytes);
+    if args
+        .expected_sha256
+        .as_ref()
+        .is_some_and(|expected| expected != &digest)
+    {
+        return Err(failure(
+            "read preimage changed; restart with explicit offset: 0 and no expected_sha256",
+        ));
+    }
     let text = std::str::from_utf8(&bytes).map_err(|_| failure("read_file requires UTF-8 text"))?;
     if args.offset > bytes.len() || !text.is_char_boundary(args.offset) {
         return Err(failure(
@@ -483,7 +551,6 @@ fn read_page(args: &ReadArgs) -> Result<Value> {
     if end == args.offset && end < bytes.len() {
         return Err(failure("limit is too small for the next UTF-8 character"));
     }
-    let digest = sha256(&bytes);
     let outcome = |end| {
         json!({
             "content":&text[args.offset..end], "sha256":digest,
@@ -1037,11 +1104,17 @@ fn same_preimage(first: &Option<Preimage>, fresh: &Option<Preimage>) -> bool {
     }
 }
 
+enum Mutation<'a> {
+    Write(&'a str),
+    Edit(&'a str, &'a str),
+    Append(&'a str),
+    Patch(&'a str),
+}
+
 fn replace(
     request: &FileRequest,
     path: &str,
-    content: Option<&str>,
-    edit: Option<(&str, &str)>,
+    mutation: Mutation<'_>,
     expected: Option<&str>,
 ) -> Result<Value> {
     let root = directory(&request.write_root)?;
@@ -1074,38 +1147,54 @@ fn replace(
             .ok_or_else(|| failure("expected preimage file does not exist"))?;
         if sha256(&original.bytes) != expected {
             return Err(failure(
-                "stale expected_sha256; read the file again before editing",
+                "stale expected_sha256; read_file with explicit offset: 0 before editing",
             ));
         }
     }
-    let new_bytes = if let Some((old, new)) = edit {
-        let original = first
-            .as_ref()
-            .ok_or_else(|| failure("edit target does not exist"))?;
-        let text = std::str::from_utf8(&original.bytes)
-            .map_err(|_| failure("edit_file requires UTF-8 text"))?;
-        let occurrences: Vec<usize> = text
-            .char_indices()
-            .filter_map(|(i, _)| text[i..].starts_with(old).then_some(i))
-            .take(2)
-            .collect();
-        if occurrences.len() != 1 {
-            return Err(failure(
-                "old_text must have exactly one occurrence, including overlapping matches",
-            ));
+    let new_bytes = match mutation {
+        Mutation::Write(content) => content.as_bytes().to_vec(),
+        Mutation::Append(content) => {
+            let original = first
+                .as_ref()
+                .ok_or_else(|| failure("append target does not exist"))?;
+            std::str::from_utf8(&original.bytes)
+                .map_err(|_| failure("append_file requires UTF-8 text"))?;
+            let mut bytes = original.bytes.clone();
+            bytes.extend_from_slice(content.as_bytes());
+            bytes
         }
-        let start = occurrences[0];
-        let end = start + old.len();
-        let mut bytes = Vec::with_capacity(original.bytes.len().saturating_add(new.len()));
-        bytes.extend_from_slice(&original.bytes[..start]);
-        bytes.extend_from_slice(new.as_bytes());
-        bytes.extend_from_slice(&original.bytes[end..]);
-        bytes
-    } else {
-        content
-            .ok_or_else(|| failure("missing replacement content"))?
-            .as_bytes()
-            .to_vec()
+        Mutation::Patch(patch) => {
+            let original = first
+                .as_ref()
+                .ok_or_else(|| failure("patch target does not exist"))?;
+            let text = std::str::from_utf8(&original.bytes)
+                .map_err(|_| failure("apply_patch requires UTF-8 text"))?;
+            patch::apply(text, patch)?.into_bytes()
+        }
+        Mutation::Edit(old, new) => {
+            let original = first
+                .as_ref()
+                .ok_or_else(|| failure("edit target does not exist"))?;
+            let text = std::str::from_utf8(&original.bytes)
+                .map_err(|_| failure("edit_file requires UTF-8 text"))?;
+            let occurrences: Vec<usize> = text
+                .char_indices()
+                .filter_map(|(i, _)| text[i..].starts_with(old).then_some(i))
+                .take(2)
+                .collect();
+            if occurrences.len() != 1 {
+                return Err(failure(
+                    "old_text must have exactly one occurrence, including overlapping matches",
+                ));
+            }
+            let start = occurrences[0];
+            let end = start + old.len();
+            let mut bytes = Vec::with_capacity(original.bytes.len().saturating_add(new.len()));
+            bytes.extend_from_slice(&original.bytes[..start]);
+            bytes.extend_from_slice(new.as_bytes());
+            bytes.extend_from_slice(&original.bytes[end..]);
+            bytes
+        }
     };
     if new_bytes.len() > MAX_FILE_BYTES {
         return Err(failure("replacement exceeds the file byte bound"));

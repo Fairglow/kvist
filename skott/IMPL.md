@@ -1,6 +1,108 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Prompt-local read continuation and incremental tools (2026-10-27)
+
+### Independent source-only observation
+
+A separate clean-slate observer inspected the native tool implementation and
+its test sources, excluding intent, queues, existing records, documentation,
+reviews, chat and Git history. It did not execute tests. The following is an
+excerpted summary of its source-derived observations, not a compliance claim.
+
+The registry exposes, in order, `shell`, `read_file`, `write_file`, `list_dir`,
+`find_files`, `search_files`, `edit_file`, `append_file`, `apply_patch`.
+Native arguments are closed typed objects. Explicit null is not omission for
+optional strings. Rendered native requests carry JSON rather than shell text.
+
+Each `Skott::run_controlled` invocation constructs a fresh executor bridge with
+a mutex-protected map of at most 4096 exact canonical path strings. The helper
+and direct executors remain stateless. Omitted offsets initially use zero;
+subsequent implicit reads receive the stored end offset and digest. Explicit
+offsets bypass injection. Changing limits does not reset a cursor. Mutations
+do not update it, so an implicit post-mutation read can fail stale and require
+an explicit zero-offset restart. The sequential runtime, not the mutex alone,
+keeps resolve/execute/observe ordered.
+
+Only successful, bounded, complete JSON pages with consistent offset, content
+length, continuation, total size and digest metadata advance state. Failed or
+malformed results do not advance it. The bridge cannot independently recompute
+a whole-file digest from a single page. Reads before EOF are repeatable; after
+EOF an explicit earlier offset remains repeatable, while terminal proposals use
+Sav's existing argument-based action detector. One additional empty EOF read
+can execute before identical later proposals are rejected.
+
+Dispatch recording receives the original proposal before cursor resolution.
+Successful page results contain the actual offset and digest; failed implicit
+continuations do not expose injected arguments through this bridge. No
+automatic effect replay or new filesystem/network authority was observed.
+
+Append requires an existing UTF-8 preimage and digest and inserts no newline.
+Patch requires an existing UTF-8 preimage and digest, exact ordered path-free
+unified hunks, valid coordinates/counts and LF transport lines. CR is content;
+the explicit no-final-newline marker removes the transport LF. All hunks are
+computed before replacement. Unsupported formats, stale/context mismatches,
+oversized results and no-change patches fail before installation.
+
+All mutations share descriptor-relative no-follow parent/target access,
+same-directory exclusive staging, file synchronization, a preimage recheck,
+atomic rename and directory synchronization. Replacements preserve mode, not
+ownership, ACLs, xattrs or hardlink identity. They are not transactional
+compare-and-swap against external writers. Post-rename I/O failures may report
+failure after an effect. Native sandbox requests stage private read-only
+payload/helper grants outside the workspace; host execution remains a separate
+unconfined path.
+
+### Implementer-executed evidence
+
+Before production changes, five incremental-tool regressions failed because
+the tools/read digest argument were absent. The loop continuation regression
+failed with repeated first-page content rather than interleaved next pages.
+
+The affected library/component/incremental/native-file/loop/steering suites
+passed: 224 + 40 + 7 + 36 + 45 + 6 tests. The explicitly selected real sandbox
+trial passed append and patch through the installed helper, workspace
+confinement, inaccessible outside content and denied host-loopback network.
+Strict all-target Skott Clippy, formatting and patch whitespace checks passed.
+These are finite local executions, not model-performance or blanket isolation
+claims. Live-model tests were not run.
+
+Subsequent result-bound/binary-preimage and stale-continuation recovery
+regressions, plus prompt/error-hint wording clarifications, are additional
+work beyond the observer's original source scope. Final execution passed
+224 library, 40 component, 8 incremental-file, 36 native-file, 46 loop and
+6 steering tests (360 total), plus the real sandbox trial. The added loop
+regression observes two identical failed continuations retaining their offset
+and digest, then successful explicit restart against a changed preimage.
+All-target strict Clippy, workspace formatting checks and patch whitespace
+checks passed again. No additional production algorithm changed.
+
+### Ancillary existing-code observations
+
+The source-only observer identified two existing-code issues outside this
+change's new cursor/append/patch behavior: host shell execution does not stage
+the script produced for commands over 4096 bytes (`host.rs:98-111`), and a
+new whole-file write target can equal its generated replacement filename,
+temporarily exposing that destination before the stale check fails
+(`file_tools.rs`, `Replacement::create` and `replace`). Neither existing
+mechanism was changed here. Append/patch require existing targets, which
+cannot be allocated by the exclusive temporary-file creation. These findings
+are retained for separate arbitration, not silently certified away.
+
+### Independent source-blind comparison
+
+A separate reviewer read only the scoped requirements, native-tool contract,
+tool-rendering design, root contract, this new implementation-record section
+and the finite execution log. Its report is retained at
+[`docs/reviews/tool-ergonomics-comparison.md`](../docs/reviews/tool-ergonomics-comparison.md).
+It found substantial correspondence and no concrete contradiction in the new
+cursor/append/patch behavior. It identified an underspecified no-op patch
+policy, later-observation and coverage limits, and retained the two ancillary
+existing-code findings for separate arbitration. The test log's aggregate
+counts do not independently prove individual assertions or identify all
+quality-gate commands. No intent was automatically changed to conceal these
+findings, and no acceptance or formal compliance is claimed.
+
 ## Repository scheduling configuration relocation (2026-10-25)
 
 ### Independent source-only observation

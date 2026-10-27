@@ -256,7 +256,9 @@ fn tool_definitions_have_stable_order_and_names() {
             "list_dir",
             "find_files",
             "search_files",
-            "edit_file"
+            "edit_file",
+            "append_file",
+            "apply_patch"
         ]
     );
 }

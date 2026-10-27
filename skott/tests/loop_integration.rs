@@ -370,7 +370,7 @@ fn make_session_with_tools(tool_defs: Vec<sav::ToolDefinition>) -> AgentSession 
 fn run_once(
     session: &mut AgentSession,
     transport: &ScriptedTransport,
-    executor: &RecordingExecutor,
+    executor: &impl ToolExecutor,
     sink: &Collector,
     cancellation: &CancellationToken,
     context: &mut ContextManager,
@@ -393,7 +393,7 @@ fn run_once(
 fn run_collected(
     session: &mut AgentSession,
     transport: &ScriptedTransport,
-    executor: &RecordingExecutor,
+    executor: &impl ToolExecutor,
     cancellation: &CancellationToken,
     context: &mut ContextManager,
     recorder: &mut FakeRecorder,
@@ -1277,7 +1277,11 @@ fn hardening_unchanged_repeated_actions_are_not_executed_again() {
 
 #[test]
 fn reliability_legitimate_native_rereads_do_not_trip_effect_breakers() {
-    let proposal = tool_turn("refresh", "read_file", json!({"path":"/workspace/file"}));
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let path = root.join("text");
+    std::fs::write(&path, "fresh").unwrap();
+    let proposal = tool_turn("refresh", "read_file", json!({"path":path,"offset":0}));
     let transport = ScriptedTransport::new(vec![
         proposal.clone(),
         proposal.clone(),
@@ -1286,7 +1290,10 @@ fn reliability_legitimate_native_rereads_do_not_trip_effect_breakers() {
         proposal,
         answer_turn("done"),
     ]);
-    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let executor = NativeReadExecutor {
+        root,
+        pages: Mutex::new(Vec::new()),
+    };
     let mut session = make_session();
     session.push_user("refresh state");
     let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
@@ -1301,6 +1308,235 @@ fn reliability_legitimate_native_rereads_do_not_trip_effect_breakers() {
     );
     assert!(summary.success(), "{summary:?}");
     assert_eq!(summary.tools_executed, 5);
+    assert_eq!(executor.pages.lock().unwrap().len(), 5);
+}
+
+struct NativeReadExecutor {
+    root: PathBuf,
+    pages: Mutex<Vec<serde_json::Value>>,
+}
+
+impl ToolExecutor for NativeReadExecutor {
+    fn execute(&self, intent: &ToolIntent, _: &CancellationToken) -> skott::Result<ToolOutcome> {
+        let request = skott::file_tools::FileRequest::new(
+            self.root.to_str().unwrap(),
+            &intent.name,
+            intent.arguments.clone(),
+        )?;
+        let page = skott::file_tools::execute_file_request(&request)?;
+        self.pages.lock().unwrap().push(page.clone());
+        Ok(success_outcome(&serde_json::to_string(&page).unwrap()))
+    }
+}
+
+#[test]
+fn omitted_read_offsets_advance_per_path_and_explicit_zero_restarts() {
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let a = root.join("a");
+    let b = root.join("b");
+    std::fs::write(&a, "aé\r\nlast").unwrap();
+    std::fs::write(&b, "123456").unwrap();
+    let transport = ScriptedTransport::new(vec![
+        tool_turn("a1", "read_file", json!({"path":a,"limit":3})),
+        tool_turn("b1", "read_file", json!({"path":b,"limit":2})),
+        tool_turn("a2", "read_file", json!({"path":a,"limit":2})),
+        tool_turn("b2", "read_file", json!({"path":b,"limit":4})),
+        tool_turn("reset", "read_file", json!({"path":a,"offset":0,"limit":1})),
+        tool_turn("a3", "read_file", json!({"path":a,"limit":2})),
+        answer_turn("done"),
+    ]);
+    let executor = NativeReadExecutor {
+        root,
+        pages: Mutex::new(Vec::new()),
+    };
+    let mut session = make_session();
+    session.push_user("read");
+    let result = Skott::default()
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &Collector::default(),
+            &CancellationToken::new(),
+            &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+        )
+        .unwrap();
+    assert!(result.success(), "{result:?}");
+    let pages = executor.pages.lock().unwrap();
+    let contents: Vec<_> = pages
+        .iter()
+        .map(|p| p["content"].as_str().unwrap())
+        .collect();
+    assert_eq!(contents, ["aé", "12", "\r\n", "3456", "a", "é"]);
+    assert_eq!(pages[5]["offset"], 1);
+}
+
+#[test]
+fn identical_omitted_reads_finish_large_escaped_file_then_trip_only_after_eof() {
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let path = root.join("text");
+    let text = "\"\\\né".repeat(5000);
+    std::fs::write(&path, &text).unwrap();
+    let proposal = tool_turn("read", "read_file", json!({"path":path,"limit":16384}));
+    let transport = ScriptedTransport::new(vec![proposal; 40]);
+    let executor = NativeReadExecutor {
+        root,
+        pages: Mutex::new(Vec::new()),
+    };
+    let mut session = make_session();
+    session.push_user("read");
+    let result = Skott::default()
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &Collector::default(),
+            &CancellationToken::new(),
+            &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+        )
+        .unwrap();
+    assert!(
+        result
+            .failure
+            .as_deref()
+            .is_some_and(|s| s.contains("circuit breaker")),
+        "{result:?}"
+    );
+    let pages = executor.pages.lock().unwrap();
+    let joined: String = pages
+        .iter()
+        .map(|p| p["content"].as_str().unwrap())
+        .collect();
+    assert_eq!(joined, text);
+    assert!(pages.last().unwrap()["next_offset"].is_null());
+    assert_eq!(pages.iter().filter(|p| p["content"] == "").count(), 1);
+}
+
+#[test]
+fn empty_file_terminal_repeats_are_bounded_and_new_prompt_restarts() {
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let path = root.join("text");
+    std::fs::write(&path, "").unwrap();
+    let proposal = tool_turn("read", "read_file", json!({"path":path}));
+    let executor = NativeReadExecutor {
+        root,
+        pages: Mutex::new(Vec::new()),
+    };
+    let mut session = make_session();
+    session.push_user("read");
+    let result = Skott::default()
+        .run(
+            &mut session,
+            &ScriptedTransport::new(vec![proposal.clone(); 10]),
+            &executor,
+            &Collector::default(),
+            &CancellationToken::new(),
+            &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+        )
+        .unwrap();
+    assert!(result.failure.is_some(), "{result:?}");
+    assert_eq!(executor.pages.lock().unwrap().len(), 2);
+    std::fs::write(&path, "new").unwrap();
+    session.push_user("read again");
+    let result = Skott::default()
+        .run(
+            &mut session,
+            &ScriptedTransport::new(vec![proposal, answer_turn("done")]),
+            &executor,
+            &Collector::default(),
+            &CancellationToken::new(),
+            &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+        )
+        .unwrap();
+    assert!(result.success(), "{result:?}");
+    assert_eq!(
+        executor.pages.lock().unwrap().last().unwrap()["content"],
+        "new"
+    );
+}
+
+#[test]
+fn stale_continuations_do_not_advance_and_explicit_restart_recovers() {
+    struct ChangingReadExecutor {
+        native: NativeReadExecutor,
+        path: PathBuf,
+        arguments: Mutex<Vec<serde_json::Value>>,
+    }
+    impl ToolExecutor for ChangingReadExecutor {
+        fn execute(
+            &self,
+            intent: &ToolIntent,
+            token: &CancellationToken,
+        ) -> skott::Result<ToolOutcome> {
+            self.arguments
+                .lock()
+                .unwrap()
+                .push(intent.arguments.clone());
+            let outcome = self.native.execute(intent, token)?;
+            if self.arguments.lock().unwrap().len() == 1 {
+                std::fs::write(&self.path, "newbytes").unwrap();
+            }
+            Ok(outcome)
+        }
+    }
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let path = root.join("text");
+    std::fs::write(&path, "original").unwrap();
+    let proposal = tool_turn("read", "read_file", json!({"path":path,"limit":2}));
+    let transport = ScriptedTransport::new(vec![
+        proposal.clone(),
+        proposal.clone(),
+        proposal,
+        tool_turn(
+            "restart",
+            "read_file",
+            json!({"path":path,"offset":0,"limit":3}),
+        ),
+        answer_turn("done"),
+    ]);
+    let executor = ChangingReadExecutor {
+        native: NativeReadExecutor {
+            root,
+            pages: Mutex::new(Vec::new()),
+        },
+        path,
+        arguments: Mutex::new(Vec::new()),
+    };
+    let mut session = make_session();
+    session.push_user("read");
+    let sink = Collector::default();
+    let result = Skott::default()
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &sink,
+            &CancellationToken::new(),
+            &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+        )
+        .unwrap();
+    assert!(result.success(), "{result:?}");
+    assert_eq!(result.tools_executed, 2);
+    let args = executor.arguments.lock().unwrap();
+    assert_eq!(args[1]["offset"], 2);
+    assert_eq!(args[2], args[1]);
+    assert_eq!(args[3]["offset"], 0);
+    assert!(args[3].get("expected_sha256").is_none());
+    assert_eq!(executor.native.pages.lock().unwrap()[1]["content"], "new");
+    assert!(
+        sink.events()
+            .iter()
+            .any(|e| matches!(e, Event::Note(text) if text.contains("offset: 0")))
+    );
 }
 
 #[test]

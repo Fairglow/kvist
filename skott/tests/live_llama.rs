@@ -58,9 +58,28 @@ fn real_sandbox_confines_native_files_and_denies_host_network() {
         serde_json::json!({"path":"/workspace/file.txt"}),
     );
     assert_eq!(read.status, Some(0));
+    let page: serde_json::Value = serde_json::from_slice(&read.stdout).unwrap();
+    assert_eq!(page["content"], "confined");
+    let appended = invoke(
+        "append_file",
+        serde_json::json!({
+            "path":"/workspace/file.txt","content":"\nnext\n","expected_sha256":page["sha256"]
+        }),
+    );
+    assert_eq!(appended.status, Some(0), "{}", appended.error_text(1000));
+    let appended: serde_json::Value = serde_json::from_slice(&appended.stdout).unwrap();
+    let patched = invoke(
+        "apply_patch",
+        serde_json::json!({
+            "path":"/workspace/file.txt",
+            "patch":"@@ -1,2 +1,2 @@\n confined\n-next\n+patched\n",
+            "expected_sha256":appended["sha256"]
+        }),
+    );
+    assert_eq!(patched.status, Some(0), "{}", patched.error_text(1000));
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&read.stdout).unwrap()["content"],
-        "confined"
+        std::fs::read(workspace.join("file.txt")).unwrap(),
+        b"confined\npatched\n"
     );
     let denied = invoke("read_file", serde_json::json!({"path":outside}));
     assert_ne!(denied.status, Some(0));
@@ -179,7 +198,7 @@ fn live_llama_reads_edits_and_verifies_inside_the_real_sandbox() {
         "Use read_file on /workspace/answer.txt to obtain its sha256. Then use edit_file \
          with that expected_sha256 to replace exactly 'answer = 41' with 'answer = 42'. \
          Preserve all other bytes, including CRLF and the missing final newline. \
-         Read the file again to verify. Do not use shell or write_file. Finally reply DONE.",
+         Read the file again with offset: 0 to verify. Do not use shell or write_file. Finally reply DONE.",
     );
     let sink = Events::default();
     let mut log = SessionLog::open(&root.path().join("logs"), "live-isolated-edit").unwrap();

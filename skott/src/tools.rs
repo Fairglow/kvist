@@ -300,7 +300,7 @@ impl ToolRegistry {
         for (name, description, extra, required, read) in [
             (
                 "read_file",
-                "Read a UTF-8 byte page (default 4096, maximum 16384), with full-file sha256, total_bytes and next_offset. Omitting offset reads page zero; offsets are bytes, NOT lines. Complete files are bounded to 1 MiB. Pages dynamically shrink on UTF-8 boundaries so complete JSON and digest metadata fit within 7000 encoded bytes; resume at actual next_offset until null.",
+                "Read a UTF-8 byte page (default 4096, maximum 16384), with full-file sha256, total_bytes and next_offset. Within this prompt, omitting offset continues this path's last successful page (initially zero); explicit offset: 0 restarts. Offsets are bytes, NOT lines. EOF returns an empty page on continuation; repeated EOF reads are loop-detected. Continuation rejects changed files: restart explicitly. Complete files are bounded to 1 MiB. Pages dynamically shrink on UTF-8 boundaries to fit 7000 encoded bytes. Optional expected_sha256 guards explicit reads.",
                 None,
                 vec!["path"],
                 true,
@@ -346,6 +346,26 @@ impl ToolRegistry {
                 vec!["path", "old_text", "new_text", "expected_sha256"],
                 false,
             ),
+            (
+                "append_file",
+                "Atomically append content verbatim to an existing UTF-8 file inside the write root, only when expected_sha256 matches. No newline is inserted. Preserves prior bytes and mode. Content maximum 64 KiB, resulting file maximum 1 MiB.",
+                Some((
+                    "content",
+                    "The UTF-8 content to append, without an implicit newline.",
+                )),
+                vec!["path", "content", "expected_sha256"],
+                false,
+            ),
+            (
+                "apply_patch",
+                "Atomically update one existing UTF-8 file using strict unified-diff hunks and expected_sha256. Supply @@ -old_start[,count] +new_start[,count] @@ and space/-/+ lines ending in LF, with optional \\ No newline at end of file markers. No file headers, paths, fuzz, renames or multi-file operations. Exact coordinates, context and counts required. CR before LF remains content. Patch maximum 64 KiB, result maximum 1 MiB.",
+                Some((
+                    "patch",
+                    "Single-file unified hunks only, without ---/+++ file headers.",
+                )),
+                vec!["path", "patch", "expected_sha256"],
+                false,
+            ),
         ] {
             let mut properties = serde_json::json!({
                 "path":{"type":"string","description":"Canonical absolute path; no . or .. components.","maxLength":4096}
@@ -354,11 +374,14 @@ impl ToolRegistry {
                 name,
                 "read_file" | "list_dir" | "find_files" | "search_files"
             ) {
-                properties["offset"] = serde_json::json!({"type":"integer","minimum":0,"maximum":if read {1048576} else {4096},"default":0});
+                properties["offset"] = serde_json::json!({"type":"integer","minimum":0,"maximum":if read {1048576} else {4096}});
+                if !read {
+                    properties["offset"]["default"] = serde_json::json!(0);
+                }
                 properties["limit"] = serde_json::json!({"type":"integer","minimum":1,"maximum":if read {16384} else {256},"default":if read {4096} else {100}});
             }
             if let Some((field, desc)) = extra {
-                properties[field] = serde_json::json!({"type":"string","description":desc,"maxLength":if field == "content" {65536} else {1024}});
+                properties[field] = serde_json::json!({"type":"string","description":desc,"maxLength":if matches!(field, "content" | "patch") {65536} else {1024}});
             }
             if matches!(name, "find_files" | "search_files") {
                 properties["include_generated"] = serde_json::json!({
@@ -377,7 +400,10 @@ impl ToolRegistry {
                     serde_json::json!({"type":"string","minLength":1,"maxLength":65536});
                 properties["new_text"] = serde_json::json!({"type":"string","maxLength":65536});
             }
-            if matches!(name, "write_file" | "edit_file") {
+            if matches!(
+                name,
+                "read_file" | "write_file" | "edit_file" | "append_file" | "apply_patch"
+            ) {
                 properties["expected_sha256"] = serde_json::json!({"type":"string","description":"sha256: followed by 64 lowercase hexadecimal digits."});
             }
             definitions.push(ToolDefinition {
@@ -397,7 +423,7 @@ impl ToolRegistry {
         match intent.name.as_str() {
             "shell" => self.render_shell(intent),
             "read_file" | "write_file" | "list_dir" | "find_files" | "search_files"
-            | "edit_file" => {
+            | "edit_file" | "append_file" | "apply_patch" => {
                 let request = FileRequest::for_registry(
                     &self.policy.write_root,
                     &intent.name,

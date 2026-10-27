@@ -5,6 +5,8 @@ Sav is the shared headless runtime library. Skott is its interactive/headless
 workspace client and independent run inspector. Kvist/maerg owns protected task
 authority, workflow and canonical evidence; Galla enforces approved effects.
 Skott links Sav, not the `sav-run` executable.
+Its native workspace tools and deliberately separate dependency-acquisition
+boundary are described in [Native agent toolkit](agent-toolkit.md).
 
 ## Select a backend, not a different source of truth
 
