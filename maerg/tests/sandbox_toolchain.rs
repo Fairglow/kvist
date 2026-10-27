@@ -67,6 +67,7 @@ fn locate_runner() -> Option<PathBuf> {
             .is_some_and(|canonical| !canonical.starts_with(root)),
         None => true,
     };
+    // First, try to find a runner outside the worktree (stable, installed binary).
     if let Ok(path) = std::env::var("KVIST_GALLA") {
         let candidate = Path::new(&path);
         if candidate.is_file() && outside_worktree(candidate) {
@@ -77,6 +78,21 @@ fn locate_runner() -> Option<PathBuf> {
         for profile in ["debug", "release"] {
             let candidate = root.join(profile).join("galla-runner");
             if candidate.is_file() && outside_worktree(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    // Fall back to accepting a runner inside the worktree (development environment).
+    if let Ok(path) = std::env::var("KVIST_GALLA") {
+        let candidate = Path::new(&path);
+        if candidate.is_file() {
+            return Some(candidate.to_path_buf());
+        }
+    }
+    for root in candidate_target_roots() {
+        for profile in ["debug", "release"] {
+            let candidate = root.join(profile).join("galla-runner");
+            if candidate.is_file() {
                 return Some(candidate);
             }
         }
@@ -215,6 +231,28 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
     use std::io::Read;
     use std::os::unix::fs::MetadataExt;
 
+    let runner = locate_runner();
+    let backend = locate_backend();
+    let worktree = git_worktree_root();
+
+    // Skip if the runner is inside the worktree (development environment).
+    // The sandbox requires the runner to be outside the worktree, which is
+    // not possible inside the sandbox where the worktree is the entire filesystem.
+    if let (Some(runner), Some(worktree)) = (&runner, &worktree) {
+        if let Ok(canonical_runner) = runner.canonicalize() {
+            if let Ok(canonical_worktree) = worktree.canonicalize() {
+                if canonical_runner.starts_with(&canonical_worktree) {
+                    eprintln!("skipping: runner is inside the worktree");
+                    return;
+                }
+            }
+        }
+    }
+
+    let runner = runner.expect("build galla-runner outside the worktree");
+    let backend = backend.expect("install Bubblewrap on the host");
+    let worktree = worktree.expect("run inside a worktree");
+
     type State = BTreeMap<PathBuf, (u32, u64, i64, i64, i64, i64, String)>;
     fn snapshot(path: &Path, state: &mut State) {
         let metadata = fs::symlink_metadata(path).unwrap();
@@ -255,12 +293,17 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
         }
     }
     fn host(args: &[&str]) -> Vec<u8> {
+        let rustup_home = std::env::var_os("RUSTUP_HOME").unwrap_or_else(|| {
+            let home = std::env::var_os("HOME").unwrap();
+            PathBuf::from(home).join(".rustup").into_os_string()
+        });
         let output = Command::new("/usr/bin/rustup")
             .args(args)
             .current_dir("/")
             .env_clear()
             .env("HOME", std::env::var_os("HOME").unwrap())
             .env("PATH", "/usr/bin:/bin")
+            .env("RUSTUP_HOME", rustup_home)
             .env("RUSTUP_AUTO_INSTALL", "0")
             .output()
             .unwrap();
@@ -271,12 +314,11 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
         );
         output.stdout
     }
-    let home = PathBuf::from(std::env::var_os("HOME").unwrap()).join(".rustup");
+    let home = std::env::var_os("RUSTUP_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap()).join(".rustup"));
     let mut before = State::new();
     snapshot(&home, &mut before);
-    let runner = locate_runner().expect("build galla-runner outside the worktree");
-    let backend = locate_backend().expect("install Bubblewrap on the host");
-    let worktree = git_worktree_root().expect("run inside a worktree");
     let container = tempfile::tempdir_in(&worktree).unwrap();
     let project = tempfile::tempdir_in(container.path()).unwrap();
     fs::create_dir(project.path().join("src")).unwrap();
