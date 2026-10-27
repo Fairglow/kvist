@@ -10,6 +10,58 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "blad-mermaid-policy-tests"
+    title: "write_tests: pin native Mermaid scheduling coverage"
+    description: "Reproduce the missing color-geometry allocation and add a persistent repository regression for native-engine fixture coverage, whole-pool slots and CI inheritance."
+    context: "The supplied failure is deadline_exceeded during admission. The tracked three-name override omits color_depth_never_changes_visible_geometry. Three local full-suite iterations passed before repair; the timing failure is not claimed reproduced. The new persistent policy regression failed with 0 matching complete-scope rules before implementation."
+    purpose: "Prevent another omitted engine caller from repeating the scheduling gap."
+    expected_outcome: "The old three-name configuration fails the new coverage regression."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    timestamps: {created_at: "2026-10-27T15:17:17Z", updated_at: "2026-10-27T15:17:17Z", completed_at: "2026-10-27T15:17:17Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-mermaid-policy-code"
+    title: "implement_code: cover native-engine fixture execution"
+    description: "Repair the shared scheduling selector, wire its regression into repository CI and document exact scope without changing rendering source, deadlines, assertions, retries or skips."
+    context: "The complete selector and CI-wired Python regression pass. All 318 all-feature and 297 standalone tests pass; 20 default and 20 inherited-CI iterations each pass 840 selected/control instances. Events show no reserved-fixture overlap and retain ordinary concurrency. Rendering/test sources and the dirty justfile are untouched. DESIGN.md records the advisory exception."
+    purpose: "Separate semantic/resource assertions from avoidable runner starvation."
+    expected_outcome: "Native-engine fixtures reserve the pool and unrelated tests remain parallel."
+    kind: implementation
+    status: completed
+    depends_on: ["blad-mermaid-policy-tests"]
+    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    timestamps: {created_at: "2026-10-27T15:17:17Z", updated_at: "2026-10-27T15:27:38Z", completed_at: "2026-10-27T15:27:38Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-mermaid-policy-audit"
+    title: "security_audit: observe scheduling and retained bounds"
+    description: "Independently derive scoped observations from policy, regression and rendering/cancellation source, excluding intent and prior records."
+    context: "Independent source-only mermaid-policy-observer described the exact fixture scope, CI wiring, inherited allocation and retained deadline/cancellation/resource assertions. IMPL.md retains the static regression limits, uninspected delegated Markdown test body and pre-existing color-test native-marker gap. No new runtime authority or safety certification."
+    purpose: "Verify that a test-policy repair does not weaken rendering boundaries."
+    expected_outcome: "Source-only implementation observations with explicit finite scope."
+    kind: security-audit
+    status: completed
+    depends_on: ["blad-mermaid-policy-code"]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    timestamps: {created_at: "2026-10-27T15:17:17Z", updated_at: "2026-10-27T15:27:38Z", completed_at: "2026-10-27T15:27:38Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-mermaid-policy-review"
+    title: "compliance_review: compare scheduling coverage evidence"
+    description: "Compare local intent with independently observed behavior and attributed repeated default/CI execution in a separate source-blind context."
+    context: "Separate source-blind mermaid-policy-comparator established no concrete scoped scheduling mismatch. IMPL.md retains the unmeasured timeout cause, external-load/alternate-runner limits, static-policy versus event distinction, uninspected Markdown body, color-fallback equality possibility, absent active-layout cancellation and unrepeated R-040 corpus measurements. Intent validates structurally; no acceptance or certification is implied."
+    purpose: "Keep implementation and independent comparison separate."
+    expected_outcome: "Persistent diagnostic comparison and any discrepancies for arbitration."
+    kind: compliance-review
+    status: completed
+    depends_on: ["blad-mermaid-policy-audit"]
+    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    timestamps: {created_at: "2026-10-27T15:17:17Z", updated_at: "2026-10-27T15:32:07Z", completed_at: "2026-10-27T15:32:07Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "blad-mermaid-deadline-tests"
     title: "write_tests: diagnose concurrent Mermaid deadlines"
     description: "Use supplied deadline failures, effective nextest scheduling and existing cancellation/budget assertions to distinguish scheduling starvation from resource-admission defects."

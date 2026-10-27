@@ -4,6 +4,93 @@
 
 Date: 2026-10-12
 
+## Scoped native-Mermaid scheduling follow-up - 2026-10-27
+
+Independent clean-slate `mermaid-policy-observer` read only the scheduling
+configuration, Python regression, CI invocation and scoped renderer/test
+source. It read no intent, queues, prior records, reviews, session artifacts
+or Git history, ran no tests and made no compliance judgment. Its observations:
+
+- The dedicated `diagrams`/`mermaid_backend` binaries, Markdown Mermaid test,
+  adapter budget module and exact color-geometry, runtime-tool independence,
+  session dump and viewer resize tests reserve `num-test-threads`. Empty CI
+  configuration inherits this policy. Other mixed-suite tests retain parallel
+  eligibility; source/fallback cases inside dedicated binaries are reserved.
+- The Python regression checks an exact whitespace-normalized selector, its
+  full-pool allocation, the preceding Skott override and absence of CI
+  overrides. CI invokes it. It does not interpret filters, discover tests or
+  measure scheduling.
+- Source assertions cover spatial geometry, labels/directions, Unicode,
+  resource rejection/reuse and exact encoded-byte boundaries. Selected
+  CLI/session tests require native box glyphs; viewer coverage checks scrolling
+  and resize. The color-depth test compares plain output with twelve styled
+  combinations, but lacks its own native-success marker: identical fallback
+  output could satisfy equality.
+- The 500 ms child deadline covers preflight, initialization, parsing,
+  admission and rendering with cooperative checkpoints, not preemption.
+  Cancellation remains distinct. Tests do not deterministically cancel during
+  active native layout.
+- Static observation found 32 nonignored candidate instances plus the selected
+  Markdown test. That test body was not inspected: `markdown.rs` delegates to
+  `markdown_tests.rs`, outside the observer's allowed file list. This is an
+  explicit observation-scope gap, not an observed missing implementation.
+
+### Attributed diagnosis and execution
+
+The supplied failure is `deadline_exceeded` during admission, not a geometry
+assertion or deterministic resource rejection. The previous three-name filter
+omitted the color-depth test and other native-engine fixtures. Three local
+full-suite iterations before repair all passed; the original timing failure
+and its external scheduling cause were not locally reproduced or measured.
+`show-config test-groups` reports group membership, not thread allocation,
+and is not evidence of reservation by itself.
+
+The persistent Python regression failed against the old configuration with
+zero complete-scope rules and passed after repair. Implementer execution used
+`--offline --locked`: all-feature nextest passed 318 tests, standalone nextest
+passed 297, each with three pre-existing ignored characterizations. Twenty
+default-profile iterations at CPU-count concurrency and twenty inherited-CI
+iterations at four workers each passed 42 selected/control instances: 840
+per profile, including all 33 native-fixture instances twenty times each.
+The unchanged reported geometry test also passed twenty isolated CI iterations.
+
+Structured start/finish events show no overlapping execution involving a
+reserved fixture. Ordinary concurrency reached twenty in the full run, five
+in selected default runs and four in selected CI runs. The event check
+normalizes stress indices and excludes the three existing ignored fixtures:
+nextest emits synthetic starts even for filtered ignored cases, sometimes
+without a matching ignored event. This exclusion does not add test skips.
+All-feature and standalone strict Clippy, workspace formatting, the two Python
+policy checks and whitespace checks passed. Implementer diff inspection confirms
+no renderer/test-source changes, deadline increases, retries or added skips.
+The component intent validator reported valid documents without acceptance.
+
+Reservation coordinates only one configured nextest invocation. It does not
+isolate external processes, other invocations or arbitrary runners/configs;
+the original timeout cannot be claimed universally eliminated.
+
+### Independent source-blind follow-up comparison
+
+Separate `mermaid-policy-comparator` read scoped intent and only this follow-up
+evidence section, without source, test/configuration files, queues, Git history
+or earlier implementation records. Its comparison:
+
+No concrete scoped scheduling mismatch is established. Independent source
+observations support whole-pool reservations, CI inheritance and preserved
+deadline/cancellation semantics.
+
+Static policy checks establish configuration shape, not complete caller
+discovery or actual scheduling. Implementer-attributed events report fixture
+exclusion and preserved ordinary concurrency. Attributed 318/297-suite results
+and twenty iterations per default/CI profile of 42 instances support finite
+local success, not universal flake elimination or proof of the original
+timeout's cause.
+
+Evidence limits: uninspected Markdown test body; color equality can pass
+identical fallbacks; no deterministic active-layout cancellation; R-040 corpus
+measurements not re-established. These are evidence gaps, not established
+implementation violations. No acceptance or certification follows.
+
 ## Scoped Mermaid deadline scheduling observation - 2026-10-27
 
 Independent clean-slate `mermaid-deadline-observer` read only nextest policy,

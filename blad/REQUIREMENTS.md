@@ -177,6 +177,16 @@ live-follow features proposed in the blad implementation plan.
     unbounded persistent caches and per-render terminal/process effects. Record
     measured diagram corpus cost and numeric limits before backend admission.
 
+Repository nextest verification of R-033 and R-037--R-039 MUST reserve the
+current test pool for native-Mermaid fixture execution, including the dedicated
+diagram/backend suites and mixed Markdown, color-geometry, CLI/session and
+viewer regressions that invoke the engine. Unrelated tests MUST remain parallel.
+A persistent repository-policy regression MUST reject missing coverage or
+weakened pool reservations, including CI-profile inheritance. Preserve existing
+render assertions, cancellation semantics and production limits; do not retry
+or skip failures. This coordinates one configured runner, not external host
+processes, concurrent runners or arbitrary configurations.
+
 ### Accepted viewer polish
 
 41. **R-041 Navigation:** Follow inline/reference links without entering a
