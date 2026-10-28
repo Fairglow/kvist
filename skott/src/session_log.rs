@@ -59,8 +59,8 @@ pub struct SessionMetadata {
     pub context_source: String,
     pub response_reserve: u32,
     pub response_source: String,
-    pub max_run_tokens: u64,
-    pub max_run_secs: u64,
+    pub max_run_tokens: Option<u64>,
+    pub max_run_secs: Option<u64>,
 }
 
 fn hash(bytes: &[u8]) -> String {
@@ -643,8 +643,8 @@ mod tests {
                     context_source: "test".into(),
                     response_reserve: 1024,
                     response_source: "test".into(),
-                    max_run_tokens: 10000,
-                    max_run_secs: 30,
+                    max_run_tokens: Some(10000),
+                    max_run_secs: Some(30),
                 });
         log.session_start().unwrap();
         let value: Value =

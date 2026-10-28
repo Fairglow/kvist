@@ -21,8 +21,8 @@ as tasks and running submissions as guidance. The pending mailbox has at most
 32 messages and 1 MiB of text; tasks are at most 1 MiB and guidance 64 KiB each.
 IDs are monotonically increasing, run-owner-local `GuidanceId`s. `edit` and
 `withdraw` succeed only before claim. Delivery preserves submission order,
-conversation grouping, original goal, observed effects, wall/token charges,
-generation attempt counts and effect-repeat protection. Interrupted provider
+conversation grouping, original goal, observed effects, wall/token charges
+and effect-repeat protection. Delivery renews generation attempts. Interrupted provider
 partials are provisional and never executable. Remaining stale calls receive
 explicit not-executed results before guidance is appended.
 
@@ -42,6 +42,22 @@ and pending guidance within a 10-ms polling interval; it never resets the
 prompt token. Executing effects must use the prompt token instead.
 `validate_turn` checks complete finish classification and bounded, unique tool
 proposals without authorizing them.
+
+`NativeRuntime.max_turns: Option<u32>` defaults to `None`; `with_retry`
+accepts either a positive cap or `None`. `RunLimits.wall_time:
+Option<Duration>` and `max_tokens: Option<u64>` default to `None`; supplied
+values must be positive, and wall time must fit the monotonic clock.
+`response_reserve` remains bounded and mandatory. Limits apply to one task,
+not the conversation. Delivered guidance renews only the unattended turn and
+generation-attempt allowances. Explicit whole-task wall/token accounting and
+effect-repeat protection persist. `MAX_TURNS = 500` remains the conservative
+host/review policy bound, not a sandboxed runtime ceiling.
+`ContextManager::compactions()` and `Event::Progress.compactions` report
+successful context reductions across that manager's lifetime.
+`AgentSession::prepare_request` returns the fitted request and optional
+compaction metadata and retains the fitted conversation only on success.
+Preflight also compacts before exceeding the shared transport's 1024-message
+bound, even when a large token window has not reached its warm-up threshold.
 
 ## Shared registry configuration (ADR 0015)
 
@@ -144,7 +160,13 @@ does not become native tool intent and cannot mint task approval.
 delimited JSON record has `schema_version: 1`, one stable `run_id`, a contiguous
 one-based `sequence`, and a JSON object `event` with a string `type`. The writer
 creates `run_start` and explicitly finishes with `run_end`. Records fit 64 KiB,
-the journal fits 64 MiB, and IDs fit 128 ASCII identifier bytes.
+each segment fits 64 MiB, and IDs fit 128 ASCII identifier bytes.
+The initial path is stable; successive files append `.part-NNNNNN` to its
+filename. A reserved `journal_segment` event links the next segment by index,
+preserving run identity and sequence. Followers opened at the initial path
+cross these links using the held directory, reject missing/invalid segments,
+and report an incomplete run until `run_end`. Total disk usage is not capped;
+disk errors remain terminal before subsequent effects.
 `record` appends; `checkpoint` synchronizes before effects; `finish` synchronizes
 a terminal disposition. Failed writes poison the writer. Dropping it does not
 invent a terminal result or imply absent effects.

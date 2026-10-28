@@ -1,6 +1,8 @@
 """Repository-only scheduling checks; not part of standalone Blad packaging."""
 
 import pathlib
+import shlex
+import subprocess
 import tomllib
 import unittest
 
@@ -24,8 +26,44 @@ def normalized(expression):
 
 class NextestPolicyTests(unittest.TestCase):
     def setUp(self):
-        with (ROOT / "tools/nextest.toml").open("rb") as source:
+        with (ROOT / ".config/nextest.toml").open("rb") as source:
             self.profiles = tomllib.load(source)["profile"]
+
+    def test_policy_is_at_nextests_default_discovery_path(self):
+        config = ROOT / ".config/nextest.toml"
+        self.assertTrue(config.is_file(), "ordinary nextest runs must discover the policy")
+        with config.open("rb") as source:
+            self.assertEqual(tomllib.load(source)["profile"], self.profiles)
+        self.assertFalse((ROOT / "tools/nextest.toml").exists(),
+                         "keep one canonical scheduling policy, not divergent copies")
+
+    def test_only_the_shared_policy_is_exposed_by_git_ignore_rules(self):
+        for path, expected in [
+            (".config/nextest.toml", 1),
+            (".config/local-settings.toml", 0),
+            (".config/private/settings.toml", 0),
+        ]:
+            with self.subTest(path=path):
+                result = subprocess.run(
+                    ["git", "check-ignore", "--no-index", "--quiet", path],
+                    cwd=ROOT, capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, expected, result.stderr)
+
+    def test_repository_entrypoints_use_standard_discovery(self):
+        for path in ["justfile", ".github/workflows/rust.yml"]:
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text().replace("\\\n", " ")
+                commands = [line[line.index("cargo nextest run"):]
+                            for line in source.splitlines() if "cargo nextest run" in line]
+                self.assertEqual(len(commands), 2)
+                for command in commands:
+                    arguments = shlex.split(command)
+                    self.assertFalse(
+                        any(arg == "--config-file" or arg.startswith("--config-file=")
+                            for arg in arguments),
+                        "repository entrypoints must exercise default discovery",
+                    )
 
     def test_native_mermaid_fixture_scope_reserves_the_whole_pool(self):
         rules = self.profiles["default"]["overrides"]

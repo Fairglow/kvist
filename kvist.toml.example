@@ -109,6 +109,10 @@ model = "Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL"
 
 [agent.roles.developer]
 profile = "tiel-coder-35b-q4"
+# Whole authoring task budget: default 300 seconds, maximum 2592000 (30 days).
+# For overnight work, explicitly set 86400, then review and reapprove policy.
+# timeout_seconds = 86400
+# Optional cumulative token_limit remains independent of the wall budget.
 
 [agent.roles.architect]
 profile = "qwen38-27b-q4"

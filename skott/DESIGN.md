@@ -55,9 +55,15 @@ to the conversation as user messages, preserving the original task objective and
 all completed filesystem effects. The worker loop checks for pending steering
 messages before each model request and before entering backoff. The UI reports
 steering as "interrupting" during delivery and "added to model context" after
-successful delivery. Per-prompt budgets (wall time, tokens) are preserved across
-steering deliveries; steering cannot reset retry accounting or repeated-action
-protection.
+successful delivery. Explicit per-task budgets (wall time, tokens) are preserved across steering
+deliveries. Delivery renews the unattended turn and generation-attempt
+allowances, never repeated-action protection. Sandboxed defaults have no run
+caps; host/review policy remains finite. The UI renders the shared context
+manager's cumulative successful-compaction count independently of its
+conditional compaction-progress/ETA field. Log budget metadata is optional.
+A new conversation clears run/spinner state, queued prompts, pending streamed
+content, hidden reasoning, growth forecasts, clipboard staging and statistics,
+including the compaction count; model, effort and display preferences survive.
 
 ### Shared runtime steering delivery (ADR 0015)
 
@@ -607,14 +613,14 @@ Libtest fixtures in that test binary use process-local `#[serial]` locks.
 Nextest launches each test in a separate process, so those locks cannot
 coordinate its tests. The repository-wide trial inspects the same live tree
 in which fixtures from multiple binaries temporarily create sandbox-only
-links. The tracked `tools/nextest.toml` selects its exact package, binary and test and
+links. The tracked `.config/nextest.toml` selects its exact package, binary and test and
 sets `threads-required = "num-test-threads"` in a default-profile override.
-The repository's `just test` recipe explicitly selects this file; it does not
-depend on nextest's discovery of the ignored sandbox-local `.config/nextest.toml`.
+Normal nextest runs, repository recipes and workspace CI automatically discover
+this canonical policy. Only that file is excepted from `.config` ignore rules.
 It reserves the entire current nextest pool, including when `-j` changes its
 size, without serializing unrelated tests. A one-member serial group would
 not exclude tests outside that group. The configuration regression pins the
-exact selector and full-pool requirement. A recipe regression pins explicit
+exact selector and full-pool requirement. A recipe regression pins automatic
 configuration selection, and tracked-only checkout verification demonstrates
 that neither check requires sandbox-local files. Actual nextest start/finish events
 verify exclusivity and retained ordinary parallelism. Separate invocations and
@@ -748,6 +754,21 @@ Deduplicated directory scheduling charges two retained path representations,
 caps their bytes at 32 MiB, and rejects depth above 128 or more than 1,000,000
 entries. One 30-second cooperative preflight guard bounds both stages.
 Enumeration/read-link failures are errors, not skipped entries or empty targets.
+Writable-scope traversal uses at most eight scoped workers. A mutex owns the
+pending directory stack, visited set, charged path bytes and active count;
+one atomic entry counter applies across workers. A condition variable wakes
+idle workers when children arrive or the last active directory finishes.
+Workers wait with finite cancellation/deadline polling. Each worker's exit
+guard signals shared stop and wakes waiters, including during unwinding.
+All spawn/join results are inspected; any failure prevents request dispatch.
+Popped directory paths retain their existing two-representation charge while
+active, and aliases share the canonical visited set. Nothing is cached across
+invocations or excluded based on directory name.
+An internal directory-visit callback permits a bounded rendezvous regression
+to demonstrate actual overlapping I/O without depending on machine throughput.
+Preflight stage transitions retain the original start instant and cancellation
+token. Debug start/completion events and timeout errors expose stages and
+durations, not command/environment/output values.
 Post-exit retained streams have a finite cleanup window and explicit failure.
 No drain reader is detached. Uninterruptible kernel work and genuinely escaped
 host descendants are not claimed terminated merely because cleanup was attempted.

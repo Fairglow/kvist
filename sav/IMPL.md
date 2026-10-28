@@ -568,3 +568,29 @@ coverage of real provider accounts, installed external agents, filesystem faults
 same-UID adversaries, arbitrary callback stalls, non-Linux operation, or every
 host integration. No peer implementation, production code, or test code was
 changed or inspected beyond the stated source boundary.
+
+## Long-session source-observation supplement (2026-10-28)
+
+**Evidence boundary:** Source/test observations only. No commands, tests, or builds were executed. Test assertions are not executed proof; these observations do not certify compliance.
+
+`AgentSession` owns conversation messages, model identity, system instructions, tool definitions, and the current answer. `ContextManager` retains summary and compaction count across its caller-controlled lifetime. Each runtime invocation separately initializes task budgets, progress totals, retry state, unattended-turn accounting, and action tracking.
+
+Defaults impose **no turn ceiling, wall cutoff, or cumulative-token cutoff**, with a 1,024-token response reserve. Default retries permit three attempts with two-second initial exponential backoff, capped at thirty seconds. Attempt deadlines grow with attempt number, subject to remaining task time. Length termination may regenerate with a doubled output reserve when context capacity permits.
+
+The mailbox allows 32 pending submissions and 1 MiB combined text. Active guidance is bounded to 64 KiB; idle task submissions may consume the full byte allowance. Editing/withdrawal ends at claim. Actual delivered guidance renews unattended-turn and generation-attempt allowances, not task time, cumulative token charges, or reported turn totals. Interrupted attempts retain conservative estimated-input-plus-reserved-output charges.
+
+Generation uses operation-scoped cancellation monitored for guidance and task cancellation, including quiet providers. Executing tools receive task cancellation instead: guidance does not interrupt an already-started effect. Dispatch recording precedes execution and another control check. Stale undispatched calls receive paired rejection results. Only complete validated turns authorize tools; earlier effects are not rolled back.
+
+Advisory repeated-read tracking uses a FIFO capped at **1,024 distinct hashes**. Duplicates do not refresh their position; another distinct insertion evicts the oldest. Repeatable reads bypass the separate effect breaker. Forgetting a hash removes advisory memory, not read permission. Both structures are task-local.
+
+Context preflight estimates serialized bytes plus framing at four bytes per token, includes response reserve, validates complete tool/result groups, and preserves systems, outstanding goals, and the newest group. Capacity-based retention starts above approximately 75% utilization and targets approximately 65%. Summaries are bounded to 4,000 characters, lossy, and nonauthoritative. Irreducible history fails atomically, including at the 1,024-message boundary.
+
+Direct transport separately bounds request/message text to 8 MiB, responses to 16 MiB, tools to 128, and individual deadlines to 24 hours. Journals bound records to 64 KiB and rotate into no-clobber 64-MiB segments without an aggregate segment cap. Followers retain partial tails and original descriptors, validate continuations, and return at most 256 records per poll. EOF alone remains incomplete.
+
+Terminal records now force a tail check even in the final batch slot. Currently readable trailing bytes cause failure before terminal success returns; `end_of_input()` also rejects previously failed followers. The inspected regression asserts clean-tail acceptance and garbage/newline rejection at record counts 256 and 512, bounded batches, and failed-follower finalization rejection. Earlier inspected assertions cover guidance accounting, FIFO eviction, rotation, and malformed continuations.
+
+### Source-derived counter addendum
+
+**Sav addendum — source-derived:** `ContextManager::prepare` saturating-increments its counter once when successful preparation removes history or changes the rolling summary—not once per removed turn. No-op preparations and errors leave the counter unchanged; errors also preserve the request and summary. Successful no-ops may still set `max_output_tokens`. Legacy `compact` increments on its rolling branch, not its short-history no-op. Skott’s `protected_message_count_limit_is_exact_and_failure_is_atomic` asserts that 1,024 protected messages succeed without compaction or message changes; 1,025 yield `InvalidModelTurn` with the entire request unchanged. Both cases assert an empty summary and zero counter.
+
+No commands, tests, or builds were executed; these are source observations and test-source assertions, not compliance certification.

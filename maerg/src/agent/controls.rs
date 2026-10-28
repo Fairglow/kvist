@@ -22,7 +22,8 @@ impl RunControls<'_> {
         Ok(())
     }
 
-    pub(super) fn deliver(&self, session: &mut AgentSession) -> Result<()> {
+    pub(super) fn deliver(&self, session: &mut AgentSession) -> Result<bool> {
+        let mut any_delivered = false;
         for id in self.mailbox.withdrawals()? {
             self.notice(id, GuidanceState::Withdrawn)?;
         }
@@ -46,6 +47,7 @@ impl RunControls<'_> {
                     ));
                 }
             })? && !self.cancellation.is_cancelled();
+            any_delivered |= delivered;
             self.notice(
                 guidance.id,
                 if delivered {
@@ -55,7 +57,7 @@ impl RunControls<'_> {
                 },
             )?;
         }
-        Ok(())
+        Ok(any_delivered)
     }
 
     pub(super) fn skip_calls<'a>(

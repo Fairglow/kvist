@@ -138,10 +138,16 @@ pub fn run_with_controls(
     json_output: bool,
     allow_control: bool,
 ) -> Result<RunSummary> {
-    if overrides.allow_host_execution || overrides.host_turns.is_some() || overrides.no_logs {
+    if overrides.allow_host_execution
+        || overrides.host_turns.is_some()
+        || overrides.no_logs
+        || overrides.max_turns == Some(0)
+    {
         return Err(Error::Config {
             path: None,
-            reason: "headless execution forbids host execution and disabled recording".into(),
+            reason:
+                "headless execution forbids host execution, disabled recording and zero turn limits"
+                    .into(),
         });
     }
     overrides.limits.validate()?;
@@ -272,7 +278,7 @@ pub fn run_with_controls(
             response_reserve: budgets.limits.response_reserve,
             response_source: budgets.response_source.into(),
             max_run_tokens: overrides.limits.max_tokens,
-            max_run_secs: overrides.limits.wall_time.as_secs(),
+            max_run_secs: overrides.limits.wall_time.map(|time| time.as_secs()),
         });
     let mut session = AgentSession::new(
         model.clone(),
@@ -303,7 +309,8 @@ pub fn run_with_controls(
             "response_reserve":budgets.limits.response_reserve,
             "response_source":budgets.response_source,
             "max_run_tokens":overrides.limits.max_tokens,
-            "max_run_secs":overrides.limits.wall_time.as_secs(),
+            "max_run_secs":overrides.limits.wall_time.map(|time| time.as_secs()),
+            "max_turns":overrides.max_turns,
         }}))?;
     }
     sink.send(Event::Note(budget_note))?;
@@ -323,7 +330,7 @@ pub fn run_with_controls(
     } else {
         None
     };
-    let result = Skott::with_retry(crate::session::MAX_TURNS, model.retry_policy())
+    let result = Skott::with_retry(overrides.max_turns, model.retry_policy())
         .with_limits(budgets.limits)?
         .run_controlled(
             &mut session,

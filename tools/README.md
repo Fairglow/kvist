@@ -3,10 +3,11 @@
 Repository helpers that are not part of the Rust workspace. Scripts are invoked
 by the [justfile](../justfile) or CI, not by Cargo directly.
 
-## `nextest.toml`
+## Repository test scheduling (`../.config/nextest.toml`)
 
-Shared repository scheduling policy. `just test` explicitly selects this file;
-direct nextest runs should also pass `--config-file tools/nextest.toml`.
+Nextest automatically discovers the shared tracked `.config/nextest.toml`
+policy. Ordinary `cargo nextest run`, `just test`, `just test-profile` and
+workspace CI use it without an extra `--config-file` argument.
 It reserves the complete test-thread pool for the native repository-wide
 sandbox trial while ordinary tests stay parallel. It also reserves the pool for
 Blad's dedicated `diagrams`/`mermaid_backend` binaries, Markdown Mermaid
@@ -31,10 +32,13 @@ trial uses `target/repository-trial` for nested Cargo output, so another Cargo
 build holding ordinary `target/debug` locks cannot stall that trial.
 Pool reservation coordinates only this nextest
 invocation, not unrelated host processes or another test runner. This tracked
-policy does not depend on the ignored, sandbox-local `.config/nextest.toml`.
+policy is the only tracked exception under `.config`; other local settings
+remain ignored. Explicit alternate configurations must preserve the same
+reservations.
 
-`test_nextest_policy.py` pins the scoped selector, whole-pool allocation and
-CI-profile inheritance. Repository CI runs it with Python 3.11+ (standard
+`test_nextest_policy.py` pins default discovery, Git ignore visibility,
+entrypoint consistency, scoped selection, whole-pool allocation and
+CI-profile inheritance. Repository CI runs it with Python 3.11+ and Git (standard
 library only); it stays outside Blad's self-contained package tests:
 
 ```bash
@@ -59,11 +63,11 @@ For a reproducible warm comparison, build once with the same package/features,
 then profile the identical selection and thread count several times:
 
 ```bash
-cargo nextest run --config-file tools/nextest.toml --offline --locked \
+cargo nextest run --offline --locked \
   --workspace --all-features --no-run
 NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 python3 tools/profile_tests.py \
   --output /tmp/kvist-test-profile-1 -- \
-  cargo nextest run --config-file tools/nextest.toml --offline --locked \
+  cargo nextest run --offline --locked \
   --workspace --all-features --test-threads num-cpus --no-fail-fast \
   --message-format libtest-json-plus --message-format-version 0.1
 ```

@@ -187,8 +187,8 @@ fn measured_decode(provider: &TimedProvider, sink: &Sink, backoff: Duration) -> 
     let session = session(vec![]);
     let context = ContextManager::new(8192, 4);
     let cancellation = CancellationToken::new();
-    let budget = PromptBudget::start(Duration::from_secs(10), &cancellation).unwrap();
-    let mut tokens = 100_000;
+    let budget = PromptBudget::start(Some(Duration::from_secs(10)), &cancellation).unwrap();
+    let mut tokens = Some(100_000);
     runtime
         .drive_turn(
             &session.next_request().unwrap(),
@@ -372,7 +372,7 @@ fn native_live_totals_preserve_provider_usage_and_post_turn_rate_convention() {
 fn progress_elapsed_uses_prompt_start_including_initial_recording() {
     let runtime = NativeRuntime::default();
     let cancellation = CancellationToken::new();
-    let budget = PromptBudget::start(Duration::from_secs(10), &cancellation).unwrap();
+    let budget = PromptBudget::start(Some(Duration::from_secs(10)), &cancellation).unwrap();
     thread::sleep(Duration::from_millis(100));
     let sink = Sink::default();
     let controls = ControlMailbox::default();

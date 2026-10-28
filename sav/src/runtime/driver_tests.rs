@@ -109,7 +109,7 @@ fn retry_test_parts<'a>(
         max_output_tokens: None,
     };
     let cancellation = CancellationToken::new();
-    let budget = PromptBudget::start(Duration::from_secs(60), &cancellation).unwrap();
+    let budget = PromptBudget::start(Some(Duration::from_secs(60)), &cancellation).unwrap();
     let progress = LiveProgress {
         session: _session,
         context,
@@ -147,7 +147,7 @@ fn drive_turn_retries_transient_timeouts_then_succeeds() {
         attempts: std::sync::atomic::AtomicUsize::new(0),
     };
     let sink = CollectingSink(std::sync::Mutex::new(Vec::new()));
-    let mut tokens = 100_000_000_u64;
+    let mut tokens = Some(100_000_000_u64);
     let mut recorder: Option<&mut dyn Recorder> = None;
 
     let (turn, _) = skott
@@ -212,7 +212,7 @@ fn drive_turn_exhausts_the_attempt_budget_on_persistent_failures() {
         attempts: std::sync::atomic::AtomicUsize::new(0),
     };
     let sink = CollectingSink(std::sync::Mutex::new(Vec::new()));
-    let mut tokens = 100_000_000_u64;
+    let mut tokens = Some(100_000_000_u64);
     let mut recorder: Option<&mut dyn Recorder> = None;
 
     let error = skott

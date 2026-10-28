@@ -40,13 +40,8 @@ use super::error::{Error, Result};
 
 use super::ToolOutcome;
 
-/// The maximum number of model turns in one session before the loop stops.
-///
-/// Large enough that a long task runs uninterrupted to a result: the loop keeps
-/// turning while the model has not answered, and stops only on an answer, a
-/// detected loop/hang (repeated-action breaker, cadence watchdog), a real
-/// failure, or one of the prompt budgets. Five hundred turns is a safety bound,
-/// not an expected duration.
+/// Conservative policy maximum for explicitly privileged host/review runs.
+/// Sandboxed native runs have no default turn ceiling.
 pub const MAX_TURNS: u32 = 500;
 /// The maximum bytes of a tool result folded back to the model.
 pub const MAX_TOOL_RESULT_BYTES: usize = 8 * 1024;
@@ -113,6 +108,7 @@ pub(super) fn emit_live_progress<S: EventSink>(
         compaction_progress: progress
             .session
             .compaction_progress(progress.context, progress.tool_defs),
+        compactions: progress.context.compactions(),
         generation_tokens_per_sec: token_rate(output_tokens, generation_secs),
         average_tokens_per_sec: token_rate(cumulative_output, cumulative_decode),
         total_tokens,
@@ -223,6 +219,8 @@ pub enum Event {
         context_utilization: f64,
         /// How close compaction is to the hard limit (`0.0..=1.0`).
         compaction_progress: f64,
+        /// Successful context reductions across this conversation.
+        compactions: u64,
         /// Output tokens per observed decode second (first-token wait,
         /// event handling, and tool execution excluded). While a
         /// turn streams this is derived from the streamed output estimate;
@@ -322,6 +320,26 @@ impl AgentSession {
             output_schema: None,
             max_output_tokens: None,
         })
+    }
+
+    /// Fits the next request and retains its compacted conversation on success.
+    /// Failed preflight leaves both the conversation and context manager unchanged.
+    pub fn prepare_request(
+        &mut self,
+        context: &mut ContextManager,
+        response_reserve: u32,
+    ) -> Result<Option<(ModelRequest, Option<super::context::Compaction>)>> {
+        let Some(mut request) = self.next_request() else {
+            return Ok(None);
+        };
+        let compaction = context.prepare(&mut request, response_reserve)?;
+        self.messages = request
+            .messages
+            .iter()
+            .skip(usize::from(!self.system_prompt.is_empty()))
+            .cloned()
+            .collect();
+        Ok(Some((request, compaction)))
     }
 
     /// Folds an assistant turn into the conversation and returns the tool
@@ -578,22 +596,18 @@ impl RunSummary {
 #[derive(Debug, Clone, Copy)]
 pub struct RunLimits {
     /// Whole-prompt wall time; executors must honor cooperative cancellation.
-    pub wall_time: Duration,
+    pub wall_time: Option<Duration>,
     /// Conservative estimated input plus reserved output across all attempts.
-    pub max_tokens: u64,
+    pub max_tokens: Option<u64>,
     /// Provider-enforced output tokens reserved in every context preflight.
     pub response_reserve: u32,
 }
 
 impl Default for RunLimits {
     fn default() -> Self {
-        // The defaults are safety bounds, not expected runtimes: a prompt runs
-        // uninterrupted until it reaches a result, is detected as hung or
-        // looping, or genuinely fails. Operators bound individual runs with
-        // --max-run-secs / --max-run-tokens.
         Self {
-            wall_time: Duration::from_secs(86_400),
-            max_tokens: 100_000_000,
+            wall_time: None,
+            max_tokens: None,
             response_reserve: 1024,
         }
     }
@@ -602,15 +616,15 @@ impl Default for RunLimits {
 impl RunLimits {
     /// Rejects invalid limits before starting a provider or watcher.
     pub fn validate(self) -> Result<Self> {
-        if self.wall_time.is_zero()
-            || self.wall_time > Duration::from_secs(86_400)
-            || self.max_tokens == 0
-            || self.max_tokens > 1_000_000_000
+        if self
+            .wall_time
+            .is_some_and(|time| time.is_zero() || Instant::now().checked_add(time).is_none())
+            || self.max_tokens == Some(0)
             || !(1..=1_048_576).contains(&self.response_reserve)
         {
             return Err(Error::Config {
                 path: None,
-                reason: "run limits require positive wall time <=24h, tokens <=1000000000, and response reserve <=1048576".into(),
+                reason: "run limits require positive wall time fitting the monotonic clock, positive tokens, and response reserve in 1..=1048576".into(),
             });
         }
         Ok(self)
@@ -698,16 +712,26 @@ pub(super) fn fold_outcome<S: EventSink, E: ToolExecutor>(
 
 pub(super) struct PromptBudget {
     pub(super) started_at: Instant,
-    pub(super) deadline: Instant,
+    pub(super) deadline: Option<Instant>,
     pub(super) expired: Arc<AtomicBool>,
     stop: Option<mpsc::Sender<()>>,
     watcher: Option<JoinHandle<()>>,
 }
 
 impl PromptBudget {
-    pub(super) fn start(wall_time: Duration, cancellation: &CancellationToken) -> Result<Self> {
+    pub(super) fn start(
+        wall_time: Option<Duration>,
+        cancellation: &CancellationToken,
+    ) -> Result<Self> {
         let started_at = Instant::now();
-        let deadline = started_at + wall_time;
+        let deadline = wall_time
+            .map(|time| {
+                started_at.checked_add(time).ok_or_else(|| Error::Config {
+                    path: None,
+                    reason: "wall time exceeds the monotonic clock range".into(),
+                })
+            })
+            .transpose()?;
         let expired = Arc::new(AtomicBool::new(false));
         let thread_expired = Arc::clone(&expired);
         let token = cancellation.clone();
@@ -716,7 +740,9 @@ impl PromptBudget {
             .name("prompt-deadline".into())
             .spawn(move || {
                 loop {
-                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    let remaining = deadline.map_or(Duration::MAX, |deadline| {
+                        deadline.saturating_duration_since(Instant::now())
+                    });
                     if remaining.is_zero() {
                         thread_expired.store(true, Ordering::SeqCst);
                         token.cancel();
@@ -742,7 +768,9 @@ impl PromptBudget {
     }
 
     pub(super) fn remaining(&self) -> Duration {
-        self.deadline.saturating_duration_since(Instant::now())
+        self.deadline.map_or(Duration::MAX, |deadline| {
+            deadline.saturating_duration_since(Instant::now())
+        })
     }
 }
 

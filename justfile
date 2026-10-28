@@ -47,11 +47,11 @@ target:
 
 test:
     kvist vendor
-    cargo nextest run --config-file tools/nextest.toml --locked --workspace --all-features --test-threads num-cpus --no-fail-fast
+    cargo nextest run --locked --workspace --all-features --test-threads num-cpus --no-fail-fast
 
 test-profile:
     kvist vendor
-    NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 python3 tools/profile_tests.py -- cargo nextest run --config-file tools/nextest.toml --offline --locked --workspace --all-features --test-threads num-cpus --no-fail-fast --message-format libtest-json-plus --message-format-version 0.1
+    NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 python3 tools/profile_tests.py -- cargo nextest run --offline --locked --workspace --all-features --test-threads num-cpus --no-fail-fast --message-format libtest-json-plus --message-format-version 0.1
 
 audit:
     cargo deny --all-features --locked check advisories bans licenses sources

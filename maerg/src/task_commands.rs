@@ -4193,7 +4193,7 @@ pub fn run_task_with_controls(
         // The approved runner identity and capability-confirmed probe are passed
         // so a successful non-loopback turn can be authorized and applied as a
         // bounded authoring sandbox request.
-        let run_result = crate::agent::execute_agent_with_controls(
+        let run_result = match crate::agent::execute_agent_with_controls(
             agent_profile,
             sandbox_config,
             Some(&approved_runner),
@@ -4211,7 +4211,30 @@ pub fn run_task_with_controls(
                 policy_identity: &policy_identity,
             },
             allow_control,
-        )?;
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                let reason = redact_bounded(
+                    error.to_string(),
+                    &evidence_redactions(&config),
+                    MAX_VERIFICATION_EVIDENCE_BYTES,
+                );
+                let transition_at =
+                    Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+                let _ = transition_locked(
+                    &context,
+                    &lock,
+                    task_id,
+                    TaskStatus::Blocked,
+                    Some(&reason),
+                    &transition_at,
+                )?;
+                return Err(KvistError::TaskRunFailed {
+                    task_id: task_id.to_owned(),
+                    reason,
+                });
+            }
+        };
         let agent_timestamp =
             Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
         append_agent_execution(

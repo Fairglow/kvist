@@ -363,6 +363,14 @@ fn diagnostics_cover_the_chain_without_command_or_output_payloads() {
         "offline vendor snapshot prepared",
         "offline Rust resources prepared",
         "offline Rust resources validated",
+        "sandbox preflight stage started",
+        "stage=runner_identity",
+        "stage=workspace_scope",
+        "stage=rust_resources",
+        "stage=request_validation",
+        "sandbox writable scope inspected",
+        "entries=",
+        "directories=",
         "sandbox request validated",
         "sandbox grant",
         "sandbox environment entry",
@@ -416,7 +424,7 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
 
 #[test]
 fn repository_trial_requires_global_nextest_exclusivity() {
-    let path = manifest_dir().join("../tools/nextest.toml");
+    let path = manifest_dir().join("../.config/nextest.toml");
     let contents = fs::read_to_string(path).expect("read repository nextest configuration");
     let config: toml::Value = toml::from_str(&contents).expect("parse nextest configuration");
     let overrides = config["profile"]["default"]["overrides"]
@@ -435,7 +443,7 @@ fn repository_trial_requires_global_nextest_exclusivity() {
 }
 
 #[test]
-fn repository_nextest_recipe_selects_shared_configuration() {
+fn repository_nextest_recipe_uses_default_discovery() {
     let recipes = fs::read_to_string(manifest_dir().join("../justfile"))
         .expect("read repository test recipes");
     let test_recipe = recipes
@@ -449,10 +457,10 @@ fn repository_nextest_recipe_selects_shared_configuration() {
         .expect("repository test recipe nextest command");
     let arguments: Vec<_> = command.split_whitespace().collect();
     assert!(
-        arguments
-            .windows(2)
-            .any(|pair| pair == ["--config-file", "tools/nextest.toml"]),
-        "the repository recipe must explicitly select tracked scheduling configuration"
+        !arguments.iter().any(|argument| {
+            *argument == "--config-file" || argument.starts_with("--config-file=")
+        }),
+        "the repository recipe must exercise automatic scheduling discovery"
     );
 }
 

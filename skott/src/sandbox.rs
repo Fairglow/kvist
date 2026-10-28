@@ -25,6 +25,11 @@ use sha2::{Digest, Sha256};
 use crate::config::SandboxPaths;
 use crate::error::{Error, Result, io_error};
 
+mod scope;
+use scope::check_writable_scope;
+#[cfg(test)]
+use scope::check_writable_scope_with;
+
 /// The CLI argument that selects the version-one request mode on the runner.
 const REQUEST_ARGUMENT: &str = "--kvist-sandbox-request-v1";
 /// The accepted request protocol identifier.
@@ -123,12 +128,10 @@ pub(crate) fn build_request_with_rust(
     rust: Option<&crate::toolchain::rust_environment::RustEnvironment>,
     cancellation: &CancellationToken,
 ) -> Result<SandboxRequest> {
-    let preflight = Preflight {
-        cancellation,
-        started: Instant::now(),
-    };
+    let preflight = Preflight::new(cancellation).stage("runner_identity");
     preflight.check()?;
     let runner_identity = read_file_identity("sandbox runner", &sandbox.runner, &preflight)?;
+    let preflight = preflight.stage("backend_identity");
     let backend_identity = backend_identity("sandbox backend", &sandbox.backend, &preflight)?;
 
     let workdir = request.working_directory.canonicalize().map_err(|source| {
@@ -157,6 +160,7 @@ pub(crate) fn build_request_with_rust(
             reason: "the write root must be a non-empty absolute path".to_owned(),
         });
     }
+    let preflight = preflight.stage("workspace_scope");
     check_writable_scope(&workdir, &preflight)?;
     let authoring = grant(
         &workdir,
@@ -173,8 +177,11 @@ pub(crate) fn build_request_with_rust(
     // is rejected up front per the sandbox request contract. Destinations stay
     // disjoint, so the runner's overlap check also passes.
     let mut wires = vec![authoring];
+    let preflight = preflight.stage("rust_resources");
     if let Some(rust) = rust {
+        preflight.check()?;
         rust.validate(&workdir, cancellation)?;
+        preflight.check()?;
         for resource in rust.grants() {
             let source = Path::new(&resource.source);
             if roots_overlap(source, &workdir) {
@@ -191,6 +198,7 @@ pub(crate) fn build_request_with_rust(
             });
         }
     }
+    let preflight = preflight.stage("context_identities");
     for (index, root) in request.read_roots.iter().enumerate() {
         preflight.check()?;
         let metadata = std::fs::symlink_metadata(root).map_err(|e| {
@@ -278,6 +286,8 @@ pub(crate) fn build_request_with_rust(
 
     // Validate locally before spawning so a malformed request fails fast and is
     // testable without the installed runner. The runner repeats these checks.
+    let preflight = preflight.stage("request_validation");
+    preflight.check()?;
     validation::validate(&request).map_err(|error| Error::SandboxBuild {
         reason: error.to_string(),
     })?;
@@ -315,14 +325,37 @@ pub(crate) fn build_request_with_rust(
 struct Preflight<'a> {
     cancellation: &'a CancellationToken,
     started: Instant,
+    stage: &'static str,
 }
 
-impl Preflight<'_> {
+impl<'a> Preflight<'a> {
+    fn new(cancellation: &'a CancellationToken) -> Self {
+        Self {
+            cancellation,
+            started: Instant::now(),
+            stage: "request",
+        }
+    }
+
+    fn stage(mut self, stage: &'static str) -> Self {
+        self.stage = stage;
+        tracing::debug!(
+            stage = %stage,
+            elapsed_ms = self.started.elapsed().as_millis() as u64,
+            "sandbox preflight stage started"
+        );
+        self
+    }
+
     fn check(&self) -> Result<()> {
         crate::executor::check_cancelled(self.cancellation)?;
         if self.started.elapsed() >= MAX_PREFLIGHT_TIME {
             return Err(Error::SandboxBuild {
-                reason: "sandbox preflight exceeded 30 seconds; narrow the working directory or reduce context files".into(),
+                reason: format!(
+                    "sandbox preflight exceeded 30 seconds; stage={}, elapsed_ms={}; narrow the working directory or reduce context files",
+                    self.stage,
+                    self.started.elapsed().as_millis(),
+                ),
             });
         }
         Ok(())
@@ -419,131 +452,8 @@ fn build_context_grant(root: &Path, index: usize, preflight: &Preflight<'_>) -> 
     })
 }
 
-fn check_writable_scope(workdir: &Path, preflight: &Preflight<'_>) -> Result<()> {
-    // `workdir` is canonical in the caller, so it is a real directory: the scope
-    // root. The sandbox bind-mounts it read-write, so every symlink inside it is
-    // live to the sandboxed process. The escape risk is a symlink whose resolved
-    // target lies OUTSIDE the scope -- following it for writing leaves the write
-    // root. Symlinks that stay inside the scope are common (Node's `.bin` links,
-    // in-project aliases) and safe, so they are allowed; only scope-escaping links
-    // fail the build, named with the target they point at.
-    let mut stack: Vec<(PathBuf, usize)> = Vec::new();
-    let mut visited: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
-    let mut path_bytes = 0;
-    queue_scope_directory(
-        workdir.to_owned(),
-        0,
-        &mut stack,
-        &mut visited,
-        &mut path_bytes,
-    )?;
-    let mut count = 0;
-    while let Some((dir, depth)) = stack.pop() {
-        preflight.check()?;
-        let entries = std::fs::read_dir(&dir).map_err(|source| {
-            io_error(
-                "inspect working directory scope for the sandbox",
-                Some(&dir.display().to_string()),
-                source,
-            )
-        })?;
-        for entry in entries {
-            preflight.check()?;
-            admit_scope_entry(&mut count)?;
-            let entry = entry.map_err(|source| {
-                io_error(
-                    "enumerate working directory scope",
-                    Some(&dir.to_string_lossy()),
-                    source,
-                )
-            })?;
-            let path = entry.path();
-            let file_type = entry.file_type().map_err(|source| {
-                io_error(
-                    "inspect working directory scope for the sandbox",
-                    Some(&path.display().to_string()),
-                    source,
-                )
-            })?;
-            if file_type.is_dir() {
-                queue_scope_directory(path, depth + 1, &mut stack, &mut visited, &mut path_bytes)?;
-                continue;
-            }
-            if !file_type.is_symlink() {
-                continue;
-            }
-            let target = std::fs::read_link(&path).map_err(|source| {
-                io_error(
-                    "read working directory symbolic link",
-                    Some(&path.to_string_lossy()),
-                    source,
-                )
-            })?;
-            let resolved = resolve_link_target(&target, &path);
-            if target_escapes_scope(&resolved, workdir) {
-                return Err(Error::SandboxBuild {
-                    reason: format!(
-                        "working directory `{}` contains a symbolic link `{}` pointing at
-                         `{}` which escapes the writable scope `{}`; a write through such a
-                         link could leave the scope, so remove the link, move its target
-                         inside the working directory, or narrow the working directory",
-                        workdir.display(),
-                        path.display(),
-                        target.to_string_lossy(),
-                        workdir.display(),
-                    ),
-                });
-            }
-            // In-scope link is allowed, but if it points at a directory keep
-            // walking its canonical target so links reachable through it are still
-            // checked -- without ever following the link at sandbox runtime.
-            let canonical = match std::fs::canonicalize(&path) {
-                Ok(canonical) => canonical,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(source) => {
-                    return Err(io_error(
-                        "resolve working directory symbolic link",
-                        Some(&path.to_string_lossy()),
-                        source,
-                    ));
-                }
-            };
-            if !canonical.starts_with(workdir) {
-                return Err(Error::SandboxBuild {
-                    reason: "symbolic link left the working directory during inspection".into(),
-                });
-            }
-            let metadata = std::fs::metadata(&canonical).map_err(|source| {
-                io_error(
-                    "inspect symbolic link target",
-                    Some(&path.to_string_lossy()),
-                    source,
-                )
-            })?;
-            if metadata.is_dir() {
-                let target_depth = canonical
-                    .strip_prefix(workdir)
-                    .map_err(|_| Error::SandboxBuild {
-                        reason: "symbolic link left the working directory during inspection".into(),
-                    })?
-                    .components()
-                    .count();
-                queue_scope_directory(
-                    canonical,
-                    target_depth,
-                    &mut stack,
-                    &mut visited,
-                    &mut path_bytes,
-                )?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn admit_scope_entry(count: &mut usize) -> Result<()> {
-    *count = count.saturating_add(1);
-    if *count > MAX_SCOPE_ENTRIES {
+fn admit_scope_entry(count: &std::sync::atomic::AtomicUsize) -> Result<()> {
+    if count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= MAX_SCOPE_ENTRIES {
         return Err(Error::SandboxBuild {
             reason: "working directory scan exceeds 1000000 entries; narrow the working directory"
                 .into(),
@@ -928,10 +838,7 @@ mod preflight_tests {
             std::fs::create_dir(&path).unwrap();
         }
         let token = CancellationToken::new();
-        let preflight = Preflight {
-            cancellation: &token,
-            started: Instant::now(),
-        };
+        let preflight = Preflight::new(&token).stage("workspace_scope");
         check_writable_scope(root.path(), &preflight).unwrap();
         path.push("d");
         std::fs::create_dir(&path).unwrap();
@@ -941,12 +848,12 @@ mod preflight_tests {
 
     #[test]
     fn scope_entry_quota_accepts_exactly_one_million() {
-        let mut count = 0;
+        let count = std::sync::atomic::AtomicUsize::new(0);
         for _ in 0..MAX_SCOPE_ENTRIES {
-            admit_scope_entry(&mut count).unwrap();
+            admit_scope_entry(&count).unwrap();
         }
-        assert_eq!(count, 1_000_000);
-        assert!(admit_scope_entry(&mut count).is_err());
+        assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 1_000_000);
+        assert!(admit_scope_entry(&count).is_err());
     }
 
     #[test]
@@ -967,15 +874,85 @@ mod preflight_tests {
         let root = tempfile::tempdir().unwrap();
         let token = CancellationToken::new();
         let expired = Preflight {
-            cancellation: &token,
             started: Instant::now() - MAX_PREFLIGHT_TIME,
+            ..Preflight::new(&token).stage("workspace_scope")
         };
-        assert!(check_writable_scope(root.path(), &expired).is_err());
-        let current = Preflight {
-            cancellation: &token,
-            started: Instant::now(),
-        };
+        let error = check_writable_scope(root.path(), &expired).unwrap_err();
+        assert!(
+            error.to_string().contains("stage=workspace_scope"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("elapsed_ms="), "{error}");
+        let current = Preflight::new(&token).stage("workspace_scope");
         token.cancel();
         assert!(check_writable_scope(root.path(), &current).is_err());
+    }
+
+    #[test]
+    fn independent_scope_directories_are_inspected_concurrently() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Mutex, mpsc};
+
+        let root = tempfile::tempdir().unwrap();
+        for name in ["first", "second"] {
+            std::fs::create_dir(root.path().join(name)).unwrap();
+        }
+        let token = CancellationToken::new();
+        let preflight = Preflight::new(&token).stage("workspace_scope");
+        let arrivals = AtomicUsize::new(0);
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let receiver = Mutex::new(receiver);
+        let result = check_writable_scope_with(root.path(), &preflight, &|path| {
+            if path == root.path() {
+                return Ok(());
+            }
+            if arrivals.fetch_add(1, Ordering::Relaxed) == 0 {
+                receiver
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .map_err(|_| Error::SandboxBuild {
+                        reason: "independent directory inspection was serialized".into(),
+                    })?;
+            } else {
+                sender.send(()).unwrap();
+            }
+            Ok(())
+        });
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(arrivals.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn scope_inspection_deduplicates_internal_directory_aliases_and_cycles() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("real/nested")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
+        std::os::unix::fs::symlink(&root, root.join("real/nested/cycle")).unwrap();
+        let token = CancellationToken::new();
+        let preflight = Preflight::new(&token).stage("workspace_scope");
+        let seen = std::sync::Mutex::new(std::collections::BTreeSet::new());
+        check_writable_scope_with(&root, &preflight, &|path| {
+            assert!(seen.lock().unwrap().insert(path.to_owned()), "{path:?}");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn scope_inspection_keeps_hidden_directory_escape_checks() {
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join("work");
+        std::fs::create_dir_all(work.join(".generated/deep")).unwrap();
+        std::os::unix::fs::symlink(root.path(), work.join(".generated/deep/escape")).unwrap();
+        let token = CancellationToken::new();
+        let preflight = Preflight::new(&token).stage("workspace_scope");
+        let error = check_writable_scope(&work, &preflight).unwrap_err();
+        assert!(
+            error.to_string().contains("escapes the writable scope"),
+            "{error}"
+        );
     }
 }

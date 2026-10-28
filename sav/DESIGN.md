@@ -2,6 +2,33 @@
 
 # Sav Design
 
+## Long-running conversations
+
+Represent absent run caps with `Option`, not magic zero values. A prompt
+deadline is optional; the owned watcher still polls interrupts without one.
+Keep whole-task token charges optional and monotonic. Track unattended turns
+separately from total turns; delivery of actual human guidance renews that
+allowance and starts fresh generation attempts, but not wall/token accounting
+or action history. Count successful compactions in the context manager only
+after an atomic preflight/compaction commits.
+Account for the transport's 1024-message bound as well as tokens; capacity-based
+retention targets 65% of both ceilings. Exact protected messages cannot be
+discarded to fit; fail explicitly if they alone exceed the message bound.
+Keep duplicate-read advisory notices bounded to the most recent 1024 distinct
+observation hashes. Eviction only forgets a notice, never permits a blocked
+effect or changes the independent repeated-action circuit breaker.
+
+Journal segments keep record and poll bounds independent of total lifetime.
+Reserve space for a segment-link record, create the next private no-clobber
+regular file relative to the held directory, synchronize it and its directory,
+then synchronize the link in the old file before switching. Followers derive
+the next filename from the original name and consecutive index rather than
+trusting an arbitrary path in a record. Sequence and run identity span segments.
+An interrupted rotation remains incomplete; it never invents success or replay.
+Validate any currently available terminal tail before returning a batch even
+when `run_end` occupies its final slot; failed followers cannot report a clean
+end of input.
+
 ## Shared native runtime extraction (ADR 0015)
 
 `runtime::session` owns conversation, shared events and host traits;
@@ -19,8 +46,8 @@ withdrawal-notice queue avoids retaining an unbounded history.
 
 Each provider attempt uses a fresh operation token and joined 10-ms watcher.
 Only the whole-prompt token reaches the executor. A steering interruption
-rebuilds context, retaining consumed tokens and the next generation attempt
-number/reserve. Backoff polls at most every 25 ms. Before the next tool the
+rebuilds context, retaining consumed tokens and the output reserve. Actual
+guidance delivery renews generation attempts. Backoff polls at most every 25 ms. Before the next tool the
 driver records paired skipped results for remaining proposals. Recording is
 synchronous and delivery is persisted before the next request; failure is
 terminal. Shutdown and delivery mutation share a lock, while blocking provider,

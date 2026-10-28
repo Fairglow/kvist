@@ -204,8 +204,8 @@ fn live_llama_reads_edits_and_verifies_inside_the_real_sandbox() {
     let mut log = SessionLog::open(&root.path().join("logs"), "live-isolated-edit").unwrap();
     let summary = Skott::with_retry(8, model.retry_policy())
         .with_limits(RunLimits {
-            wall_time: Duration::from_secs(180),
-            max_tokens: 100_000,
+            wall_time: Some(Duration::from_secs(180)),
+            max_tokens: Some(100_000),
             response_reserve: 1024,
         })
         .unwrap()

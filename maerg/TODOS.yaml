@@ -1,15 +1,59 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:f7da07bb59d07a6a28452ba569ba4f61fdd84b2751cf28068cbf903521554bc0"
-  contract_revision: "sha256:89d3d8a4ee1505032286b2cf2d296ffb8d6c08deb5d7bf9f0cc73982ef2173a9"
-  design_revision: "sha256:abaf3c5a4eff80ace9acabbdb7aa1d1954d01b0906aef01187279afc6936eddb"
+  requirements_revision: "sha256:281212e4191c502db6f398383ec57eeaed84e4b72cfe7eb1d1e4a12b65c3805e"
+  contract_revision: "sha256:3d77971a11f1f6df310d38e7edf4a21322aa0e4d1b08c1b30794eb6a9c2a9577"
+  design_revision: "sha256:d429f0a617503b13ec764f430cf6e86464d69a26973371e39d2ba405e02c8ac9"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-27T21:23:22Z"
+    checked_at: "2026-10-28T08:23:13Z"
     stale_since: null
     causes: []
 tasks:
+  - id: "long-sessions-write-tests"
+    title: "write_tests: cross protected generation ceiling"
+    description: "Test more than 64 generations and positive multi-day role timeouts with invalid-bound rejection."
+    context: "Regressions reproduced the 64-generation cutoff, one-hour configuration maximum, multi-day explicit-endpoint construction rejection and three-interruption attempt exhaustion before repair. Both shared-native and explicit profiles are covered. Advisory exception is recorded in intent."
+    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:07:55Z", completed_at: "2026-10-28T19:07:55Z"}
+    purpose: "Pin explicit rather than hidden task budgets."
+    expected_outcome: "Regressions fail before implementation."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+  - id: "long-sessions-implement-code"
+    title: "implement_code: support approved long protected runs"
+    description: "Remove generation cutoff, extend allowed role timeouts and clip individual effects to runner limits."
+    context: "Generation ceiling removed; approved role timeouts extend to 30 days; individual requests/effects retain independent ceilings and actual guidance renews attempts. Existing defaults and approvals remain unchanged. Orchestrator execution: nextest 71505598-2bf0-47b7-aacf-37cdfe23f4c8 passed 1466 affected-package tests with 10 existing skips; strict all-target Clippy and formatting passed. No endurance or acceptance claim."
+    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:07:55Z", completed_at: "2026-10-28T19:07:55Z"}
+    purpose: "Allow overnight work without changing existing approvals."
+    expected_outcome: "Explicit time/token limits remain effective."
+    kind: implementation
+    status: completed
+    depends_on: ["long-sessions-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+  - id: "long-sessions-security-audit"
+    title: "security_audit: observe protected budget boundaries"
+    description: "Derive source-only observations of changed limits, effect clipping and unchanged authority."
+    context: "Independent source-only observer excluded intent, queues, prior IMPL and Git history; its dated IMPL supplement is persisted. Its explicit-endpoint deadline and guidance-attempt findings were reproduced, repaired and re-observed. Phase-based enforcement and retained-turn memory growth remain documented limitations; dependency acquisition is outside this repair. Observer executed no commands. Final orchestrator suite ab6f4e27-e93a-421f-9d4c-4bb6773be8cb: 1467 passed, 10 existing skips."
+    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:13:28Z", completed_at: "2026-10-28T19:13:28Z"}
+    purpose: "Keep independent boundary observations."
+    expected_outcome: "Scoped source-derived record without certification."
+    kind: security-audit
+    status: completed
+    depends_on: ["long-sessions-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+  - id: "long-sessions-compliance-review"
+    title: "compliance_review: compare protected budget evidence"
+    description: "Compare scoped intent with independent observations and execution evidence without source access."
+    context: "Independent source-blind comparator e695c030-f655-4293-823c-573ba50ec13e confirms stale remaining-budget deadline statements now agree with independent clipping requirements; no production change was made to satisfy review. Source-derived addendum observes approval binding and exact min(remaining,86400s) supplied timeout; named run 5cea9539-b4ce-4665-a7a3-a5aed9c9179d passes timeout-change rejection. Real-executor clipping enforcement and strict timing during uncooperative synchronous work remain unqualified; 66 generations under seven-day configuration are not seven elapsed days. No further concrete scoped contradiction established. Retained evidence memory grows. No certification, receipt or acceptance; accepted revisions remain stale."
+    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:18:43Z", completed_at: "2026-10-28T19:18:43Z"}
+    purpose: "Retain discrepancies for human arbitration."
+    expected_outcome: "Persistent scoped comparison without acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: ["long-sessions-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
   - id: "live-accounting-race-write-tests"
     title: "write_tests: distinguish known usage from interrupted attempts"
     description: "Reproduce run 173's guidance-before-response race and pin unknown-attempt charging independently from completed-turn accounting."
@@ -283,16 +327,16 @@ tasks:
     purpose: "Prevent self-certification."
     expected_outcome: "Observed behavior and discrepancies remain durable."
     kind: compliance-review
-    status: blocked
+    status: in-progress
     depends_on:
       - "shared-runtime-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
     timestamps:
       created_at: "2026-10-23T22:00:00Z"
-      updated_at: "2026-10-24T00:00:55Z"
+      updated_at: "2026-10-28T11:23:30Z"
       completed_at: null
-    blocked_reason: "Formal readiness is blocked by existing queue/toolchain diagnostics and retained normative discrepancies requiring human arbitration, including automatic exact dependency fulfillment. No requirement is silently waived or certified."
+    blocked_reason: null
     recovery_state: null
   - id: "bin-only-path-write-tests"
     title: "Pin bin-only authoring and verification"
@@ -3750,6 +3794,328 @@ tasks:
     timestamps:
       created_at: "2026-10-05T08:30:00Z"
       updated_at: "2026-10-05T09:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "md-output-write-tests"
+    title: "write_tests: pin command output as well-formed Markdown"
+    description: "Write failing tests that every command's result is a well-formed Markdown document: the status overview, the tasks table, blocked/awaiting-decision reasons, and stale-document revision details render as Markdown headings, tables, lists, and fenced code rather than unstyled text, and the stable `status --format text` and `--format json` report forms are byte-for-byte unchanged so scripts are unaffected."
+    context: "The shell currently prints pre-formatted plain text that it soft-wraps and pages; the project already ships the `blad` Markdown renderer but the shell does not use it. The new `REQ-MARKDOWN-OUTPUT` makes Markdown the canonical command output while keeping the stable report forms for non-interactive consumers."
+    purpose: "Establish executable evidence that commands report Markdown and that scripts are unaffected before the output layer is rebuilt."
+    expected_outcome: "The new tests fail against the current plain-text output and pass after the Markdown output layer is implemented."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-MARKDOWN-OUTPUT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "md-output-implement-code"
+    title: "implement_code: emit command results as Markdown"
+    description: "Rebuild the command report builders to emit a well-formed Markdown document as the canonical result: the status overview, the tasks table, blocked/awaiting-decision reasons, and stale-document revision details as Markdown headings, tables, lists, and fenced code. Keep the stable `status --format text` and `--format json` report forms unchanged so non-interactive consumers are unaffected, and preserve the plain-text degradation contract when the terminal cannot host the TUI."
+    context: "The failing tests from md-output-write-tests define the expected Markdown output; the existing report builders are the source of the document's facts."
+    purpose: "Make Markdown the single source of truth for what a command reports, without breaking scripts."
+    expected_outcome: "All md-output-write-tests pass; every command reports a well-formed Markdown document and the stable text and JSON report forms are unchanged."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "md-output-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-MARKDOWN-OUTPUT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "md-output-security-audit"
+    title: "security_audit: inspect the Markdown output layer"
+    description: "Independently review the changed report builders for untrusted-input handling (queue- and report-derived text rendered as Markdown without escape-sequence injection or secret leakage), determinism (stable Markdown for a given input), and no behavior change beyond presentation (stable text and JSON report forms byte-identical, no new I/O or authority)."
+    context: "The changed paths transform untrusted reason and path text into Markdown; internal/implementer review — the independent gate is the compliance-review task."
+    purpose: "Preserve independent confirmation that the Markdown output layer introduces no disclosure, corruption, or nondeterminism."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "md-output-implement-code"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-MARKDOWN-OUTPUT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "md-output-compliance-review"
+    title: "compliance_review: compare the Markdown output against intent"
+    description: "In a clean-slate, source-blind context, derive IMPL.md from the changed source and test evidence, then compare REQ-MARKDOWN-OUTPUT and the Provided-interfaces contract against IMPL.md and test evidence, reporting any discrepancy for explicit human arbitration."
+    context: "The implementer must not certify its own work; this task is the independent gate for the Markdown output layer."
+    purpose: "Independently verify that the implemented Markdown output satisfies the updated requirements and contract before acceptance."
+    expected_outcome: "A compliance review record with the compared artifacts, observed evidence, and any discrepancies for arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "md-output-security-audit"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-MARKDOWN-OUTPUT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "tui-layout-write-tests"
+    title: "write_tests: pin the Skott-style TUI layout and transcript"
+    description: "Write failing tests that the shell is a full-screen TUI with a one-row status heading, a stats bar, a Min(1) transcript panel with a proportional scrollbar, and a fixed-height command footer; that the heading shows the active component, state, task progress, VCS branch, sandbox backend, default model, and live/stale lock counts; that the transcript is a bounded window over a durable per-component disk-persisted record that splits into successive files when one grows too large; and that switching component clears the panel and restores that component's former transcript."
+    context: "The shell is currently a line-oriented reedline REPL whose output scrolls off-screen; the `skott` TUI already demonstrates the target layout. The new REQ-INTERACTIVE-TUI and REQ-TRANSCRIPT-PERSISTENCE make the TUI and the durable per-component transcript mandatory."
+    purpose: "Establish executable evidence for the TUI layout, the persistent split transcript, and component focus restoration before the shell is rebuilt."
+    expected_outcome: "The new tests fail against the current line-oriented shell and pass after the TUI is implemented."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "tui-layout-implement-code"
+    title: "implement_code: build the Blad-rendered TUI and persistent transcript"
+    description: "Rebuild the shell as a full-screen TUI in the shape of the `skott` layout: a status heading, a stats bar, a transcript panel with a proportional scrollbar, and a command footer. Render every command's Markdown document with the `blad` MarkdownRenderer, supplying the renderer's theme, width, and panel background from the TUI so the output matches the theme. Persist the transcript per component under the component's `.kvist/` state directory, unlimited in size and splitting into successive numbered files when one grows past a bound. Auto-select the focused component as the default for every command that expects a component, and restore a component's former transcript when the operator returns to it. Degrade to the plain-text line-oriented shell when the terminal cannot host the TUI."
+    context: "The failing tests from tui-layout-write-tests define the expected layout and transcript behavior; the `blad` renderer and the `skott` TUI pattern are the reference."
+    purpose: "Deliver a Markdown-first TUI with a durable, scrollable, per-component transcript."
+    expected_outcome: "All tui-layout-write-tests pass; the shell is a Skott-style TUI that renders command Markdown with `blad` and persists a split, per-component transcript."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "md-output-implement-code"
+      - "tui-layout-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "tui-layout-security-audit"
+    title: "security_audit: inspect the TUI and transcript persistence"
+    description: "Independently review the TUI and transcript paths for untrusted-input handling (queue- and report-derived text rendered into the transcript without escape-sequence injection or secret leakage), transcript bounds (file splitting at a fixed bound, no unbounded memory, no symlink or traversal in the state directory), and no authority change (the transcript is local uninspected state, not compliance evidence, and the TUI grants no new task or execution authority)."
+    context: "The changed paths persist untrusted text to disk and render it into the TUI; internal/implementer review — the independent gate is the compliance-review task."
+    purpose: "Preserve independent confirmation that the TUI and transcript introduce no disclosure, corruption, or authority change."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "tui-layout-implement-code"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "tui-layout-compliance-review"
+    title: "compliance_review: compare the TUI against intent"
+    description: "In a clean-slate, source-blind context, derive IMPL.md from the changed source and test evidence, then compare REQ-INTERACTIVE-TUI, REQ-TRANSCRIPT-PERSISTENCE, and the Provided-interfaces contract against IMPL.md and test evidence, reporting any discrepancy for explicit human arbitration."
+    context: "The implementer must not certify its own work; this task is the independent gate for the TUI and transcript."
+    purpose: "Independently verify that the implemented TUI and transcript satisfy the updated requirements and contract before acceptance."
+    expected_outcome: "A compliance review record with the compared artifacts, observed evidence, and any discrepancies for arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "tui-layout-security-audit"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "settings-menu-write-tests"
+    title: "write_tests: pin the settings menu and component auto-selection"
+    description: "Write failing tests that the settings menu exposes model, reasoning effort, session history, component selection, theme, and other settings; that selecting a component from the menu is the same focus change as the `cd` builtin and pre-fills the component for subsequent commands; and that theme, model, and effort selections persist the preference and apply immediately to the session."
+    context: "The TUI needs a settings menu in the `skott` overlay pattern; the new REQ-SETTINGS-MENU makes it mandatory. Component auto-selection is the same focus change as `cd`, so the operator is never asked for the component."
+    purpose: "Establish executable evidence for the settings menu and component auto-selection before implementation."
+    expected_outcome: "The new tests fail against the current shell (no settings menu, no auto-selection) and pass after the menu is implemented."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "settings-menu-implement-code"
+    title: "implement_code: add the settings menu and component auto-selection"
+    description: "Add a settings menu in the `skott` overlay pattern exposing model, reasoning effort, session history, component selection, theme, and other settings. Selecting a component from the menu performs the same focus change as the `cd` builtin and pre-fills the component for subsequent commands. Theme, model, and effort selections persist the preference and apply immediately to the session. The menu is a pure function of the session state and is testable without a terminal."
+    context: "The failing tests from settings-menu-write-tests define the expected menu and auto-selection behavior; the `skott` overlay pattern is the reference."
+    purpose: "Deliver a settings menu and component auto-selection so the operator is never asked for the component."
+    expected_outcome: "All settings-menu-write-tests pass; the settings menu exposes the major choices and component selection pre-fills subsequent commands."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "settings-menu-write-tests"
+      - "tui-layout-implement-code"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "settings-menu-security-audit"
+    title: "security_audit: inspect the settings menu"
+    description: "Independently review the settings menu paths for untrusted-input handling (model, theme, and effort selections validated against the configured set without injection), persistence (preferences written atomically without clobbering unrelated settings), and no authority change (the menu grants no new task or execution authority and component selection is the same focus change as `cd`)."
+    context: "The changed paths persist preferences and change the component focus; internal/implementer review — the independent gate is the compliance-review task."
+    purpose: "Preserve independent confirmation that the settings menu introduces no disclosure, corruption, or authority change."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "settings-menu-implement-code"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "settings-menu-compliance-review"
+    title: "compliance_review: compare the settings menu against intent"
+    description: "In a clean-slate, source-blind context, derive IMPL.md from the changed source and test evidence, then compare REQ-SETTINGS-MENU and the Provided-interfaces contract against IMPL.md and test evidence, reporting any discrepancy for explicit human arbitration."
+    context: "The implementer must not certify its own work; this task is the independent gate for the settings menu."
+    purpose: "Independently verify that the implemented settings menu satisfies the updated requirements and contract before acceptance."
+    expected_outcome: "A compliance review record with the compared artifacts, observed evidence, and any discrepancies for arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "settings-menu-security-audit"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "run-all-write-tests"
+    title: "write_tests: pin the whole-component run loop"
+    description: "Write failing tests that `task run-all [COMPONENT_DIR]` iterates the component's tasks in dependency order, running each ready task, and stops when the component is complete, when a task becomes blocked, or when a task reaches an awaiting-decision point; that it never auto-resolves a decision or unblocks a blocked task; and that it pauses and reports the exact state and the command that resolves it, leaving durable task state for explicit finalize or recovery."
+    context: "The existing `task run … all` runs every uncompleted task sequentially and stops at the first failure, but does not iterate in dependency order or stop at a blocker or decision. The new REQ-RUN-COMPONENT makes a whole-component run mandatory."
+    purpose: "Establish executable evidence for the whole-component run loop and its stop conditions before implementation."
+    expected_outcome: "The new tests fail against the current `task run … all` behavior and pass after `task run-all` is implemented."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-RUN-COMPONENT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "run-all-implement-code"
+    title: "implement_code: add the whole-component run command"
+    description: "Add `task run-all [COMPONENT_DIR]` that iterates the component's tasks in dependency order, running each ready task, and stops when the component is complete, when a task becomes blocked, or when a task reaches an awaiting-decision point. Reuse the existing `task run` selection and execution path for each task so the loop respects the same locking, policy-approval, and evidence guarantees. Never auto-resolve a decision or unblock a blocked task; pause and report the exact state and the command that resolves it, leaving durable task state for explicit finalize or recovery. The loop is a pure function of the queue state and the per-task run result."
+    context: "The failing tests from run-all-write-tests define the expected loop and stop conditions; the existing `task run` selection and execution path is reused."
+    purpose: "Deliver a whole-component run that iterates tasks to completion or an explicit blocker or decision."
+    expected_outcome: "All run-all-write-tests pass; `task run-all` iterates the component's tasks in dependency order and stops at completion, a blocker, or a decision."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "run-all-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-RUN-COMPONENT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "run-all-security-audit"
+    title: "security_audit: inspect the whole-component run loop"
+    description: "Independently review the run-all loop for untrusted-input handling (queue-derived task selection without injection), locking and policy-approval preservation (the loop reuses the `task run` guarantees and never broadens a grant), and no auto-resolution (the loop never unblocks a blocked task or resolves a decision, leaving durable state for explicit finalize or recovery)."
+    context: "The changed paths iterate the queue and run tasks; internal/implementer review — the independent gate is the compliance-review task."
+    purpose: "Preserve independent confirmation that the whole-component run loop introduces no authority change or unsafe auto-resolution."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "run-all-implement-code"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-RUN-COMPONENT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "run-all-compliance-review"
+    title: "compliance_review: compare the whole-component run against intent"
+    description: "In a clean-slate, source-blind context, derive IMPL.md from the changed source and test evidence, then compare REQ-RUN-COMPONENT and the Provided-interfaces contract against IMPL.md and test evidence, reporting any discrepancy for explicit human arbitration."
+    context: "The implementer must not certify its own work; this task is the independent gate for the whole-component run."
+    purpose: "Independently verify that the implemented whole-component run satisfies the updated requirements and contract before acceptance."
+    expected_outcome: "A compliance review record with the compared artifacts, observed evidence, and any discrepancies for arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "run-all-security-audit"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-RUN-COMPONENT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-28T08:23:13Z"
+      updated_at: "2026-10-28T08:23:13Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

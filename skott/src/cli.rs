@@ -109,18 +109,20 @@ pub struct Cli {
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=1_048_576))]
     pub response_reserve: Option<u32>,
 
-    /// Whole-prompt wall time, including requests, retry waits and tools.
-    /// Defaults to the 24-hour safety bound so a long task runs uninterrupted
-    /// to a result; pass a smaller value to bound individual runs.
-    #[arg(long, default_value_t = 86_400, value_parser = clap::value_parser!(u64).range(1..=86_400))]
-    pub max_run_secs: u64,
+    /// Optional whole-task wall limit, including requests, retries and tools.
+    /// No default cutoff; new idle prompts start fresh budgets.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub max_run_secs: Option<u64>,
 
     /// Estimated input plus reserved output tokens across all model attempts.
-    /// Defaults to a 100-million-token safety bound so long multi-turn tasks
-    /// are not cut off by the estimate budget; pass a smaller value to bound
-    /// individual runs.
-    #[arg(long, default_value_t = 100_000_000, value_parser = clap::value_parser!(u64).range(1..=1_000_000_000))]
-    pub max_run_tokens: u64,
+    /// No default cumulative-token cutoff.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub max_run_tokens: Option<u64>,
+
+    /// Optional sandboxed model turns without human intervention. Delivered
+    /// guidance renews this allowance; no default turn ceiling.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..), conflicts_with = "allow_host_execution")]
+    pub max_turns: Option<u32>,
 
     /// An initial prompt to submit (optional).
     pub prompt: Option<String>,
@@ -305,6 +307,40 @@ mod tests {
             "host turn cap is unset by default"
         );
         assert_eq!(cli.prompt.as_deref(), Some("explain this"));
+        assert_eq!(cli.max_turns, None);
+        assert_eq!(cli.max_run_secs, None);
+        assert_eq!(cli.max_run_tokens, None);
+    }
+
+    #[test]
+    fn optional_caps_allow_multi_day_runs_but_reject_zero_and_host_turn_override() {
+        let cli = Cli::try_parse_from([
+            "skott",
+            "--max-turns",
+            "10000",
+            "--max-run-secs",
+            "604800",
+            "--max-run-tokens",
+            "2000000000",
+            "long task",
+        ])
+        .unwrap();
+        assert_eq!(cli.max_turns, Some(10000));
+        assert_eq!(cli.max_run_secs, Some(604800));
+        assert_eq!(cli.max_run_tokens, Some(2_000_000_000));
+        for flag in ["--max-turns", "--max-run-secs", "--max-run-tokens"] {
+            assert!(Cli::try_parse_from(["skott", flag, "0", "task"]).is_err());
+        }
+        assert!(
+            Cli::try_parse_from([
+                "skott",
+                "--allow-host-execution",
+                "--max-turns",
+                "2",
+                "task"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

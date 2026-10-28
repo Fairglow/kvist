@@ -39,6 +39,17 @@ delegating task approval or effect authority to their clients.
 
 ### Live task diagnostics and controls
 
+Protected native authoring has no implicit 64-generation ceiling. Role
+`timeout_seconds` is a positive whole-task budget, defaults to 300 and accepts
+up to 2,592,000 seconds (30 days). Explicit `token_limit` remains cumulative.
+Each sandbox effect is clipped to remaining task time and at most 86,400
+seconds; this does not increase runner grants. Changing role budgets changes
+approval input and requires normal policy reapproval. Guidance does not reset
+these approved budgets.
+Delivered guidance renews model-generation attempts. Individual model requests
+retain the transport's independent 24-hour ceiling, including explicit endpoint
+profiles; shared profiles may impose shorter per-attempt deadlines.
+
 Explicit cancellation is carried into an executing sandbox effect and
 terminates/reaps its owned process group; steering alone never cancels that
 effect. The sandbox execution API exposes an additional explicit-token entry
@@ -110,6 +121,13 @@ The `kvist` executable provides (the authoritative design is
   task ID, an item prefix selecting every task of that item, or `all` (every
   uncompleted task of the component, run sequentially, stopping at the first
   failure)
+- `task run-all [COMPONENT_DIR]` — run the whole component: iterate the
+  component's tasks in dependency order, running each ready task, and stop when
+  the component is complete, when a task becomes blocked, or when a task
+  reaches an awaiting-decision point. It never auto-resolves a decision or
+  unblocks a blocked task; it pauses and reports the exact state and the
+  command that resolves it, leaving durable task state for explicit finalize
+  or recovery
 - `task log [COMPONENT_DIR] TASK_ID`
 - `task replay SESSION_JSONL [--max-turns N]`
 - `task approve-policy [PROJECT_DIR]`
@@ -383,6 +401,45 @@ live locks from stale ones. Destructive operations (`task unlock --force`,
 `agent remove --all`, `component accept --commit`, `vcs commit-accepted`)
 require an explicit in-shell confirmation.
 
+### Markdown-first output and the interactive TUI
+
+Every command reports its result as a well-formed Markdown document that is the
+canonical description of that result. The interactive shell renders that
+document with the `blad` renderer inside a full-screen terminal UI in the shape
+of the `skott` layout:
+
+- **Status heading.** Shows the active component together with its state and
+  task progress, plus the VCS branch, sandbox backend, default model, and
+  live/stale lock counts. When no component is selected the heading shows the
+  whole project and the shell operates on the project; when a component is
+  selected it is auto-selected as the default for every command that expects a
+  component, so the operator is never asked for it and it is pre-filled.
+- **Main transcript area.** A bounded on-screen window with a scrollbar over a
+  durable, per-component, disk-persisted record of every interaction (commands
+  and their rendered Markdown output). The record is unlimited in size and
+  splits into successive files when one grows too large. The operator can
+  scroll back through the session. Switching component clears the transcript
+  area and restores that component's former transcript when the operator
+  returns to it. The transcript is local uninspected state, not compliance
+  evidence.
+- **Command footer.** The same command surface as the CLI with full
+  tab-completion (static from the clap surface, dynamic from the project
+  state) and keyboard-shortcut help rendered the same way `skott` does it.
+
+The TUI degrades to the plain-text line-oriented shell when the terminal cannot
+host it, and the plain-text degradation contract of `REQ-INTERACTIVE-SHELL`
+still applies. The stable `status --format text` and `--format json` report
+forms are unchanged for non-interactive consumers.
+
+`task run-all [COMPONENT_DIR]` runs the whole selected component: it iterates
+the component's tasks in dependency order, running each ready task, and stops
+when the component is complete, when a task becomes blocked, or when a task
+reaches an awaiting-decision point. It never auto-resolves a decision or
+unblocks a blocked task; it pauses and reports the exact state and the command
+that resolves it, leaving durable task state for explicit finalize or recovery.
+It respects the same locking, policy-approval, and evidence guarantees as
+`task run`.
+
 ## Required interfaces
 
 ADR 0015 retains maerg as the authority host for shared Sav mechanisms.
@@ -396,6 +453,9 @@ Kvist requires:
 
 - `sav.library/v1` for prompt acquisition, command rendering,
   profiles, setup, process supervision, and model transports;
+- `blad.library/v1` for Markdown rendering in the interactive TUI, with the
+  renderer's theme, width, and panel background supplied by the host so the
+  rendered output matches the TUI's theme;
 - a selected Git or Jujutsu repository for durable-artifact tracking checks;
 - an independently installed runner implementing
   `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` for task execution,
@@ -628,7 +688,8 @@ after which `IMPL.md` is rederived from the code.
 
 The model phase runs under one shared wall-clock budget equal to the configured
 profile timeout, covering the liveness probe, every model and brokered turn, every read and effect, and every
-retry backoff; the per-attempt transport deadline is the remaining budget. When
+retry backoff; each per-attempt transport deadline is clipped to the remaining
+budget and independent transport/profile ceiling. When
 the gateway accepts but a turn still hits a transient availability failure — a
 socket connection refused, timed out, interrupted, or reset error, a
 slot-allocation timeout, or an overall transport timeout — the maerg retries it

@@ -206,6 +206,149 @@ fn follower_keeps_original_descriptor_and_limits_batches() {
 }
 
 #[test]
+fn journals_rotate_past_64_mib_without_ending_the_run() {
+    let dir = tempfile::tempdir().expect("directory");
+    let logs = dir.path().join("logs");
+    let retained = dir.path().join("retained");
+    let unrelated = dir.path().join("unrelated");
+    fs::create_dir(&logs).unwrap();
+    fs::create_dir(&unrelated).unwrap();
+    let path = logs.join("long.jsonl");
+    let mut writer = RunJournal::create(&path, "long-run", json!({})).expect("journal");
+    let mut follower = JournalFollower::open(&path).expect("live follower");
+    fs::rename(&logs, &retained).unwrap();
+    symlink(&unrelated, &logs).unwrap();
+    let event = json!({"type":"text","data":{"text":"x".repeat(60 * 1024)}});
+    for _ in 0..1100 {
+        writer.record(&event).expect("record beyond old total cap");
+    }
+
+    writer.finish("completed").expect("terminal");
+    for entry in fs::read_dir(&retained).expect("segments") {
+        assert!(entry.expect("entry").metadata().expect("metadata").len() <= 64 * 1024 * 1024);
+    }
+    assert!(retained.join("long.jsonl.part-000001").is_file());
+    assert_eq!(
+        fs::read_dir(&unrelated).unwrap().count(),
+        0,
+        "rotation must use the held directory"
+    );
+    let mut text_records = 0;
+    let mut sequence = 0;
+    while !follower.is_finished() {
+        let rows = follower.poll().expect("cross segment");
+        assert!(!rows.is_empty());
+        assert!(rows.len() <= 256);
+        for row in rows {
+            sequence += 1;
+            assert_eq!(row.sequence, sequence);
+            text_records += usize::from(row.event["type"] == "text");
+        }
+    }
+    follower.end_of_input().expect("complete");
+    assert_eq!(text_records, 1100);
+    let mut snapshot = JournalFollower::open(&retained.join("long.jsonl")).unwrap();
+    while !snapshot.is_finished() {
+        assert!(!snapshot.poll().unwrap().is_empty());
+    }
+    snapshot.end_of_input().unwrap();
+}
+
+#[test]
+fn terminal_at_poll_boundary_cannot_hide_trailing_data() {
+    let dir = tempfile::tempdir().unwrap();
+    for ordinary_records in [254, 510] {
+        for trailing in ["", "unexpected trailing data\n", "\n"] {
+            let path = dir
+                .path()
+                .join(format!("boundary-{ordinary_records}-{}", trailing.len()));
+            let mut writer = RunJournal::create(&path, "boundary", json!({})).unwrap();
+            for _ in 0..ordinary_records {
+                writer.record(&json!({"type":"note"})).unwrap();
+            }
+            writer.finish("completed").unwrap();
+            OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap()
+                .write_all(trailing.as_bytes())
+                .unwrap();
+            let mut follower = JournalFollower::open(&path).unwrap();
+            let mut rejected = false;
+            while !follower.is_finished() {
+                match follower.poll() {
+                    Ok(records) => assert!(!records.is_empty() && records.len() <= 256),
+                    Err(_) => {
+                        rejected = true;
+                        break;
+                    }
+                }
+            }
+            assert_eq!(
+                rejected,
+                !trailing.is_empty(),
+                "terminal after {ordinary_records} ordinary records; trailing {trailing:?}"
+            );
+            assert_eq!(follower.end_of_input().is_err(), rejected);
+        }
+    }
+}
+
+#[test]
+fn followers_reject_invalid_missing_and_linked_continuations() {
+    for invalid in [
+        "missing", "link", "index", "path", "trailing", "mixed", "gap",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run");
+        let mut writer = RunJournal::create(&path, "r", json!({})).unwrap();
+        assert!(
+            writer
+                .record(&json!({"type":"journal_segment","data":{"index":1}}))
+                .is_err()
+        );
+        drop(writer);
+        let data = match invalid {
+            "index" => json!({"index":2}),
+            "path" => json!({"index":1,"path":"elsewhere"}),
+            _ => json!({"index":1}),
+        };
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        writeln!(
+            file,
+            "{}",
+            json!({"schema_version":1,"run_id":"r","sequence":2,
+            "event":{"type":"journal_segment","data":data}})
+        )
+        .unwrap();
+        if invalid == "trailing" {
+            writeln!(file, "unexpected trailing data").unwrap();
+        }
+        let next = dir.path().join("run.part-000001");
+        if invalid == "link" {
+            symlink(&path, &next).unwrap();
+        } else if invalid != "missing" {
+            fs::write(
+                &next,
+                format!(
+                    "{}\n",
+                    json!({
+                        "schema_version":1, "run_id":if invalid == "mixed" { "other" } else { "r" },
+                        "sequence":if invalid == "gap" { 4 } else { 3 },
+                        "event":{"type":"run_end","data":{"disposition":"completed"}}
+                    })
+                ),
+            )
+            .unwrap();
+        }
+        assert!(
+            JournalFollower::open(&path).unwrap().poll().is_err(),
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
 fn private_controls_are_validated_acknowledged_and_removed() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&seen);
@@ -305,10 +448,12 @@ fn control_rejects_malformed_requests_without_calling_host_and_bounds_idle_clien
 }
 
 #[test]
-fn journal_enforces_exact_record_and_total_bound_without_partial_append() {
+fn journal_rotation_collision_stops_without_partial_append() {
     let dir = tempfile::tempdir().expect("directory");
     let path = dir.path().join("run");
     let mut writer = RunJournal::create(&path, "r", json!({})).expect("journal");
+    let next = dir.path().join("run.part-000001");
+    fs::write(&next, "reserved").expect("existing segment");
     let event = json!({"type":"note","text":"x".repeat(60_000)});
     for _ in 0..1200 {
         let before = fs::metadata(&path).expect("metadata").len();
@@ -317,9 +462,12 @@ fn journal_enforces_exact_record_and_total_bound_without_partial_append() {
             Err(_) => {
                 assert_eq!(fs::metadata(&path).expect("metadata").len(), before);
                 assert!(before > 63 * 1024 * 1024);
+                assert_eq!(fs::read_to_string(&next).unwrap(), "reserved");
+                assert!(writer.record(&json!({"type":"late"})).is_err());
+                assert!(writer.checkpoint().is_err());
                 return;
             }
         }
     }
-    panic!("journal accepted more than its 64 MiB bound");
+    panic!("journal overwrote an existing continuation segment");
 }

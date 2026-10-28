@@ -96,12 +96,6 @@ pub fn split_command(
     sav::render_command(template, prompt, context_paths, target_dir).map_err(Into::into)
 }
 
-/// The maximum number of model turns one `task run` may perform before it stops.
-///
-/// The shared wall-clock budget is the primary limiter; this is a hard safety
-/// net so a model that keeps proposing effects can never loop forever.
-const MAX_AGENT_TURNS: usize = 64;
-
 /// The brokered and applied outcomes of one model turn within a run.
 ///
 /// A run is a sequence of these; [`record_turn_outcome`](record_turn_outcome)
@@ -452,7 +446,7 @@ impl TurnBudget {
         if remaining.is_zero() {
             return Err(KvistError::Sav(ModelError::ModelTransportTimedOut));
         }
-        Ok(remaining)
+        Ok(remaining.min(Duration::from_secs(86_400)))
     }
 }
 
@@ -866,7 +860,7 @@ fn dispatch_effect(
         sandbox.config,
         execution_request,
         crate::sandbox::ExecutionOptions {
-            timeout: Some(sandbox.budget.remaining()),
+            timeout: Some(sandbox.budget.remaining().min(Duration::from_secs(86_400))),
             output_limit: Some(profile.max_output_bytes),
             live_stdout: None,
         },
@@ -1280,11 +1274,52 @@ fn execute_agent_inner(
         let mut context = if let Some(native) = &mut choice.native {
             let limit = match native.context_limit {
                 Some(limit) => limit,
-                None => native.transport_bounded(budget.model_deadline(cancellation)?,profile.max_output_bytes)?
-                    .context_limit(&native.model,cancellation)?
-                    .ok_or_else(||KvistError::Runtime(sav::runtime::Error::Config{
-                        path:None,reason:"shared native serving capacity is unavailable; configure context_limit in the selected registry profile".into(),
-                    }))?,
+                None => {
+                    let retry = sav::runtime::RetryPolicy::new(
+                        MODEL_TURN_MAX_ATTEMPTS,
+                        MODEL_TURN_RETRY_BACKOFF,
+                        MODEL_TURN_RETRY_BACKOFF,
+                    );
+                    let mut attempt = 0u32;
+                    loop {
+                        attempt += 1;
+                        let transport = native.transport_bounded(
+                            budget.model_deadline(cancellation)?,
+                            profile.max_output_bytes,
+                        )?;
+                        match transport.context_limit(&native.model, cancellation) {
+                            Ok(Some(limit)) => break limit,
+                            Ok(None) => {
+                                return Err(KvistError::Runtime(sav::runtime::Error::Config {
+                                    path: None,
+                                    reason: "shared native serving capacity is unavailable; configure context_limit in the selected registry profile".into(),
+                                }));
+                            }
+                            Err(source) => {
+                                if is_retryable_transport_error(&source)
+                                    && attempt < retry.max_attempts
+                                {
+                                    tracing::warn!(
+                                        task_id = %request.task_id,
+                                        attempt,
+                                        %source,
+                                        "context-limit discovery failed; retrying"
+                                    );
+                                    let deadline = Instant::now()
+                                        + retry.backoff_delay(attempt + 1).min(budget.remaining());
+                                    while Instant::now() < deadline && !cancellation.is_cancelled()
+                                    {
+                                        thread::sleep(Duration::from_millis(10).min(
+                                            deadline.saturating_duration_since(Instant::now()),
+                                        ));
+                                    }
+                                } else {
+                                    return Err(KvistError::Sav(source));
+                                }
+                            }
+                        }
+                    }
+                }
             };
             let reserve = native
                 .response_reserve
@@ -1318,52 +1353,37 @@ fn execute_agent_inner(
         );
         conversation.push_user(request.prompt);
 
-        let mut generations = 0;
+        let mut generations = 0u64;
         let mut model_attempts = 0;
 
         loop {
             if cancellation.is_cancelled() || controls.is_shutdown() {
                 return Err(KvistError::Sav(ModelError::Cancelled));
             }
-            steering.deliver(&mut conversation)?;
-            if generations >= MAX_AGENT_TURNS {
-                let reason = format!(
-                    "agent did not complete within the {}-turn bound",
-                    MAX_AGENT_TURNS
-                );
-                tracing::warn!(
-                    task_id = %request.task_id,
-                    %reason,
-                    max_turns = MAX_AGENT_TURNS,
-                    "agent exceeded the multi-turn bound"
-                );
-                let failure = TurnFailure {
-                    reason,
-                    timed_out: false,
-                    output_limit_exceeded: false,
-                    cancelled: false,
-                };
-                return Ok(Some(failure));
+            if steering.deliver(&mut conversation)? {
+                model_attempts = 0;
             }
 
             // 1. The model turn runs on the host: numeric loopback gateway only,
             //    liveness-probed, transient availability failures retried in the
             //    shared budget. Streamed deltas are redacted with the same values
             //    as the durable log.
-            generations += 1;
+            generations = generations.saturating_add(1);
             let operation = sav::runtime::Operation::start(cancellation, controls)?;
-            let mut model_request = conversation.next_request().ok_or_else(|| {
-                KvistError::Runtime(sav::runtime::Error::InvalidModelTurn {
-                    reason: "protected conversation lost its original task".into(),
-                })
-            })?;
             let reserve = choice
                 .native
                 .as_ref()
                 .and_then(|native| native.response_reserve)
                 .unwrap_or(1024);
-            if let Some(compaction) = context.prepare(&mut model_request, reserve)? {
-                live.record(&serde_json::json!({"type":"context_compaction","data":{"completed_groups":compaction.compacted_turns,"lossy":true,"canonical_evidence":false}}),true)?;
+            let (model_request, compaction) = conversation
+                .prepare_request(&mut context, reserve)?
+                .ok_or_else(|| {
+                    KvistError::Runtime(sav::runtime::Error::InvalidModelTurn {
+                        reason: "protected conversation lost its original task".into(),
+                    })
+                })?;
+            if let Some(compaction) = compaction {
+                live.record(&serde_json::json!({"type":"context_compaction","data":{"completed_groups":compaction.compacted_turns,"compactions":context.compactions(),"lossy":true,"canonical_evidence":false}}),true)?;
             }
             let generated = execute_host_turn(
                 &choice,
@@ -2384,6 +2404,21 @@ mod tests {
                 reason: "bad json".to_owned(),
             }
         ));
+    }
+
+    #[test]
+    fn multi_day_task_deadlines_fit_direct_transport() {
+        let budget = TurnBudget::new(Duration::from_secs(604_800));
+        let deadline = budget.model_deadline(&CancellationToken::new()).unwrap();
+        assert!(deadline <= Duration::from_secs(86_400));
+        assert!(budget.remaining() > Duration::from_secs(6 * 86_400));
+        DirectModelTransport::new(
+            sav::LocalModelProvider::Ollama,
+            "http://127.0.0.1:11434",
+            deadline,
+            65536,
+        )
+        .unwrap();
     }
 
     /// The failure class a scripted transport produces.

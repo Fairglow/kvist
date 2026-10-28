@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Component, Path, PathBuf};
@@ -28,6 +29,9 @@ pub struct JournalRecord {
 /// A no-clobber, private, held-descriptor diagnostic writer.
 pub struct RunJournal {
     file: File,
+    directory: File,
+    base_name: OsString,
+    segment: u64,
     path: PathBuf,
     run_id: String,
     sequence: u64,
@@ -45,9 +49,12 @@ impl RunJournal {
             ));
         }
         let initial = encode_record(run_id, 1, &json!({"type":"run_start","data":metadata}))?;
-        let file = open_regular(path, true)?;
+        let (directory, file, base_name) = open_regular(path, true)?;
         let mut writer = Self {
             file,
+            directory,
+            base_name,
+            segment: 0,
             path: path.to_owned(),
             run_id: run_id.into(),
             sequence: 0,
@@ -71,7 +78,10 @@ impl RunJournal {
         let event: Value = serde_json::from_slice(&encoded)
             .map_err(|_| invalid("event cannot be parsed within the JSON nesting bound"))?;
         validate_event(&event)?;
-        if matches!(event["type"].as_str(), Some("run_start" | "run_end")) {
+        if matches!(
+            event["type"].as_str(),
+            Some("run_start" | "run_end" | "journal_segment")
+        ) {
             return Err(invalid(
                 "run lifecycle event is reserved for the journal owner",
             ));
@@ -110,12 +120,61 @@ impl RunJournal {
                 "journal is terminal or failed; no further records are allowed",
             ));
         }
+        let mut sequence = self
+            .sequence
+            .checked_add(1)
+            .ok_or_else(|| invalid("journal sequence exhausted"))?;
+        let mut bytes = encode_record(&self.run_id, sequence, &event)?;
+        if self
+            .bytes
+            .saturating_add(bytes.len() as u64)
+            .saturating_add(MAX_RECORD_BYTES as u64)
+            > MAX_JOURNAL_BYTES
+        {
+            if let Err(error) = self.rotate() {
+                self.poisoned = true;
+                return Err(error);
+            }
+            sequence = self
+                .sequence
+                .checked_add(1)
+                .ok_or_else(|| invalid("journal sequence exhausted"))?;
+            bytes = encode_record(&self.run_id, sequence, &event)?;
+        }
+        self.write_record(bytes, sequence)
+    }
+
+    fn rotate(&mut self) -> Result<()> {
+        let segment = self
+            .segment
+            .checked_add(1)
+            .ok_or_else(|| invalid("journal segment index exhausted"))?;
         let sequence = self
             .sequence
             .checked_add(1)
             .ok_or_else(|| invalid("journal sequence exhausted"))?;
-        let bytes = encode_record(&self.run_id, sequence, &event)?;
-        self.write_record(bytes, sequence)
+        let link = encode_record(
+            &self.run_id,
+            sequence,
+            &json!({"type":"journal_segment","data":{"index":segment}}),
+        )?;
+        let next = open_segment(
+            &self.directory,
+            &segment_name(&self.base_name, segment),
+            &self.path,
+            true,
+        )?;
+        next.sync_data()
+            .map_err(|source| io_error(&self.path, "synchronize next journal segment", source))?;
+        self.directory
+            .sync_all()
+            .map_err(|source| io_error(&self.path, "synchronize journal directory", source))?;
+        self.write_record(link, sequence)?;
+        self.checkpoint()?;
+        self.file = next;
+        self.segment = segment;
+        self.bytes = 0;
+        Ok(())
     }
 
     fn write_record(&mut self, bytes: Vec<u8>, sequence: u64) -> Result<()> {
@@ -179,6 +238,10 @@ fn encode_bounded(value: &impl Serialize) -> Result<Vec<u8>> {
 /// A bounded follower of the original regular file, including partial live tails.
 pub struct JournalFollower {
     reader: BufReader<File>,
+    directory: File,
+    base_name: OsString,
+    segment: u64,
+    next_segment: bool,
     path: PathBuf,
     pending: Vec<u8>,
     run_id: Option<String>,
@@ -191,8 +254,13 @@ pub struct JournalFollower {
 impl JournalFollower {
     /// Opens a non-link regular file without following any path component links.
     pub fn open(path: &Path) -> Result<Self> {
+        let (directory, file, base_name) = open_regular(path, false)?;
         Ok(Self {
-            reader: BufReader::new(open_regular(path, false)?),
+            reader: BufReader::new(file),
+            directory,
+            base_name,
+            segment: 0,
+            next_segment: false,
             path: path.to_owned(),
             pending: Vec::new(),
             run_id: None,
@@ -220,6 +288,9 @@ impl JournalFollower {
 
     /// Reports a truncated final record when no more input is expected.
     pub fn end_of_input(&self) -> Result<()> {
+        if self.failed {
+            return Err(invalid("journal follower failed previously"));
+        }
         if !self.pending.is_empty() {
             return Err(invalid("journal ends with an incomplete record"));
         }
@@ -233,7 +304,31 @@ impl JournalFollower {
 
     fn read_available(&mut self) -> Result<Vec<JournalRecord>> {
         let mut records = Vec::new();
-        while records.len() < MAX_POLL_RECORDS {
+        // A terminal record in the final batch slot still requires a tail check.
+        while records.len() < MAX_POLL_RECORDS || self.finished {
+            if self.next_segment {
+                if !self
+                    .reader
+                    .fill_buf()
+                    .map_err(|source| {
+                        io_error(&self.path, "read journal segment boundary", source)
+                    })?
+                    .is_empty()
+                {
+                    return Err(invalid(
+                        "journal segment contains data after its continuation",
+                    ));
+                }
+                let file = open_segment(
+                    &self.directory,
+                    &segment_name(&self.base_name, self.segment),
+                    &self.path,
+                    false,
+                )?;
+                self.reader = BufReader::new(file);
+                self.bytes = 0;
+                self.next_segment = false;
+            }
             let available = self
                 .reader
                 .fill_buf()
@@ -280,6 +375,21 @@ impl JournalFollower {
             self.run_id.get_or_insert_with(|| record.run_id.clone());
             self.sequence = record.sequence;
             self.finished = record.event["type"] == "run_end";
+            if record.event["type"] == "journal_segment" {
+                let expected = self
+                    .segment
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("journal segment index exhausted"))?;
+                if record.event["data"]["index"].as_u64() != Some(expected)
+                    || record.event["data"]
+                        .as_object()
+                        .is_none_or(|data| data.len() != 1)
+                {
+                    return Err(invalid("journal continuation index is invalid"));
+                }
+                self.segment = expected;
+                self.next_segment = true;
+            }
             if self.finished
                 && !record.event["data"]["disposition"]
                     .as_str()
@@ -314,7 +424,13 @@ fn io_error(path: &Path, operation: &'static str, source: std::io::Error) -> Err
     }
 }
 
-fn open_regular(path: &Path, create: bool) -> Result<File> {
+fn segment_name(base: &std::ffi::OsStr, segment: u64) -> OsString {
+    let mut name = base.to_owned();
+    name.push(format!(".part-{segment:06}"));
+    name
+}
+
+fn open_regular(path: &Path, create: bool) -> Result<(File, File, OsString)> {
     let absolute = if path.is_absolute() {
         path.to_owned()
     } else {
@@ -347,6 +463,21 @@ fn open_regular(path: &Path, create: bool) -> Result<File> {
             _ => return Err(invalid("journal path must not contain . or ..")),
         }
     }
+    let file = open_segment(&directory, name, path, create)?;
+    if create {
+        directory
+            .sync_all()
+            .map_err(|source| io_error(path, "synchronize journal directory", source))?;
+    }
+    Ok((directory, file, name.to_owned()))
+}
+
+fn open_segment(
+    directory: &File,
+    name: &std::ffi::OsStr,
+    path: &Path,
+    create: bool,
+) -> Result<File> {
     let access = if create {
         OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL
     } else {
@@ -354,7 +485,7 @@ fn open_regular(path: &Path, create: bool) -> Result<File> {
     };
     let file = File::from(
         openat(
-            &directory,
+            directory,
             name,
             access | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
             Mode::S_IRUSR | Mode::S_IWUSR,
@@ -367,11 +498,6 @@ fn open_regular(path: &Path, create: bool) -> Result<File> {
         .is_file()
     {
         return Err(invalid("live journal must be a regular file"));
-    }
-    if create {
-        directory
-            .sync_all()
-            .map_err(|source| io_error(path, "synchronize journal directory", source))?;
     }
     Ok(file)
 }

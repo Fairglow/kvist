@@ -204,6 +204,7 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
 | --------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `task next`           | `kvist task next [COMPONENT_DIR]`                                                              | print the first ready task (no state change)                                                                                                                                                                                                                                                             |
 | `task run`            | `kvist task run [COMPONENT_DIR] [TASK_ID] [--stream]`                                          | execute with the supervised agent; TASK_ID = exact task ID, an item prefix selecting every task of that item, or `all` (every uncompleted task, sequentially, stopping at the first failure); omitted task = suggest the next ready one (confirmed interactively; non-interactive contexts fail clearly) |
+| `task run-all`        | `kvist task run-all [COMPONENT_DIR]`                                                           | run the whole component: iterate the component's tasks in dependency order, running each ready task, and stop when the component is complete, when a task becomes blocked, or when a task reaches an awaiting-decision point; it never auto-resolves a decision or unblocks a blocked task, pausing with the exact state and the command that resolves it |
 | `task log`            | `kvist task log [COMPONENT_DIR] TASK_ID`                                                       | print the most recent bounded, redacted execution log                                                                                                                                                                                                                                                    |
 | `task replay`         | `kvist task replay SESSION_JSONL [--max-turns N]`                                              | replay a recorded trajectory                                                                                                                                                                                                                                                                             |
 | `task transition`     | `kvist task transition [COMPONENT_DIR] TASK_ID STATUS [--reason R]`                            | one audited manual status transition                                                                                                                                                                                                                                                                     |
@@ -230,6 +231,48 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
 | `agent remove` | `kvist agent remove [MODEL_NAME] [--all] [--global]`                                  | remove profile(s)                                                |
 | `agent check`  | `kvist agent check [--global]`                                                        | live-verify configured profiles                                  |
 | `agent role`   | `kvist agent role [list\|set ROLE MODEL [--effort E]\|clear ROLE [--all]] [--global]` | bind roles (developer, architect, security-reviewer) to profiles |
+
+### 4.5 The interactive TUI and Markdown-first output
+
+The `kvist shell` is a full-screen terminal UI in the shape of the `skott`
+layout, not a line-oriented REPL:
+
+- **Status heading.** Shows the active component together with its state and
+  task progress, plus the VCS branch, sandbox backend, default model, and
+  live/stale lock counts. When no component is selected the heading shows the
+  whole project and commands operate on the project; when a component is
+  selected it is auto-selected as the default for every command that expects a
+  component, so the operator is never asked for it and it is pre-filled.
+- **Main transcript area.** A bounded on-screen window with a scrollbar over a
+  durable, per-component, disk-persisted record of every interaction (commands
+  and their rendered Markdown output). The record is unlimited in size and
+  splits into successive files when one grows too large. The operator can
+  scroll back through the session. Switching component clears the transcript
+  area and restores that component's former transcript when the operator
+  returns to it.
+- **Command footer.** The same command surface as the CLI with full
+  tab-completion and keyboard-shortcut help rendered the same way `skott` does
+  it.
+
+**Markdown is the canonical output.** Every command reports a well-formed
+Markdown document as its canonical result, and the TUI renders that document
+with the `blad` renderer so tables, diagrams, math, and code blocks display
+with full fidelity. The stable `status --format text` and `--format json`
+report forms are unchanged for non-interactive consumers, and the plain-text
+degradation contract still applies when the terminal cannot host the TUI.
+
+**Settings menu.** The TUI provides a settings menu (the `skott` overlay
+pattern) exposing model, reasoning effort, session history, component
+selection, theme, and other settings. Selecting a component from the menu is
+the same focus change as the `cd` builtin and pre-fills the component for
+subsequent commands.
+
+**Run the whole component.** `task run-all [COMPONENT_DIR]` iterates the
+component's tasks in dependency order, running each ready task, and stops when
+the component is complete, when a task becomes blocked, or when a task reaches
+an awaiting-decision point. It never auto-resolves a decision or unblocks a
+blocked task; it pauses and reports the exact state and the command that
+resolves it, leaving durable task state for explicit finalize or recovery.
 
 ## 5. Context resolution rules (normative)
 

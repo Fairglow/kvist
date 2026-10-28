@@ -519,6 +519,154 @@ fn shared_profile(endpoint: &str, context_limit: usize) -> AgentProfile {
 }
 
 #[test]
+fn protected_run_continues_beyond_64_generations() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let endpoint = format!("http://{}", listener.local_addr().expect("address"));
+    let gate = EffectGate::new(dir.path());
+    let stopped = AtomicBool::new(false);
+    let result = thread::scope(|scope| {
+        let provider = scope.spawn(|| {
+            let mut inference = 0;
+            let mut last_request = Instant::now();
+            loop {
+                if stopped.load(Ordering::SeqCst) {
+                    return inference;
+                }
+                assert!(
+                    last_request.elapsed() < Duration::from_secs(10),
+                    "missing model request"
+                );
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        if read_request(&mut stream).is_none() {
+                            continue;
+                        }
+                        last_request = Instant::now();
+                        inference += 1;
+                        if inference <= 65 {
+                            respond_with_effect(&mut stream, 10, 4);
+                            gate.release(|| {});
+                        } else {
+                            respond(&mut stream, 10, 4);
+                            return inference;
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("accept: {error}"),
+                }
+            }
+        });
+        let mut selected = shared_profile(&endpoint, 8192);
+        selected.timeout_seconds = 604_800;
+        let result = execute_agent(
+            &selected,
+            &gate.config,
+            Some(&gate.identity),
+            Some(&gate.probe),
+            AgentExecutionRequest {
+                project_root: dir.path(),
+                vcs_selection: VcsSelection::Git,
+                prompt: "complete all 65 steps",
+                context_paths: &[],
+                read_only_mounts: &[],
+                target_dir: dir.path(),
+                task_id: "long-task",
+                stream_output: false,
+                role: Role::Developer,
+                policy_identity: "fixture",
+            },
+        )
+        .expect("recorded outcome");
+        stopped.store(true, Ordering::SeqCst);
+        let generations = provider.join().expect("provider");
+        assert_eq!(generations, 66, "{}", result.stderr);
+        result
+    });
+    assert!(result.success, "{}", result.stderr);
+}
+
+#[test]
+fn multi_day_explicit_endpoint_run_accepts_repeated_human_guidance() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let dir = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let controls = sav::runtime::ControlMailbox::default();
+    let stopped = AtomicBool::new(false);
+    let result = thread::scope(|scope| {
+        let provider = scope.spawn(|| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut inference = 0;
+            while !stopped.load(Ordering::SeqCst) {
+                assert!(Instant::now() < deadline, "missing request");
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let Some(request) = read_request(&mut stream) else {
+                            continue;
+                        };
+                        inference += 1;
+                        if inference <= 5 {
+                            controls
+                                .steer(format!("additional guidance {inference}"))
+                                .unwrap();
+                            assert_eq!(stream.read(&mut [0]).unwrap(), 0, "generation interrupted");
+                        } else {
+                            assert!(request.to_string().contains("additional guidance 5"));
+                            respond(&mut stream, 10, 4);
+                            break;
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(1))
+                    }
+                    Err(error) => panic!("accept: {error}"),
+                }
+            }
+            inference
+        });
+        let mut selected = profile(&endpoint);
+        selected.timeout_seconds = 604_800;
+        let result = kvist::agent::execute_agent_controlled(
+            &selected,
+            &SandboxConfig {
+                runner: "/usr/bin/true".into(),
+                backend: "/usr/bin/true".into(),
+                environment_allowlist: vec![],
+                acquisition: Default::default(),
+            },
+            None,
+            None,
+            AgentExecutionRequest {
+                project_root: dir.path(),
+                vcs_selection: VcsSelection::Git,
+                prompt: "original task",
+                context_paths: &[],
+                read_only_mounts: &[],
+                target_dir: dir.path(),
+                task_id: "long-guided-task",
+                stream_output: false,
+                role: Role::Developer,
+                policy_identity: "fixture",
+            },
+            &controls,
+            &sav::CancellationToken::new(),
+        )
+        .unwrap();
+        stopped.store(true, Ordering::SeqCst);
+        let calls = provider.join().unwrap();
+        assert_eq!(calls, 6, "{}", result.stderr);
+        result
+    });
+    assert!(result.success, "{}", result.stderr);
+}
+
+#[test]
 fn approved_context_reaches_native_and_explicit_endpoint_requests() {
     for shared in [true, false] {
         let dir = tempfile::tempdir_in(".").expect("workspace");

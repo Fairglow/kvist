@@ -115,9 +115,10 @@ fn run() -> skott::Result<ExitCode> {
         config_path: Some(config_path.clone()),
         allow_host_execution: cli.allow_host_execution,
         host_turns: cli.host_turns,
+        max_turns: cli.max_turns,
         prompt: cli.prompt.clone(),
         limits: RunLimits {
-            wall_time: std::time::Duration::from_secs(cli.max_run_secs),
+            wall_time: cli.max_run_secs.map(std::time::Duration::from_secs),
             max_tokens: cli.max_run_tokens,
             response_reserve: cli.response_reserve.unwrap_or(1024),
         },

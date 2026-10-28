@@ -2677,3 +2677,21 @@ suites), `cargo build --workspace --offline --locked --quiet`, and `cargo clippy
 -p blad -p skott --all-targets --offline --locked --quiet -- -D warnings`.
 `git diff --check` also passed. These are execution results from the
 implementation session, not tests independently executed by either reviewer.
+
+## Automatic nextest policy discovery — source-only supplement (2026-10-28)
+
+Source observation only; no tests/builds executed.
+
+The default-profile override targets `package(=kvist-blad)` and:
+- Every test in binaries `diagrams` and `mermaid_backend`.
+- Exact unit test `markdown::tests::test_mermaid_block_is_processed`.
+- Tests matching `/^mermaid::budget_tests::/`.
+- Exact binary/test pairs: `render_options/color_depth_never_changes_visible_geometry`, `policies/rendering_needs_no_runtime_tools_and_does_not_consume_stdin`, `integration/every_session_route_uses_the_same_escape_free_dump_policy`, and `viewer/ascii_diagram_overflow_remains_scrollable_and_canonical_on_resize`.
+
+Each match requests the entire runner pool through `threads-required = "num-test-threads"`, at priority 100—not merely serialization within a subgroup.
+
+The Markdown regression renders a Mermaid fence through the ordinary `render_markdown` helper. It asserts box corners and labels A/B, rejects literal `A --> B` and `placeholder`, and unwraps rendering/UTF-8 conversion. It neither retries nor suppresses rendering errors.
+
+The runtime creates a child control with a cooperative 500-ms deadline. Cancellation remains shared through cloned controls; rendering introduces no worker thread or preemption. Configured ceilings include 64-KiB source, 8,192 lexical units, 256 nodes, 512 edges, depth 32, 32,768 model items, 256-KiB model text, 2,000,000 work units, 262,144 grid/document cells, 2-MiB output, and 256-byte graphemes.
+
+Cancellation/deadline errors map to `io::ErrorKind::Interrupted`, not successful source fallback. Other rendering failures emit sanitized diagnostics and UTF-8-boundary-safe source fallback capped at 65,536 bytes. Budget-test source asserts resource errors, subsequent control reuse, and exact output-byte boundaries; these assertions were not executed.

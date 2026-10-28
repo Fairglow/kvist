@@ -52,6 +52,20 @@ the root component.
 
 ### REQ-SHARED-RUNTIME
 
+Delivered human guidance MUST renew model-generation attempts, without
+resetting approved task wall/token budgets. Both shared-native and explicit
+endpoint transports MUST clip individual calls to their independent deadline
+ceiling rather than reject an otherwise valid multi-day task budget.
+
+Protected authoring MUST NOT stop at an implicit generation-count ceiling.
+The approved positive role timeout MUST bound the whole task, MAY span up to
+30 days, and MUST remain unchanged by guidance. Individual sandbox effects
+MUST retain the runner's 24-hour ceiling, clipped to remaining task time.
+Default role timeouts remain unchanged; extending them requires the existing
+policy approval flow. Tests MUST exceed the former 64-generation ceiling.
+This human-requested repair has an explicit advisory exception while receipts
+are unavailable.
+
 Maerg MUST consume shared provider/profile resolution and native runtime
 mechanisms without yielding task policy, context, authorization, acquisition,
 verification, promotion or evidence authority. Explicit run selections MUST be
@@ -380,8 +394,9 @@ intervention.
 
 The shared wall-clock budget MUST equal the configured profile timeout and MUST
 cover the liveness probe, every turn attempt, every retry backoff, every read,
-and every brokered effect. The per-attempt transport deadline remains the
-remaining budget. Only transient gateway availability failures are retried a
+and every brokered effect. Each per-attempt transport deadline MUST be bounded
+by the remaining budget and the independent transport/profile ceiling.
+Only transient gateway availability failures are retried a
 bounded number of times; response-level failures and surfaced decisions end the
 loop deterministically.
 
@@ -495,6 +510,70 @@ value but `0`) MUST force styling even when standard output is not a
 terminal. Styled output MUST keep table columns aligned on visible width,
 and titled boxes MUST fit the probed terminal width without truncating
 content.
+
+### REQ-MARKDOWN-OUTPUT
+
+Every Kvist command MUST report its result as a well-formed Markdown document
+that is the canonical description of that result. The document MUST state the
+observed state, document validity, task progress, the next ready task, and an
+actionable next step for every non-current state, and MUST render blocked and
+awaiting-decision reasons and stale-document revision details as structured
+Markdown (headings, tables, lists, fenced code) rather than unstyled text. The
+Markdown document is the single source of truth for what a command reports. The
+stable `status --format text` and `--format json` report forms MUST be unchanged
+so non-interactive consumers and scripts are unaffected, and the plain-text
+degradation contract of `REQ-INTERACTIVE-SHELL` MUST still apply when the
+terminal cannot host the TUI or styling is disabled. The Markdown is the
+presentation of state, not a substitute for the durable artifacts or for
+executable tests.
+
+### REQ-INTERACTIVE-TUI
+
+The interactive shell MUST be a full-screen terminal UI in the shape of the
+`skott` layout: a status heading, a scrollable main transcript area, and a
+command footer. The status heading MUST show the active component together with
+its state and task progress, plus the VCS branch, sandbox backend, default
+model, and live/stale lock counts. When no component is selected the heading
+MUST show the whole project and the shell MUST operate on the project; when a
+component is selected it MUST be auto-selected as the default for every command
+that expects a component, so the operator is never asked for it and it is
+pre-filled. The command footer MUST expose the same command surface as the CLI
+with full tab-completion (static from the clap surface, dynamic from the
+project state) and MUST provide keyboard-shortcut help rendered the same way
+`skott` does it. The TUI MUST degrade to the plain-text line-oriented shell
+when the terminal cannot host it.
+
+### REQ-TRANSCRIPT-PERSISTENCE
+
+The main transcript area MUST be a bounded on-screen window over a durable,
+per-component, disk-persisted record of every interaction with Kvist (commands
+and their rendered Markdown output). The record MUST be unlimited in size and
+MUST split into successive files when one grows too large. The operator MUST be
+able to scroll back through the session with a scrollbar. Switching component
+MUST clear the transcript area and MUST restore that component's former
+transcript when the operator returns to it. The transcript is local uninspected
+state and MUST NOT be treated as compliance evidence.
+
+### REQ-SETTINGS-MENU
+
+The interactive shell MUST provide a settings menu (the `skott` overlay
+pattern) that exposes the major choices: model, reasoning effort, session
+history, component selection, theme, and other settings. Selecting a component
+from the menu MUST be the same focus change as the `cd` builtin and MUST
+pre-fill the component for subsequent commands. Theme, model, and effort
+selections MUST persist the preference and apply immediately to the session.
+
+### REQ-RUN-COMPONENT
+
+The shell MUST provide a command that runs the whole selected component: it
+MUST iterate over the component's tasks in dependency order, running each ready
+task, and MUST stop when the component is complete, when a task becomes
+blocked, or when a task reaches an awaiting-decision point. It MUST NOT
+auto-resolve a decision or unblock a blocked task; it MUST pause and report the
+exact state and the command that resolves it, so the operator can decide and
+resume. The command MUST respect the same locking, policy-approval, and
+evidence guarantees as `task run`, and MUST leave durable task state for
+explicit finalize or recovery when it stops at a blocker or decision.
 
 ### REQ-COMPLIANCE
 

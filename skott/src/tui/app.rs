@@ -148,6 +148,8 @@ pub struct Stats {
     pub utilization: f64,
     /// How close compaction is to the hard limit (`0.0..=1.0`).
     pub compaction_progress: f64,
+    /// Successful context reductions across the conversation.
+    pub compactions: u64,
     /// Estimated seconds until the live context reaches the hard limit, forecast
     /// from the observed context growth rate. `None` when the estimate is not
     /// meaningful (no prior sample, flat or declining context, or growth below a
@@ -666,6 +668,7 @@ impl App {
                 context_limit,
                 context_utilization,
                 compaction_progress,
+                compactions,
                 total_tokens,
                 elapsed_secs,
                 ..
@@ -695,6 +698,7 @@ impl App {
                     context_limit,
                     utilization: context_utilization,
                     compaction_progress,
+                    compactions,
                     eta_secs,
                     total_tokens,
                     elapsed_secs,
@@ -962,6 +966,20 @@ impl App {
     /// compaction field appears only while the live context is past the
     /// warm-up threshold, i.e. only when compaction is actually in play.
     pub fn stats_line(&self) -> String {
+        self.format_stats_line(false)
+    }
+
+    /// Keeps the core statistics visible by dropping padding and graphs on narrow rows.
+    pub fn stats_line_for_width(&self, width: usize) -> String {
+        let full = self.stats_line();
+        if unicode_width::UnicodeWidthStr::width(full.as_str()) <= width {
+            full
+        } else {
+            self.format_stats_line(true)
+        }
+    }
+
+    fn format_stats_line(&self, compact: bool) -> String {
         let Some(stats) = self.stats else {
             return String::new();
         };
@@ -982,18 +1000,28 @@ impl App {
         let average = format!("{:>5}", format_number(stats.average_tokens_per_sec));
         let limit = format_number(stats.context_limit as f64);
         let current = format_number(stats.context_tokens as f64);
-        let context = format!(
-            "ctx {}{:>5.0}% {current:>width$}/{limit}",
-            bargraph(stats.utilization, 8),
-            stats.utilization.clamp(0.0, 1.0) * 100.0,
-            width = limit.len()
-        );
+        let context = if compact {
+            format!(
+                "ctx {:.0}% {current}/{limit}",
+                stats.utilization.clamp(0.0, 1.0) * 100.0
+            )
+        } else {
+            format!(
+                "ctx {}{:>5.0}% {current:>width$}/{limit}",
+                bargraph(stats.utilization, 8),
+                stats.utilization.clamp(0.0, 1.0) * 100.0,
+                width = limit.len()
+            )
+        };
+        let speed = if compact { speed.trim() } else { &speed };
+        let average = if compact { average.trim() } else { &average };
         let mut parts = vec![
             format!("⚡ {speed} t/s"),
             format!("avg {average} t/s"),
             context,
+            format!("compactions {}", stats.compactions),
         ];
-        if stats.compaction_progress > 0.0 {
+        if !compact && stats.compaction_progress > 0.0 {
             let eta_suffix = match stats.eta_secs {
                 Some(secs) => format!(" (in {})", format_eta(secs)),
                 None => String::new(),
@@ -1017,11 +1045,19 @@ impl App {
             }
             crate::session::TokenAccounting::Unavailable => "provider usage unavailable".into(),
         };
-        parts.push(format!(
-            "{usage_part} · {:>7}",
-            format_elapsed(stats.elapsed_secs)
-        ));
-        parts.join("  ·  ")
+        if compact {
+            parts.push(format!(
+                "{} · {}",
+                usage_part.trim(),
+                format_elapsed(stats.elapsed_secs)
+            ));
+        } else {
+            parts.push(format!(
+                "{usage_part} · {:>7}",
+                format_elapsed(stats.elapsed_secs)
+            ));
+        }
+        parts.join(if compact { " · " } else { "  ·  " })
     }
 
     /// Processes one key event and reports what the runner should do.
@@ -1741,6 +1777,15 @@ impl App {
     /// keeping the selected model and effort. The runner restarts the model
     /// conversation for the new session (reported as [`KeyAction::NewSession`]).
     fn new_session(&mut self) {
+        self.quit_running();
+        self.pending_prompt = None;
+        self.pending_text.clear();
+        self.pending_reasoning.clear();
+        self.hidden_reasoning.clear();
+        self.stats = None;
+        self.last_growth = None;
+        self.pending_osc_52 = None;
+        self.last_copied_escape = None;
         self.clear_screen();
         self.following = true;
         self.status = "idle".to_owned();
@@ -3366,6 +3411,18 @@ table_sep = { fg = "gray" }
     fn ctrl_n_starts_a_new_session() {
         let mut app = app();
         app.note(app.theme.dim, "earlier output");
+        app.push_event(Event::TurnStart {
+            model: "test".into(),
+        });
+        app.push_event(Event::Reasoning("old pending reasoning".into()));
+        app.push_event(Event::Text("old partial answer".into()));
+        app.stats = Some(super::Stats {
+            compactions: 7,
+            ..super::Stats::default()
+        });
+        app.last_growth = Some((10.0, 1000));
+        app.pending_prompt = Some("old queued task".into());
+        app.hidden_reasoning.push(Vec::new());
         assert!(!app.lines.is_empty());
         assert_eq!(app.on_key(ctrl(KeyCode::Char('n'))), KeyAction::NewSession);
         assert!(
@@ -3376,6 +3433,16 @@ table_sep = { fg = "gray" }
         );
         assert_eq!(app.status, "idle");
         assert_eq!(app.overlay, Overlay::None);
+        assert!(!app.running);
+        assert!(app.spinner().is_none());
+        assert!(app.stats.is_none());
+        assert!(app.last_growth.is_none());
+        assert!(app.pending_prompt.is_none());
+        assert!(app.hidden_reasoning.is_empty());
+        app.flush_pending();
+        let text = rendered_text(&app).join("\n");
+        assert!(!text.contains("old partial answer"));
+        assert!(!text.contains("old pending reasoning"));
     }
 
     #[test]
@@ -3555,6 +3622,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.02,
             compaction_progress: 0.0,
+            compactions: 0,
             generation_tokens_per_sec: 42.0,
             average_tokens_per_sec: 95.0,
             total_tokens: 512,
@@ -3566,8 +3634,8 @@ table_sep = { fg = "gray" }
         assert!(line.contains("8.19k"));
         assert!(line.contains("512 tok"));
         assert!(line.contains("3:46"));
-        // Below the warm-up threshold the compaction field stays hidden.
-        assert!(!line.contains("compaction"));
+        assert!(line.contains("compactions 0"));
+        assert!(!line.contains("compaction "));
         app.stats.as_mut().unwrap().token_accounting = crate::session::TokenAccounting::Unavailable;
         let line = app.stats_line();
         assert!(line.contains("provider usage unavailable"));
@@ -3590,6 +3658,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.77,
             compaction_progress: 0.08,
+            compactions: 0,
             generation_tokens_per_sec: 40.0,
             average_tokens_per_sec: 90.0,
             total_tokens: 4096,
@@ -3603,6 +3672,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.89,
             compaction_progress: 0.33,
+            compactions: 0,
             generation_tokens_per_sec: 40.0,
             average_tokens_per_sec: 90.0,
             total_tokens: 4700,
@@ -3619,12 +3689,16 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.24,
             compaction_progress: 0.0,
+            compactions: 0,
             generation_tokens_per_sec: 40.0,
             average_tokens_per_sec: 90.0,
             total_tokens: 512,
             elapsed_secs: 10.0,
         });
-        assert!(!idle.stats_line().contains("compaction"));
+        assert!(!idle.stats_line().contains("compaction "));
+        idle.stats.as_mut().unwrap().compactions = 7;
+        assert!(idle.stats_line().contains("compactions 7"));
+        assert!(!idle.stats_line().contains("compaction "));
     }
 
     #[test]
@@ -3639,6 +3713,7 @@ table_sep = { fg = "gray" }
                 context_limit: 32768,
                 context_utilization: 0.3,
                 compaction_progress: 0.0,
+                compactions: 0,
                 generation_tokens_per_sec: rate,
                 average_tokens_per_sec: avg,
                 total_tokens: total,
@@ -3674,6 +3749,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.5,
             compaction_progress: 0.4,
+            compactions: 0,
             generation_tokens_per_sec: 50.0,
             average_tokens_per_sec: 50.0,
             total_tokens: 1024,
@@ -3694,6 +3770,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.4,
             compaction_progress: 0.3,
+            compactions: 0,
             generation_tokens_per_sec: 50.0,
             average_tokens_per_sec: 50.0,
             total_tokens: 1024,
@@ -3708,6 +3785,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.5,
             compaction_progress: 0.45,
+            compactions: 0,
             generation_tokens_per_sec: 50.0,
             average_tokens_per_sec: 50.0,
             total_tokens: 2048,
@@ -3731,6 +3809,7 @@ table_sep = { fg = "gray" }
                 context_limit: 8192,
                 context_utilization: 0.5,
                 compaction_progress: 0.4,
+                compactions: 0,
                 generation_tokens_per_sec: 50.0,
                 average_tokens_per_sec: 50.0,
                 total_tokens: 1024,
@@ -3754,6 +3833,7 @@ table_sep = { fg = "gray" }
                 context_limit: 8192,
                 context_utilization: 0.5,
                 compaction_progress: 0.4,
+                compactions: 0,
                 generation_tokens_per_sec: 50.0,
                 average_tokens_per_sec: 50.0,
                 total_tokens: 1024,
@@ -3778,6 +3858,7 @@ table_sep = { fg = "gray" }
                 context_limit: 8192,
                 context_utilization: 0.5,
                 compaction_progress: 0.4,
+                compactions: 0,
                 generation_tokens_per_sec: 50.0,
                 average_tokens_per_sec: 50.0,
                 total_tokens: 1024,

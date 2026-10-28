@@ -179,7 +179,7 @@ pub fn start<M, E>(
     context: ContextManager,
     recorder: Option<Box<dyn Recorder>>,
     retry: RetryPolicy,
-    max_turns: u32,
+    max_turns: impl Into<Option<u32>>,
     limits: RunLimits,
 ) -> Result<(SessionHandle, mpsc::Receiver<Event>, PromptSender)>
 where
@@ -193,7 +193,7 @@ where
         context,
         recorder,
         retry,
-        max_turns,
+        max_turns.into(),
         limits,
         ControlMailbox::default(),
     )
@@ -208,7 +208,7 @@ pub fn start_with_controls<M, E>(
     mut context: ContextManager,
     mut recorder: Option<Box<dyn Recorder>>,
     retry: RetryPolicy,
-    max_turns: u32,
+    max_turns: impl Into<Option<u32>>,
     limits: RunLimits,
     controls: ControlMailbox,
 ) -> Result<(SessionHandle, mpsc::Receiver<Event>, PromptSender)>
@@ -216,6 +216,7 @@ where
     M: ModelTransport + Send + 'static,
     E: ToolExecutor + Send + 'static,
 {
+    let max_turns = max_turns.into();
     let prompt_tx = PromptSender {
         controls: controls.clone(),
         lifetime: Arc::new(()),

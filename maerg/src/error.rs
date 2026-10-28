@@ -521,6 +521,17 @@ pub enum KvistError {
         /// Component-root-relative component path.
         component: PathBuf,
     },
+    /// A task run failed and the task has been transitioned to blocked.
+    #[error(
+        "task `{task_id}` failed during execution and has been transitioned to blocked: {reason}\n\n\
+         hint: run `kvist task log <component> {task_id}` to inspect the execution error and failure logs"
+    )]
+    TaskRunFailed {
+        /// The task that failed.
+        task_id: String,
+        /// Bounded, redacted failure diagnostic.
+        reason: String,
+    },
     /// A task requires verification but the test-command policy has changed or is not approved.
     #[error(
         "unapproved test-command policy has changed or has not been approved. Run `kvist task approve-policy` to approve it. Current hash: {current_hash}, expected: {expected_hash:?}"

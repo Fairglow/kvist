@@ -52,10 +52,14 @@ impl ModelTransport for ScriptedTransport {
 
     fn stream(
         &self,
-        _request: &ModelRequest,
+        request: &ModelRequest,
         _cancellation: &CancellationToken,
         on_event: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
     ) -> sav::Result<ModelTurn> {
+        assert!(
+            request.messages.len() <= 1024,
+            "must compact before transport message limit"
+        );
         let turn = {
             let mut turns = self.turns.lock().unwrap();
             if turns.is_empty() {
@@ -125,24 +129,82 @@ fn answer_turn(text: &str) -> ModelTurn {
 }
 
 #[test]
-fn invalid_injected_turn_limits_fail_before_model_io() {
-    for limit in [0, MAX_TURNS + 1, u32::MAX] {
-        let transport = ScriptedTransport::new(vec![answer_turn("not sent")]);
-        let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
-        let mut session = make_session();
-        session.push_user("go");
-        let result = Skott::with_retry(limit, fast_retry()).run(
+fn default_run_continues_beyond_500_turns_and_compacts_between_tasks() {
+    let mut turns: Vec<_> = (0..540)
+        .map(|page| {
+            tool_turn(
+                "next step",
+                "shell",
+                json!({"command":format!("printf {page}")}),
+            )
+        })
+        .collect();
+    turns.push(answer_turn("long task completed"));
+    let transport = ScriptedTransport::new(turns);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("complete the long task");
+    let mut context = ContextManager::for_model(131_072);
+    let sink = Collector::default();
+    let summary = Skott::default()
+        .run(
             &mut session,
             &transport,
             &executor,
-            &Collector::default(),
+            &sink,
             &CancellationToken::new(),
-            &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            &mut context,
             None,
-        );
-        assert!(matches!(result, Err(Error::Config { .. })));
-        assert_eq!(transport.turns.lock().unwrap().len(), 1);
-    }
+        )
+        .expect("long run");
+    assert!(summary.success(), "{summary:?}");
+    assert_eq!(summary.turns, 541);
+    assert_eq!(summary.tools_executed, 540);
+    assert!(sink.events().iter().any(|event| matches!(
+        event, Event::Note(text) if text.contains("context compacted")
+    )));
+    let compactions = context.compactions();
+    assert!(compactions > 0);
+    session.push_user("a fresh task in the same conversation");
+    let second = Skott::with_retry(1, fast_retry())
+        .run(
+            &mut session,
+            &ScriptedTransport::new(vec![answer_turn("second completed")]),
+            &executor,
+            &sink,
+            &CancellationToken::new(),
+            &mut context,
+            None,
+        )
+        .expect("fresh allowance");
+    assert!(second.success(), "{second:?}");
+    assert_eq!(second.turns, 1);
+    assert!(context.compactions() >= compactions);
+    assert!(
+        matches!(sink.events().iter().rev().find(|event| matches!(event, Event::Progress { .. })),
+        Some(Event::Progress { compactions: count, .. }) if *count == context.compactions())
+    );
+    assert_eq!(ContextManager::for_model(8192).compactions(), 0);
+}
+
+#[test]
+fn invalid_injected_turn_limits_fail_before_model_io() {
+    let limit = 0;
+    let transport = ScriptedTransport::new(vec![answer_turn("not sent")]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("go");
+    let result = Skott::with_retry(limit, fast_retry()).run(
+        &mut session,
+        &transport,
+        &executor,
+        &Collector::default(),
+        &CancellationToken::new(),
+        &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+        None,
+    );
+    assert!(matches!(result, Err(Error::Config { .. })));
+    assert_eq!(transport.turns.lock().unwrap().len(), 1);
 }
 
 fn success_outcome(stdout: &str) -> ToolOutcome {
@@ -1670,11 +1732,11 @@ fn reliability_length_recovery_respects_window_and_shared_token_budgets() {
         });
         let mut recorder = FakeRecorder::default();
         let limits = skott::session::RunLimits {
-            max_tokens: if limited_by_window {
+            max_tokens: Some(if limited_by_window {
                 1_000_000
             } else {
                 charge as u64 + 64
-            },
+            }),
             ..skott::session::RunLimits::default()
         };
         let result = Skott::default().with_limits(limits).unwrap().run(
@@ -1815,7 +1877,7 @@ fn hardening_token_budget_is_charged_before_any_provider_attempt() {
     let mut recorder = FakeRecorder::default();
     let summary = Skott::default()
         .with_limits(skott::RunLimits {
-            max_tokens: 1,
+            max_tokens: Some(1),
             ..skott::RunLimits::default()
         })
         .unwrap()
@@ -1879,7 +1941,7 @@ fn hardening_shared_deadline_bounds_backoff() {
         RetryPolicy::new(2, Duration::from_secs(5), Duration::from_secs(5)),
     )
     .with_limits(skott::RunLimits {
-        wall_time: Duration::from_millis(50),
+        wall_time: Some(Duration::from_millis(50)),
         ..skott::RunLimits::default()
     })
     .unwrap()

@@ -189,6 +189,80 @@ struct ToolProvider {
     calls: AtomicUsize,
     requests: Mutex<Vec<ModelRequest>>,
 }
+
+#[test]
+fn duplicate_read_notices_forget_old_observations_without_blocking_reads() {
+    struct Reads(AtomicUsize);
+    impl ModelTransport for Reads {
+        fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
+            let call = self.0.fetch_add(1, Ordering::SeqCst);
+            let page = match call {
+                0 | 1 | 1026 => 0,
+                2..=1025 => call - 1,
+                1027 => 1024,
+                _ => return Ok(answer()),
+            };
+            let mut turn = answer();
+            turn.tool_intents = vec![ToolIntent {
+                id: format!("read-{call}"),
+                provider_id: None,
+                name: "read".into(),
+                arguments: serde_json::json!({"page":page}),
+            }];
+            turn.finish_reason = FinishReason::ToolCalls;
+            Ok(turn)
+        }
+        fn stream(
+            &self,
+            request: &ModelRequest,
+            cancellation: &CancellationToken,
+            _: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+        ) -> sav::Result<ModelTurn> {
+            self.complete(request, cancellation)
+        }
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(5)
+        }
+    }
+    struct Reader;
+    impl ToolExecutor for Reader {
+        fn execute(
+            &self,
+            _: &ToolIntent,
+            _: &CancellationToken,
+        ) -> sav::runtime::Result<ToolOutcome> {
+            Ok(success())
+        }
+        fn repeatable(&self, _: &ToolIntent) -> bool {
+            true
+        }
+        fn repeated_observation_notice(&self, _: &ToolIntent) -> Option<String> {
+            Some("recent duplicate read".into())
+        }
+    }
+    let sink = Sink::default();
+    let result = NativeRuntime::default()
+        .run(
+            &mut session(),
+            &Reads(AtomicUsize::new(0)),
+            &Reader,
+            &sink,
+            &CancellationToken::new(),
+            &mut ContextManager::new(8192, 4),
+            None,
+        )
+        .unwrap();
+    assert!(result.success(), "{result:?}");
+    assert_eq!(
+        sink.0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| matches!(event, Event::Note(note) if note == "recent duplicate read"))
+            .count(),
+        2
+    );
+}
 impl ModelTransport for ToolProvider {
     fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
         unreachable!()
@@ -370,7 +444,7 @@ impl EventSink for BackoffSink<'_> {
     }
 }
 #[test]
-fn guidance_interrupts_backoff_without_resetting_attempt_number() {
+fn guidance_interrupts_backoff_and_renews_generation_attempts() {
     let controls = ControlMailbox::default();
     let sink = BackoffSink {
         controls: &controls,
@@ -405,7 +479,7 @@ fn guidance_interrupts_backoff_without_resetting_attempt_number() {
             _ => None,
         })
         .collect();
-    assert_eq!(attempts, vec![1, 2]);
+    assert_eq!(attempts, vec![1, 1]);
 }
 struct FailingDelivery {
     delivered: bool,
@@ -680,6 +754,123 @@ fn guidance_racing_final_answer_cannot_become_a_replacement_task() {
     assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
     assert_eq!(controls.next_task().unwrap(), None);
 }
+
+#[test]
+fn repeated_human_guidance_renews_turn_and_generation_allowances() {
+    struct Guided<'a> {
+        controls: &'a ControlMailbox,
+        calls: AtomicUsize,
+    }
+    impl ModelTransport for Guided<'_> {
+        fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
+            unreachable!()
+        }
+        fn stream(
+            &self,
+            request: &ModelRequest,
+            _: &CancellationToken,
+            _: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+        ) -> sav::Result<ModelTurn> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            if call < 8 {
+                self.controls
+                    .steer(format!("human guidance {call}"))
+                    .unwrap();
+                return Err(sav::Error::ModelTransportCancelled);
+            }
+            assert!(
+                request
+                    .messages
+                    .contains(&ModelMessage::User("human guidance 7".into()))
+            );
+            Ok(answer())
+        }
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(5)
+        }
+    }
+    let controls = ControlMailbox::default();
+    let provider = Guided {
+        controls: &controls,
+        calls: AtomicUsize::new(0),
+    };
+    let summary = NativeRuntime::with_retry(1, RetryPolicy::default())
+        .run_controlled(
+            &mut session(),
+            &provider,
+            &NeverExecute,
+            &Sink::default(),
+            &CancellationToken::new(),
+            &mut ContextManager::for_model(8192),
+            None,
+            &controls,
+        )
+        .unwrap();
+    assert!(summary.success(), "{summary:?}");
+    assert_eq!(summary.turns, 9);
+}
+
+#[test]
+fn new_tasks_reset_explicit_token_budgets_and_invalid_limits_fail() {
+    let limits = RunLimits::default();
+    assert_eq!(limits.wall_time, None);
+    assert_eq!(limits.max_tokens, None);
+    for limits in [
+        RunLimits {
+            wall_time: Some(Duration::ZERO),
+            ..limits
+        },
+        RunLimits {
+            wall_time: Some(Duration::MAX),
+            ..limits
+        },
+        RunLimits {
+            max_tokens: Some(0),
+            ..limits
+        },
+    ] {
+        assert!(limits.validate().is_err());
+    }
+    RunLimits {
+        wall_time: Some(Duration::from_secs(7 * 86400)),
+        ..limits
+    }
+    .validate()
+    .unwrap();
+    let mut conversation = session();
+    let mut context = ContextManager::for_model(8192);
+    for _ in 0..2 {
+        conversation.push_user("new task");
+        let controls = ControlMailbox::default();
+        let provider = FinalRaceProvider {
+            controls: &controls,
+            calls: AtomicUsize::new(1),
+        };
+        conversation.push_user("guidance racing final answer");
+        let mut request = conversation.next_request().unwrap();
+        request.max_output_tokens = Some(1024);
+        let charge = sav::runtime::context::estimate_request(&request) as u64 + 1024;
+        let summary = NativeRuntime::default()
+            .with_limits(RunLimits {
+                max_tokens: Some(charge),
+                ..limits
+            })
+            .unwrap()
+            .run_controlled(
+                &mut conversation,
+                &provider,
+                &NeverExecute,
+                &Sink::default(),
+                &CancellationToken::new(),
+                &mut context,
+                None,
+                &controls,
+            )
+            .unwrap();
+        assert!(summary.success(), "{summary:?}");
+        assert_eq!(summary.turns, 1);
+    }
+}
 #[test]
 fn interrupted_generation_keeps_token_charge_and_prompt_deadline() {
     let controls = ControlMailbox::default();
@@ -692,7 +883,7 @@ fn interrupted_generation_keeps_token_charge_and_prompt_deadline() {
     let charge = sav::runtime::context::estimate_request(&request) as u64 + 1024;
     let summary = NativeRuntime::default()
         .with_limits(RunLimits {
-            max_tokens: charge,
+            max_tokens: Some(charge),
             ..RunLimits::default()
         })
         .unwrap()
@@ -748,13 +939,18 @@ impl ModelTransport for EndlessSteering<'_> {
     }
 }
 #[test]
-fn repeated_guidance_cannot_reset_attempt_limit() {
+fn repeated_guidance_cannot_reset_explicit_token_limit() {
     let controls = ControlMailbox::default();
     let provider = EndlessSteering(&controls, AtomicUsize::new(0));
     let result = NativeRuntime::with_retry(
         50,
         RetryPolicy::new(2, Duration::from_millis(1), Duration::from_millis(1)),
     )
+    .with_limits(RunLimits {
+        max_tokens: Some(8000),
+        ..RunLimits::default()
+    })
+    .unwrap()
     .run_controlled(
         &mut session(),
         &provider,
@@ -765,8 +961,9 @@ fn repeated_guidance_cannot_reset_attempt_limit() {
         None,
         &controls,
     );
-    assert!(matches!(result, Err(sav::runtime::Error::RunBudget { .. })));
-    assert_eq!(provider.1.load(Ordering::SeqCst), 2);
+    assert!(result.unwrap().budget_exhausted);
+    assert!(provider.1.load(Ordering::SeqCst) > 2);
+    assert!(provider.1.load(Ordering::SeqCst) < 8);
     assert_eq!(controls.next_task().unwrap(), None);
 }
 struct DeadlineProvider<'a>(&'a ControlMailbox, AtomicUsize);
@@ -799,7 +996,7 @@ fn steering_preserves_wall_deadline() {
     let start = Instant::now();
     let summary = NativeRuntime::default()
         .with_limits(RunLimits {
-            wall_time: Duration::from_millis(80),
+            wall_time: Some(Duration::from_millis(80)),
             ..RunLimits::default()
         })
         .unwrap()

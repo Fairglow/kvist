@@ -10,6 +10,50 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "mermaid-discovery-write-tests"
+    title: "write_tests: reproduce absent default scheduling policy"
+    description: "Pin canonical nextest discovery, Git visibility and consistent repository entrypoints before relocating policy."
+    context: "The supplied timing failure was not reproduced in 20 isolated cold-process runs. Default discovery did reject profile ci. Four new Python policy failures and both coupled Rust scheduling failures were reproduced before repair, then passed. No renderer assertion or bound was weakened."
+    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:46:41Z", completed_at: "2026-10-28T22:46:41Z"}
+    purpose: "Prevent standard nextest commands silently bypassing native Mermaid isolation."
+    expected_outcome: "Missing/ignored default configuration and divergent entrypoints fail regressions."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+  - id: "mermaid-discovery-implement-code"
+    title: "implement_code: discover existing scheduling policy automatically"
+    description: "Relocate the sole policy to .config/nextest.toml, expose only it through ignore rules and wire normal discovery through recipes and CI."
+    context: "Canonical relocation and automatic recipe/CI discovery implemented with rendering source, 500ms deadline and allocation rules unchanged. Orchestrator execution: 341 all-feature default-profile and 320 standalone CI-profile passes; three existing skips each. Ten selected CI stress iterations passed 350 cases. Full-suite events show zero reserved overlap and ordinary concurrency 20. All 22 Python tool tests and scoped strict Clippy/format checks pass."
+    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:46:41Z", completed_at: "2026-10-28T22:46:41Z"}
+    purpose: "Apply established isolation without requiring an extra command-line flag."
+    expected_outcome: "Direct and inherited-CI nextest runs use the same policy."
+    kind: implementation
+    status: completed
+    depends_on: ["mermaid-discovery-write-tests"]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+  - id: "mermaid-discovery-security-audit"
+    title: "security_audit: observe discovery and retained rendering boundaries"
+    description: "Independently derive source-only observations, excluding intent, queues and prior records."
+    context: "Independent source-only observer 3b16ef03-8fab-426d-a0d5-12dc1f2ffb23 excluded intent/history/prior records and executed no commands. Its IMPL supplement observes exact selectors, full-pool priority, runtime ceilings and Interrupted cancellation propagation; no concrete scoped bug identified. Static assertions are not execution proof; external-load and alternate-runner limits remain explicit."
+    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:46:41Z", completed_at: "2026-10-28T22:46:41Z"}
+    purpose: "Retain independent observations rather than self-certification."
+    expected_outcome: "A scoped source-derived IMPL supplement with explicit evidence limits."
+    kind: security-audit
+    status: completed
+    depends_on: ["mermaid-discovery-implement-code"]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+  - id: "mermaid-discovery-compliance-review"
+    title: "compliance_review: compare discovery intent and finite evidence"
+    description: "Compare local intent with independent observations and execution evidence in a source-blind context."
+    context: "Independent source-blind comparator 25f11ef7-8451-4689-b27a-93546c08f3a5 found no concrete scoped contradiction. Source observations support discovery and retained bounds; attributed full-suite events support reservation and ordinary concurrency. Missing-policy and regression failures were reproduced, not the original admission timeout. Actual tracked-only clean-checkout and recipe/CI execution were not established; stress supplied no overlap conclusion. External load and separate runners remain outside the guarantee. No certification, receipt or acceptance; revised intent remains unaccepted."
+    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:47:58Z", completed_at: "2026-10-28T22:47:58Z"}
+    purpose: "Retain discrepancies and remaining runner/host limitations."
+    expected_outcome: "A recorded scoped comparison without certification."
+    kind: compliance-review
+    status: completed
+    depends_on: ["mermaid-discovery-security-audit"]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
   - id: "blad-markdown-subset-intent-tests"
     title: "write_tests: pin the current useful-subset baseline"
     description: "Before bounding the backlog, pin the currently supported Markdown subset and its terminal projection so intent changes have a stable fail-first baseline."

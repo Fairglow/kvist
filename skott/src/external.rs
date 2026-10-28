@@ -179,6 +179,7 @@ pub fn run_profile(
     }
     if overrides.no_logs
         || overrides.host_turns.is_some()
+        || overrides.max_turns.is_some()
         || overrides.context_limit.is_some()
         || overrides.response_reserve.is_some()
         || overrides.profile.is_some()
@@ -200,7 +201,10 @@ pub fn run_profile(
         prompt,
         working_directory: cwd,
         log_directory: &logs,
-        wall_time: overrides.limits.wall_time,
+        wall_time: overrides
+            .limits
+            .wall_time
+            .unwrap_or(Duration::from_secs(86_400)),
         effort: overrides.effort,
         acknowledged_host: overrides.allow_host_execution,
     })?;

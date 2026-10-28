@@ -102,15 +102,18 @@ overlap other tests in the same nextest invocation, because their temporary
 fixtures and sandbox-only registrations mutate that checkout. Other tests MUST
 retain their normal parallelism.
 
-The checked-in `tools/nextest.toml` default configuration MUST select the exact package,
+The checked-in `.config/nextest.toml` default configuration MUST select the exact package,
 binary and test, reserve the complete configured test-thread pool, and apply to
 profiles inheriting the default. Verification MUST demonstrate both absence of
 overlap for the repository trial and concurrent execution of ordinary tests.
-The repository test recipe MUST explicitly select this configuration. A clean
-checkout MUST retain the policy without the ignored, sandbox-local
-`.config/nextest.toml`; repository regressions MUST NOT require that local file.
+Normal nextest discovery, repository test recipes and inherited CI profiles
+MUST select this same canonical policy without a required `--config-file`
+argument. A clean checkout MUST retain the policy; ignore rules MUST expose
+only that tracked configuration, not other local `.config` contents.
 This scheduling guarantee does not coordinate separate runner invocations or
 unrelated host writers, and it does not excuse stale interrupted-test fixtures.
+This user-directed scheduling repair has a local advisory exception while
+receipt enforcement is unavailable; no acceptance or certification is implied.
 
 ## RUN-REQ-TEST-PERFORMANCE
 
@@ -213,6 +216,25 @@ This repair has an explicit per-bundle advisory-review exception: the human
 requested investigation and repair of the sandbox chain; current acceptance
 does not enforce advisory receipts. Independent observations and comparisons
 remain separate evidence, not acceptance or implementer certification.
+
+## RUN-REQ-SCOPE-PREFLIGHT
+
+Sandbox request preparation MUST inspect the complete writable scope, including
+hidden and generated directories, without serializing independent directory I/O.
+Concurrency MUST remain bounded and preserve aggregate entry, depth and retained
+path quotas, link confinement, cancellation, and the existing preflight deadline.
+Every inspection worker MUST finish before request construction returns; an I/O,
+worker or scheduling failure MUST prevent dispatch rather than omit coverage.
+Tests MUST demonstrate overlapping directory inspection, complete link checks,
+cycle deduplication, cancellation and unchanged quota boundaries.
+
+Debug diagnostics MUST distinguish identity reads, workspace inspection, Rust
+resource validation, context identities and final request validation. Timeout
+errors MUST identify the active stage and elapsed time without command text,
+environment values or tool output. The real repository sandbox trial remains
+non-ignored and retains its actual checkout, isolation and Cargo assertions.
+This repair does not claim that a finite wall-time guard can tolerate arbitrary
+external CPU/storage contention. No new intent acceptance is performed.
 
 ## RUN-REQ-HISTORY-NAVIGATION
 
@@ -692,15 +714,23 @@ returning success.
 
 ### RUN-REQ-BUDGET
 
-One prompt deadline bounds model requests, retries, waits,
+When explicitly selected, one prompt deadline bounds model requests, retries, waits,
 and cooperative tool execution. Retry waits MUST be cancellable. Identical
 repeated opaque/effectful action arguments MUST receive correction and
 eventually stop without silently
 widening authority. Cancelled multi-call turns MUST retain valid paired
-results for subsequent prompts. Injected turn limits MUST be in 1..=500.
-Default prompt budgets MUST be safety bounds (24-hour wall, 100,000,000
-estimated tokens), so a prompt runs uninterrupted to a result, a detected
-hang/loop, or a real failure. The provider accepting a request — including a
+results for subsequent prompts. Sandboxed runs MUST have no default turn,
+wall-time or cumulative-token limit; explicit positive `--max-turns`,
+`--max-run-secs` and `--max-run-tokens` limits MUST be supported. New idle tasks
+MUST receive fresh budgets; delivered guidance MUST renew the unattended turn
+and generation-attempt allowance but retain explicit whole-task wall/token
+charges and repeated-action protection. Host-unconfined and independent-review
+turn caps MUST retain their existing defaults and 500-turn policy maximum.
+The top stats MUST show successful conversation compactions, including zero,
+persist across tasks, and reset for a new conversation. Required live journals
+MUST rotate rather than end a task at a total-size threshold.
+This human-requested repair has an explicit advisory exception while receipts
+are unavailable. The provider accepting a request — including a
 model load/switch — and the first-token wait MUST be bounded by the turn's
 own deadline, not a short fixed probe, so a slow switch completes within the
 turn. The terminal UI MUST appear without waiting for the model, and a

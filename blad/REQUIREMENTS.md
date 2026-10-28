@@ -186,6 +186,11 @@ weakened pool reservations, including CI-profile inheritance. Preserve existing
 render assertions, cancellation semantics and production limits; do not retry
 or skip failures. This coordinates one configured runner, not external host
 processes, concurrent runners or arbitrary configurations.
+The canonical policy MUST be tracked at nextest's default discovery path,
+`.config/nextest.toml`, so ordinary repository runs and inherited CI profiles
+do not require an easily omitted `--config-file` argument. Regression checks
+MUST reject an ignored/missing configuration and repository entrypoints that
+select a different configuration. Other local `.config` contents stay ignored.
 
 ### Accepted viewer polish
 

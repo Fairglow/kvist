@@ -277,6 +277,15 @@ token_limit = 10000
     );
     assert_eq!(config.agent.developer.token_limit, Some(10000));
 
+    for seconds in [86_400, 604_800, 2_592_000] {
+        fs::write(
+            project.path().join("kvist.toml"),
+            format!("schema_version = 1\ncomponent_root = \"src\"\n[agent.roles.developer]\ntimeout_seconds = {seconds}\n"),
+        ).expect("multi-day role policy");
+        let config = config::load(project.path()).expect("explicit multi-day timeout");
+        assert_eq!(config.agent.developer.timeout_seconds, seconds);
+    }
+
     // 2b. Project-local `.kvist/config.toml` overrides root `kvist.toml`
     // Reset kvist.toml to not contain any agent block
     fs::write(
@@ -313,6 +322,7 @@ command_template = "local-override-developer"
         "[agent.profiles.architect]\ntoken_limit = \"not-an-integer\"\n",
         "[agent.profiles.architect]\ntoken_limit = 0\n",
         "[agent.profiles.architect]\ntoken_limit = -5\n",
+        "[agent.roles.architect]\ntimeout_seconds = 2592001\n",
     ] {
         fs::write(
             project.path().join("kvist.toml"),

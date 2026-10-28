@@ -3,7 +3,8 @@
 
 # Ignore settings
 /.cargo
-/.config
+/.config/*
+!/.config/nextest.toml
 /.idea
 .kvist
 /.vscode
@@ -29,6 +30,3 @@ kvist.toml
 # not part of the Kvist durable set. Kept on disk for reference, excluded from
 # the committed project.
 .work-docs/
-
-# Sandbox nextest configuration
-/.config/nextest.toml

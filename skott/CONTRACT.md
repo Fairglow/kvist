@@ -73,8 +73,9 @@ mailbox, not a potentially stale UI `running` flag, atomically classifies
 submission against task completion. Guidance interrupts provider generation or
 bounded backoff, never an executing tool. Remaining stale tool calls receive
 paired not-executed results before ordered guidance enters the next request.
-The session is not replaced and prompt time/token/attempt/repeat accounting
-does not reset. Undelivered guidance is dropped on task termination, never
+The session is not replaced. Delivered guidance renews the unattended turn and
+generation-attempt allowances; explicit task time/token charges and repeat
+protection do not reset. Undelivered guidance is dropped on task termination, never
 converted into another task. A submission after the completion boundary is a
 new task.
 
@@ -155,10 +156,18 @@ The workspace remains fully writable; protected task execution must use the
 maerg's narrow broker, never this workspace shell.
 
 `--response-reserve TOKENS` sets the initial generation reserve; absent values
-use per-model configuration or a window-aware default. `--max-run-secs SECONDS`
-defaults to 86,400 (24 hours) and `--max-run-tokens TOKENS` defaults to
-100,000,000 estimated tokens, so a long task runs uninterrupted to a result;
-pass smaller values to bound individual runs.
+use per-model configuration or a window-aware default. `--max-run-secs SECONDS`, `--max-run-tokens TOKENS` and `--max-turns N`
+are optional positive limits; sandboxed native runs have no default cutoff.
+The turn cap counts model requests since the last delivered human guidance;
+wall time and estimated input/reserved-output tokens cover the entire task,
+including retries and steering. Each subsequent idle prompt starts fresh limits.
+`--max-turns` conflicts with host execution; host mode retains its explicit
+`--host-turns` policy. Per-request deadlines and stall protection remain.
+The top stats include `compactions N` even at zero and after context utilization
+falls; the count spans tasks in the same conversation and resets with a new
+session. Progress events expose the same count. Log budget metadata uses `null`
+for absent caps. Shared live journals rotate into ordered 64-MiB segments,
+without a total run-size cutoff.
 The context limit must be greater than the reserve. Every model request
 is preflighted using complete canonical serialization and byte-aware heuristic
 accounting, and carries the current attempt's explicit provider output bound.
@@ -209,8 +218,8 @@ external writers.
 
 ## Repository-only performance diagnostics
 
-The `test`/`test-profile` recipes and workspace CI jobs select
-`tools/nextest.toml`; local `msrv` retains Cargo's runner. Existing whole-pool
+The `test`/`test-profile` recipes, normal nextest runs and workspace CI jobs
+automatically discover `.config/nextest.toml`; local `msrv` retains Cargo's runner. Existing whole-pool
 trials retain exclusivity; scheduling priority is not additional authority.
 The repository sandbox trial builds beneath
 `/workspace/target/repository-trial`, not the enclosing Cargo target.
@@ -680,12 +689,12 @@ All hunks validate before the existing per-file atomic replacement.
 
 ### Native repository test scheduling
 
-The repository's tracked `tools/nextest.toml` reserves all configured nextest slots
+The repository's tracked `.config/nextest.toml` reserves all configured nextest slots
 for `skott::rust_build_environment::native_repository_tests_execute_inside_the_workspace_sandbox`.
 The rule is inherited from the default profile; unrelated tests remain parallel.
-`just test` explicitly selects it with `--config-file tools/nextest.toml`.
-The ignored `.config/nextest.toml` remains optional sandbox-local configuration,
-not a prerequisite for repository tests.
+Normal nextest runs, `just test`, `just test-profile` and workspace CI discover
+it automatically, without `--config-file`. Other local `.config` contents
+remain ignored; this policy is the only tracked exception.
 `#[serial]` remains the in-process libtest mechanism, not a nextest or
 cross-invocation lock. Alternate configs or explicit overriding profile rules
 must preserve exclusivity when running this repository-wide trial.
@@ -772,6 +781,11 @@ between I/O operations and share a 30-second cooperative preflight limit;
 the executor supplies the prompt's cancellation/deadline token. Oversized
 workspaces fail explicitly with narrowing guidance. Filesystem/kernel calls
 are not preemptible, and preflight is not a substitute for namespace enforcement.
+Workspace inspection uses at most eight owned workers sharing the same aggregate
+quotas and deadline, never a per-worker allowance. All workers are joined before
+return, including failure and cancellation. Debug logs identify preflight stages
+and report inspected entries/directories and elapsed time without payloads;
+preflight timeout errors name the active stage and elapsed milliseconds.
 
 ### `ToolOutcome`
 
@@ -872,6 +886,7 @@ enum Event {
         context_limit: usize,
         context_utilization: f64,
         compaction_progress: f64,
+        compactions: u64,
         tokens_per_sec: f64,
         total_tokens: u64,
         elapsed_secs: f64,
@@ -887,7 +902,8 @@ line matches the executed one.
 
 `Event::Progress` carries the live stats the UI shows: working speed
 (`tokens_per_sec`), context utilization and the compaction progress bar, plus
-cumulative `total_tokens` and `elapsed_secs` for progress.
+the conversation's successful `compactions` count, cumulative `total_tokens`
+and `elapsed_secs` for progress.
 
 ### `Skott` (loop)
 
@@ -927,16 +943,13 @@ recording and event-delivery errors return `Err`, never a successful default.
 Repeated identical argument hashes are rejected and eventually circuit-break;
 the detector does not observe or prove unchanged filesystem state.
 
-Injected-library `RunLimits` defaults to a 24-hour (86,400-second) prompt wall
-budget, 100,000,000 conservatively estimated request/reserve tokens, and 1024
-response tokens, so a prompt runs uninterrupted to a result, a detected
-hang/loop, or a real failure. Production startup resolves the selected
-model's reserve separately.
-Allowed maxima are 24 hours, 1,000,000,000 estimated tokens, and 1,048,576
-response tokens; each must be positive. Every attempt, including retries,
-charges its complete estimated input plus reserve before I/O. Turn limits are
-1..=500. Provider attempt deadlines and backoff are clipped to the prompt
-deadline; cancellation is cooperative for injected transports/executors.
+Injected-library `RunLimits` defaults to absent wall/token caps and 1024
+response tokens. Production startup resolves the selected model's reserve
+separately. Supplied wall/token/turn limits must be positive; wall time must fit
+the monotonic clock and response reserve is 1..=1,048,576. Every attempt,
+including retries, charges complete estimated input plus reserve against an
+explicit token cap. Provider deadlines and backoff are clipped to an explicit
+task deadline. Cancellation remains cooperative for injected collaborators.
 
 ### `RunSummary`
 
@@ -1099,8 +1112,9 @@ Options:
   --log-dir <PATH>            Directory for the session journal and transcript
   --context-limit <TOKENS>    Serving window override (model config/discovery otherwise)
   --response-reserve <TOKENS> Initial output reserve (model config/window-aware otherwise)
-  --max-run-secs <SECONDS>    Whole-prompt wall budget (default 86400)
-  --max-run-tokens <TOKENS>   Estimated attempt budget (default 100000000)
+  --max-run-secs <SECONDS>    Optional whole-task wall budget (no default cap)
+  --max-run-tokens <TOKENS>   Optional cumulative estimated-token budget
+  --max-turns <N>            Optional sandboxed turns without human guidance
   --headless <PROMPT>         Terminal-free, sandbox-only, required recording
   --json                     Version-one ordered NDJSON (headless only)
   --no-logs                   Skip the durable session journal and transcript
@@ -1129,7 +1143,7 @@ Options:
 - A positional `PROMPT` starts the session and submits the first prompt; the
   session can continue with further input in the UI.
 - `--list-models` is non-interactive and exits zero.
-- The sandbox is the default execution scope and is multi-turn (`500` turns). The
+- The sandbox is the default execution scope with no default turn ceiling. The
   `--allow-host-execution` flag opts out of the sandbox: the agent runs with host
   privileges, so it is single-turn by default to prevent a single prompt from
   driving an unbounded autonomous loop under those privileges. `--host-turns`

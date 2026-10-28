@@ -90,13 +90,57 @@ for every attempt, including retries; it is not provider billing accounting.
 Production startup uses explicit CLI/model context or bounded selected-model
 serving-capacity discovery; it has no assumed 8192-token context fallback.
 The initial output reserve is explicit CLI/model configuration or
-`min(8192, max(1, context/4))`. Default prompt limits remain 1800 seconds and
-1,000,000 estimated attempt tokens; sandbox loops cap at 50 turns. Length
-recovery can enlarge the output reserve before effects, sharing those limits.
+`min(8192, max(1, context/4))`. Sandboxed native tasks have no default turn,
+wall-time or cumulative-token cutoff. Optional `--max-turns N`,
+`--max-run-secs SECONDS` and `--max-run-tokens TOKENS` bound unattended turns,
+whole-task wall time and estimated attempt tokens respectively. Length recovery
+can enlarge the output reserve before effects, sharing any explicit budgets.
 Compaction triggers near 75% and targets 65%, retaining outstanding goals and
 complete tool groups rather than discarding history after a fixed number of
 turns. Provider usage may be unavailable; journals use null, and UI/streamed
 estimates are explicitly distinguished from measured usage.
+
+### Overnight and multi-day work
+
+The previous source defaults were 500 turns, 24 hours and 100 million estimated
+tokens in Skott, with a hard 24-hour wall maximum; protected Kvist authoring
+separately stopped at 64 generations and allowed role timeouts only up to one
+hour (five minutes by default). These ceilings were defensive runaway bounds,
+not context-window constraints, and fast tool loops could exhaust them quickly.
+
+Use ordinary sandboxed Skott execution for work without an arbitrary lifetime
+cutoff, or choose explicit budgets:
+
+```sh
+skott --headless --json --max-run-secs 604800 'Complete the approved week-long task.'
+```
+
+In the interactive UI, an idle follow-up is a new task with fresh budgets.
+Submission during active work is steering: it preserves the objective and
+effects while renewing the unattended-turn and generation-attempt allowances.
+It does **not** reset explicit task time/token caps or repeated-action history.
+After a cap stops work, an idle follow-up can continue the same conversation.
+The top stats report `compactions N`, including zero, across tasks in that
+conversation; a new conversation resets the count.
+
+Kvist protected authoring no longer has the 64-generation cutoff. It retains
+the approved role timeout, now configurable up to 30 days, and optional
+cumulative `token_limit`. For an overnight or week-long run, explicitly set
+`timeout_seconds = 86400` or `604800` in the relevant `[agent.roles.ROLE]`
+table and run `kvist task approve-policy` after reviewing the changed scope.
+Existing defaults, configuration and approvals are not silently expanded.
+Individual model calls are clipped to their transport deadline (never above
+24 hours), rather than treating a multi-day task budget as one request.
+Each sandbox effect still has at most 24 hours and the remaining task budget;
+verification has its separate `[test_policy]` timeout.
+
+Keep limits on individual requests, tool output, context, retry failures and
+stalled/repeated actions: these bound resource use or catch lack of progress.
+They are different from an arbitrary cap on productive work. Host-unconfined
+mode remains single-turn by default (`--host-turns` accepts 1–500); independent
+review retains its separate configured turn cap. Opaque external agents retain
+their own internal policies and Sav's bounded process supervision; these native
+runtime changes cannot remove a provider CLI's internal limits.
 
 Normal sandbox PATH Cargo forces `--offline --locked` against the private,
 read-only vendor snapshot. Provision a matching `Cargo.lock` separately;
@@ -104,6 +148,10 @@ missing or stale locks fail rather than being created or updated by the build.
 Explicit alternate Cargo paths are not rewritten, and standalone authoring
 still permits workspace edits. Bounded compaction summaries may lose older
 references; this is not a guarantee of complete retained history.
+Protected runs also retain structured generation/effect evidence in memory;
+context compaction and journal rotation do not impose a total process-memory
+quota. The multi-day budgets are covered by accelerated boundary tests, not
+by a days-long live endurance qualification.
 
 Unsafe Rust is not categorically forbidden: it must be necessary, minimally
 scoped, justified by documented safety invariants, independently reviewed, and
@@ -149,6 +197,15 @@ Use an external private `--log-dir` when integrity matters. Interactive
 Headless logs must be non-linked/private and outside the writable workspace,
 defaulting to `$XDG_STATE_HOME/skott/runs` or
 `$HOME/.local/state/skott/runs`.
+
+Shared live `*.events.jsonl` journals rotate before a segment reaches 64 MiB,
+using `.part-000001`, `.part-000002`, etc. Keep all segments together and attach
+using the initial file; the follower checks contiguous sequence and run identity
+across segments with bounded reads. Total disk use is uncapped, so monitor free
+space. Disk/recording errors still stop further effects. Rotation is not model
+context compaction and does not increase its count. Readable/structured
+transcripts are separate and do not have this aggregate 64-MiB cutoff; history
+display retains its existing read bounds, not guaranteed unlimited scrollback.
 
 History/replay is advisory display only. It rejects nonregular/link paths,
 caps files at 5 MiB before and during reading, and caps directory enumeration.

@@ -53,16 +53,64 @@ For the best developer experience, launch Kvist's interactive shell:
 kvist shell
 ```
 
-The shell provides:
+The shell is a full-screen terminal UI in the shape of the `skott` layout, not a
+line-oriented REPL:
 
-- **Contextual Auto-Completion:** Press `<TAB>` to autocomplete commands, flags, subcommands, component directory paths, active task IDs, attempt IDs, and configured model names. Dynamic values carry rich descriptions (task status and title, a `★ next ready` marker in run contexts, the current component), completions track durable project state after every command, and a complete `--` token switches completion from flags to positionals.
-- **Live Status Prompt:** Displays the active VCS branch, the current component focus (set with `cd`), a `✘` marker after a failed command until the next one succeeds, and a dimmed status badge with the sandbox backend, lock counts (live vs. stale), and default model.
-- **Modern Theming, Plain-Text Fallback:** Output is styled with a consistent accent palette and stays column-aligned; it degrades to plain text under `NO_COLOR`, `CLICOLOR=0`, `TERM=dumb`, or when captured/piped (`CLICOLOR_FORCE` overrides). Banner and streaming stages render as titled boxes that fit your terminal width.
-- **Height-Aware Pager, Spinner & Live Streaming:** Output longer than your terminal is paginated, long-running commands show a spinner with elapsed time, and sandboxed agent output streams to the terminal as it is produced.
-- **Keyboard Shortcuts:** `Ctrl+L` clears the screen and redraws the prompt, `↑`/`↓` pick completion candidates, and `Ctrl+D` exits.
-- **Audit Journaling & History:** An append-only session journal (`.kvist/session.log`, inspect with `journal`) and persistent editor history (`.kvist/history`, inspect with `history`).
-- **Workflow Builtins:** `cd [COMPONENT]` sets the current component, `tasks` lists task status, `run` executes the next ready task, `last` shows recent agent runs, `locks [clean]` inspects or removes stale locks, and `help` lists everything.
-- **Cancellable Execution:** `Ctrl+C` during a running command cancels the supervised process group and returns to the prompt, leaving durable task state for explicit `task finalize` or `task recover`.
+- **Status Heading:** Shows the active component together with its state and
+  task progress, plus the active VCS branch, the sandbox backend, the default
+  model, and lock counts (live vs. stale). When no component is selected the
+  heading shows the whole project and commands operate on the project; when a
+  component is selected it is auto-selected as the default for every command
+  that expects a component, so you are never asked for it and it is pre-filled.
+- **Main Transcript Area:** A bounded on-screen window with a scrollbar over a
+  durable, per-component, disk-persisted record of every interaction (commands
+  and their rendered Markdown output). The record is unlimited in size and
+  splits into successive files when one grows too large, so you can always
+  scroll back to any earlier command and result. Switching component clears the
+  transcript area and restores that component's former transcript when you
+  return to it.
+- **Command Footer:** The same command surface as the CLI with full
+  tab-completion (static from the command grammar, dynamic from the project
+  state) and keyboard-shortcut help rendered the same way `skott` does it.
+- **Markdown-First Output:** Every command reports a well-formed Markdown
+  document, and the shell renders it with the `blad` renderer so tables,
+  diagrams, math, and code blocks display with full fidelity. The stable
+  `status --format text` and `--format json` report forms are unchanged for
+  scripts, and the plain-text degradation contract still applies when the
+  terminal cannot host the TUI.
+- **Settings Menu:** A menu (the `skott` overlay pattern) exposes the major
+  choices: model, reasoning effort, session history, component selection,
+  theme, and other settings. Selecting a component from the menu is the same
+  focus change as the `cd` builtin and pre-fills the component for subsequent
+  commands.
+- **Run the Whole Component:** `task run-all` iterates the component's tasks in
+  dependency order, running each ready task, and stops when the component is
+  complete, when a task becomes blocked, or when a task reaches an
+  awaiting-decision point. It never auto-resolves a decision or unblocks a
+  blocked task; it pauses and reports the exact state and the command that
+  resolves it.
+- **Contextual Auto-Completion:** Press `<TAB>` to autocomplete commands,
+  flags, subcommands, component directory paths, active task IDs, attempt IDs,
+  and configured model names. Dynamic values carry rich descriptions (task
+  status and title, a `★ next ready` marker in run contexts, the current
+  component), completions track durable project state after every command, and
+  a complete `--` token switches completion from flags to positionals.
+- **Modern Theming, Plain-Text Fallback:** Output is styled with a consistent
+  accent palette and stays column-aligned; it degrades to plain text under
+  `NO_COLOR`, `CLICOLOR=0`, `TERM=dumb`, or when captured/piped
+  (`CLICOLOR_FORCE` overrides).
+- **Keyboard Shortcuts:** `Ctrl+L` clears the screen and redraws the prompt,
+  `↑`/`↓` pick completion candidates, and `Ctrl+D` exits.
+- **Audit Journaling & History:** An append-only session journal
+  (`.kvist/session.log`, inspect with `journal`) and persistent editor history
+  (`.kvist/history`, inspect with `history`).
+- **Workflow Builtins:** `cd [COMPONENT]` sets the current component, `tasks`
+  lists task status, `run` executes the next ready task, `last` shows recent
+  agent runs, `locks [clean]` inspects or removes stale locks, and `help` lists
+  everything.
+- **Cancellable Execution:** `Ctrl+C` during a running command cancels the
+  supervised process group and returns to the prompt, leaving durable task
+  state for explicit `task finalize` or `task recover`.
 
 Typical session:
 
@@ -70,6 +118,7 @@ Typical session:
 kvist (main) ❯ cd maerg          # remember the component
 kvist maerg/ (main) ❯ tasks      # status of maerg's tasks
 kvist maerg/ (main) ❯ run        # execute the next ready task
+kvist maerg/ (main) ❯ run-all    # run the whole component to completion/blocker
 kvist maerg/ (main) ❯ last       # recent agent runs with log links
 ```
 

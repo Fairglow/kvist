@@ -4,6 +4,17 @@
 
 ## Shared registry realization (ADR 0015)
 
+Long-running protected authoring removes only the hard-coded generation
+counter cutoff. `TurnBudget` and optional token accounting remain authoritative
+across guidance. Parse role wall budgets up to 30 days, retain the five-minute
+default, and clip each runner request to its separate 24-hour maximum.
+No configuration or existing approval is silently broadened.
+Use Sav's session preflight to retain compacted conversation state rather than
+rebuilding every subsequent request from unbounded pre-compaction history.
+Report actual guidance delivery from the host adapter and renew model attempts
+only after that delivery. Clip `TurnBudget::model_deadline` to 24 hours before
+constructing either transport; the underlying task deadline stays unchanged.
+
 The agent configuration loader resolves the shared registry after parsing local
 role policy and retains immutable resolved profiles. Runtime callers select
 these typed profiles directly; no command-string inference is used on this
@@ -187,8 +198,10 @@ result, no intent was dropped, and every authorized effect applied.
 
 The model phase runs under one shared wall-clock budget equal to the configured
 profile timeout, covering the liveness probe, every turn attempt, and every retry
-backoff; the per-attempt transport deadline is the remaining budget, so the model
-phase never exceeds the configured timeout by more than scheduling slack.
+backoff; each per-attempt transport deadline is clipped to the remaining budget
+and independent transport/profile ceiling. Enforcement occurs at phase
+boundaries and through cooperative transport/effect cancellation, not a
+preemptive whole-task watchdog for arbitrary synchronous work.
 Before constructing each transport, check cancellation and then require a
 nonzero remaining model budget. Expiry is a transport timeout, not an invalid
 endpoint/deadline configuration error; cancellation takes precedence.
@@ -874,6 +887,74 @@ current component), and the walker treats a complete `--` token as the end
 of flag parsing, so Tab after `--` completes positionals only. Editor launch
 retries the transient Linux `ETXTBSY` ("text file busy") a bounded number of
 times before reporting it.
+
+### Markdown-first output and the Blad-rendered TUI
+
+The shell's presentation is rebuilt around a Skott-style layout. A vertical
+layout splits the terminal into a one-row **status heading**, a one-row stats
+bar, a `Min(1)` **transcript** panel, and a fixed-height **command footer**.
+The whole frame is painted with the theme's panel background first, so no cell
+keeps ratatui's reset color. The transcript panel is a top-only panel with a
+proportional scrollbar on its right edge that tracks the current window into
+the full per-component transcript.
+
+**Markdown output layer.** Every command produces a well-formed Markdown
+document as its canonical result. The command's existing report builders are
+retained as the source of that document: the status overview, the `tasks`
+table, the blocked/awaiting-decision reasons, and the stale-document revision
+details are emitted as Markdown (headings, tables, lists, fenced code) rather
+than as pre-formatted plain text. The TUI then renders each document with the
+`blad` `MarkdownRenderer` (the same library `skott` embeds), so tables,
+diagrams, math, and code blocks display with full fidelity. The renderer is a
+pure function of its inputs plus the theme, width, and panel background, so
+styled and plain output remain unit-testable without a terminal. The stable
+`status --format text` and `--format json` report forms are unchanged, so
+scripts are unaffected.
+
+**Transcript persistence and splitting.** The transcript is a bounded on-screen
+window over a durable, per-component, disk-persisted record under the
+component's `.kvist/` state directory. Each command and its rendered Markdown
+output are appended to the record. The record is unlimited in size and splits
+into successive numbered files when one grows past a bound, so a long session
+never loses history. The on-screen panel shows a window over the current file
+and supports scrolling back with the scrollbar. Switching component clears the
+panel and restores that component's former transcript when the operator returns
+to it. The transcript is local uninspected state, excluded from compliance
+evidence, and distinct from the canonical attempt evidence.
+
+**Status heading and component auto-selection.** The heading shows the active
+component together with its state and task progress, plus the VCS branch,
+sandbox backend, default model, and live/stale lock counts. When no component
+is selected the heading shows the whole project and commands operate on the
+project. When a component is selected (via `cd` or the settings menu) it is
+auto-selected as the default for every command that expects a component, so the
+operator is never asked for it and it is pre-filled. The same focus value is
+shared with the completer for ordering.
+
+**Settings menu.** The shell provides a settings menu in the `skott` overlay
+pattern: model, reasoning effort, session history, component selection, theme,
+and other settings. Selecting a component from the menu is the same focus change
+as the `cd` builtin and pre-fills the component for subsequent commands. Theme,
+model, and effort selections persist the preference and apply immediately to
+the session. The menu is a pure function of the session state and is testable
+without a terminal.
+
+**Keyboard-shortcut help.** The command footer provides keyboard-shortcut help
+rendered the same way `skott` does it: a help overlay listing the key bindings
+and the command surface, reachable by a shortcut and dismissible. The content
+is the same closed help topic set as `kvist help` and the shell's `help`
+builtin, so it cannot drift.
+
+**Run the whole component.** `task run-all [COMPONENT_DIR]` iterates the
+component's tasks in dependency order, running each ready task, and stops when
+the component is complete, when a task becomes blocked, or when a task reaches
+an awaiting-decision point. It reuses the existing `task run` selection and
+execution path for each task, so it respects the same locking, policy-approval,
+and evidence guarantees. It never auto-resolves a decision or unblocks a blocked
+task; it pauses and reports the exact state and the command that resolves it,
+leaving durable task state for explicit finalize or recovery. The loop is a
+pure function of the queue state and the per-task run result, so the stop
+conditions are unit-testable without a terminal.
 
 ### Guided help and actionable status guidance
 

@@ -119,19 +119,19 @@ pub trait Recorder: Send {
 
 /// Thin application adapter for the shared bounded native loop.
 pub struct Skott {
-    pub max_turns: u32,
+    pub max_turns: Option<u32>,
     pub retry: RetryPolicy,
     pub limits: RunLimits,
 }
 impl Default for Skott {
     fn default() -> Self {
-        Self::with_retry(MAX_TURNS, RetryPolicy::default())
+        Self::with_retry(None, RetryPolicy::default())
     }
 }
 impl Skott {
-    pub fn with_retry(max_turns: u32, retry: RetryPolicy) -> Self {
+    pub fn with_retry(max_turns: impl Into<Option<u32>>, retry: RetryPolicy) -> Self {
         Self {
-            max_turns,
+            max_turns: max_turns.into(),
             retry,
             limits: RunLimits::default(),
         }

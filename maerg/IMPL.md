@@ -502,3 +502,29 @@ observer.
   limit. Linux sampling can miss brief/reparented processes and peaks. Coverage
   is synthetic and source-observed, not proof of portability, isolation,
   compliance, or acceptance.
+
+## Long-session source-observation supplement (2026-10-28)
+
+**Evidence boundary:** Source/test inspection only. No commands, tests, or builds were executed. Regression assertions are source evidence rather than executed proof; these observations do not certify compliance.
+
+Each protected execution creates a fresh conversation, context manager, task budget, control ownership, token budget, live journal, and retained-turn collection. There is no fixed generation-count ceiling. Role defaults impose a 300-second task budget, no cumulative-token limit, and 65,536-byte output capture. Configuration accepts task timeouts through thirty days and output limits through 1 MiB.
+
+`TurnBudget::model_deadline` now returns the lesser of remaining task time and **24 hours**, rejecting cancellation or exhausted time first. This limits individual transport requests without shortening the stored task budget. Shared native transports additionally apply their configured attempt deadline. Gateway probes, retries/backoffs, and effect timeouts consume the same remaining task budget. Enforcement is phase-based rather than an independent whole-task deadline watcher.
+
+`RunControls::deliver` now returns whether guidance actually reached the conversation. Withdrawal-only, dropped, or empty batches do not renew attempts. The execution loop resets `model_attempts` when delivery returns true; it also resets after an ordinary completed generation. Guidance therefore renews generation opportunities without resetting elapsed task time, retained evidence, or cumulative token accounting.
+
+Known provider usage accumulates across retained completed turns. Failed/interrupted attempts and unavailable or zero usage retain conservative reservations. Remaining token capacity can reduce the next output allowance; nonzero provider usage replaces its reservation. Transient model attempts are capped at three, further restricted by shared-profile settings. Failed attempts that already streamed text to stdout are not automatically retried.
+
+Generation uses operation-scoped cancellation, while executing effects receive task cancellation. Guidance preserves the system-pinned original task, skips undispatched calls, and retains completed effects. Complete turns are retained before validation/effect handling. Durable dispatch precedes execution; uncertain effects are explicitly retained rather than replayed. Finalization attempts to preserve earlier evidence on cancellation/error.
+
+Selected context is restricted to recognized local artifacts and exact root/parent mounts: at most seven paths, 4,096 encoded bytes per path, 1 MiB per file, and 4 MiB aggregate. Reads reject links, nonregular files, invalid UTF-8, and detected changes. Shared native capacity uses configuration/discovery; explicit endpoint mode uses an 8,192-token window and 1,024-token reserve. Compaction prefers four recent groups, but `run_turns` grows independently of compacted history.
+
+Live diagnostics inherit Sav’s journal rotation and follower behavior. Final logs are bounded/redacted; trajectories retain known usage and possible mutation.
+
+`multi_day_task_deadlines_fit_direct_transport` asserts that a seven-day budget produces a transport-compatible request deadline while retaining over six days. `multi_day_explicit_endpoint_run_accepts_repeated_human_guidance` asserts five interruptions followed by a sixth successful request. Other inspected tests assert 66-generation continuation, cumulative accounting, context refusal, and cancellation evidence. Dependency-acquisition internals were excluded from this refresh.
+
+### Source-derived approval and effect-timeout addendum
+
+**Maerg addendum — source-derived:** Approval remains bound to configuration-source identity/digest, serialized profile digests, and explicit timeout fields for all three roles. Approval loading authenticates the recorded material; execution compares it with current material. The timeout-change regression changes the developer timeout from five to six seconds and asserts rejection with the source-identity/digest diagnostic, unchanged queue contents, and no sandbox-request file. Effect dispatch passes exactly `Some(remaining_task_budget.min(Duration::from_secs(86_400)))` to the sandbox executor: at most 24 hours, further clipped to remaining task time, with no positive minimum. This observes the supplied timeout, not independently verified executor enforcement. The seven-day-configured fixture scripts 65 effect-producing generations followed by a final response and asserts 66 generations and success; it does not assert seven elapsed days or directly test timeout clipping.
+
+No commands, tests, or builds were executed; these are source observations and test-source assertions, not compliance certification.

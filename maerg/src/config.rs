@@ -206,7 +206,7 @@ pub struct RoleConfig {
     pub model: Option<String>,
     /// Thinking effort policy for this role (overrides profile default).
     pub thinking_effort: Option<sav::ReasoningEffort>,
-    /// Maximum duration for one sandbox runner request in seconds.
+    /// Whole protected authoring task budget in seconds.
     pub timeout_seconds: u64,
     /// Token budget limit for this role.
     pub token_limit: Option<usize>,
@@ -257,7 +257,7 @@ impl RoleConfig {
 }
 
 pub const DEFAULT_AGENT_TIMEOUT_SECONDS: u64 = 300;
-pub const MAX_AGENT_TIMEOUT_SECONDS: u64 = 3_600;
+pub const MAX_AGENT_TIMEOUT_SECONDS: u64 = 30 * 24 * 60 * 60;
 pub const DEFAULT_AGENT_MAX_OUTPUT_BYTES: usize = 65_536;
 pub const MAX_AGENT_OUTPUT_BYTES: usize = 1_048_576;
 

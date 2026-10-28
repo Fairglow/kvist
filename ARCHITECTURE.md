@@ -53,15 +53,17 @@ trusted core.
 
 | Stable ID        | Path              | Responsibility                                                                                                                                  | Provides                                                             | Requires                                                                                    |
 | ---------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `kvist.maerg`   | `maerg/`         | Project artifacts, component discovery, validation, status, queues, policy, task lifecycle, context selection, evidence, and CLI dispatch       | `kvist.cli/v1`, `kvist.artifacts/v1`, `kvist.host-authority/planned` | `sav.library/v1`, `galla.protocol/v1`, operating-system and VCS services |
+| `kvist.maerg`   | `maerg/`         | Project artifacts, component discovery, validation, status, queues, policy, task lifecycle, context selection, evidence, and CLI dispatch       | `kvist.cli/v1`, `kvist.artifacts/v1`, `kvist.host-authority/planned` | `sav.library/v1`, `blad.library/v1`, `galla.protocol/v1`, operating-system and VCS services |
 | `sav`  | `sav/`  | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport, and reusable bounded runtime mechanisms | `sav.library/v1`, `sav.cli/v1`                   | Host authority interfaces and operating-system process/network services                     |
 | `galla` | `galla/` | Strict request validation and Linux Bubblewrap enforcement for approved task grants                                                             | `galla.protocol/v1`, `galla.cli/v1`                | Bubblewrap, Linux kernel isolation, and operating-system process/filesystem services        |
-| `skott` | `skott/` | Interactive/headless workspace agent, request budgets, native file tools and private operational journals; no task approval or canonical evidence | `skott.library/v1`, `skott.cli/v1` | `sav.library/v1`, `galla.protocol/v1`, installed Linux enforcement |
+| `skott` | `skott/` | Interactive/headless workspace agent, request budgets, native file tools and private operational journals; no task approval or canonical evidence | `skott.library/v1`, `skott.cli/v1` | `sav.library/v1`, `blad.library/v1`, `galla.protocol/v1`, installed Linux enforcement |
+| `blad` | `blad/` | Terminal Markdown rendering: tables, diagrams, math, code highlighting, and themes. A pure string-in/writer-out renderer plus an interactive viewer; owns no session or workflow state | `blad.library/v1`, `blad.cli/v1` | Operating-system terminal and filesystem services |
 
 The repository layout places the root Rust workspace manifest at the project
-root (`/Cargo.toml`), with `maerg/`, `sav/`, `galla/`, and `skott/`
+root (`/Cargo.toml`), with `maerg/`, `sav/`, `galla/`, `skott/`, and `blad/`
 as top-level peer components. `kvist.maerg` depends on `sav` as a
-Rust library, while `galla` is an independent execution boundary.
+Rust library and on `blad` for Markdown rendering in its interactive TUI, while
+`galla` is an independent execution boundary.
 Neither child imports Kvist maerg types. The maerg and installed runner
 communicate only through the versioned protocol. The workspace agent uses that
 boundary but does not replace the maerg's narrower protected task broker:
@@ -138,6 +140,19 @@ context materialization are designed.
 constraints; `CONTRACT.md` owns consumer-visible semantics; `DESIGN.md` owns
 private realization; `TODOS.yaml` owns execution state; `IMPL.md` owns
 independently observed behavior.
+
+**Markdown output and the interactive TUI:** every command reports a
+well-formed Markdown document as its canonical result. The interactive shell
+renders that document with the `blad` renderer inside a Skott-style TUI: a
+status heading, a scrollable transcript that is a bounded window over a
+durable per-component, disk-persisted record, and a command footer with the
+full command surface and tab-completion. The on-disk transcript is unlimited
+and splits into successive files when one grows too large; switching component
+restores that component's former transcript. The stable text and JSON report
+forms are unchanged for non-interactive consumers, and the plain-text
+degradation contract still applies when the terminal cannot host the TUI. This
+is recorded in
+[`0016-markdown-first-tui-and-blad-integration.md`](docs/decisions/0016-markdown-first-tui-and-blad-integration.md).
 
 **Persistence:** durable writes use bounded reads, regular non-link paths,
 same-directory temporary files, synchronization where supported, and explicit
@@ -223,6 +238,12 @@ language (Rust enforced exactly through `Cargo.lock`; Python, Node, and
 that manifest via `enforce_vendoring` before an offline build is allowed. Routing
 Rust verification through the Cargo topology and mounting the read-only vendored
 registry and cargo configuration is the planned, security-sensitive integration.
+The Markdown-first output and the Blad-rendered interactive TUI are recorded in
+[`0016-markdown-first-tui-and-blad-integration.md`](docs/decisions/0016-markdown-first-tui-and-blad-integration.md):
+every command reports a well-formed Markdown document, the interactive shell
+renders it with the `blad` renderer in a Skott-style TUI with a durable
+per-component transcript, a settings menu, and a whole-component run command,
+while the stable text and JSON report forms remain unchanged for scripts.
 
 The immediate prerequisite risks are repository-layout migration, explicit
 attempt recovery, the production Bubblewrap runner, typed sandbox grants,

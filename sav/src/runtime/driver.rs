@@ -4,7 +4,7 @@ use super::{ControlMailbox, GuidanceNotice, GuidanceState};
 use super::{Error, Result, ToolOutcome, context::ContextManager, retry::RetryPolicy};
 use crate::{CancellationToken, ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn};
 use std::{
-    collections::HashSet,
+    collections::VecDeque,
     sync::atomic::Ordering,
     thread,
     time::{Duration, Instant},
@@ -31,7 +31,8 @@ fn deliver_guidance<S: EventSink>(
     recorder: &mut Option<&mut dyn Recorder>,
     controls: &ControlMailbox,
     cancellation: &CancellationToken,
-) -> Result<()> {
+) -> Result<bool> {
+    let mut any_delivered = false;
     for id in controls.withdrawals()? {
         control_notice(
             sink,
@@ -78,6 +79,7 @@ fn deliver_guidance<S: EventSink>(
                 session.push_user(message.text);
             }
         })? && !cancellation.is_cancelled();
+        any_delivered |= delivered;
         // No subsequent provider request or effect may precede durable delivery.
         control_notice(
             sink,
@@ -92,7 +94,7 @@ fn deliver_guidance<S: EventSink>(
             },
         )?;
     }
-    Ok(())
+    Ok(any_delivered)
 }
 
 /// Mirrors cancellation into a fresh operation token, never resetting the
@@ -162,29 +164,20 @@ impl Drop for Operation {
     }
 }
 /// The multi-turn loop driver.
+#[derive(Default)]
 pub struct NativeRuntime {
-    pub max_turns: u32,
+    pub max_turns: Option<u32>,
     /// How to retry a turn that ends in a transient, recoverable failure.
     pub retry: RetryPolicy,
     /// Limits shared by the complete prompt rather than reset on retries.
     pub limits: RunLimits,
 }
 
-impl Default for NativeRuntime {
-    fn default() -> Self {
-        NativeRuntime {
-            max_turns: MAX_TURNS,
-            retry: RetryPolicy::default(),
-            limits: RunLimits::default(),
-        }
-    }
-}
-
 impl NativeRuntime {
     /// Creates a loop driver with an explicit retry policy.
-    pub fn with_retry(max_turns: u32, retry: RetryPolicy) -> Self {
+    pub fn with_retry(max_turns: impl Into<Option<u32>>, retry: RetryPolicy) -> Self {
         NativeRuntime {
-            max_turns,
+            max_turns: max_turns.into(),
             retry,
             limits: RunLimits::default(),
         }
@@ -236,7 +229,7 @@ impl NativeRuntime {
     }
 
     /// Runs with a bounded in-process steering capability. Guidance never
-    /// resets prompt cancellation, wall/token accounting or attempt limits.
+    /// resets prompt cancellation or whole-task wall/token accounting.
     #[allow(clippy::too_many_arguments)]
     pub fn run_controlled<M: ModelTransport, E: ToolExecutor, S: EventSink>(
         &self,
@@ -250,10 +243,10 @@ impl NativeRuntime {
         controls: &ControlMailbox,
     ) -> Result<RunSummary> {
         self.limits.validate()?;
-        if !(1..=MAX_TURNS).contains(&self.max_turns) {
+        if self.max_turns == Some(0) {
             return Err(Error::Config {
                 path: None,
-                reason: format!("turn limit must be in 1..={MAX_TURNS}"),
+                reason: "turn limit must be positive when supplied".into(),
             });
         }
         let budget = PromptBudget::start(self.limits.wall_time, cancellation)?;
@@ -371,28 +364,39 @@ impl NativeRuntime {
         let mut usage_complete = true;
         let mut tokens_remaining = self.limits.max_tokens;
         let mut actions = crate::ActionHashRing::new();
-        let mut read_pages = HashSet::new();
+        let mut read_pages = VecDeque::new();
         let mut next_attempt = 1;
         let mut next_reserve = self.limits.response_reserve;
-        while summary.turns < self.max_turns {
+        let mut unattended_turns = 0u32;
+        loop {
             if controls.is_shutdown() {
                 cancellation.cancel();
             }
             if cancellation.is_cancelled() || budget.remaining().is_zero() {
                 break;
             }
-            deliver_guidance(session, sink, recorder, controls, cancellation)?;
+            if deliver_guidance(session, sink, recorder, controls, cancellation)? {
+                unattended_turns = 0;
+                next_attempt = 1;
+            }
+            if self
+                .max_turns
+                .is_some_and(|limit| unattended_turns >= limit)
+            {
+                summary.exhausted = true;
+                record_notice(sink, recorder, "unattended turn limit reached; send a follow-up to continue with a fresh allowance".into())?;
+                break;
+            }
             if next_attempt > self.retry.max_attempts {
                 return Err(Error::RunBudget {
                     reason: "generation attempt limit after guidance".into(),
                 });
             }
-            let Some(mut request) = session.next_request() else {
+            let Some((request, compaction)) = session.prepare_request(context, next_reserve)?
+            else {
                 break;
             };
-            if let Some(compaction) = context.prepare(&mut request, next_reserve)?
-                && compaction.compacted_turns > 0
-            {
+            if let Some(compaction) = compaction {
                 record_notice(
                     sink,
                     recorder,
@@ -402,13 +406,8 @@ impl NativeRuntime {
                     ),
                 )?;
             }
-            session.messages = request
-                .messages
-                .iter()
-                .skip(usize::from(!session.system_prompt.is_empty()))
-                .cloned()
-                .collect();
-            summary.turns += 1;
+            summary.turns = summary.turns.saturating_add(1);
+            unattended_turns = unattended_turns.saturating_add(1);
             sink.send(Event::TurnStart {
                 model: session.model_selector().into(),
             })?;
@@ -511,11 +510,17 @@ impl NativeRuntime {
                 }
                 let hash = crate::compute_action_hash(&intent.name, &intent.arguments);
                 let native_read = executor.repeatable(intent);
-                if native_read
-                    && !read_pages.insert(hash.clone())
-                    && let Some(message) = executor.repeated_observation_notice(intent)
-                {
-                    record_notice(sink, recorder, message)?;
+                if native_read {
+                    if read_pages.contains(&hash) {
+                        if let Some(message) = executor.repeated_observation_notice(intent) {
+                            record_notice(sink, recorder, message)?;
+                        }
+                    } else {
+                        if read_pages.len() == 1024 {
+                            read_pages.pop_front();
+                        }
+                        read_pages.push_back(hash.clone());
+                    }
                 }
                 let decision = if native_read {
                     crate::LoopDecision::Proceed
@@ -617,10 +622,6 @@ impl NativeRuntime {
             }
         }
         summary.answer = session.answer.clone();
-        summary.exhausted = summary.turns >= self.max_turns
-            && summary.answer.is_none()
-            && summary.failure.is_none()
-            && !cancellation.is_cancelled();
         Ok(())
     }
 
@@ -654,7 +655,7 @@ impl NativeRuntime {
         progress: &LiveProgress,
         total_generation_seconds: &mut f64,
         budget: &PromptBudget,
-        tokens_remaining: &mut u64,
+        tokens_remaining: &mut Option<u64>,
         recorder: &mut Option<&mut dyn Recorder>,
         controls: &ControlMailbox,
         first_attempt: u32,
@@ -699,12 +700,14 @@ impl NativeRuntime {
                 .unwrap_or(self.limits.response_reserve);
             let charge = (super::context::estimate_request(&attempt_request) as u64)
                 .saturating_add(u64::from(reserve));
-            if charge > *tokens_remaining {
-                return Err(Error::RunBudget {
-                    reason: "estimated input/output tokens".into(),
-                });
+            if let Some(remaining) = tokens_remaining {
+                if charge > *remaining {
+                    return Err(Error::RunBudget {
+                        reason: "estimated input/output tokens".into(),
+                    });
+                }
+                *remaining -= charge;
             }
-            *tokens_remaining -= charge;
             let attempt_deadline = base
                 .saturating_mul(attempt)
                 .min(base.saturating_mul(self.retry.max_attempts))
@@ -930,6 +933,7 @@ impl NativeRuntime {
             context_utilization: session.utilization(context, session.tool_definitions().len()),
             compaction_progress: session
                 .compaction_progress(context, session.tool_definitions().len()),
+            compactions: context.compactions(),
             generation_tokens_per_sec: average,
             average_tokens_per_sec: average,
             total_tokens,

@@ -46,6 +46,22 @@ authority through narrow interfaces.
 The following stable identifiers define the reusable runtime's mandatory
 behavior. Host-specific policy may impose stricter execution constraints.
 
+### AR-REQ-LONG-SESSIONS
+
+Native runs MUST have no default turn, wall-time or cumulative-token cutoff.
+Hosts MAY opt into positive per-task limits. Delivered human guidance MUST
+renew the unattended turn allowance and generation-attempt allowance, without
+resetting explicitly selected whole-task wall/token budgets or replaying effects.
+New tasks MUST start fresh budgets. Cancellation, per-request bounds, context
+fitting and repeated-action protection MUST remain effective without run caps.
+Progress MUST expose the count of successful context compactions across the
+conversation, including across tasks, without counting failed/no-op preflights.
+Diagnostic journals MUST rotate at 64 MiB rather than fail on total size;
+followers MUST traverse ordered segments with bounded memory and no link
+following. Tests MUST cross the former 500-turn and 64-MiB cutoffs.
+This human-requested change has an explicit advisory exception while review
+receipts are unavailable; independent observations are not acceptance.
+
 ### Shared native runtime verification (ADR 0015)
 
 The native runtime control boundary MUST expose finite message/byte bounds and
@@ -53,7 +69,8 @@ correlated identities. Regression evidence MUST include quiet-provider
 interruption, backoff wakeup, effect completion before guidance, complete
 skipped-result pairing, final-answer/submission arbitration, pre-claim
 edit/withdraw, required-delivery recording failure, shutdown, and preservation
-of wall/token/attempt budgets. Hosts using low-level mechanisms retain
+of explicit wall/token budgets and finite retries without human intervention.
+Delivered guidance renews the generation allowance. Hosts using low-level mechanisms retain
 authorization, delivery recording and policy responsibilities.
 
 ### AR-REQ-SHARED-RUNTIME
@@ -71,7 +88,8 @@ transport's model-selector bounds before they are advertised as usable.
 Native conversation, context fitting, retry, tool-result sequencing and control
 mechanisms MUST remain independent of terminal and maerg types. Hosts inject
 tool/effect authority and recording. Steering MUST be bounded and ordered,
-preserve prompt budgets and retry accounting, discard provisional generations,
+preserve explicit task wall/token charges, renew unattended allowances on
+delivery, discard provisional generations,
 pair skipped tool calls, and never replay effects. Cancellation and shutdown
 remain distinct from steering.
 

@@ -66,6 +66,8 @@ pub struct Overrides {
     /// The maximum autonomous turns a prompt drives when `allow_host_execution`
     /// is set. `None` means the safe default (one turn).
     pub host_turns: Option<u32>,
+    /// Optional sandboxed unattended turn allowance.
+    pub max_turns: Option<u32>,
     /// A prefilled prompt that is auto-started when the session begins.
     pub prompt: Option<String>,
     /// Shared prompt and provider response limits.
@@ -78,20 +80,20 @@ pub struct Overrides {
 
 /// Resolves the autonomous turn cap for a session and validates it.
 ///
-/// Sandboxed execution is the safe default and is multi-turn (`MAX_TURNS`). Host
+/// Sandboxed execution has no default turn ceiling. Host
 /// execution runs with real privileges, so it is single-turn by default and only
 /// `--host-turns` lifts the cap — and only within `1..=MAX_TURNS`, because an
 /// out-of-range cap would otherwise be a silent no-op. Returns the resolved cap,
 /// or [`Error::HostTurns`] when a host cap was requested outside that range.
-fn resolve_max_turns(allow_host_execution: bool, host_turns: Option<u32>) -> Result<u32> {
+fn resolve_max_turns(allow_host_execution: bool, host_turns: Option<u32>) -> Result<Option<u32>> {
     if allow_host_execution {
         match host_turns {
-            Some(turns) if (1..=MAX_TURNS).contains(&turns) => Ok(turns),
+            Some(turns) if (1..=MAX_TURNS).contains(&turns) => Ok(Some(turns)),
             Some(turns) => Err(Error::HostTurns {
                 requested: turns,
                 max: MAX_TURNS,
             }),
-            None => Ok(1),
+            None => Ok(Some(1)),
         }
     } else if host_turns.is_some() {
         Err(Error::Config {
@@ -99,7 +101,7 @@ fn resolve_max_turns(allow_host_execution: bool, host_turns: Option<u32>) -> Res
             reason: "host-turn overrides require explicit host execution".into(),
         })
     } else {
-        Ok(MAX_TURNS)
+        Ok(None)
     }
 }
 
@@ -114,6 +116,14 @@ pub fn run_with_controls(
     mut overrides: Overrides,
     allow_control: bool,
 ) -> ExitCode {
+    if overrides.max_turns == Some(0)
+        || (overrides.allow_host_execution && overrides.max_turns.is_some())
+    {
+        eprintln!(
+            "sandboxed turn limits must be positive and cannot override host-execution policy"
+        );
+        return ExitCode::from(2);
+    }
     if allow_control
         && (overrides.no_logs || overrides.allow_host_execution || overrides.host_turns.is_some())
     {
@@ -186,7 +196,7 @@ pub fn run_with_controls(
 
     // Resolve the autonomous turn cap for this session, validating the host cap.
     let max_turns = match resolve_max_turns(overrides.allow_host_execution, overrides.host_turns) {
-        Ok(turns) => turns,
+        Ok(turns) => turns.or(overrides.max_turns),
         Err(error) => {
             eprintln!("{}", error.describe());
             return ExitCode::from(error.exit_code());
@@ -293,7 +303,7 @@ impl Discovery {
         config: Config,
         overrides: Overrides,
         working_directory: PathBuf,
-        max_turns: u32,
+        max_turns: Option<u32>,
         allow_control: bool,
     ) -> Result<Self> {
         let model_config = config.clone();
@@ -418,7 +428,7 @@ struct SessionBuilder {
     log_dir: Option<PathBuf>,
     no_logs: bool,
     working_directory: PathBuf,
-    max_turns: u32,
+    max_turns: Option<u32>,
     limits: crate::session::RunLimits,
     allow_host_execution: bool,
     allow_control: bool,
@@ -521,7 +531,7 @@ impl SessionBuilder {
                         response_reserve: budgets.limits.response_reserve,
                         response_source: budgets.response_source.into(),
                         max_run_tokens: self.limits.max_tokens,
-                        max_run_secs: self.limits.wall_time.as_secs(),
+                        max_run_secs: self.limits.wall_time.map(|time| time.as_secs()),
                     }),
             ) as Box<dyn Recorder>)
         };
@@ -949,7 +959,7 @@ mod tests {
     fn sandboxed_work_is_multi_turn_by_default() {
         assert_eq!(
             resolve_max_turns(false, None).expect("default cap"),
-            MAX_TURNS,
+            None,
             "a sandboxed prompt runs multi-turn without any flag"
         );
     }
@@ -968,7 +978,7 @@ mod tests {
     fn host_execution_is_single_turn_by_default() {
         assert_eq!(
             resolve_max_turns(true, None).expect("default cap"),
-            1,
+            Some(1),
             "host work is single-turn by default to bound privilege overuse"
         );
     }
@@ -977,12 +987,12 @@ mod tests {
     fn host_turns_lifts_the_cap_when_in_range() {
         assert_eq!(
             resolve_max_turns(true, Some(10)).expect("cap"),
-            10,
+            Some(10),
             "an in-range host cap is honored"
         );
         assert_eq!(
             resolve_max_turns(true, Some(MAX_TURNS)).expect("cap"),
-            MAX_TURNS,
+            Some(MAX_TURNS),
             "the maximum in-range value is honored"
         );
     }

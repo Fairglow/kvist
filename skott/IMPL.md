@@ -951,3 +951,130 @@ configuration/history loaders; no race test was executed.
   Host-unconfined backends themselves retain authority over host-accessible
   logs. Cancellation, failed recording and absent terminal disposition leave
   prior/unknown effects unresolved rather than undone or replayable.
+
+## Long-session source-observation supplement (2026-10-28)
+
+**Evidence boundary:** Source/test inspection only. No commands, tests, or builds were executed. Assertions described here were inspected, not demonstrated by execution; no full-compliance conclusion is made.
+
+Skott delegates its native conversation loop to Sav. Sandboxed operation defaults to no unattended-turn ceiling or cumulative wall/token cutoff. Explicit host execution defaults to one turn, with host overrides bounded to 1–500. Model defaults are a 300-second attempt deadline, three attempts, two-second initial retry backoff, thirty-second maximum backoff, and thirty-second streaming cadence watchdog.
+
+Frontend context selection uses CLI override, model configuration, or provider discovery. Missing capacity fails rather than silently assuming an 8,192-token window. Automatic output reserve is one quarter of capacity, capped at 8,192 tokens. Workers use capacity-based compaction.
+
+A worker retains its conversation, context manager, transport, and recorder across tasks. Each task receives fresh runtime budgets, progress totals, action tracking, and read cursors; conversation compaction counts persist. Ordinary task cancellation is rearmed after the run. Permanent shutdown closes submissions, cancels work, removes controls, and joins the worker. Events use a bounded 128-entry channel; backpressure waits observe shutdown, not ordinary task cancellation.
+
+The mailbox atomically classifies active submissions as guidance and idle submissions as new tasks. Delivered guidance renews Sav’s generation/unattended-turn allowances without resetting cumulative task budgets. Changed model/effort selections do not move an active task: submissions can still steer its existing worker. Idle submission with a changed selection can create a fresh worker.
+
+`App::new_session` now clears running/spinner state, staged prompt, pending answer/reasoning buffers, hidden reasoning, statistics, growth sampling, and staged/cached clipboard escapes before clearing displayed lines and restoring follow mode. The event-loop new-session action separately shuts down the old worker and starts a fresh conversation. The strengthened `ctrl_n_starts_a_new_session` test seeds active generation and stale data, then asserts cleared state and absence of old text after flushing. Clipboard clearing is directly source-observed, not asserted by that test.
+
+Interactive recording defaults under `.skott/runs` and may be disabled. Headless execution requires recording outside the writable workspace, forbids host execution, and bounds its initial prompt to 64 KiB. Optional controls require sandboxed execution and private logs.
+
+Conversation JSONL/text files persist across tasks and do not rotate; text previews are individually bounded, not aggregate-bounded. Each task receives a separate rotating Sav live journal. Dispatch synchronization precedes effects; transcripts/live text can contain sensitive content. Attachment initializes neither models nor executors, and viewer detachment does not itself cancel execution.
+
+Opaque external agents require interactive host acknowledgement and mandatory logs. They have no native steering/token accounting, zero automatic retries, a default 24-hour wall limit, one-hour idle limit, and 4-MiB output bound.
+
+`loop_integration.rs` asserts 541-turn continuation and cross-task compaction; `context_preflight.rs` asserts protected goals, message boundaries, and atomic failure.
+
+## Automatic nextest policy discovery — source-only supplement (2026-10-28)
+
+Source observation only; no tests/builds executed.
+
+The policy resides at `.config/nextest.toml`, nextest’s default discovery location; filesystem inspection found `tools/nextest.toml` absent. `.gitignore` ignores other `.config` contents while explicitly exposing this policy.
+
+The exact selector `package(=skott) & binary(=rust_build_environment) & test(=native_repository_tests_execute_inside_the_workspace_sandbox)` reserves `num-test-threads` at priority 100. Its test body launches sandboxed repository Cargo tests. Priority 50 covers all `skott/rustup_inventory` tests and exact `kvist/sandbox_toolchain/rust_authoring_has_host_inventory_private_defaults_and_offline_builds`, without a whole-pool reservation.
+
+The empty `[profile.ci]` supplies no reservation or timeout overrides, leaving default inheritance applicable. Workflow nextest commands do not explicitly select that profile. Default slow-timeout settings are 30 seconds with termination after ten periods, distinct from Mermaid’s runtime deadline.
+
+Both justfile nextest recipes and both CI workspace commands omit `--config-file`. They specify `--locked --workspace --all-features --test-threads num-cpus --no-fail-fast`; profiling/CI additionally specify `--offline` and libtest JSON-plus format version 0.1.
+
+Rust regression source checks the exact repository-trial reservation and ordinary recipe discovery. Python regressions assert canonical placement, ignore-rule visibility, two nextest commands per entrypoint file without config flags, exact Mermaid scope/order, two priority-100 reservations, priority-50 inventory scope, and CI inheritance settings. The quality workflow invokes Python unittest discovery.
+
+These are inspected assertions, not executed proof. Explicit alternate configurations and `cargo test` can bypass scheduling. Reservations do not coordinate separate runners or external CPU load. Original timing-failure causation was not measured.
+
+## Independent request-preflight observations (2026-10-28)
+
+These observations derive only from an independent context's permitted current
+implementation and test source. It executed no tests or builds and read no
+intent, queue, prior record, reviews, chat or Git history. This is not compliance
+certification.
+
+### Budgets and directory scheduling
+
+One `Preflight` start time and cancellation token span request construction.
+Stage changes retain the same 30-second budget; workers do not receive
+independent budgets. Workspace inspection shares a one-million-entry atomic
+counter, maximum directory depth of 128, and 32 MiB path-byte accounting under
+a mutex. Path accounting charges twice each newly scheduled directory's path
+length; it is not a measurement of total allocation.
+
+Runner, backend and context-file identity reads each have a separate 256 MiB
+bound, with cancellation/time checks between 64 KiB reads. This is not a shared
+aggregate byte quota.
+
+Eight scoped workers consume a shared LIFO directory stack. A visited-path set
+deduplicates scheduled directories; an active-directory count distinguishes
+completion from a temporarily empty queue. Idle workers use a condition
+variable with 100 ms polling. All successfully spawned workers are joined before
+inspection returns. Worker-spawn errors, inspection errors and panics stop
+peers; an exit guard wakes waiters. Panics become build errors. Poisoned
+inspection state also returns an error.
+
+### Links and filesystem inspection
+
+Ordinary directories, including hidden directories, are traversed without
+name-based exclusions. Relative links resolve against their containing
+directory. Existing targets are canonicalized and checked against the writable
+root; failed canonicalization receives a lexical containment check.
+
+The link itself is subsequently canonicalized: `NotFound` is tolerated, other
+errors propagate, and a resolved target outside the root is rejected. In-scope
+directory targets are scheduled by canonical path and physical relative depth,
+allowing aliases and cycles to share existing work.
+
+These checks observe a mutable filesystem; they do not establish an immutable
+snapshot. Blocking filesystem operations are not interrupted by the cooperative
+timeout, and worker joins must finish before return.
+
+### Diagnostics and dispatch
+
+Preflight stages are `runner_identity`, `backend_identity`, `workspace_scope`,
+`rust_resources`, `context_identities` and `request_validation`. Stage-start logs
+contain cumulative elapsed time. Timeout errors include the current stage,
+elapsed milliseconds and narrowing/reduction guidance.
+
+Scope-summary diagnostics report entries, scheduled directories, configured
+worker count, duration and failure status. Request and runner diagnostics report
+identities, limits and outcome metadata; grant traces include paths, while
+environment traces include names rather than values.
+
+The immediate executor propagates request-construction errors before dispatch
+and checks cancellation again before execution. The runner execution wall-time
+limit is separate from preflight timing.
+
+### Concrete assertions present in source
+
+Quota tests assert exactly one million successful entry admissions, exactly
+four remaining admissions across eight competing workers, acceptance at the
+path-byte boundary, and rejection beyond it. Depth tests accept 128 levels and
+reject 129. Expired-preflight assertions require `stage=workspace_scope` and
+`elapsed_ms=`.
+
+Worker tests assert directory-I/O error propagation, panic conversion,
+cancellation failure, 65 visits with peak visitation no greater than eight,
+and concurrent progress by two independent directories. Alias/cycle tests
+assert three distinct directory visits; a hidden-directory escape must fail.
+`build_request` scope-link tests reject a nested escaping link and accept
+immediate and nested links to an internal file.
+
+Diagnostic integration assertions require stage, scope, request and runner
+messages, status seven and failure metadata, while excluding command/output
+sentinels. Native repository tests assert nested Cargo success using a separate
+target directory. The lock trial requests cancellation after five seconds if
+unfinished; separate tests inspect exact nextest exclusivity and automatic
+discovery recipe configuration.
+
+These assertions are source evidence, not execution results or evidence of any
+original-host failure's cause.
+
+The observer also identified `grant`'s metadata-error closure shadowing its
+source-path parameter: its error context uses OS error text instead of the
+grant path. That diagnostic defect is outside the traversal/stage changes.

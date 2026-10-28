@@ -1028,6 +1028,12 @@ color-geometry, runtime-tool independence, session dump and viewer diagram
 regressions. Source-only fixtures in mixed suites and unrelated tests remain
 parallel. The previous three-name policy omitted other engine callers and is
 superseded.
+Keep one canonical tracked policy at `.config/nextest.toml`, nextest's automatic
+workspace discovery path. Remove the former tools-directory policy rather than
+maintaining copies. Repository recipes and CI use normal discovery; explicit
+alternate configurations remain outside this guarantee. Git ignore exceptions
+expose only this policy, not other local `.config` contents. Regression checks
+cover discovery, ignore rules, entrypoint consistency and unchanged allocation.
 Use a persistent standard-library Python policy regression in `tools/`, outside
 the standalone crate's packaged tests, and run it in repository CI. Assert the
 exact scoped selector, whole-pool allocation and inherited CI behavior; verify

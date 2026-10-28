@@ -90,6 +90,25 @@ fn serialized_estimate_accounts_for_every_canonical_field_and_framing() {
 }
 
 #[test]
+fn protected_message_count_limit_is_exact_and_failure_is_atomic() {
+    for count in [1024, 1025] {
+        let mut request = request(vec![user("outstanding human guidance"); count]);
+        let original = request.clone();
+        let mut context = ContextManager::for_model(131_072);
+        let result = context.prepare(&mut request, 1024);
+        if count == 1024 {
+            assert!(result.unwrap().is_none());
+            assert_eq!(request.messages, original.messages);
+        } else {
+            assert!(matches!(result, Err(Error::InvalidModelTurn { .. })));
+            assert_eq!(request, original);
+        }
+        assert!(context.summary().is_empty());
+        assert_eq!(context.compactions(), 0);
+    }
+}
+
+#[test]
 fn reliability_compacted_native_references_precede_lossy_body_prefixes() {
     let path = format!("/workspace/{}/file.rs", "long-directory/".repeat(12));
     let digest = format!("sha256:{}", "a".repeat(64));

@@ -109,7 +109,7 @@ jobs:
           NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
         run: |
           python3 tools/profile_tests.py --output "$RUNNER_TEMP/kvist-test-profile" -- \
-            cargo nextest run --config-file tools/nextest.toml --offline --locked \
+            cargo nextest run --offline --locked \
             --workspace --all-features --test-threads num-cpus --no-fail-fast \
             --message-format libtest-json-plus --message-format-version 0.1
 
@@ -234,7 +234,7 @@ jobs:
           NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
         run: |
           python3 tools/profile_tests.py --output "$RUNNER_TEMP/kvist-test-profile" -- \
-            cargo nextest run --config-file tools/nextest.toml --offline --locked \
+            cargo nextest run --offline --locked \
             --workspace --all-features --test-threads num-cpus --no-fail-fast \
             --message-format libtest-json-plus --message-format-version 0.1
 

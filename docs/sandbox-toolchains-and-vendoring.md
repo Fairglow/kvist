@@ -153,6 +153,25 @@ The host home itself, Cargo credentials/configuration and rustup settings are
 not mounted. System-profile detection alone does not authorize home-directory
 mounts for other languages.
 
+### Diagnosing Skott request preflight
+
+Skott's 30-second request-preflight guard is separate from Rust startup
+preparation, a sandbox command's execution timeout, and nextest's test timeout.
+A test taking more than 30 seconds can therefore still fail specifically during
+preflight. Timeout errors include `stage` and `elapsed_ms`; `SKOTT_LOG=debug`
+also records identity, workspace, Rust-resource, context and request-validation
+stages. Logs omit command text, environment values and captured output.
+
+The complete writable checkout is inspected on every request, including hidden,
+vendor and build directories. Up to eight joined workers overlap directory I/O
+under one shared entry/path/depth allowance and deadline; generated directories
+are not trusted, skipped or cached. Debug completion records include entry and
+directory counts, duration and failure state. External CPU/storage contention
+can still exhaust a finite deadline, and kernel calls cannot be preempted.
+Run native repository tests through the automatically discovered
+`.config/nextest.toml` policy so other tests in that invocation cannot mutate the
+checkout concurrently with its whole-repository trial.
+
 Both Rust Quality and MSRV CI jobs explicitly install Python, Node and C/C++
 as system packages before native tests. A tool available only through the
 runner's host toolcache is not necessarily available in the sandbox.
@@ -213,7 +232,7 @@ Nextest starts each test in a separate process, so that attribute does not
 provide nextest-wide exclusion. A serial test group also excludes only its own
 members, not other tests.
 
-The repository's tracked `tools/nextest.toml` selects the exact package, binary and
+The repository's tracked `.config/nextest.toml` selects the exact package, binary and
 repository trial and uses `threads-required = "num-test-threads"` in the default
 profile. This reserves the whole current nextest pool, even when `-j` changes
 its size, and is inherited by the CI profile. Ordinary tests remain parallel.
@@ -221,15 +240,15 @@ Use the same override pattern for future tests that must run alone; change the
 selector to their exact identity. Alternate configs or overriding profile rules
 must retain this policy.
 
-`just test` explicitly selects this configuration. For direct repository runs,
-pass `--config-file tools/nextest.toml` as well: the ignored
-`.config/nextest.toml` is optional sandbox-local configuration and is not
-included in a clean checkout.
+Normal nextest runs, `just test`, `just test-profile` and workspace CI
+automatically discover this configuration in a clean checkout. No extra
+`--config-file` argument is needed. This is the only tracked exception under
+`.config`; other local settings remain ignored.
 
 For a one-off isolated run:
 
 ```bash
-cargo nextest run --config-file tools/nextest.toml --offline --locked \
+cargo nextest run --offline --locked \
   -p skott --test rust_build_environment \
   -E 'test(=native_repository_tests_execute_inside_the_workspace_sandbox)'
 ```

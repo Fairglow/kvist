@@ -23,6 +23,12 @@ self-certified implementations.
 Successful use produces:
 
 - a product vision approved before architecture;
+- a Markdown-first interactive workspace: every command reports a well-formed
+  Markdown document that the terminal renders with full fidelity (tables,
+  diagrams, math, code) through the `blad` renderer, in a Skott-style TUI with a
+  status heading, a scrollable per-component transcript persisted to disk, a
+  command footer with full tab-completion, a settings menu, and a whole-component
+  run that iterates tasks to completion or an explicit blocker or decision;
 - an explicit component hierarchy with narrow dependency direction;
 - testable requirements separated from consumer contracts and internal design;
 - an advisory AI review opportunity for controlled intent before
@@ -105,3 +111,10 @@ status, and attempt logs, is exempt.
    required.
 9. **Deterministic and safe behavior.** Validation, ordering, serialization,
    failures, and authority boundaries are explicit and reproducible.
+10. **Markdown is the canonical output.** Every command reports a well-formed
+   Markdown document, and the interactive workspace renders that document with
+   full fidelity through the `blad` renderer. The on-screen transcript is a
+   bounded window over a durable, per-component, disk-persisted record, so the
+   operator can always scroll back to any earlier command and result. Markdown
+   is the presentation of state, not a substitute for the durable artifacts or
+   for executable tests.

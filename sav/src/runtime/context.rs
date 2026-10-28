@@ -146,6 +146,7 @@ pub struct ContextManager {
     keep_full_turns: usize,
     /// Rolling summary text representing compacted history.
     summary: String,
+    compactions: u64,
 }
 
 impl ContextManager {
@@ -172,6 +173,7 @@ impl ContextManager {
             warmup_tokens,
             keep_full_turns,
             summary: String::new(),
+            compactions: 0,
         }
     }
 
@@ -193,6 +195,11 @@ impl ContextManager {
     /// The current rolling summary text.
     pub fn summary(&self) -> &str {
         &self.summary
+    }
+
+    /// Successful context reductions across this conversation's lifetime.
+    pub fn compactions(&self) -> u64 {
+        self.compactions
     }
 
     /// Whether the estimated `context_tokens` has crossed the warm-up threshold
@@ -301,7 +308,11 @@ impl ContextManager {
         let mut candidate = request.clone();
         candidate.max_output_tokens = Some(response_reserve);
         let initial_used = estimate_request(&candidate).saturating_add(reserve);
-        if initial_used <= self.limit_tokens && !self.should_compact(initial_used) {
+        let message_limit = crate::direct_transport::MAX_MESSAGES;
+        if initial_used <= self.limit_tokens
+            && !self.should_compact(initial_used)
+            && candidate.messages.len() <= message_limit
+        {
             *request = candidate;
             return Ok(None);
         }
@@ -339,11 +350,18 @@ impl ContextManager {
             let irreducible_used = estimate_request(&candidate).saturating_add(reserve);
             let can_remove_more = eligible.get(compacted).is_some();
             if irreducible_used <= self.limit_tokens
-                && (!capacity_retention || irreducible_used <= target || !can_remove_more)
+                && candidate.messages.len() <= message_limit
+                && (!capacity_retention
+                    || (irreducible_used <= target
+                        && candidate.messages.len() < message_limit * 65 / 100)
+                    || !can_remove_more)
             {
                 if compacted == 0 && prior_summary_index.is_none() {
                     *request = candidate;
                     return Ok(None);
+                }
+                if candidate.messages.len() == message_limit {
+                    rolled.clear();
                 }
                 rolled = fit_summary(
                     &mut candidate,
@@ -362,9 +380,19 @@ impl ContextManager {
                 });
                 self.summary = rolled;
                 *request = candidate;
+                if changed {
+                    self.compactions = self.compactions.saturating_add(1);
+                }
                 return Ok(compaction);
             }
             let Some(&index) = eligible.get(compacted) else {
+                if candidate.messages.len() > message_limit {
+                    return Err(Error::InvalidModelTurn {
+                        reason: format!(
+                            "protected context reaches the {message_limit}-message request bound; shorten task guidance or start a new conversation"
+                        ),
+                    });
+                }
                 return Err(Error::ContextBudget {
                     used: estimate_request(&candidate),
                     limit: self.limit_tokens,
@@ -470,6 +498,7 @@ impl ContextManager {
                 || keep <= MIN_KEEP_FULL_TURNS
             {
                 self.summary = rolled;
+                self.compactions = self.compactions.saturating_add(1);
                 return (
                     condensed,
                     Compaction {

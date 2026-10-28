@@ -1,3 +1,4 @@
+# Shared repository scheduling, automatically discovered by nextest.
 [profile.default]
 slow-timeout = { period = "30s", terminate-after = 10 }
 

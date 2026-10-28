@@ -136,9 +136,9 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
 /// utilization, with compaction shown only while it is in play. Shown even
 /// before the first turn so the overview is always present.
 fn render_stats(f: &mut ratatui::Frame, app: &App, area: Rect) {
-    let stats_text = app.stats_line();
+    let stats_text = app.stats_line_for_width(usize::from(area.width));
     let text = if stats_text.is_empty() {
-        " ⚡      — t/s   ·   avg    — t/s   ·   ctx ░░░░░░░░   0%    —/—   ".to_owned()
+        " ⚡      — t/s   ·   avg    — t/s   ·   ctx 0% —/—   ·   compactions 0".to_owned()
     } else {
         stats_text
     };
@@ -323,6 +323,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from("  The stats bar shows: generation speed (t/s, output-only, like"),
         Line::from("  llama-server's), avg (session throughput incl. prompt and"),
         Line::from("  tool time), ctx (context utilization of the model window),"),
+        Line::from("  compactions (successful reductions in this conversation),"),
         Line::from("  cumulative processed tokens, and elapsed time. The"),
         Line::from("  compaction field appears only while the live context is"),
         Line::from("  past the warm-up threshold, with an 'in ...' ETA while the"),
@@ -332,6 +333,9 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from(""),
         Line::from("  Compaction keeps the model's context bounded by rolling"),
         Line::from("  complete tool groups into a lossy, nonbinding summary."),
+        Line::from("  Sandboxed tasks have no default run cutoff. Optional"),
+        Line::from("  --max-turns, --max-run-secs and --max-run-tokens bound work."),
+        Line::from("  Guidance renews turn allowance, not task time/token caps."),
         Line::from("  Private transcripts are bounded and may contain secrets;"),
         Line::from("  --no-logs disables them. Ctrl+T only hides reasoning."),
         Line::from(match app.execution_scope {
@@ -871,6 +875,7 @@ mod tests {
             context_limit: 81920,
             context_utilization: 0.366,
             compaction_progress: 0.0,
+            compactions: 0,
             generation_tokens_per_sec: 62.0,
             average_tokens_per_sec: 214.0,
             total_tokens: 45200,
@@ -884,6 +889,7 @@ mod tests {
             stats_row.contains("62 t/s")
                 && stats_row.contains("214 t/s")
                 && stats_row.contains("81.92k")
+                && stats_row.contains("compactions 0")
                 && stats_row.contains("45.2k tok"),
             "stats content must be visible, got: {stats_row:?}"
         );
@@ -902,7 +908,7 @@ mod tests {
             stats_row.contains("t/s")
                 && stats_row.contains("avg")
                 && stats_row.contains("ctx")
-                && !stats_row.contains("compaction"),
+                && !stats_row.contains("compaction "),
             "placeholder:\n{stats_row:?}"
         );
     }
