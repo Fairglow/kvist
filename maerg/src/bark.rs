@@ -1276,7 +1276,10 @@ fn next_command_for(
     match task.status {
         TaskStatus::Blocked => {
             if task_queue::dependencies_completed(task, tasks) {
-                Some(format!("kvist task run {component} {}", task.id))
+                Some(format!(
+                    "kvist task transition {component} {} pending",
+                    task.id
+                ))
             } else {
                 let n = task_queue::incomplete_dependency_count(task, tasks);
                 let unit = if n == 1 { "task" } else { "tasks" };
@@ -2227,13 +2230,13 @@ mod tests {
     }
 
     #[test]
-    fn tasks_next_command_names_run_or_transition_per_dependency_chain() {
-        // Completed chain: the exact re-run command.
+    fn tasks_next_command_names_reopening_transition_per_dependency_chain() {
+        // Completed chain: reopen without executing.
         let ready = ready_task("done", TaskStatus::Completed, &[]);
         let blocked = ready_task("b1", TaskStatus::Blocked, &["done"]);
         let tasks = vec![blocked.clone(), ready];
         let next = next_command_for(&blocked, &tasks, "maerg").expect("command");
-        assert_eq!(next, "kvist task run maerg b1");
+        assert_eq!(next, "kvist task transition maerg b1 pending");
 
         // Incomplete chain: reopen with the incomplete-dependency count.
         let pending = ready_task("p1", TaskStatus::Pending, &[]);

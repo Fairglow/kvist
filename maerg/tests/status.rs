@@ -623,7 +623,7 @@ fn status_blocked_details_list_reasons_and_exact_next_commands() {
     assert!(stdout.contains(
         "reason: missing test-command policy for component `x`. Please define a command for it in `kvist.toml` under `[test_policy]` and approve it"
     ));
-    assert!(stdout.contains("next: kvist task run . blocked-ready"));
+    assert!(stdout.contains("next: kvist task transition . blocked-ready pending"));
     assert!(stdout.contains("blocked: blocked-waiting"));
     assert!(stdout.contains("reason: Waiting on dep-task."));
     assert!(stdout.contains(
@@ -652,7 +652,7 @@ fn status_blocked_details_list_reasons_and_exact_next_commands() {
     assert!(stdout.contains(
         "reason: missing test-command policy for component `x`. Please define a command for it in `kvist.toml` under `[test_policy]` and approve it"
     ));
-    assert!(stdout.contains("next:   kvist task run . blocked-ready"));
+    assert!(stdout.contains("next:   kvist task transition . blocked-ready pending"));
     assert!(stdout.contains("Blocked:   blocked-waiting"));
     assert!(stdout.contains(
         "next:   kvist task transition . blocked-waiting pending (1 dependency task incomplete)"

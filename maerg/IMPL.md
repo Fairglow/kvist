@@ -5,6 +5,177 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped transition-matrix verification - 2026-10-29
+
+Independent clean-slate `transition-observer` derived observations from
+Maerg's task commands, queue, guidance and scoped test source only. It excluded
+all intent, queues, prior records/reviews, peers, chat/Git history and execution
+logs, made no edits and ran no checks. Its initial observation exposed a
+missing other-task scan on acceptance. After that repair, a separately scoped
+clean-slate `transition-fence-observer` observed only the shared scan, its two
+call sites and two new test sequences, under the same exclusions. The delta
+observation was not a repeat whole-implementation review. Their source-derived
+observations are:
+
+- The five-state matrix contains ten legal edges; completed is terminal and
+  self-transitions are refused. In-progress entry checks the complete
+  dependency chain, including decision resumption. Blocked/decision entry
+  requires and persists a nonblank reason in both queue and transition events;
+  leaving those states clears the queue reason. Direct human
+  in-progress-to-completed transition remains an ordinary legal operation.
+- Ordinary transitions permit current/blocked components; execution, selection
+  and result acceptance require current. Unlock, no-launch recovery, block
+  disposition and log inspection permit current/blocked/stale, retaining
+  current-project, tracked-artifact, discovery and structural checks.
+- Unlock validates lock shape and Linux process liveness, quarantines and
+  rechecks the stale lock before removal. Force skips only confirmation.
+  Unresolved-attempt checking follows removal; an error can truthfully report
+  that the lock was removed while task state remains unresolved.
+- No-launch recovery validates authenticated prepared/failure/recovery-chain
+  evidence, launch/write-exposure false, current approval, runner, scope and
+  exact queue digests. It resumes reconstructed before/after replacement states
+  and restores only pending/in-progress origins without accepting intent.
+  Ordinary prepared execution evidence additionally accepts a decision origin.
+- Both finalization dispositions check bounded latest attempt identity,
+  selected-record schema/task identity, prepared presence and conflicting
+  dispositions/recovery decisions. They reject their own explicit fence.
+  The final shared other-task scan rejects sibling fences and unresolved
+  journals before either completion or block queue mutation. Its resolved
+  predicate includes disposed execution and fully authenticated recovered
+  chains, not merely the existence of a recovery receipt.
+- Acceptance stores completed status, attempt acceptance identity, disposition
+  and timestamps before synchronously appending final evidence. A matching
+  completed non-committing repeat finishes missing recording or returns the
+  existing decision without queue rewrite or duplicate event. A repeated commit
+  request is refused with separate pending-commit guidance. Block retains its
+  matching-reason, queue-first append-only repeat semantics.
+- Status, shell and blocked-state hints reopen with a reason-free pending
+  transition, rather than suggesting execution under blocked component state.
+  Help no longer describes verification alone as completion.
+
+The delta observer specifically traced a test which first leaves one task
+awaiting human disposition, then creates an authentic no-launch fence for an
+independent task. Acceptance must refuse with queue and both journal byte
+sequences unchanged, then succeed only after sibling recovery. Its other test
+places a pending ancestor above a completed direct predecessor and checks
+pending/blocked/decision in-progress entries all refuse without queue/journal
+mutation. These are source assertions, not execution claims by the observers.
+
+**Attributed execution, not independent observation:** the implementing session
+reproduced the repaired defects before their production fixes. Its final
+`cargo test --offline --locked -p kvist` passed 772 tests across 37 suites with
+seven existing ignores. Eleven new integration tests include 200
+state/reason/dependency combinations, all 25 stale-intent pairs, structural/VCS
+gates, live/dead/malformed locks, stale authenticated recovery, decision
+resumption, finalization identity and repeat/interrupted recording, sibling
+recovery preservation and indirect dependencies. Strict all-target Clippy,
+format/whitespace checks and component structural validation passed. Full named
+execution output is retained in the session's `transition-verification-tests.log`.
+
+**Observed limitations retained for arbitration:** selected finalization's
+identity check does not itself run prepared-field/HMAC assessment or require
+successful execution/verification/pending-human-disposition records. Acceptance
+change inventory still trusts reported scopes when present, checks optional
+post-digests only when reads succeed, and does not reject every unknown operation.
+Pending commit-record creation/write failures are still ignored. Those
+pre-existing broader acceptance limitations are not certified by this repair.
+Reconstructed partial states are not actual power-loss or fault injection:
+torn appends, disk-full/fsync failures, check/write races, quarantine races,
+PID reuse and non-Linux behavior remain unverified. An interrupted unversioned
+ordinary-transition prepared tail remains a refusal, not authenticated
+no-launch recovery. No universal crash recovery, unsafe force-reset, provider
+behavior, production sandbox isolation, security or overall compliance
+certification is claimed.
+
+The existing operational Maerg review task was observed pending at
+`2026-10-29T09:50:40Z`; this request did not change it, its attempt journal or
+the human's accepted revision metadata. Local intent changed deliberately and
+remains stale pending human review/acceptance. The installed binary was not
+replaced and no commit was created.
+
+**Independent source-blind comparison:** `transition-comparator` received only
+the scoped requirements/contract/design/task definitions, the independent
+observations and attributed execution summary, with no tools or source access.
+It found no demonstrated contradiction in transition adjacency, state gates,
+supported no-launch restoration, sibling fencing or non-committing repeat
+semantics; that is bounded support, not certification or proof of deadlock
+absence. It retained for explicit human arbitration the acceptance read-failure
+and optional-digest ambiguity, durable pending-commit record failures, and the
+operational treatment of unsupported interrupted ordinary-transition tails.
+Snapshot checks do not establish fail-closed validation of all accepted file
+contents. None of these broader limitations was silently repaired, waived or
+treated as approved by the comparison.
+
+## Scoped stale-attempt abandonment repair - 2026-10-29
+
+Independent clean-slate `stale-abandon-observer` inspected only current
+task-command validators, finalization, queue serialization, lock/journal
+helpers, guidance and scoped test source. It excluded intent, queues, prior
+records, reviews, peer implementations, chat and Git history. It edited
+nothing, ran no tests and made no compliance determination. Its bounded
+source-derived observations are:
+
+- Block disposition and log inspection permit current, blocked and stale
+  components while retaining project, tracked-artifact, discovery and
+  structural-state checks. Execution and result acceptance require current
+  state; ordinary transitions permit current/blocked, not stale.
+- Intent acceptance retains its unresolved-attempt guard. Its message derives
+  remaining blocked state from the queue and names the pending-transition
+  command instead of claiming all task state became current.
+- Rejection requires a reason, bounded latest exact task/attempt, supported
+  record schema and matching task identity, with prepared evidence. Explicit
+  target recovery fences, other tasks' unresolved attempts, conflicting
+  dispositions and recovery-in-progress evidence refuse the write. Another
+  merely blocked task does not. Rejection bypasses result-digest checks,
+  refuses commit and does not certify execution, rollback or completion.
+- The same exclusive component operation lock guards rejection. Queue and
+  journal snapshots are checked before mutation. The blocked queue decision
+  is stored first; ownership and snapshots are checked again before appending
+  synchronized human-finalized evidence. Prior evidence is not replaced.
+- A repeated identical stored block decision can finish a missing event
+  without rewriting the queue; an identical existing event is not duplicated.
+  Recording errors report partial persistence and inspection/repetition
+  guidance. Rejection leaves intent revisions and acceptance identity alone.
+- Canonical serialization now retains non-null disposition and acceptance
+  identity fields rather than silently dropping parsed values.
+- Guidance names inspection/block before acceptance, then deliberate pending
+  transition. Task log remains read-only. Authenticated no-launch recovery is
+  not broadened into a user assertion of no execution.
+
+The observer read assertions for stale authenticated-attempt rejection,
+unchanged intent revisions and journal prefixes, repeated/interrupted
+recording, result drift, unrelated blocked tasks, refusal guards, queue
+round-trips and active-lock refusal. Those were source assertions, not its
+execution results. Interruption is modeled at the queue-only boundary;
+append/sync failures and snapshot races were not fault-injected. Torn JSON
+remains malformed evidence and is refused, not repaired by repetition.
+These limitations remain explicit; the change is not a journal-repair or
+whole-component compliance claim.
+
+Implementer-attributed execution: `cargo test --offline --locked -p kvist`
+passes 761 tests across 37 suites with seven existing ignores, including
+65 dogfood-boundary tests, 54 task-command tests and nine queue tests.
+Named output is retained in the session's `stale-abandon-tests.log`.
+Strict all-target Maerg Clippy and workspace formatting pass. The stale
+gate and dropped-disposition regressions failed before their respective
+production fixes. No independent execution or intent acceptance is claimed.
+
+Independent source-blind `stale-abandon-comparator` used only the isolated
+scoped intent/task definitions, source-derived observations and attributed
+execution results, with no tools or source access. It established no concrete
+repair-scoped contradiction. Actual append/sync fault injection, torn-record
+recovery and snapshot-race execution remain unqualified; malformed journal
+protection is intentional. This is not whole-component certification.
+
+After that comparison, the implementer used the rebuilt CLI to apply the
+human's already-requested block disposition to the real
+`shared-runtime-compliance-review`, `attempt-0001`. The original journal bytes
+were verified unchanged as a prefix and exactly one blocked human disposition
+was appended. Intent metadata was verified unchanged. The task is blocked,
+not completed or deferred; intent remains stale pending human review.
+The installed executable was not replaced. This operational action does not
+become independent execution or proof of absent effects.
+
 ## Scoped resilient task execution repair - 2026-10-28
 
 Independent clean-slate `resilient-source-observer` inspected the current

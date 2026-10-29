@@ -435,7 +435,7 @@ pub enum TaskCommand {
         /// Requested durable task status.
         #[arg(skip)]
         status: TaskStatusArgument,
-        /// Required nonblank blocker explanation only when STATUS is `blocked`.
+        /// Required nonblank explanation when STATUS is `blocked` or `awaiting-decision`.
         #[arg(long)]
         reason: Option<String>,
         #[doc(hidden)]

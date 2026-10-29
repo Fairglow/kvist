@@ -124,6 +124,10 @@ Kvist component lifecycle
 
   Intent changed after accept -> the component is STALE:
   review the diff (git diff HEAD -- <DOC>), then `kvist component accept [DIR]`.
+  If acceptance is fenced by an unresolved attempt, inspect retained effects
+  and first use `kvist task finalize [DIR] TASK ATTEMPT block --reason \"...\"`.
+  Rejection works while stale; it does not certify completion or roll back.
+  Then accept reviewed intent before transitioning the task to pending.
 
   `kvist status` shows the exact action for every non-current state, and
   `kvist help task-states` explains the task states that status reports.
@@ -152,8 +156,8 @@ Legal transitions
 
 How to achieve them
   pending -> in-progress      kvist task run [DIR] [TASK]  (ready: deps completed)
-  in-progress -> completed    automatic after test verification, or
-                              kvist task finalize [DIR] TASK ATTEMPT accept
+  in-progress -> completed    kvist task finalize [DIR] TASK ATTEMPT accept
+                              (verification success alone never completes a task)
   in-progress -> blocked      automatic when verification fails, or
                               kvist task transition [DIR] TASK blocked --reason \"...\"
   in-progress -> awaiting-decision
@@ -162,7 +166,8 @@ How to achieve them
                               or the shell `tasks` builtin; e.g. add [[test_policy.commands]]
                               to kvist.toml and run `kvist task approve-policy`), then
                               kvist task transition [DIR] TASK pending
-  blocked -> in-progress      kvist task run [DIR] TASK  (dependency chain completed)
+  blocked -> in-progress      kvist task transition [DIR] TASK in-progress
+                              (dependency chain completed; then explicitly run TASK)
   awaiting-decision -> ...    decide, update intent, re-accept, then
                               kvist task transition [DIR] TASK in-progress
   in-progress -> pending      kvist task transition [DIR] TASK pending  (reset)

@@ -168,10 +168,10 @@ pub fn component_state_hint(state: project_state::ComponentState, component: &Pa
             format!("the component is current; run `kvist task next {display}`")
         }
         project_state::ComponentState::Stale => format!(
-            "review the changed documents listed by `kvist status` (for example `git diff HEAD -- {display}` under Git), then run `kvist component accept {display}`"
+            "review the changed documents listed by `kvist status` (for example `git diff HEAD -- {display}` under Git), then run `kvist component accept {display}`. If acceptance is fenced by an unresolved attempt, inspect its retained effects and explicitly abandon it first with `kvist task finalize {display} <TASK_ID> <ATTEMPT_ID> block --reason ...`, or use `kvist task recover {display} <TASK_ID> <ATTEMPT_ID> --disposition execution-did-not-start` only with authenticated no-launch evidence. A stale operation lock can be removed with `kvist task unlock {display} --force`, never a live owner's lock. Then accept intent before returning the task to pending"
         ),
         project_state::ComponentState::Blocked => format!(
-            "resolve the blocked tasks listed by `kvist status`, for example `kvist task transition {display} <TASK_ID> pending --reason <why>` or `kvist task finalize {display} <TASK_ID> <ATTEMPT_ID> accept`"
+            "inspect and resolve the blocked reasons listed by `kvist status`, then reopen each task with `kvist task transition {display} <TASK_ID> pending` (without --reason); reopening does not execute it, and unresolved attempts still require inspection first"
         ),
         project_state::ComponentState::Invalid => {
             format!("run `kvist component validate {display}` to see which document is invalid")

@@ -682,6 +682,20 @@ fn append_task(output: &mut String, task: &Task) {
         }
         None => line(output, 4, "recovery_state: null"),
     }
+    if let Some(acceptance_id) = &task.acceptance_id {
+        line(
+            output,
+            4,
+            &format!("acceptance_id: {}", yaml_string(acceptance_id)),
+        );
+    }
+    if let Some(disposition) = task.disposition {
+        let name = match disposition {
+            FinalizeDispositionArgument::Accept => "accept",
+            FinalizeDispositionArgument::Block => "block",
+        };
+        line(output, 4, &format!("disposition: {name}"));
+    }
 }
 
 fn recovery_state_name(state: RecoveryStateKind) -> &'static str {

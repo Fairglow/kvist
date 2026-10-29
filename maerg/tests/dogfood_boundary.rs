@@ -10,5 +10,7 @@ mod layout;
 mod protocol;
 #[path = "dogfood_boundary/support.rs"]
 mod support;
+#[path = "dogfood_boundary/transitions.rs"]
+mod transitions;
 #[path = "dogfood_boundary/workflow.rs"]
 mod workflow;

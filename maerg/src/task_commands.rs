@@ -89,9 +89,8 @@ fn transition_locked(
     task.status = target;
     task.timestamps.updated_at = timestamp.clone();
     task.timestamps.completed_at = (target == TaskStatus::Completed).then(|| timestamp.clone());
-    // `validate_transition` guarantees a reason for a Blocked target; the
-    // empty-string fallback keeps this total if that invariant ever changes.
-    task.blocked_reason = (target == TaskStatus::Blocked).then(|| reason.unwrap_or("").to_owned());
+    task.blocked_reason = matches!(target, TaskStatus::Blocked | TaskStatus::AwaitingDecision)
+        .then(|| reason.unwrap_or("").to_owned());
 
     tracing::info!(
         task_id = %task_id,
@@ -176,6 +175,31 @@ fn validate_context_with_blocked(
     component_path: &Path,
     allow_blocked_component: bool,
 ) -> Result<TaskContext> {
+    let allowed = if allow_blocked_component {
+        &[ComponentState::Current, ComponentState::Blocked][..]
+    } else {
+        &[ComponentState::Current][..]
+    };
+    validate_context_in_states(project_dir, component_path, allowed)
+}
+
+fn validate_inspection_context(project_dir: &Path, component_path: &Path) -> Result<TaskContext> {
+    validate_context_in_states(
+        project_dir,
+        component_path,
+        &[
+            ComponentState::Current,
+            ComponentState::Blocked,
+            ComponentState::Stale,
+        ],
+    )
+}
+
+fn validate_context_in_states(
+    project_dir: &Path,
+    component_path: &Path,
+    allowed: &[ComponentState],
+) -> Result<TaskContext> {
     let component_path = context::normalize_component_path(component_path)?;
     let inspection = project_state::inspect(project_dir)?;
     if inspection.state != ProjectState::Current {
@@ -196,9 +220,7 @@ fn validate_context_with_blocked(
             state: "not a discovered component".to_owned(),
             hint: context::component_not_found_hint(&component_path),
         })?;
-    if component.state != ComponentState::Current
-        && !(allow_blocked_component && component.state == ComponentState::Blocked)
-    {
+    if !allowed.contains(&component.state) {
         return Err(KvistError::TaskComponentNotCurrent {
             component: component_path.clone(),
             state: component.state.name().to_owned(),
@@ -302,16 +324,17 @@ fn validate_transition(
     }
     match target {
         TaskStatus::InProgress
-            if !(matches!(task.status, TaskStatus::Pending | TaskStatus::Blocked)
-                && task.depends_on.iter().all(|dependency| {
-                    task_by_id(tasks, dependency)
-                        .is_some_and(|dependency| dependency.status == TaskStatus::Completed)
-                })
-                && transitive_dependencies_completed(task, tasks)) =>
+            if !(matches!(
+                task.status,
+                TaskStatus::Pending | TaskStatus::Blocked | TaskStatus::AwaitingDecision
+            ) && task.depends_on.iter().all(|dependency| {
+                task_by_id(tasks, dependency)
+                    .is_some_and(|dependency| dependency.status == TaskStatus::Completed)
+            }) && transitive_dependencies_completed(task, tasks)) =>
         {
             return Err(KvistError::TaskNotReady {
                 task_id: task.id.clone(),
-                reason: "it must be pending or blocked with all dependency-chain tasks completed — see `kvist help task-states`"
+                reason: "it must be pending, blocked or awaiting-decision with all dependency-chain tasks completed — see `kvist help task-states`"
                     .to_owned(),
             });
         }
@@ -336,7 +359,7 @@ fn validate_transition(
             return Err(transition_error(
                 task,
                 target,
-                "`--reason` is permitted only when status is blocked",
+                "`--reason` is permitted only when status is blocked or awaiting-decision",
             ));
         }
         _ => {}
@@ -991,7 +1014,9 @@ impl<'a> AttemptRecord<'a> {
             from_status: status_name(from),
             to_status: status_name(to),
             timestamp,
-            reason: (to == TaskStatus::Blocked).then_some(reason).flatten(),
+            reason: matches!(to, TaskStatus::Blocked | TaskStatus::AwaitingDecision)
+                .then_some(reason)
+                .flatten(),
         }
     }
 }
@@ -1294,6 +1319,23 @@ fn ensure_component_attempts_recovered_except(
             return Err(unresolved_attempt_error(&attempt_path));
         }
         ensure_task_attempt_recovered(component_dir, &task.id, task.status, permitted_attempt)?;
+    }
+    Ok(())
+}
+
+fn ensure_other_task_attempts_recovered(
+    component_dir: &Path,
+    queue: &TaskQueue,
+    task_id: &str,
+) -> Result<()> {
+    for other in queue.tasks.iter().filter(|task| task.id != task_id) {
+        if other.recovery_state.is_some() {
+            return Err(unresolved_attempt_error(&existing_attempt_path(
+                component_dir,
+                &other.id,
+            )));
+        }
+        ensure_task_attempt_recovered(component_dir, &other.id, other.status, None)?;
     }
     Ok(())
 }
@@ -1803,10 +1845,25 @@ pub fn accept(
             &serialized,
         )?;
 
+        let blocked = queue
+            .tasks
+            .iter()
+            .find(|task| task.status == TaskStatus::Blocked);
+        let next = match blocked {
+            Some(task) => format!(
+                "the component remains blocked by task `{}`; after resolving its reason, run `kvist task transition {} {} pending`",
+                task.id,
+                context.component_path.display(),
+                task.id,
+            ),
+            None => format!(
+                "the component is now current; next: kvist task next {}",
+                context.component_path.display()
+            ),
+        };
         let message_text = format!(
-            "accepted component document changes for {} (the component is now current); next: kvist task next {}",
+            "accepted component document changes for {} ({next})",
             context.component_path.display(),
-            context.component_path.display()
         );
 
         if commit {
@@ -2061,7 +2118,7 @@ fn read_validated_document(kind: DocumentKind, path: &Path) -> Result<String> {
 
 /// Unlocks a locked component directory, optionally asking for confirmation.
 pub fn unlock(project_dir: &Path, component_path: &Path, force: bool) -> Result<String> {
-    let context = validate_context(project_dir, component_path)?;
+    let context = validate_inspection_context(project_dir, component_path)?;
     let lock_path = TaskLock::task_lock_path(&context)?;
 
     match fs::symlink_metadata(&lock_path) {
@@ -2097,7 +2154,14 @@ pub fn unlock(project_dir: &Path, component_path: &Path, force: bool) -> Result<
             }
 
             TaskLock::remove_stale_path(&lock_path)?;
-            ensure_component_attempts_recovered(&context.component_dir)?;
+            ensure_component_attempts_recovered(&context.component_dir).map_err(|error| {
+                journal_error(
+                    &lock_path,
+                    &format!(
+                        "stale operation lock was removed, but task execution state remains unresolved; no task was accepted or replayed: {error}"
+                    ),
+                )
+            })?;
 
             Ok(format!(
                 "successfully unlocked component {}",
@@ -2144,7 +2208,7 @@ pub fn recover(
         });
     }
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-    let context = validate_context_with_blocked(project_dir, component_path, true)?;
+    let context = validate_inspection_context(project_dir, component_path)?;
     ensure_task_attempt_is_recovery_candidate(&context, task_id, attempt_id)?;
     preflight_recovery_evidence(
         &existing_attempt_path(&context.component_dir, task_id),
@@ -2354,7 +2418,8 @@ fn validate_prepared_attempt(prepared: &PreparedAttempt, path: &Path) -> Result<
     if prepared.phase != "prepared"
         || !valid_attempt_id(&prepared.attempt_id)
         || prepared.task_id.trim().is_empty()
-        || !valid_recovery_status(&prepared.pre_status)
+        || !(valid_recovery_status(&prepared.pre_status)
+            || prepared.pre_status == "awaiting-decision")
         || !valid_digest(&prepared.pre_queue_digest)
         || !valid_digest(&prepared.intended_post_queue_digest)
         || !valid_digest(&prepared.policy_identity)
@@ -2510,7 +2575,7 @@ fn recovery_inputs(
     attempt_id: &str,
 ) -> Result<RecoveryInputs> {
     let revalidated_context =
-        validate_context_with_blocked(&context.project_dir, &context.component_path, true)?;
+        validate_inspection_context(&context.project_dir, &context.component_path)?;
     if revalidated_context.project_dir != context.project_dir
         || revalidated_context.component_dir != context.component_dir
     {
@@ -2806,7 +2871,18 @@ pub fn finalize(
     reason: Option<&str>,
     is_json: bool,
 ) -> Result<String> {
-    let context = validate_context(project_dir, component_dir)?;
+    let blocking = matches!(disposition, crate::cli::FinalizeDispositionArgument::Block);
+    if blocking && commit {
+        return Err(journal_error(
+            component_dir,
+            "`--commit` is allowed only with an accept disposition; blocking never accepts or commits changes",
+        ));
+    }
+    let context = if blocking {
+        validate_inspection_context(project_dir, component_dir)?
+    } else {
+        validate_context(project_dir, component_dir)?
+    };
     if commit {
         validate_commit_preconditions(&context.project_dir, None)?;
     }
@@ -2815,16 +2891,69 @@ pub fn finalize(
     let lock = TaskLock::for_context(&context, "finalize", &started_at)?;
 
     let result = (|| -> Result<String> {
+        if blocking {
+            return block_attempt_locked(
+                &context,
+                &lock,
+                task_id,
+                attempt_id,
+                reason,
+                &started_at,
+                is_json,
+            );
+        }
         let journal_path = existing_attempt_path(&context.component_dir, task_id);
         let journal = read_attempt_journal(&journal_path)?;
+        validate_finalization_identity(&journal_path, &journal, task_id, attempt_id)?;
+        let (mut queue, queue_digest) = read_queue_snapshot(&context.component_dir)?;
+        let task_index = queue
+            .tasks
+            .iter()
+            .position(|task| task.id == task_id)
+            .ok_or_else(|| KvistError::TaskNotFound {
+                component: context.component_path.clone(),
+                task_id: task_id.to_owned(),
+            })?;
+        let task = &queue.tasks[task_index];
+        if task.recovery_state.is_some() {
+            return Err(journal_error(
+                &journal_path,
+                "an explicit recovery fence cannot be cleared by acceptance; inspect its reason and authenticated recovery evidence",
+            ));
+        }
+        ensure_other_task_attempts_recovered(&context.component_dir, &queue, task_id)?;
+        let already_accepted = task.status == TaskStatus::Completed
+            && task.disposition == Some(crate::task_queue::FinalizeDispositionArgument::Accept)
+            && task.acceptance_id.as_deref() == Some(attempt_id);
+        if !already_accepted {
+            validate_transition(task, &queue.tasks, TaskStatus::Completed, None)?;
+        } else if commit {
+            return Err(journal_error(
+                &journal_path,
+                "this task attempt is already accepted; finish missing final evidence without --commit, or retry a reported pending commit with `kvist component commit <ACCEPTANCE_ID>`",
+            ));
+        }
 
         let mut write_scopes = Vec::new();
         let mut attempt_changes = Vec::new();
-        let mut found_attempt = false;
+        let mut finalized = false;
 
         for event in &journal.events {
             if event.get("attempt_id").and_then(Value::as_str) == Some(attempt_id) {
-                found_attempt = true;
+                match event.get("phase").and_then(Value::as_str) {
+                    Some("human-finalized")
+                        if event.get("disposition").and_then(Value::as_str) == Some("accepted") =>
+                    {
+                        finalized = true;
+                    }
+                    Some("human-finalized" | "recovery-prepared" | "recovered") => {
+                        return Err(journal_error(
+                            &journal_path,
+                            "attempt already has a different disposition or authenticated recovery in progress",
+                        ));
+                    }
+                    _ => {}
+                }
                 if let Some(scope_val) = event.get("approved_write_scope").and_then(Value::as_array)
                 {
                     for s in scope_val {
@@ -2862,13 +2991,6 @@ pub fn finalize(
                     }
                 }
             }
-        }
-
-        if !found_attempt {
-            return Err(journal_error(
-                &journal_path,
-                &format!("attempt `{attempt_id}` not found in journal"),
-            ));
         }
 
         // Verify write scope boundaries and post-digests
@@ -2960,9 +3082,21 @@ pub fn finalize(
             }
         }
 
+        let queue_path = context
+            .component_dir
+            .join(ComponentArtifact::TaskQueue.filename());
+        lock.revalidate()?;
+        if read_queue_snapshot(&context.component_dir)?.1 != queue_digest
+            || read_attempt_journal(&journal_path)?.digest != journal.digest
+        {
+            return Err(journal_error(
+                &journal_path,
+                "queue or attempt evidence changed while preparing human acceptance",
+            ));
+        }
         if tampered {
-            let mut queue = read_queue(&context.component_dir)?;
-            if let Some(t) = queue.tasks.iter_mut().find(|t| t.id == task_id) {
+            if !already_accepted {
+                let t = &mut queue.tasks[task_index];
                 t.recovery_state = Some(RecoveryState {
                     state: RecoveryStateKind::Fenced,
                     attempt_id: attempt_id.to_string(),
@@ -2970,12 +3104,7 @@ pub fn finalize(
                 });
                 let serialized =
                     serialize(&queue).map_err(|e| journal_error(&journal_path, &e.to_string()))?;
-                replace_file_atomically(
-                    &context
-                        .component_dir
-                        .join(ComponentArtifact::TaskQueue.filename()),
-                    &serialized,
-                )?;
+                replace_file_atomically(&queue_path, &serialized)?;
             }
             return Err(journal_error(
                 &journal_path,
@@ -2983,240 +3112,178 @@ pub fn finalize(
             ));
         }
 
-        let queue = read_queue(&context.component_dir)?;
-        let task_index = queue
-            .tasks
-            .iter()
-            .position(|task| task.id == task_id)
-            .ok_or_else(|| KvistError::TaskQueueUnavailable {
-                path: context
-                    .component_dir
-                    .join(ComponentArtifact::TaskQueue.filename()),
-                reason: format!("task `{task_id}` not found in the queue"),
-            })?;
-        let task = &queue.tasks[task_index];
-
-        match disposition {
-            crate::cli::FinalizeDispositionArgument::Block => {
-                let reason_str = reason.filter(|r| !r.trim().is_empty()).ok_or_else(|| {
-                    journal_error(
+        let expected_queue_digest = if !already_accepted {
+            let completed_task = &mut queue.tasks[task_index];
+            completed_task.status = TaskStatus::Completed;
+            completed_task.acceptance_id = Some(attempt_id.to_string());
+            completed_task.disposition =
+                Some(crate::task_queue::FinalizeDispositionArgument::Accept);
+            completed_task.timestamps.updated_at = started_at.clone();
+            completed_task.timestamps.completed_at = Some(started_at.clone());
+            let serialized =
+                serialize(&queue).map_err(|e| journal_error(&journal_path, &e.to_string()))?;
+            replace_file_atomically(&queue_path, &serialized)?;
+            digest(serialized.as_bytes())
+        } else {
+            queue_digest
+        };
+        if !finalized {
+            let recorded = (|| {
+                lock.revalidate()?;
+                if read_queue_snapshot(&context.component_dir)?.1 != expected_queue_digest
+                    || read_attempt_journal(&journal_path)?.digest != journal.digest
+                {
+                    return Err(journal_error(
                         &journal_path,
-                        "block disposition requires a non-blank reason",
-                    )
-                })?;
-                validate_transition(task, &queue.tasks, TaskStatus::Blocked, Some(reason_str))?;
-
-                // Append human-finalized event
-                let final_event = serde_json::json!({
-                    "schema_version": 1,
-                    "attempt_id": attempt_id,
-                    "task_id": task_id,
-                    "phase": "human-finalized",
-                    "disposition": "blocked",
-                    "reason": reason_str
-                });
-                let mut journal_content = fs::read_to_string(&journal_path).unwrap_or_default();
-                journal_content.push_str(&format!("{final_event}\n"));
-                replace_file_atomically(&journal_path, &journal_content)?;
-
-                // Update queue
-                let mut queue = read_queue(&context.component_dir)?;
-                let blocked_task = &mut queue.tasks[task_index];
-                blocked_task.status = TaskStatus::Blocked;
-                blocked_task.blocked_reason = Some(reason_str.to_string());
-                blocked_task.disposition =
-                    Some(crate::task_queue::FinalizeDispositionArgument::Block);
-                blocked_task.timestamps.updated_at = started_at.clone();
-                let serialized =
-                    serialize(&queue).map_err(|e| journal_error(&journal_path, &e.to_string()))?;
-                replace_file_atomically(
-                    &context
-                        .component_dir
-                        .join(ComponentArtifact::TaskQueue.filename()),
-                    &serialized,
-                )?;
-
-                let message = format!(
-                    "finalized task `{task_id}` (attempt `{attempt_id}`) with disposition: block"
-                );
-                if is_json {
-                    Ok(serde_json::json!({
-                        "status": "success",
-                        "command": "task-finalize",
-                        "component_dir": context.component_dir.to_string_lossy(),
-                        "task_id": task_id,
-                        "attempt_id": attempt_id,
-                        "disposition": "block",
-                        "message": message
-                    })
-                    .to_string())
-                } else {
-                    Ok(message)
+                        "queue or evidence changed before recording human acceptance",
+                    ));
                 }
-            }
-            crate::cli::FinalizeDispositionArgument::Accept => {
-                validate_transition(task, &queue.tasks, TaskStatus::Completed, None)?;
+                append_json_attempt(
+                    &journal_path,
+                    &serde_json::json!({
+                        "schema_version": ATTEMPT_SCHEMA_VERSION,
+                        "attempt_id": attempt_id, "task_id": task_id,
+                        "phase": "human-finalized", "disposition": "accepted"
+                    }),
+                    "append human acceptance disposition",
+                )
+            })();
+            recorded.map_err(|error| {
+                journal_error(
+                    &journal_path,
+                    &format!(
+                        "the completed queue decision was saved but acceptance recording failed; inspect retained evidence and repeat this exact `task finalize ... accept` without --commit to finish recording, not task execution: {error}"
+                    ),
+                )
+            })?;
+        }
 
-                // Append human-finalized event
-                let final_event = serde_json::json!({
-                    "schema_version": 1,
-                    "attempt_id": attempt_id,
-                    "task_id": task_id,
-                    "phase": "human-finalized",
-                    "disposition": "accepted"
-                });
-                let mut journal_content = fs::read_to_string(&journal_path).unwrap_or_default();
-                journal_content.push_str(&format!("{final_event}\n"));
-                replace_file_atomically(&journal_path, &journal_content)?;
+        if commit {
+            let expected_head = match std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&context.project_dir)
+                .output()
+            {
+                Ok(out) if out.status.success() => {
+                    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+                }
+                _ => "".to_owned(),
+            };
 
-                // Update queue
-                let mut queue = read_queue(&context.component_dir)?;
-                let completed_task = &mut queue.tasks[task_index];
-                completed_task.status = TaskStatus::Completed;
-                completed_task.acceptance_id = Some(attempt_id.to_string());
-                completed_task.disposition =
-                    Some(crate::task_queue::FinalizeDispositionArgument::Accept);
-                completed_task.timestamps.updated_at = started_at.clone();
-                completed_task.timestamps.completed_at = Some(started_at.clone());
-                let serialized =
-                    serialize(&queue).map_err(|e| journal_error(&journal_path, &e.to_string()))?;
-                replace_file_atomically(
-                    &context
-                        .component_dir
-                        .join(ComponentArtifact::TaskQueue.filename()),
-                    &serialized,
-                )?;
+            let mut all_accepted_changes = attempt_changes.clone();
+            let queue_path_rel = if context.component_path == Path::new(".") {
+                PathBuf::from("maerg/TODOS.yaml")
+            } else {
+                context.component_path.join("TODOS.yaml")
+            };
+            let journal_path_rel = if context.component_path == Path::new(".") {
+                PathBuf::from(format!("maerg/.kvist-attempts/{task_id}.jsonl"))
+            } else {
+                context
+                    .component_path
+                    .join(".kvist-attempts")
+                    .join(format!("{task_id}.jsonl"))
+            };
 
-                if commit {
-                    let expected_head = match std::process::Command::new("git")
-                        .args(["rev-parse", "HEAD"])
-                        .current_dir(&context.project_dir)
-                        .output()
-                    {
-                        Ok(out) if out.status.success() => {
-                            String::from_utf8_lossy(&out.stdout).trim().to_owned()
-                        }
-                        _ => "".to_owned(),
-                    };
+            all_accepted_changes.push(crate::vcs_commit::AcceptedChange {
+                path: queue_path_rel,
+                operation: "modify".to_owned(),
+                pre_digest: None,
+                post_digest: None,
+            });
+            all_accepted_changes.push(crate::vcs_commit::AcceptedChange {
+                path: journal_path_rel,
+                operation: "create".to_owned(),
+                pre_digest: None,
+                post_digest: None,
+            });
+            all_accepted_changes.sort_by(|a, b| a.path.cmp(&b.path));
 
-                    let mut all_accepted_changes = attempt_changes.clone();
-                    let queue_path_rel = if context.component_path == Path::new(".") {
-                        PathBuf::from("maerg/TODOS.yaml")
-                    } else {
-                        context.component_path.join("TODOS.yaml")
-                    };
-                    let journal_path_rel = if context.component_path == Path::new(".") {
-                        PathBuf::from(format!("maerg/.kvist-attempts/{task_id}.jsonl"))
-                    } else {
-                        context
-                            .component_path
-                            .join(".kvist-attempts")
-                            .join(format!("{task_id}.jsonl"))
-                    };
+            let record = crate::vcs_commit::AcceptanceRecord {
+                acceptance_id: attempt_id.to_owned(),
+                expected_head,
+                component_path: context.component_path.clone(),
+                accepted_changes: all_accepted_changes.clone(),
+                commit_message: format!("complete task {task_id}"),
+            };
 
-                    all_accepted_changes.push(crate::vcs_commit::AcceptedChange {
-                        path: queue_path_rel,
-                        operation: "modify".to_owned(),
-                        pre_digest: None,
-                        post_digest: None,
-                    });
-                    all_accepted_changes.push(crate::vcs_commit::AcceptedChange {
-                        path: journal_path_rel,
-                        operation: "create".to_owned(),
-                        pre_digest: None,
-                        post_digest: None,
-                    });
-                    all_accepted_changes.sort_by(|a, b| a.path.cmp(&b.path));
-
-                    let record = crate::vcs_commit::AcceptanceRecord {
-                        acceptance_id: attempt_id.to_owned(),
-                        expected_head,
-                        component_path: context.component_path.clone(),
-                        accepted_changes: all_accepted_changes.clone(),
-                        commit_message: format!("complete task {task_id}"),
-                    };
-
-                    match crate::vcs_commit::commit_acceptance_record(&context.project_dir, &record)
-                    {
-                        Ok(commit_oid) => {
-                            let accepted_paths: Vec<String> = all_accepted_changes
-                                .iter()
-                                .map(|c| c.path.to_string_lossy().into_owned())
-                                .collect();
-                            if is_json {
-                                Ok(serde_json::json!({
+            match crate::vcs_commit::commit_acceptance_record(&context.project_dir, &record) {
+                Ok(commit_oid) => {
+                    let accepted_paths: Vec<String> = all_accepted_changes
+                        .iter()
+                        .map(|c| c.path.to_string_lossy().into_owned())
+                        .collect();
+                    if is_json {
+                        Ok(serde_json::json!({
                                     "status": "success",
                                     "command": "task-finalize",
                                     "commit_oid": commit_oid,
                                     "accepted_paths": accepted_paths,
                                     "message": format!("finalized and committed task `{task_id}` as {commit_oid}")
                                 }).to_string())
-                            } else {
-                                Ok(format!(
-                                    "finalized and committed task `{task_id}` (attempt `{attempt_id}`) as {commit_oid}"
-                                ))
-                            }
-                        }
-                        Err(error) => {
-                            let attempts_dir = context.component_dir.join(".kvist-attempts");
-                            let _ = fs::create_dir_all(&attempts_dir);
-                            let pending_path =
-                                attempts_dir.join(format!("acceptance-{}.json", attempt_id));
-                            let pending_json = serde_json::json!({
-                                "acceptance_id": attempt_id,
-                                "status": "commit-pending",
-                                "signing": "required",
-                                "expected_head": record.expected_head,
-                                "component_path": record.component_path.to_string_lossy(),
-                                "accepted_changes": record.accepted_changes.iter().map(|c| serde_json::json!({
-                                    "path": c.path.to_string_lossy(),
-                                    "operation": c.operation,
-                                    "pre_digest": c.pre_digest,
-                                    "post_digest": c.post_digest
-                                })).collect::<Vec<_>>(),
-                                "commit_message": record.commit_message
-                            });
-                            let _ = fs::write(&pending_path, pending_json.to_string());
-                            if is_json {
-                                let failure_output = serde_json::json!({
-                                    "status": "error",
-                                    "command": "task-finalize",
-                                    "acceptance_id": attempt_id,
-                                    "state": "commit-pending",
-                                    "message": format!("commit failed: {error}")
-                                })
-                                .to_string();
-                                Err(KvistError::JsonCommandFailure {
-                                    output: failure_output,
-                                })
-                            } else {
-                                Err(KvistError::VcsCommitFailed {
-                                    reason: format!(
-                                        "commit signing failed; acceptance {attempt_id} remains pending: {error}"
-                                    ),
-                                })
-                            }
-                        }
-                    }
-                } else {
-                    let message = format!(
-                        "finalized task `{task_id}` (attempt `{attempt_id}`) with disposition: accept"
-                    );
-                    if is_json {
-                        Ok(serde_json::json!({
-                            "status": "success",
-                            "command": "task-finalize",
-                            "component_dir": context.component_dir.to_string_lossy(),
-                            "task_id": task_id,
-                            "attempt_id": attempt_id,
-                            "disposition": "accept",
-                            "message": message
-                        })
-                        .to_string())
                     } else {
-                        Ok(message)
+                        Ok(format!(
+                            "finalized and committed task `{task_id}` (attempt `{attempt_id}`) as {commit_oid}"
+                        ))
                     }
                 }
+                Err(error) => {
+                    let attempts_dir = context.component_dir.join(".kvist-attempts");
+                    let _ = fs::create_dir_all(&attempts_dir);
+                    let pending_path = attempts_dir.join(format!("acceptance-{}.json", attempt_id));
+                    let pending_json = serde_json::json!({
+                        "acceptance_id": attempt_id,
+                        "status": "commit-pending",
+                        "signing": "required",
+                        "expected_head": record.expected_head,
+                        "component_path": record.component_path.to_string_lossy(),
+                        "accepted_changes": record.accepted_changes.iter().map(|c| serde_json::json!({
+                            "path": c.path.to_string_lossy(),
+                            "operation": c.operation,
+                            "pre_digest": c.pre_digest,
+                            "post_digest": c.post_digest
+                        })).collect::<Vec<_>>(),
+                        "commit_message": record.commit_message
+                    });
+                    let _ = fs::write(&pending_path, pending_json.to_string());
+                    if is_json {
+                        let failure_output = serde_json::json!({
+                            "status": "error",
+                            "command": "task-finalize",
+                            "acceptance_id": attempt_id,
+                            "state": "commit-pending",
+                            "message": format!("commit failed: {error}")
+                        })
+                        .to_string();
+                        Err(KvistError::JsonCommandFailure {
+                            output: failure_output,
+                        })
+                    } else {
+                        Err(KvistError::VcsCommitFailed {
+                            reason: format!(
+                                "commit signing failed; acceptance {attempt_id} remains pending: {error}"
+                            ),
+                        })
+                    }
+                }
+            }
+        } else {
+            let message = format!(
+                "finalized task `{task_id}` (attempt `{attempt_id}`) with disposition: accept"
+            );
+            if is_json {
+                Ok(serde_json::json!({
+                    "status": "success",
+                    "command": "task-finalize",
+                    "component_dir": context.component_dir.to_string_lossy(),
+                    "task_id": task_id,
+                    "attempt_id": attempt_id,
+                    "disposition": "accept",
+                    "message": message
+                })
+                .to_string())
+            } else {
+                Ok(message)
             }
         }
     })();
@@ -3226,6 +3293,199 @@ pub fn finalize(
         (Ok(msg), Ok(())) => Ok(msg),
         (Ok(_), Err(error)) => Err(error),
         (Err(error), _) => Err(error),
+    }
+}
+
+fn validate_finalization_identity(
+    path: &Path,
+    journal: &AttemptJournal,
+    task_id: &str,
+    attempt_id: &str,
+) -> Result<()> {
+    if !valid_attempt_id(attempt_id) {
+        return Err(journal_error(
+            path,
+            "attempt ID must be a bounded `attempt-` identity",
+        ));
+    }
+    let latest = journal
+        .events
+        .iter()
+        .rev()
+        .find_map(|event| event.get("attempt_id").and_then(Value::as_str));
+    if latest != Some(attempt_id) {
+        return Err(journal_error(
+            path,
+            "finalization must name the latest exact task attempt; it cannot dispose an older or unknown attempt",
+        ));
+    }
+    let mut prepared = false;
+    for event in journal
+        .events
+        .iter()
+        .filter(|event| event.get("attempt_id").and_then(Value::as_str) == Some(attempt_id))
+    {
+        if event.get("schema_version") != Some(&Value::from(ATTEMPT_SCHEMA_VERSION))
+            || event.get("task_id").and_then(Value::as_str) != Some(task_id)
+        {
+            return Err(journal_error(
+                path,
+                "attempt evidence does not match the exact task and supported schema",
+            ));
+        }
+        prepared |= event.get("phase").and_then(Value::as_str) == Some("prepared");
+    }
+    if !prepared {
+        return Err(journal_error(
+            path,
+            "finalization requires an existing prepared task attempt",
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn block_attempt_locked(
+    context: &TaskContext,
+    lock: &TaskLock,
+    task_id: &str,
+    attempt_id: &str,
+    reason: Option<&str>,
+    timestamp: &Timestamp,
+    is_json: bool,
+) -> Result<String> {
+    let reason = reason
+        .filter(|reason| !reason.trim().is_empty())
+        .ok_or_else(|| {
+            journal_error(
+                &context.component_dir,
+                "block disposition requires a non-blank reason",
+            )
+        })?;
+    if !valid_attempt_id(attempt_id) {
+        return Err(journal_error(
+            &context.component_dir,
+            "attempt ID must be a bounded `attempt-` identity",
+        ));
+    }
+    let (mut queue, queue_digest) = read_queue_snapshot(&context.component_dir)?;
+    let task_index = queue
+        .tasks
+        .iter()
+        .position(|task| task.id == task_id)
+        .ok_or_else(|| KvistError::TaskNotFound {
+            component: context.component_path.clone(),
+            task_id: task_id.to_owned(),
+        })?;
+    let task = &queue.tasks[task_index];
+    if task.recovery_state.is_some() {
+        return Err(journal_error(
+            &context.component_dir,
+            "an explicit recovery fence cannot be cleared by a block disposition; inspect its reason and authenticated recovery evidence",
+        ));
+    }
+    ensure_other_task_attempts_recovered(&context.component_dir, &queue, task_id)?;
+    let path = existing_attempt_path(&context.component_dir, task_id);
+    let journal = read_attempt_journal(&path)?;
+    validate_finalization_identity(&path, &journal, task_id, attempt_id)?;
+    let mut prepared = false;
+    let mut finalized = false;
+    for event in journal
+        .events
+        .iter()
+        .filter(|event| event.get("attempt_id").and_then(Value::as_str) == Some(attempt_id))
+    {
+        match event.get("phase").and_then(Value::as_str) {
+            Some("prepared") => prepared = true,
+            Some("human-finalized")
+                if event.get("disposition").and_then(Value::as_str) == Some("blocked")
+                    && event.get("reason").and_then(Value::as_str) == Some(reason) =>
+            {
+                finalized = true
+            }
+            Some("human-finalized" | "recovery-prepared" | "recovered") => {
+                return Err(journal_error(
+                    &path,
+                    "attempt already has a different disposition or authenticated recovery in progress",
+                ));
+            }
+            _ => {}
+        }
+    }
+    if !prepared {
+        return Err(journal_error(
+            &path,
+            "block disposition requires an existing prepared task attempt",
+        ));
+    }
+    let already_blocked = task.status == TaskStatus::Blocked
+        && task.disposition == Some(crate::task_queue::FinalizeDispositionArgument::Block)
+        && task.blocked_reason.as_deref() == Some(reason);
+    if !already_blocked {
+        validate_transition(task, &queue.tasks, TaskStatus::Blocked, Some(reason))?;
+    }
+    let queue_path = context
+        .component_dir
+        .join(ComponentArtifact::TaskQueue.filename());
+    lock.revalidate()?;
+    if read_queue_snapshot(&context.component_dir)?.1 != queue_digest
+        || read_attempt_journal(&path)?.digest != journal.digest
+    {
+        return Err(journal_error(
+            &path,
+            "queue or attempt evidence changed while preparing human block disposition",
+        ));
+    }
+    let expected_queue_digest = if !already_blocked {
+        let task = &mut queue.tasks[task_index];
+        task.status = TaskStatus::Blocked;
+        task.blocked_reason = Some(reason.to_owned());
+        task.disposition = Some(crate::task_queue::FinalizeDispositionArgument::Block);
+        task.timestamps.updated_at = timestamp.clone();
+        task.timestamps.completed_at = None;
+        let serialized =
+            serialize(&queue).map_err(|error| journal_error(&queue_path, &error.to_string()))?;
+        replace_file_atomically(&queue_path, &serialized)?;
+        digest(serialized.as_bytes())
+    } else {
+        queue_digest
+    };
+    if !finalized {
+        let recorded = (|| {
+            lock.revalidate()?;
+            if read_queue_snapshot(&context.component_dir)?.1 != expected_queue_digest
+                || read_attempt_journal(&path)?.digest != journal.digest
+            {
+                return Err(journal_error(
+                    &path,
+                    "queue or evidence changed before recording human block disposition",
+                ));
+            }
+            append_json_attempt(
+                &path,
+                &serde_json::json!({
+                "schema_version": ATTEMPT_SCHEMA_VERSION, "task_id": task_id, "attempt_id": attempt_id,
+                "phase": "human-finalized", "disposition": "blocked", "reason": reason,
+                }),
+                "append human block disposition",
+            )
+        })();
+        recorded.map_err(|error| journal_error(&path, &format!(
+            "task `{task_id}` had its block decision stored, but disposition evidence could not be completed: {error}. Completion is not certified. Inspect retained state and repeat `kvist task finalize {} {task_id} {attempt_id} block --reason ...` with the identical reason; do not delete retained evidence",
+            context.component_path.display()
+        )))?;
+    }
+    let message = format!(
+        "finalized task `{task_id}` (attempt `{attempt_id}`) with disposition: block; completion is not certified and retained effects were not rolled back.\nNext: review changed intent and run `kvist component accept {component}` if stale; after resolving the blocked reason, run `kvist task transition {component} {task_id} pending`.",
+        component = context.component_path.display(),
+    );
+    if is_json {
+        Ok(serde_json::json!({
+            "status": "success", "command": "task-finalize", "component_dir": context.component_dir,
+            "task_id": task_id, "attempt_id": attempt_id, "disposition": "block", "message": message,
+        }).to_string())
+    } else {
+        Ok(message)
     }
 }
 
@@ -4920,7 +5180,7 @@ fn is_runnable_task(task: &Task, tasks: &[Task]) -> bool {
 
 /// Reads and returns the most recent execution log file for a specific task.
 pub fn task_log(project_dir: &Path, component_path: &Path, task_id: &str) -> Result<String> {
-    let context = validate_transition_context(project_dir, component_path)?;
+    let context = validate_inspection_context(project_dir, component_path)?;
     let logs_dir = context.component_dir.join(".kvist").join("logs");
 
     let logs_metadata = fs::symlink_metadata(&logs_dir).ok();

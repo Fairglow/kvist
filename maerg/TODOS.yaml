@@ -1,15 +1,153 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:281212e4191c502db6f398383ec57eeaed84e4b72cfe7eb1d1e4a12b65c3805e"
-  contract_revision: "sha256:3d77971a11f1f6df310d38e7edf4a21322aa0e4d1b08c1b30794eb6a9c2a9577"
-  design_revision: "sha256:d429f0a617503b13ec764f430cf6e86464d69a26973371e39d2ba405e02c8ac9"
+  requirements_revision: "sha256:43bf8c7c4e280f0df2cb66c33e74f1036df70932fcbb25fb22fc34b3f35c74de"
+  contract_revision: "sha256:57efa50c20364c8d608672f8480efe58fbf641c1c712de2b4c133b5470d952e8"
+  design_revision: "sha256:fffde31a018b009ab2d4f0fd87151c16542488d47e16625bdc679a63c325b3dc"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-28T08:23:13Z"
+    checked_at: "2026-10-29T09:50:30Z"
     stale_since: null
     causes: []
 tasks:
+  - id: "transition-matrix-write-tests"
+    title: "write_tests: verify command-level transitions and recovery gates"
+    description: "Exercise every state pair, reason, dependency and stale gate; reproduce paused-state and stale recovery defects."
+    context: "Command-level coverage executes 200 state/reason/dependency combinations, all 25 stale-intent pairs, structural/VCS gates, live/dead/malformed locks, stale authenticated recovery, decision resumption, finalization identity and partial recording, sibling recovery preservation and indirect dependencies. Regressions reproduced each repaired defect before its production fix. Advisory exception is recorded in intent."
+    purpose: "Find circular gates and misleading recovery instructions before changing production behavior."
+    expected_outcome: "Matrix and recovery-path regressions demonstrate the actual command boundary."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-TRANSITION-RECOVERY"
+    timestamps:
+      created_at: "2026-10-29T10:00:00Z"
+      updated_at: "2026-10-29T10:11:58Z"
+      completed_at: "2026-10-29T10:11:58Z"
+    blocked_reason: null
+  - id: "transition-matrix-implement-code"
+    title: "implement_code: repair demonstrated lifecycle gate defects"
+    description: "Repair pause transitions and stale non-accepting recovery gates while preserving execution and evidence authority."
+    context: "Repaired pause entry/resumption and audit reasons, stale unlock/no-launch gates, blocked guidance, exact finalization identity, queue-first append-only repeatable acceptance and sibling recovery fencing. Final Maerg suite passes 772 tests with seven existing ignores; strict all-target Clippy, formatting, whitespace and structural validation pass. No automatic intent acceptance, task replay, installed-binary replacement or operational task mutation."
+    purpose: "Keep supported recovery paths open without broadening task authority."
+    expected_outcome: "Documented transitions work and stale recovery does not create an acceptance cycle."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "transition-matrix-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TRANSITION-RECOVERY"
+    timestamps:
+      created_at: "2026-10-29T10:00:00Z"
+      updated_at: "2026-10-29T10:11:58Z"
+      completed_at: "2026-10-29T10:11:58Z"
+    blocked_reason: null
+  - id: "transition-matrix-security-audit"
+    title: "security_audit: independently observe lifecycle guard behavior"
+    description: "Derive scoped implementation observations from source and tests without intent or prior records."
+    context: "Clean-slate transition-observer and a narrower transition-fence-observer independently derived the persisted IMPL supplement from permitted source/tests only. The first exposed the missing acceptance sibling scan; the second observed its final shared guard and two regression sequences. Neither read intent, queues, prior records/history, execution logs or peer implementations, edited or ran checks. Retained broader acceptance and fault/race limitations are not certified."
+    purpose: "Expose unintended recovery authority changes."
+    expected_outcome: "Persist scoped independent observations and limitations."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "transition-matrix-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TRANSITION-RECOVERY"
+    timestamps:
+      created_at: "2026-10-29T10:00:00Z"
+      updated_at: "2026-10-29T10:14:57Z"
+      completed_at: "2026-10-29T10:14:57Z"
+    blocked_reason: null
+  - id: "transition-matrix-compliance-review"
+    title: "compliance_review: compare transition intent and independent evidence"
+    description: "Compare scoped intent with independent observations and attributed execution without implementation access."
+    context: "Independent source-blind transition-comparator used only scoped intent/task definitions, independent observations and attributed execution, with no tools or source. It found no demonstrated core transition/recovery contradiction; IMPL retains acceptance read-failure/digest ambiguity, pending-commit durability and unsupported interrupted-transition tails for human arbitration. No universal deadlock-freedom, formal compliance, receipt or intent acceptance is claimed."
+    purpose: "Retain discrepancies and unverified cases for explicit arbitration."
+    expected_outcome: "Persist a separate source-blind comparison."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "transition-matrix-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TRANSITION-RECOVERY"
+    timestamps:
+      created_at: "2026-10-29T10:00:00Z"
+      updated_at: "2026-10-29T10:17:51Z"
+      completed_at: "2026-10-29T10:17:51Z"
+    blocked_reason: null
+  - id: "stale-abandon-write-tests"
+    title: "write_tests: reproduce stale intent and unresolved attempt deadlock"
+    description: "Pin stale rejection, acceptance ordering, unchanged evidence, identity and fence guards, and interrupted block recording."
+    context: "Regressions reproduced the stale log/block gate before production changes and the dropped-disposition serialization field before its fix. Coverage includes an authentic prepared attempt, acceptance ordering, unchanged intent revisions and journal prefix, repeat/interrupted rejection, identity/artifact/fence guards and active-lock refusal. Explicit advisory exception is recorded in intent."
+    purpose: "Define a safe explicit rejection escape without allowing unreviewed execution."
+    expected_outcome: "Regressions reproduce the circular gate before production changes."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-29T07:12:10Z"
+      updated_at: "2026-10-29T07:23:01Z"
+      completed_at: "2026-10-29T07:23:01Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "stale-abandon-implement-code"
+    title: "implement_code: permit explicit stale attempt rejection"
+    description: "Separate rejection from acceptance validation; preserve locking, exact identity, fences and evidence; report recovery order truthfully."
+    context: "Implemented narrow stale block/log access, exact latest task/attempt and fence guards, queue-first append-only rejection recording, repeat completion, persistent disposition fields and truthful acceptance guidance. Maerg package suite passes 761 tests with seven existing ignores; strict all-target Clippy and formatting pass. Rebuilt CLI applied the human-requested historical block with original journal prefix and accepted revision metadata unchanged. Installed binary was not overwritten."
+    purpose: "Remove the circular recovery dependency without certifying failed work."
+    expected_outcome: "A stale prepared attempt can be blocked, then intent accepted, then deliberately returned to pending."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "stale-abandon-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-29T07:12:10Z"
+      updated_at: "2026-10-29T07:23:01Z"
+      completed_at: "2026-10-29T07:23:01Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "stale-abandon-security-audit"
+    title: "security_audit: observe rejection and recovery boundaries"
+    description: "Independently observe scoped source and tests excluding intent, queues, prior records and history."
+    context: "Independent clean-slate stale-abandon-observer inspected scoped source and test assertions, excluding all intent, queues, prior records, reviews, peers and history; no edits or execution. Dated IMPL supplement persists its observations and explicit append/sync fault-injection, torn-record and snapshot-race evidence gaps. No acceptance or no-effect certification."
+    purpose: "Expose any authority or evidence-preservation regression."
+    expected_outcome: "Persist a bounded independent IMPL supplement."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "stale-abandon-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-29T07:12:10Z"
+      updated_at: "2026-10-29T07:23:01Z"
+      completed_at: "2026-10-29T07:23:01Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "stale-abandon-compliance-review"
+    title: "compliance_review: compare stale recovery intent and evidence"
+    description: "Compare isolated scoped intent with independent observations and attributed execution evidence without source."
+    context: "Separate source-blind stale-abandon-comparator used the isolated scoped intent/task bundle, observations and attributed execution without source/tools; no concrete scoped contradiction established. IMPL retains durability/interruption evidence gaps and no broad certification. Accepted revisions remain stale; the human-requested historical abandonment is a later operational action, not intent acceptance or proof no effects occurred."
+    purpose: "Keep implementation and comparison contexts independent."
+    expected_outcome: "Persist a scoped comparison and its limits."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "stale-abandon-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-29T07:12:10Z"
+      updated_at: "2026-10-29T07:23:01Z"
+      completed_at: "2026-10-29T07:23:01Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "resilient-run-write-tests"
     title: "write_tests: reproduce hidden prompts and ambiguous failures"
     description: "Pin transient retries, jitter bounds, prompt ordering, failure exits, unresolved selection and batch stop semantics."
@@ -19,8 +157,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-28T23:40:00Z"
+      updated_at: "2026-10-28T23:53:44Z"
+      completed_at: "2026-10-28T23:53:44Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "resilient-run-implement-code"
     title: "implement_code: retain outcomes and retry transient model failures"
     description: "Repair confirmation presentation, bounded observable retries and durable failure disposition without replaying effects."
@@ -29,9 +173,16 @@ tasks:
     expected_outcome: "Retryable outages recover automatically; terminal outcomes are explicit."
     kind: implementation
     status: completed
-    depends_on: ["resilient-run-write-tests"]
-    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+    depends_on:
+      - "resilient-run-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-28T23:40:00Z"
+      updated_at: "2026-10-28T23:53:44Z"
+      completed_at: "2026-10-28T23:53:44Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "resilient-run-security-audit"
     title: "security_audit: derive independent retry boundary observations"
     description: "Observe source and tests without intent, prior records or history; inspect no-replay, cancellation and recording boundaries."
@@ -40,9 +191,16 @@ tasks:
     expected_outcome: "Persist a source-derived scoped record, not certification."
     kind: security-audit
     status: completed
-    depends_on: ["resilient-run-implement-code"]
-    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+    depends_on:
+      - "resilient-run-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-28T23:40:00Z"
+      updated_at: "2026-10-28T23:53:44Z"
+      completed_at: "2026-10-28T23:53:44Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "resilient-run-compliance-review"
     title: "compliance_review: compare resilient-run evidence"
     description: "Compare local intent with independently derived observations and test evidence without reading source."
@@ -51,53 +209,87 @@ tasks:
     expected_outcome: "Persist scoped comparison without accepting intent or historical attempts."
     kind: compliance-review
     status: completed
-    depends_on: ["resilient-run-security-audit"]
-    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:57:08Z", completed_at: "2026-10-28T23:57:08Z"}
+    depends_on:
+      - "resilient-run-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-28T23:40:00Z"
+      updated_at: "2026-10-28T23:57:08Z"
+      completed_at: "2026-10-28T23:57:08Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-write-tests"
     title: "write_tests: cross protected generation ceiling"
     description: "Test more than 64 generations and positive multi-day role timeouts with invalid-bound rejection."
     context: "Regressions reproduced the 64-generation cutoff, one-hour configuration maximum, multi-day explicit-endpoint construction rejection and three-interruption attempt exhaustion before repair. Both shared-native and explicit profiles are covered. Advisory exception is recorded in intent."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:07:55Z", completed_at: "2026-10-28T19:07:55Z"}
     purpose: "Pin explicit rather than hidden task budgets."
     expected_outcome: "Regressions fail before implementation."
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:07:55Z"
+      completed_at: "2026-10-28T19:07:55Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-implement-code"
     title: "implement_code: support approved long protected runs"
     description: "Remove generation cutoff, extend allowed role timeouts and clip individual effects to runner limits."
     context: "Generation ceiling removed; approved role timeouts extend to 30 days; individual requests/effects retain independent ceilings and actual guidance renews attempts. Existing defaults and approvals remain unchanged. Orchestrator execution: nextest 71505598-2bf0-47b7-aacf-37cdfe23f4c8 passed 1466 affected-package tests with 10 existing skips; strict all-target Clippy and formatting passed. No endurance or acceptance claim."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:07:55Z", completed_at: "2026-10-28T19:07:55Z"}
     purpose: "Allow overnight work without changing existing approvals."
     expected_outcome: "Explicit time/token limits remain effective."
     kind: implementation
     status: completed
-    depends_on: ["long-sessions-write-tests"]
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+    depends_on:
+      - "long-sessions-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:07:55Z"
+      completed_at: "2026-10-28T19:07:55Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-security-audit"
     title: "security_audit: observe protected budget boundaries"
     description: "Derive source-only observations of changed limits, effect clipping and unchanged authority."
     context: "Independent source-only observer excluded intent, queues, prior IMPL and Git history; its dated IMPL supplement is persisted. Its explicit-endpoint deadline and guidance-attempt findings were reproduced, repaired and re-observed. Phase-based enforcement and retained-turn memory growth remain documented limitations; dependency acquisition is outside this repair. Observer executed no commands. Final orchestrator suite ab6f4e27-e93a-421f-9d4c-4bb6773be8cb: 1467 passed, 10 existing skips."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:13:28Z", completed_at: "2026-10-28T19:13:28Z"}
     purpose: "Keep independent boundary observations."
     expected_outcome: "Scoped source-derived record without certification."
     kind: security-audit
     status: completed
-    depends_on: ["long-sessions-implement-code"]
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+    depends_on:
+      - "long-sessions-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:13:28Z"
+      completed_at: "2026-10-28T19:13:28Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-compliance-review"
     title: "compliance_review: compare protected budget evidence"
     description: "Compare scoped intent with independent observations and execution evidence without source access."
     context: "Independent source-blind comparator e695c030-f655-4293-823c-573ba50ec13e confirms stale remaining-budget deadline statements now agree with independent clipping requirements; no production change was made to satisfy review. Source-derived addendum observes approval binding and exact min(remaining,86400s) supplied timeout; named run 5cea9539-b4ce-4665-a7a3-a5aed9c9179d passes timeout-change rejection. Real-executor clipping enforcement and strict timing during uncooperative synchronous work remain unqualified; 66 generations under seven-day configuration are not seven elapsed days. No further concrete scoped contradiction established. Retained evidence memory grows. No certification, receipt or acceptance; accepted revisions remain stale."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:18:43Z", completed_at: "2026-10-28T19:18:43Z"}
     purpose: "Retain discrepancies for human arbitration."
     expected_outcome: "Persistent scoped comparison without acceptance."
     kind: compliance-review
     status: completed
-    depends_on: ["long-sessions-security-audit"]
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+    depends_on:
+      - "long-sessions-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:18:43Z"
+      completed_at: "2026-10-28T19:18:43Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "live-accounting-race-write-tests"
     title: "write_tests: distinguish known usage from interrupted attempts"
     description: "Reproduce run 173's guidance-before-response race and pin unknown-attempt charging independently from completed-turn accounting."
@@ -371,17 +563,18 @@ tasks:
     purpose: "Prevent self-certification."
     expected_outcome: "Observed behavior and discrepancies remain durable."
     kind: compliance-review
-    status: in-progress
+    status: pending
     depends_on:
       - "shared-runtime-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
     timestamps:
       created_at: "2026-10-23T22:00:00Z"
-      updated_at: "2026-10-28T11:23:30Z"
+      updated_at: "2026-10-29T09:50:40Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null
+    disposition: block
   - id: "bin-only-path-write-tests"
     title: "Pin bin-only authoring and verification"
     description: "Retain native authoring and verification evidence and assert exclusion of administrative candidates."

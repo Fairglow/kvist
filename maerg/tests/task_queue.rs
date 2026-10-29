@@ -58,6 +58,25 @@ fn parses_and_serializes_a_canonical_queue_deterministically() {
 }
 
 #[test]
+fn serialization_preserves_finalization_disposition_and_acceptance_identity() {
+    use kvist::task_queue::FinalizeDispositionArgument;
+    for disposition in [
+        FinalizeDispositionArgument::Accept,
+        FinalizeDispositionArgument::Block,
+    ] {
+        let mut queue = parse(VALID_QUEUE).unwrap();
+        queue.tasks[0].disposition = Some(disposition);
+        queue.tasks[0].acceptance_id = Some("attempt-0001".into());
+        let serialized = serialize(&queue).unwrap();
+        let reparsed = parse(&serialized).unwrap();
+        assert_eq!(
+            reparsed, queue,
+            "canonical writes must retain recorded finalization fields"
+        );
+    }
+}
+
+#[test]
 fn accepts_a_fenced_recovery_state_only_for_an_in_progress_task() {
     let fenced = VALID_QUEUE
         .replacen("status: pending", "status: in-progress", 1)

@@ -123,8 +123,51 @@ explicitly abandon that attempt, without claiming rollback or no execution:
 ```sh
 kvist task finalize maerg shared-runtime-compliance-review attempt-0001 block \
   --reason "Abandon failed capacity-discovery attempt after reviewing retained effects; completion is not certified."
+# Review the changed intent before accepting it:
+kvist component accept maerg
 kvist task transition maerg shared-runtime-compliance-review pending
 ```
+
+Explicit block finalization and log inspection permit otherwise valid stale
+intent. This avoids a circular gate: acceptance remains fenced by an unresolved
+attempt, but rejecting it does not require accepting changed intent first.
+Rejection retains the evidence and effects even when result digests drifted.
+It requires the latest exact task/attempt and a nonblank reason, never commits
+changes, and cannot bypass explicit recovery fences or active operation locks.
+If its evidence append is interrupted after the blocked decision is stored,
+repeat the same block command and reason to finish recording. A stale component
+still cannot run, accept a task result or transition back to pending until
+its intent is reviewed and accepted. Acceptance reports remaining blocked tasks
+rather than claiming they became current.
+
+Recovery gates distinguish authority from task status:
+
+| Operation | Valid tracked component states |
+| --- | --- |
+| Ordinary transition | Current or blocked; dependency/reason checks still apply |
+| Log inspection, explicit block, stale-lock cleanup, authenticated no-launch recovery | Current, blocked or stale |
+| Task execution, selection and result acceptance | Current only |
+
+Unlock never clears an attempt fence or removes a live owner's lock, even with
+`--force`. If it removes a stale lock but unresolved evidence remains, the
+failure explicitly reports both facts. No-launch recovery still checks the exact
+authenticated approval, scope and queue; it does not accept changed intent.
+Missing, invalid, unsupported and untracked artifacts remain errors, not reset
+opportunities. Unknown effects or broken/unauthenticated recovery evidence need
+human arbitration; no blanket force-reset or universal crash recovery is claimed.
+
+Awaiting-decision transitions retain their nonblank reason in both queue and
+audit records. After deciding and accepting any changed intent, explicitly
+return the task to pending or in-progress. Blocked guidance similarly reopens
+with `task transition COMPONENT TASK pending` without `--reason`; it does not
+silently execute the task.
+
+Both finalization dispositions name the latest exact task/attempt and reject
+conflicting decisions. Acceptance stores the completed queue decision before
+appending final evidence. If that append is interrupted, repeat the same
+`task finalize COMPONENT TASK ATTEMPT accept` without `--commit` to finish
+recording, not task execution; an identical repeat does not change timestamps or
+duplicate the event. Existing commit-pending recovery remains separate.
 
 Use the rebuilt/reinstalled binary for a new run. Review any stale intent before
 `component accept`; do not accept it merely to bypass a gate. A different

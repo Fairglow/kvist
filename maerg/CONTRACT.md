@@ -192,6 +192,46 @@ Multi-task selections stop at pending finalization or decisions, rather than
 calling an unfinished task completed. Diagnostic EOF or a different next-ready
 task is never evidence of completion.
 
+`task finalize COMPONENT TASK ATTEMPT block --reason TEXT` can explicitly
+abandon the latest task attempt even while valid intent is stale or another
+task is blocked. It preserves evidence and filesystem effects; it does not
+accept intent, certify completion/no execution, or roll back changes.
+Result-digest drift and changed execution approval do not prevent rejection.
+Malformed artifacts, operation locks and explicit recovery fences still
+refuse it. A repeated identical block decision can finish interrupted
+recording, but an older attempt cannot dispose a newer one. `--commit` is
+invalid for a block disposition. Task-log inspection permits stale intent.
+For stale intent plus an unresolved attempt, inspect and block the attempt
+first; then review `component accept COMPONENT`, and only afterward use
+`task transition COMPONENT TASK pending`. Acceptance remains fenced until
+the abandonment is durable and never labels blocked task state current.
+`finalize ... accept`, ordinary transitions and task execution keep their
+existing current-intent requirements.
+
+`task unlock` and authenticated `task recover ... execution-did-not-start`
+also permit otherwise valid tracked stale or blocked components. Unlock
+removes only a provably stale operation lock; a live owner remains protected,
+and unresolved attempts still fence later writers. No-launch recovery retains
+its exact authenticated policy, scope and queue checks and restores only the
+recorded pre-attempt state. Neither command accepts changed intent. Review
+and `component accept` remain necessary before ordinary work on stale intent.
+
+All ten legal edges among the five task states are command-level operations;
+the other fifteen edges, including self-transitions and moves out of completed,
+are refused without changing queue or evidence. Entering blocked or
+awaiting-decision requires a nonblank reason; other targets forbid `--reason`.
+Entering in-progress requires the complete dependency chain, including when
+resuming awaiting-decision. Leaving a pause clears its reason.
+Both finalization dispositions require the latest exact task/attempt with
+matching schema/task identity and refuse conflicting dispositions or recovery
+decisions. Acceptance writes the completed queue decision before appending
+the final event and refuses another task's unresolved attempt or recovery
+fence, just as ordinary queue writers do. Repeating the same
+`finalize ... accept` without `--commit` finishes missing recording or returns
+the existing decision without another event or queue rewrite. Already accepted
+work is not recommitted by repeating finalization; use the reported acceptance's
+`component commit` recovery.
+
 `component commit` retries or performs the
 isolated index commit for an already accepted set (the acceptance id is
 reported when `component accept --commit` records the acceptance but cannot
@@ -213,9 +253,9 @@ the same left border as the rest of the report, aligned under the changed
 document's name. For blocked components, the status output lists
 each blocked task with its `blocked_reason` first line in full (soft-wrapped
 to the display width, never truncated) and the exact
-next command (`task run <COMPONENT_DIR> <TASK_ID>` when the task's dependency
-chain is completed, else `task transition <COMPONENT_DIR> <TASK_ID> pending`
-with the incomplete-dependency count); awaiting-decision tasks are listed with
+next command (`task transition <COMPONENT_DIR> <TASK_ID> pending`, after
+resolving the recorded blocker, with an incomplete-dependency count when
+applicable); this reopens the task but does not execute it. Awaiting-decision tasks are listed with
 a pointer to the task-states help topic. The shell's `tasks` table carries the
 same per-task reason and next-command details. Every Action line names a concrete
 next command or the `kvist help <TOPIC>` that explains a required human

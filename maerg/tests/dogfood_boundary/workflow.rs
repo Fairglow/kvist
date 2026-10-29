@@ -191,6 +191,393 @@ fn human_can_block_a_successful_attempt_without_automatic_retry() {
     );
 }
 
+fn stale_requirements(project: &std::path::Path) {
+    let path = project.join("maerg/REQUIREMENTS.md");
+    let mut contents = fs::read_to_string(&path).expect("read intent");
+    contents.push_str("\nHuman-requested intent clarification.\n");
+    fs::write(path, contents).expect("stale intent");
+}
+
+fn retain_prepared_attempt(project: &std::path::Path) -> Vec<u8> {
+    let path = attempt_journal(project);
+    let contents = fs::read_to_string(&path).expect("read attempt");
+    let first = format!(
+        "{}\n",
+        contents
+            .lines()
+            .take_while(|line| {
+                let event: serde_json::Value = serde_json::from_str(line).unwrap();
+                event.get("schema_version").is_none() || event["phase"] == "prepared"
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    fs::write(path, &first).expect("retain interrupted attempt");
+    first.into_bytes()
+}
+
+fn execute_reviewable_attempt(project: &std::path::Path) {
+    assert_success(
+        &run_kvist(project, &["task", "approve-policy"]),
+        "approve fixture policy",
+    );
+    assert_success(
+        &run_kvist(project, &["task", "run", ".", TASK_ID]),
+        "record host-authenticated fixture attempt",
+    );
+}
+
+#[test]
+fn stale_prepared_attempt_can_be_abandoned_before_acceptance_and_then_returned_to_pending() {
+    let project = create_target_project("pending");
+    execute_reviewable_attempt(project.path());
+    let journal_before = retain_prepared_attempt(project.path());
+    stale_requirements(project.path());
+    let queue_path = project.path().join("maerg/TODOS.yaml");
+    let queue_before = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+
+    for args in [
+        vec!["component", "accept", "."],
+        vec!["task", "transition", ".", TASK_ID, "pending"],
+        vec!["task", "finalize", ".", TASK_ID, ATTEMPT_ID, "accept"],
+        vec!["task", "run", ".", TASK_ID],
+        vec!["task", "next", "."],
+    ] {
+        let output = run_kvist(project.path(), &args);
+        assert!(
+            !output.status.success(),
+            "initial guard {args:?}: {}",
+            output_text(&output)
+        );
+        let expected = if args[0] == "component" {
+            "unresolved"
+        } else {
+            "stale"
+        };
+        assert!(
+            output_text(&output).contains(expected),
+            "{args:?} must identify {expected}: {}",
+            output_text(&output)
+        );
+    }
+
+    let logs_dir = project.path().join("maerg/.kvist/logs");
+    let log_path = fs::read_dir(&logs_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    fs::write(log_path, "retained failure evidence\n").unwrap();
+    let log = run_kvist(project.path(), &["task", "log", ".", TASK_ID]);
+    assert_success(&log, "inspect stale attempt log");
+    assert!(output_text(&log).contains("retained failure evidence"));
+
+    let reject = [
+        "task",
+        "finalize",
+        ".",
+        TASK_ID,
+        ATTEMPT_ID,
+        "block",
+        "--reason",
+        "Abandon failed attempt; completion is not certified.",
+    ];
+    let output = run_kvist(project.path(), &reject);
+    assert_success(&output, "abandon stale prepared attempt");
+    let message = output_text(&output);
+    assert!(message.contains("completion is not certified"), "{message}");
+    assert!(message.contains("kvist component accept ."), "{message}");
+    assert!(
+        message.contains(&format!("kvist task transition . {TASK_ID} pending")),
+        "{message}"
+    );
+    let queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    assert_eq!(
+        queue.component, queue_before.component,
+        "rejection cannot accept intent"
+    );
+    assert_eq!(
+        queue.tasks[1].status,
+        kvist::task_queue::TaskStatus::Blocked
+    );
+    assert!(queue.tasks[1].timestamps.completed_at.is_none());
+    assert!(queue.tasks[1].acceptance_id.is_none());
+    let journal = fs::read(attempt_journal(project.path())).unwrap();
+    assert!(
+        journal.starts_with(&journal_before),
+        "never rewrite prior evidence"
+    );
+    let journal_text = String::from_utf8_lossy(&journal);
+    assert!(journal_text.contains("\"disposition\":\"blocked\""));
+    assert!(!journal_text.contains("execution-did-not-start"));
+    assert!(!journal_text.contains("\"disposition\":\"accepted\""));
+    let repeat = run_kvist(project.path(), &reject);
+    assert_success(
+        &repeat,
+        "repeat identical block without duplicating evidence",
+    );
+    assert_eq!(fs::read(attempt_journal(project.path())).unwrap(), journal);
+    let pending = run_kvist(
+        project.path(),
+        &["task", "transition", ".", TASK_ID, "pending"],
+    );
+    assert!(
+        !pending.status.success(),
+        "stale intent still fences runnable transitions"
+    );
+    let accept = run_kvist(project.path(), &["component", "accept", "."]);
+    assert_success(&accept, "accept intent after abandonment");
+    let message = output_text(&accept);
+    assert!(message.contains("remains blocked"), "{message}");
+    assert!(!message.contains("component is now current"), "{message}");
+    assert!(
+        message.contains(&format!("kvist task transition . {TASK_ID} pending")),
+        "{message}"
+    );
+    assert_success(
+        &run_kvist(
+            project.path(),
+            &["task", "transition", ".", TASK_ID, "pending"],
+        ),
+        "deliberately return to pending",
+    );
+    assert_success(
+        &run_kvist(project.path(), &["task", "next", "."]),
+        "selection is unfenced",
+    );
+}
+
+#[test]
+fn human_rejection_does_not_require_unchanged_result_digests() {
+    let project = create_target_project("pending");
+    write_finalizable_attempt(project.path(), true);
+    let journal_before = fs::read(attempt_journal(project.path())).unwrap();
+    stale_requirements(project.path());
+    let changed = project.path().join("maerg/tests/generated.rs");
+    fs::write(&changed, "// retained changed result\n").unwrap();
+    let output = run_kvist(
+        project.path(),
+        &[
+            "task",
+            "finalize",
+            ".",
+            TASK_ID,
+            ATTEMPT_ID,
+            "block",
+            "--reason",
+            "Reject changed result without certifying it.",
+        ],
+    );
+    assert_success(&output, "reject drifted result");
+    assert_eq!(
+        fs::read_to_string(changed).unwrap(),
+        "// retained changed result\n"
+    );
+    assert!(
+        fs::read(attempt_journal(project.path()))
+            .unwrap()
+            .starts_with(&journal_before)
+    );
+}
+
+#[test]
+fn another_blocked_task_does_not_prevent_explicit_attempt_rejection() {
+    let project = create_target_project("pending");
+    write_finalizable_attempt(project.path(), true);
+    add_independent_ready_implementation_task(project.path());
+    let path = project.path().join("maerg/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    queue.tasks[2].status = kvist::task_queue::TaskStatus::Blocked;
+    queue.tasks[2].blocked_reason = Some("Unrelated blocker remains unresolved.".into());
+    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let other = queue.tasks[2].clone();
+    let output = run_kvist(
+        project.path(),
+        &[
+            "--json",
+            "task",
+            "finalize",
+            ".",
+            TASK_ID,
+            ATTEMPT_ID,
+            "block",
+            "--reason",
+            "Explicit human rejection.",
+        ],
+    );
+    assert_success(&output, "reject attempt while another task is blocked");
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["disposition"], "block");
+    let after = kvist::task_queue::parse(&fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(after.tasks[2], other);
+}
+
+#[test]
+fn rejection_can_finish_its_interrupted_recording_without_accepting_stale_intent() {
+    let project = create_target_project("pending");
+    execute_reviewable_attempt(project.path());
+    let prefix = retain_prepared_attempt(project.path());
+    stale_requirements(project.path());
+    let path = project.path().join("maerg/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    queue.tasks[1].status = kvist::task_queue::TaskStatus::Blocked;
+    queue.tasks[1].blocked_reason = Some("Abandon interrupted attempt.".into());
+    queue.tasks[1].disposition = Some(kvist::task_queue::FinalizeDispositionArgument::Block);
+    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let before = fs::read(&path).unwrap();
+    let wrong = run_kvist(
+        project.path(),
+        &[
+            "task",
+            "finalize",
+            ".",
+            TASK_ID,
+            ATTEMPT_ID,
+            "block",
+            "--reason",
+            "different decision",
+        ],
+    );
+    assert!(!wrong.status.success());
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(fs::read(attempt_journal(project.path())).unwrap(), prefix);
+    let repeat = run_kvist(
+        project.path(),
+        &[
+            "task",
+            "finalize",
+            ".",
+            TASK_ID,
+            ATTEMPT_ID,
+            "block",
+            "--reason",
+            "Abandon interrupted attempt.",
+        ],
+    );
+    assert_success(&repeat, "finish interrupted rejection");
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert!(
+        fs::read(attempt_journal(project.path()))
+            .unwrap()
+            .starts_with(&prefix)
+    );
+    assert_success(
+        &run_kvist(project.path(), &["component", "accept", "."]),
+        "accept after completed rejection record",
+    );
+}
+
+#[test]
+fn stale_rejection_preserves_identity_artifact_and_explicit_recovery_guards() {
+    for condition in [
+        "missing-reason",
+        "commit",
+        "wrong-task",
+        "wrong-attempt",
+        "older-attempt",
+        "invalid-document",
+        "recovery-fence",
+        "wrong-event-task",
+        "malformed-journal",
+        "sibling-fence",
+        "untracked",
+        "symlink-journal",
+    ] {
+        let project = create_target_project("pending");
+        write_finalizable_attempt(project.path(), true);
+        retain_prepared_attempt(project.path());
+        stale_requirements(project.path());
+        let mut args = vec![
+            "task",
+            "finalize",
+            ".",
+            TASK_ID,
+            ATTEMPT_ID,
+            "block",
+            "--reason",
+            "Abandon inspected attempt.",
+        ];
+        match condition {
+            "missing-reason" => args.truncate(6),
+            "commit" => args.push("--commit"),
+            "wrong-task" => args[3] = "unknown-task",
+            "wrong-attempt" => args[4] = "attempt-9999",
+            "older-attempt" => {
+                let path = attempt_journal(project.path());
+                let original = fs::read_to_string(&path).unwrap();
+                fs::write(
+                    path,
+                    format!("{original}{}", original.replace(ATTEMPT_ID, "attempt-0002")),
+                )
+                .unwrap();
+            }
+            "invalid-document" => {
+                fs::write(project.path().join("maerg/DESIGN.md"), "malformed\n").unwrap()
+            }
+            "recovery-fence" => {
+                let path = project.path().join("maerg/TODOS.yaml");
+                let mut queue =
+                    kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+                queue.tasks[1].recovery_state = Some(kvist::task_queue::RecoveryState {
+                    state: kvist::task_queue::RecoveryStateKind::Fenced,
+                    attempt_id: ATTEMPT_ID.into(),
+                    reason: "evidence-tampered".into(),
+                });
+                fs::write(path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+            }
+            "wrong-event-task" => {
+                let path = attempt_journal(project.path());
+                let original = fs::read_to_string(&path).unwrap();
+                fs::write(path, original.replace(TASK_ID, "other-task")).unwrap();
+            }
+            "malformed-journal" => fs::write(attempt_journal(project.path()), "{bad\n").unwrap(),
+            "sibling-fence" => {
+                add_independent_ready_implementation_task(project.path());
+                let path = project.path().join("maerg/TODOS.yaml");
+                let mut queue =
+                    kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+                queue.tasks[2].status = kvist::task_queue::TaskStatus::InProgress;
+                queue.tasks[2].recovery_state = Some(kvist::task_queue::RecoveryState {
+                    state: kvist::task_queue::RecoveryStateKind::Fenced,
+                    attempt_id: ATTEMPT_ID.into(),
+                    reason: "unrelated-unresolved-attempt".into(),
+                });
+                fs::write(path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+            }
+            "untracked" => assert_success(
+                &git(project.path(), &["rm", "--cached", "maerg/DESIGN.md"]),
+                "untrack intent",
+            ),
+            "symlink-journal" => {
+                let path = attempt_journal(project.path());
+                let retained = path.with_extension("retained");
+                fs::rename(&path, &retained).unwrap();
+                std::os::unix::fs::symlink(retained, path).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let queue_before = fs::read(project.path().join("maerg/TODOS.yaml")).unwrap();
+        let journal_before = fs::read(attempt_journal(project.path())).unwrap();
+        let output = run_kvist(project.path(), &args);
+        assert!(
+            !output.status.success(),
+            "{condition} must refuse: {}",
+            output_text(&output)
+        );
+        assert_eq!(
+            fs::read(project.path().join("maerg/TODOS.yaml")).unwrap(),
+            queue_before,
+            "{condition}"
+        );
+        assert_eq!(
+            fs::read(attempt_journal(project.path())).unwrap(),
+            journal_before,
+            "{condition}"
+        );
+    }
+}
+
 #[test]
 fn ambiguous_effects_remain_fenced_and_cannot_be_force_unlocked() {
     let project = create_target_project("pending");

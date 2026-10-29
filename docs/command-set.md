@@ -142,9 +142,16 @@ Guidance is part of the contract, not an afterthought:
   to "what do I do now?" is always one keystroke away. Outside a project it
   prints the guided help.
 - **Success messages** for gating commands name the next stage: after
-  `component accept`, the output says the component is current and points
-  at `task next`; after a run finishes, it points at `task log` and
+  `component accept`, the output reports whether the component is current or
+  remains blocked and names `task next` or the blocked-task transition; after a run finishes, it points at `task log` and
   `task finalize`.
+
+When stale intent and an unresolved attempt coexist, first inspect the attempt
+and explicitly reject it with `task finalize COMPONENT TASK ATTEMPT block
+--reason TEXT`. This remains available while stale and does not certify effects
+or accept intent. Then review/accept intent before returning the task to
+pending. Execution and result acceptance remain gated; never delete evidence
+or use acceptance merely to bypass recovery.
 
 ### P4 — Help is a tour
 
@@ -326,10 +333,10 @@ all commands`. Failure (not in a project) → print the top-level help
    summary, task progress, next ready task, and an **Action** line for every
    non-current state. Stale components additionally list
    each changed document (expected vs observed revision) and a diff hint.
-   Blocked components list each blocked task with its truncated
-   `blocked_reason` and the exact next command (`task run` when the
-   dependency chain is completed, else `task transition … pending` with the
-   incomplete-dependency count); awaiting-decision tasks are listed with a
+   Blocked components list each blocked task with its full first-line
+   `blocked_reason` and the exact non-executing reopening command
+   (`task transition … pending`, with an incomplete-dependency count when
+   applicable); awaiting-decision tasks are listed with a
    pointer to `kvist help task-states`.
 3. Gating success messages chain to the next lifecycle stage
    (`accept` → `task next`; `run` → `task log` / `task finalize`;

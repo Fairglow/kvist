@@ -216,8 +216,7 @@ fn guidance_entries_for(
 }
 
 /// Collects the guidance entries for a parsed queue: each blocked task with
-/// the exact command that re-runs it (dependency chain completed) or reopens
-/// it (chain incomplete), then each awaiting-decision task with a pointer to
+/// the exact non-executing command that reopens it, then each awaiting-decision task with a pointer to
 /// the task-states help topic, because resuming one is a human decision.
 fn guidance_entries(
     queue: &crate::task_queue::TaskQueue,
@@ -230,7 +229,7 @@ fn guidance_entries(
         .filter(|t| t.status == crate::task_queue::TaskStatus::Blocked)
     {
         let next = if crate::task_queue::dependencies_completed(task, &queue.tasks) {
-            format!("kvist task run {component_path} {}", task.id)
+            format!("kvist task transition {component_path} {} pending", task.id)
         } else {
             let n = crate::task_queue::incomplete_dependency_count(task, &queue.tasks);
             let unit = if n == 1 { "task" } else { "tasks" };
@@ -931,7 +930,7 @@ tasks:
             text.contains(&format!("│               reason: {reason}")),
             "full reason missing: {text}"
         );
-        assert!(text.contains("│               next:   kvist task run comp a"));
+        assert!(text.contains("│               next:   kvist task transition comp a pending"));
     }
 
     #[test]

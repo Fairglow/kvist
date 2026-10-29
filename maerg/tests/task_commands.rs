@@ -2617,6 +2617,32 @@ command = "/usr/bin/echo verify"
     );
     assert!(!transition.status.success());
     assert!(String::from_utf8_lossy(&transition.stderr).contains("lock"));
+    let requirements_path = project.path().join("src/REQUIREMENTS.md");
+    let requirements = fs::read_to_string(&requirements_path).unwrap();
+    fs::write(
+        &requirements_path,
+        format!("{requirements}\nChanged intent while a run still owns its lock.\n"),
+    )
+    .unwrap();
+    let rejection = run_kvist(
+        &project,
+        &[
+            "task",
+            "finalize",
+            ".",
+            "implement-code",
+            "attempt-0001",
+            "block",
+            "--reason",
+            "Cannot reject a live locked attempt.",
+        ],
+    );
+    fs::write(requirements_path, requirements).unwrap();
+    assert!(!rejection.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejection.stderr).contains("lock"),
+        "{rejection:?}"
+    );
     let intermediate =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
     assert!(intermediate.contains("status: in-progress"));

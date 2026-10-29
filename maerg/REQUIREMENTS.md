@@ -169,13 +169,54 @@ completion. Existing ambiguous attempts MUST NOT be retrospectively certified.
 This human-requested repair has an explicit advisory exception while receipts
 are unavailable; independent review remains separate from acceptance.
 
-Task selection and transition MUST require a current, completely VCS-tracked
-component. Writes MUST use exclusive user-owned locking, legal transitions,
+An explicit human `task finalize ... block --reason ...` MUST remain available
+when otherwise valid, VCS-tracked component intent is stale or another task is
+blocked. It MUST bind the latest exact task/attempt, retain prior evidence and
+effects, and record rejection without certifying completion, no execution or
+rollback. Rejection MUST NOT require unchanged accepted-result digests or
+current execution approval. Malformed artifacts, active locks and explicit
+recovery fences MUST remain protected. A failed disposition write MUST NOT
+silently release unresolved execution; repeating that same block decision
+MUST be able to finish its interrupted recording.
+Read-only task-log inspection MUST remain available while intent is stale.
+After abandonment, acceptance MUST report remaining blocked tasks accurately
+and identify acceptance-before-transition recovery order. This human-requested
+repair has an explicit advisory exception while review receipts are unavailable.
+
+Task selection MUST require a current, completely VCS-tracked component.
+Ordinary transitions MUST require complete tracked artifacts and current intent;
+blocked task state alone MUST NOT prevent an otherwise legal human transition.
+Writes MUST use exclusive user-owned locking, legal transitions,
 atomic queue replacement, and append-only prepared/committed attempt evidence.
 Stale locks and ambiguous prepared attempts MUST require explicit recovery.
 Recovery MUST bind a unique attempt, pre-state, intended post-state, approved
 policy, and write scope; it MUST NOT infer rollback, completion, or absence of
 effects from a missing process.
+
+### REQ-TRANSITION-RECOVERY
+
+Every documented task-state edge MUST work through the command boundary,
+including entering and resuming awaiting-decision with its required reason.
+Rejected ordinary transition requests MUST leave queue and evidence unchanged.
+Verification MUST cover all 25 state pairs, reason and dependency gates, stale intent,
+terminal states, and supported recovery sequences, not only the pure enum.
+Guidance MUST name commands their own state gates permit.
+
+Stale-lock removal and authenticated execution-did-not-start recovery MUST
+remain available for otherwise valid tracked stale or blocked components.
+Neither operation accepts intent, certifies completion, authorizes replay,
+or bypasses live-owner, evidence, approval, scope, identity or digest checks.
+Missing, invalid, unsupported or untracked artifacts remain protected.
+Execution and result acceptance MUST retain their current-intent gates.
+Result finalization MUST bind the latest exact task/attempt and MUST NOT
+overwrite a conflicting human disposition or authenticated recovery decision.
+Finalizing one task MUST NOT invalidate another unresolved attempt's recovery
+pre-state; reconcile that attempt before any unrelated queue decision.
+Acceptance MUST persist the queue decision before append-only final evidence;
+repeating the same non-committing acceptance MUST finish interrupted recording
+without duplicating evidence, mutating completed state or replaying effects.
+This human-requested verification and repair has an explicit advisory exception
+while review receipts are unavailable; independent observation remains separate.
 
 ### REQ-PROJECT-LAYOUT
 

@@ -106,6 +106,35 @@ capability checks, explicit authoring implementation and test roots with
 read-only intent, root, and immediate-parent contract mounts, agent execution,
 output redaction, and implementation test verification.
 
+Transition verification enumerates the independent expected 5-by-5 adjacency
+matrix through the CLI with all reason classes and complete/incomplete
+dependencies, checking rejected queue/journal byte identity. Awaiting-decision
+uses the same dependency validation as other in-progress entries and the same
+reason persistence as blocked. Prepared execution evidence may name an
+awaiting-decision origin; no-launch recovery still supports only its recorded
+pending/in-progress origins.
+
+Use the inspection-state validator for stale-lock removal and for both initial
+and locked no-launch recovery input validation. Stale intent cannot prevent
+these non-accepting recovery operations, but every existing structural, VCS,
+live-owner, authenticated evidence, approval, scope and exact digest guard
+still applies. Recovery leaves revision metadata stale for explicit human
+acceptance. Blocked guidance reopens with a reason-free pending transition
+instead of suggesting an execution or acceptance command that rejects blocked
+component state.
+
+Finalization shares bounded latest-attempt/schema/task identity validation.
+Acceptance rejects conflicting human/recovery decisions before mutation.
+Share the other-task unresolved/fence scan between accept and block so a
+completion cannot invalidate a sibling's exact recovery queue digest.
+Read queue/journal snapshots under the operation lock, validate the legal
+completed transition (or exact already-recorded acceptance), and recheck
+ownership and snapshot digests before writing. Persist the queue decision
+first, then append and synchronize final evidence without replacing history.
+An identical non-committing repeat finishes missing evidence without changing
+the completion timestamp. A repeated commit request does not create another
+commit; existing commit-pending recovery remains separate.
+
 The target dogfooding path splits this into recovery-safe supervised authoring,
 optional mediated dependency acquisition, isolated verification, and explicit
 human finalization. Each phase receives a separately canonicalized grant set.
@@ -248,6 +277,35 @@ and trajectory identities from that unique log stem; never overwrite evidence.
 After a successful batch invocation, reread task state; only `completed` counts
 toward completion. In-progress or awaiting-decision stops with exact finalize
 or decision guidance. Existing unbound historical failures stay unresolved.
+
+### Stale-intent attempt abandonment
+
+Use an explicit allowed-state context validator: execution accepts current
+components, ordinary transitions current/blocked components, and rejection
+or read-only log inspection current/blocked/stale components. Keep project,
+VCS, structural-artifact and lock checks. Do not remove the unresolved-attempt
+guard from intent acceptance or ordinary queue writers.
+
+Route human block disposition before accepted-result scope/digest validation.
+Under the component lock, bind a known queue task and bounded latest
+task/attempt pair; reject explicit recovery fences, wrong identities,
+completed tasks and `--commit`. Validate a nonblank reason and the legal
+blocked transition. Rejection does not load current effect grants or assert
+the old result still matches disk. Preserve the journal prefix byte-for-byte.
+Persist the blocked queue decision before appending synchronized
+`human-finalized` evidence, revalidating lock and queue/journal snapshots before
+mutation. If appending fails, report retained blocked state and the exact
+repeat command; the identical stored block decision can finish recording.
+Do not treat an interrupted rejection as accepted intent or successful work.
+Keep unrelated unresolved attempts fenced.
+Canonical queue serialization preserves non-null finalization disposition
+and acceptance identity fields; absent fields remain omitted. Recovery must
+not depend on fields that parsing accepts but serialization silently drops.
+
+Report that abandonment retains effects and does not certify completion;
+name the next intent-acceptance and pending-transition commands in that order.
+Acceptance computes its reported component state from remaining blocked tasks,
+instead of promising current state or suggesting a task that cannot run.
 
 Significant artifact separation rationale is retained in
 `docs/decisions/0001-separate-component-intent.md`.
