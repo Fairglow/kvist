@@ -1,6 +1,40 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## External CLI fixture isolation (2026-10-29)
+
+Independent clean-slate `external-fixture-observer` read only the external-only
+CLI test function, excluding intent, queues, prior records/reviews, runtime and
+peer source, execution logs and chat/Git history. It edited nothing and ran no
+checks. Its source-derived observations are:
+
+- The fixture writes an explicit `copilot` external-agent registry and a Skott
+  configuration naming native default provider `ollama`.
+- Listing and both refused-execution children receive the fixture directory as
+  working directory and `HOME`, and its `user-config` path as `XDG_CONFIG_HOME`.
+- Listing must succeed, report no native models and exactly one external-agent
+  entry. Both headless and host-execution flag attempts must fail with an
+  interactive-terminal diagnostic, without creating `.skott`.
+- These are inspected assertions, not observed executions. The no-effects
+  assertion covers `.skott` absence, not arbitrary filesystem/process effects.
+
+Execution/diagnosis attributed to the implementing context: the original and
+strengthened regression both failed before isolation, reporting a missing
+`default_provider` model before listing. Explicit registry paths overlay user
+registries, so ambient native entries contaminated this external-only fixture.
+No runtime source or validation/authority behavior was changed. Nextest run
+`f3245ca5-7301-428e-9513-1a73080a61ea` passed all 32 selected external-agent,
+shared-registry and configuration tests; 482 tests were outside the selection.
+Strict all-target Skott Clippy, formatting and whitespace checks passed.
+
+Separate source-blind `external-fixture-comparator` compared the scoped intent
+and contract with this record, without source access. It found no concrete
+scoped contradiction: both configuration paths are isolated, the external-only
+catalog is consistent with the conditional native-default requirement, and
+terminal refusals retain the documented boundary. Execution remains attributed,
+not independently rerun. Arbitrary side-effect absence, suite-wide isolation,
+acceptance and compliance certification are not established by this correction.
+
 ## Repository test performance and diagnostics (2026-10-27)
 
 ### Independent source-only observations

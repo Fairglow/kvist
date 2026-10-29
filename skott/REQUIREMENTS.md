@@ -19,6 +19,11 @@ retain equivalent authority and runtime behavior. Native and external-agent
 backends MUST be visibly distinct. Shared setup MUST disclose authority and
 possible billing and MUST NOT grant subsequent execution.
 
+Shared-profile CLI tests MUST isolate both `HOME` and `XDG_CONFIG_HOME` so
+ambient user registries cannot supply additional models or invalidate fixtures.
+This human-requested test-only correction has an explicit advisory exception
+while review receipts are unavailable; runtime authority is unchanged.
+
 Skott MUST support bounded read-only replay/follow of live runtime journals
 without requiring provider configuration or owning the run. Closing the viewer
 MUST NOT cancel execution. Cancellation and guidance MUST be separate explicitly

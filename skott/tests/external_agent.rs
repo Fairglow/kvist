@@ -110,6 +110,8 @@ fn cli_lists_external_profiles_but_refuses_unconfined_batch_execution() {
     let list = std::process::Command::new(env!("CARGO_BIN_EXE_skott"))
         .args(["--config", config.to_str().expect("path"), "--list-models"])
         .current_dir(dir.path())
+        .env("HOME", dir.path())
+        .env("XDG_CONFIG_HOME", dir.path().join("user-config"))
         .output()
         .expect("listing");
     assert!(
@@ -118,6 +120,13 @@ fn cli_lists_external_profiles_but_refuses_unconfined_batch_execution() {
         String::from_utf8_lossy(&list.stderr)
     );
     assert!(String::from_utf8_lossy(&list.stdout).contains("external-agent copilot"));
+    assert!(String::from_utf8_lossy(&list.stdout).contains("\n  (none)\n"));
+    assert_eq!(
+        String::from_utf8_lossy(&list.stdout)
+            .matches("external-agent ")
+            .count(),
+        1
+    );
     for flags in [vec!["--headless"], vec!["--allow-host-execution"]] {
         let result = std::process::Command::new(env!("CARGO_BIN_EXE_skott"))
             .args([
@@ -129,6 +138,8 @@ fn cli_lists_external_profiles_but_refuses_unconfined_batch_execution() {
             ])
             .args(flags)
             .current_dir(dir.path())
+            .env("HOME", dir.path())
+            .env("XDG_CONFIG_HOME", dir.path().join("user-config"))
             .output()
             .expect("refusal");
         assert!(!result.status.success());

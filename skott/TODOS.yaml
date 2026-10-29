@@ -10,6 +10,50 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "external-fixture-write-tests"
+    title: "write_tests: reproduce ambient registry contamination"
+    description: "Retain external-only listing and terminal refusal assertions; require no native or additional external profiles."
+    context: "The reported test fails before listing because ambient native profiles do not match default_provider. Advisory exception is recorded in requirements."
+    purpose: "Pin the intended external-only fixture."
+    expected_outcome: "Reproduce the reported failure before isolating child configuration."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
+    timestamps: {created_at: "2026-10-29T15:39:01Z", updated_at: "2026-10-29T15:42:05Z", completed_at: "2026-10-29T15:42:05Z"}
+  - id: "external-fixture-implement-code"
+    title: "implement_code: isolate external CLI fixture registries"
+    description: "Set private HOME and XDG_CONFIG_HOME on listing and refused execution child processes."
+    context: "Test-only correction; production validation and authority checks unchanged. Nextest f3245ca5-7301-428e-9513-1a73080a61ea passed all 32 selected external-agent, registry and configuration tests; 482 were unselected. Strict Skott all-target Clippy and formatting passed."
+    purpose: "Make the fixture independent of user registry contents."
+    expected_outcome: "External-agent and related registry/configuration tests pass."
+    kind: implementation
+    status: completed
+    depends_on: ["external-fixture-write-tests"]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
+    timestamps: {created_at: "2026-10-29T15:39:01Z", updated_at: "2026-10-29T15:42:05Z", completed_at: "2026-10-29T15:42:05Z"}
+  - id: "external-fixture-security-audit"
+    title: "security_audit: independently observe fixture boundaries"
+    description: "Observe only changed test source without intent, queues, prior records or runtime source."
+    context: "Independent source-only external-fixture-observer inspected only the changed CLI fixture, excluding intent, queues, prior records/history and runtime/peer source. Its observations and bounded no-effects limitation are retained in IMPL; not broad security certification."
+    purpose: "Keep source observations independent of intent."
+    expected_outcome: "Persist a source-derived IMPL supplement."
+    kind: security-audit
+    status: completed
+    depends_on: ["external-fixture-implement-code"]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
+    timestamps: {created_at: "2026-10-29T15:39:01Z", updated_at: "2026-10-29T15:42:05Z", completed_at: "2026-10-29T15:42:05Z"}
+  - id: "external-fixture-compliance-review"
+    title: "compliance_review: compare fixture intent and observations"
+    description: "Compare scoped intent with independent observations and attributed execution without implementation access."
+    context: "Separate source-blind external-fixture-comparator found no concrete scoped contradiction. IMPL retains attributed rather than independently verified execution and limits on arbitrary side effects and suite-wide isolation; no receipt, acceptance or certification."
+    purpose: "Avoid implementer self-certification."
+    expected_outcome: "Persist a separate source-blind comparison."
+    kind: compliance-review
+    status: completed
+    depends_on: ["external-fixture-security-audit"]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
+    timestamps: {created_at: "2026-10-29T15:39:01Z", updated_at: "2026-10-29T15:42:05Z", completed_at: "2026-10-29T15:42:05Z"}
   - id: "scope-preflight-write-tests"
     title: "write_tests: reproduce serial scope inspection"
     description: "Pin concurrent directory visitation, aggregate bounds, link/cycle coverage, cancellation and stage diagnostics."

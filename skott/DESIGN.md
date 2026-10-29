@@ -12,6 +12,12 @@ The optional registry default binding marks a retained native entry as the
 default-provider fallback before existing model/default validation; it changes
 presentation selection, not the shared profile or its authority.
 
+External-only CLI fixtures give child processes private `HOME` and
+`XDG_CONFIG_HOME` paths, matching the existing shared-registry listing fixture.
+An explicit registry overlays rather than disables user registry discovery;
+isolating both environment paths keeps native-default validation and terminal
+refusal checks independent of the developer's configuration.
+
 Structured transcript writes hold private directory descriptors, create message
 files no-clobber without following links, and replace the manifest atomically
 relative to its held directory. Replaced pathnames cannot redirect host writes.
