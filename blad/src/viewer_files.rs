@@ -5,6 +5,7 @@ use crate::viewer_reload::read_document_source;
 
 pub(crate) struct OpenFile {
     pub path: Option<PathBuf>,
+    pub descriptor: Option<i32>,
     pub content: String,
     pub position: Position,
 }
@@ -19,7 +20,8 @@ pub(crate) struct Position {
 pub(crate) fn load_files(paths: &[PathBuf], live_stdin: bool) -> io::Result<Vec<OpenFile>> {
     let mut files: Vec<OpenFile> = Vec::new();
     for path in paths {
-        let canonical = if path == Path::new("-") {
+        let descriptor = crate::descriptor_input::number(path).transpose()?;
+        let canonical = if path == Path::new("-") || descriptor.is_some() {
             None
         } else {
             Some(std::fs::canonicalize(path).map_err(|error| {
@@ -29,10 +31,15 @@ pub(crate) fn load_files(paths: &[PathBuf], live_stdin: bool) -> io::Result<Vec<
                 )
             })?)
         };
-        if files.iter().any(|file| file.path == canonical) {
+        if files
+            .iter()
+            .any(|file| file.path == canonical && file.descriptor == descriptor)
+        {
             continue;
         }
-        let content = if let Some(path) = &canonical {
+        let content = if let Some(descriptor) = descriptor {
+            crate::descriptor_input::snapshot(descriptor)
+        } else if let Some(path) = &canonical {
             read_document_source(path)
         } else if io::stdin().is_terminal() {
             Err(io::Error::new(
@@ -55,9 +62,10 @@ pub(crate) fn load_files(paths: &[PathBuf], live_stdin: bool) -> io::Result<Vec<
                 format!("cannot read {}: {error}", path.display()),
             )
         })?;
-        let following = canonical.is_none() && live_stdin;
+        let following = canonical.is_none() && descriptor.is_none() && live_stdin;
         files.push(OpenFile {
             path: canonical,
+            descriptor,
             content,
             position: Position {
                 following,
@@ -81,7 +89,10 @@ pub(crate) fn tab_title(files: &[OpenFile], active: usize) -> String {
             title.push_str(" | ");
         }
         let label = file.path.as_deref().and_then(Path::file_name).map_or_else(
-            || "Markdown".to_string(),
+            || {
+                file.descriptor
+                    .map_or_else(|| "Markdown".to_string(), |fd| format!("fd/{fd}"))
+            },
             |name| name.to_string_lossy().into_owned(),
         );
         if index == active {

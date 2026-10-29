@@ -216,8 +216,12 @@ fn render_markdown_theme(
     let md = safe_source.as_ref();
     let options = crate::links::parser_options();
 
-    let parser = crate::scripts::events(md, crate::frontmatter::events(md, options));
-    let mut heading_anchors = crate::links::heading_anchors(md);
+    let parser = crate::html::events(crate::scripts::events(
+        md,
+        crate::frontmatter::events(md, options),
+    ));
+    let mut heading_anchors = crate::links::heading_anchors(md, settings.strip_html);
+    let mut html = crate::html::Html::default();
 
     let mut in_code_block = false;
     let mut code_language = String::new();
@@ -269,10 +273,12 @@ fn render_markdown_theme(
             last_display = false;
             need_blank = false;
         }
+        let html_style = html.style();
         let style = Style {
-            bold: bold > 0 || in_heading,
-            italic: italic > 0,
-            strike: strikethrough > 0,
+            bold: bold > 0 || in_heading || html_style.bold,
+            italic: italic > 0 || html_style.italic,
+            strike: strikethrough > 0 || html_style.strike,
+            reverse: html_style.reverse,
             color: if in_heading {
                 Some(palette.heading)
             } else {
@@ -471,14 +477,73 @@ fn render_markdown_theme(
                     inline.text(w, &text[end..], style)?;
                 }
             }
-            Event::InlineHtml(html) if in_table => {
-                if ["<br>", "<br/>", "<br />"]
-                    .iter()
-                    .any(|tag| html.trim().eq_ignore_ascii_case(tag))
-                    && let Some(cell) = table_row_cells.last_mut()
-                {
-                    cell.push('\n');
+            Event::Html(source) | Event::InlineHtml(source) => {
+                for piece in html.project(&source, settings.strip_html) {
+                    if let Some(control) = cancellation {
+                        control.checkpoint()?;
+                    }
+                    match piece {
+                        crate::html::Piece::Text(text, html_style) => {
+                            let text = inert_source(&text);
+                            let style = Style {
+                                bold: bold > 0 || in_heading || html_style.bold,
+                                italic: italic > 0 || html_style.italic,
+                                strike: strikethrough > 0 || html_style.strike,
+                                reverse: html_style.reverse,
+                                ..style
+                            };
+                            if in_table {
+                                table_spans.append(
+                                    &mut table_row_cells,
+                                    table_rows.len(),
+                                    style,
+                                    &text,
+                                );
+                            } else {
+                                inline.text(w, &text, style)?;
+                            }
+                        }
+                        crate::html::Piece::Boundary | crate::html::Piece::Rule if in_table => {
+                            if let Some(cell) = table_row_cells.last_mut()
+                                && !cell.is_empty()
+                                && !cell.ends_with('\n')
+                            {
+                                cell.push('\n');
+                            }
+                        }
+                        crate::html::Piece::Boundary => {
+                            if inline.has_content() {
+                                inline.hard_break(w)?;
+                            }
+                        }
+                        crate::html::Piece::Break => {
+                            if in_table {
+                                if let Some(cell) = table_row_cells.last_mut() {
+                                    cell.push('\n');
+                                }
+                            } else {
+                                inline.hard_break(w)?;
+                            }
+                        }
+                        crate::html::Piece::Rule => {
+                            if inline.has_content() {
+                                inline.hard_break(w)?;
+                            }
+                            inline.text(
+                                w,
+                                &"-".repeat(terminal_width.unwrap_or(80).max(1)),
+                                style,
+                            )?;
+                            inline.hard_break(w)?;
+                        }
+                    }
                 }
+            }
+            Event::End(TagEnd::HtmlBlock) => {
+                if inline.has_content() {
+                    inline.hard_break(w)?;
+                }
+                need_blank = true;
             }
             Event::Code(text) => {
                 let text = inert_source(&text);

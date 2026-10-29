@@ -4,6 +4,136 @@
 
 Date: 2026-10-12
 
+## HTML and inherited-descriptor source observations (2026-10-29)
+
+Independent clean-slate `blad-source-observer` read Rust source and test source
+only. It excluded intent, queues, prior records/reviews, documentation, chat
+and Git history; it ran no shell commands/tests and changed no files. The
+following abridges its source-derived observations, not compliance certification:
+
+- The private HTML projector scans quoted tokens, comments and raw
+  script/style/textarea contents. It projects details/p/div boundaries, bold
+  summaries, br breaks, hr rules and b/strong, i/em, s/strike/del and
+  code/kbd/samp styles. Attributes have no effects. Details remain expanded.
+  Styles use a matching-top stack capped at 64; unmatched closing, excess and
+  self-closing style tags remain literal by default.
+- Unsupported markup remains literal unless `RenderOptions::strip_html` or
+  CLI `--strip-html` is enabled. Stripping removes markup, not text;
+  incomplete/unrecognized syntax remains visible. Raw-text elements preserve
+  their contents rather than interpreting embedded tags. Ordinary HTML text
+  decodes six named entities and numeric Unicode scalar references; entity
+  scans look for a semicolon within 32 bytes. No HTML executes or fetches
+  resources.
+- Adjacent source-contiguous block-HTML payloads are joined before projection.
+  Rendering combines HTML and Markdown styles, wraps HTML text as prose and
+  converts block boundaries to nonempty-line breaks. Table boundaries become
+  cell newlines; table spans retain bold/italic/strike/link identity, not
+  code-label reverse styling. Code/frontmatter bypass HTML projection.
+  Navigation remains Markdown-derived, not attribute-derived.
+- Exact `/dev/fd/<digits>` and `/proc/self/fd/<digits>` initial operands select
+  inherited descriptor snapshots before canonicalization. Decimal overflow
+  fails. Equal numbers reuse a snapshot in argument order, independently of
+  named files or stdin. Regular files and pipes are admitted; write-only,
+  O_PATH, device, directory and socket descriptors fail.
+- `F_DUPFD_CLOEXEC` obtains an exclusively owned duplicate numbered at least 3.
+  Its integer-only unsafe call delegates raw-number validation to the kernel;
+  the second unsafe operation constructs a File only from a successful newly
+  allocated duplicate. File closes the duplicate on every path. Original
+  descriptors remain open; reads share offsets/pipe data without changing flags.
+- Snapshots use the inclusive 16 MiB limit, one overflow probe and UTF-8
+  validation. Regular metadata size is checked even when an offset leaves a
+  smaller remainder. Pipes retry interruption and poll after WouldBlock,
+  synchronously waiting for EOF without a deadline.
+- Initial snapshots complete before output/terminal entry. Descriptor tabs
+  display fd/number, have no editable/watched path and resolve relative links
+  from cwd. Their identity remains distinct from the live stdin tab during
+  switching/closing/resize. Errors preserve kinds and gain operand context.
+  Terminal controls cross inert_source, including decoded controls. Plain
+  rendering suppresses styling; writer/cancellation errors propagate.
+- Static tests cover HTML/source/strip behavior, nesting/entities/malformed
+  tokens, raw-text boundaries, code/frontmatter, tables, writes/cancellation,
+  descriptor kinds/offsets/limits/flags and real Bash process substitution.
+  PTY assertions cover descriptor navigation/edit/reload exclusion, stdin
+  separation, HTML stream EOF equivalence, styles, search, resize and terminal
+  restoration. These assertions were not executed by the observer.
+
+The observer identified a concrete navigation discrepancy: link-label and
+heading parsers did not join block-HTML chunks, so a multiline comment containing
+`<script>` could corrupt later HTML labels/slugs. This was an independent
+finding, not inferred intent.
+
+### Attributed implementation-session repair and execution
+
+The implementing context reproduced both navigation failures with new
+regressions: a later label was `<b>Heading</b>` rather than `Heading`, and its
+heading ID was `bheadingb` rather than `heading`. It then applied the same
+HTML-event joining to both navigation consumers. It also tightened attribute
+syntax and numeric-entity digits; these final changes were not re-observed in
+the clean-slate source context.
+
+Before production changes, CLI tests reproduced the reported
+`cannot open /dev/fd/63` failure and rejected the absent `--strip-html` option;
+all five initial HTML regressions failed, including hidden details content and
+a writer error that was never reached because HTML was dropped.
+
+Final implementation-session commands:
+
+- `cargo nextest run --offline --locked -p kvist-blad --all-features
+  --status-level fail --final-status-level fail`: run
+  `235381e2-841f-4286-a3d0-5472c9a7aabc`, 365 passed, three existing opt-in
+  tests skipped. Includes both independently discovered navigation regressions.
+- `cargo clippy --offline --locked -p kvist-blad --all-features --all-targets
+  -- -D warnings`, `cargo fmt -p kvist-blad -- --check`: passed.
+- `cargo test --offline --locked -p kvist-blad --all-features --doc`: one passed.
+
+This evidence is finite, attributed implementer execution, not independent
+test execution, acceptance, a hard latency/aggregate-memory guarantee or
+security/compliance certification.
+
+### Independent source-blind HTML/descriptor comparison
+
+Separate clean-slate `blad-intent-comparator` read only scoped local intent,
+global constraints and the new implementation/evidence supplement, without
+source, tests, history or prior reviews. It found broad scoped alignment for
+HTML projection/stripping and descriptor snapshots, including the deliberate
+table-code styling reduction, finite-input waiting and raw-fd invariants.
+It did not certify safety or compliance.
+
+It found one concrete discrepancy for explicit disposition: the contract
+promised valid decimal/hex scalar entities without a length restriction, but
+the independent source observations recorded a 32-byte semicolon search.
+Long zero-padded numeric references could therefore remain literal despite
+representing a valid scalar. The comparator also retained the distinction
+between independently found navigation defects and attributed repairs, and
+noted that final refinements lacked independent source re-observation.
+
+This discrepancy is retained, not concealed by narrowing intent. Under the
+user-directed bug-fix scope, the implementing context chose to repair the
+decoder to meet the existing contract and added a regression for long
+zero-padded decimal/hex entities. This is an attributed implementation repair,
+not human acceptance or independent certification. The comparison's remaining
+evidence limits—finite/static observations, aggregate rather than exhaustive
+coverage and no hard resource/platform-wide proof—remain applicable.
+
+### Final attributed numeric-entity disposition
+
+The new long-numeric regression failed before repair, returning both original
+zero-padded references instead of `A A`. The decoder now stops each candidate
+at the next ampersand or semicolon, retaining linear scanning without a
+32-byte entity-length cutoff. Scalar overflow/invalid digits remain literal.
+This resolves the concrete example without narrowing the contract. It is
+implementer-attributed; the independent observations/comparison above remain
+historical and their source-reobservation limits remain explicit.
+
+Final post-repair execution:
+
+- All-feature nextest run `0323fb22-d23c-4396-aa94-e1549a856019`:
+  **366 passed**, three existing opt-in skips.
+- Default-feature nextest run `7a60629b-ebac-441e-b0fb-178d10ed92e9`:
+  **345 passed**, three existing opt-in skips.
+- Strict all-target/all-feature Clippy, scoped formatter check, one rustdoc
+  test and scoped `git diff --check`: passed.
+
 ## Scoped search feedback and safe exit increment - 2026-10-27
 
 Independent clean-slate `search-feedback-source-observer` read only current

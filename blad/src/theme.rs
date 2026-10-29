@@ -183,6 +183,9 @@ pub struct RenderOptions {
     pub mermaid: MermaidMode,
     /// Diagram structure encoding.
     pub diagram_charset: DiagramCharset,
+    /// Remove unsupported HTML markup rather than displaying it literally.
+    /// Supported text-only elements and all text contents remain visible.
+    pub strip_html: bool,
 }
 
 impl RenderOptions {

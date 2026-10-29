@@ -235,6 +235,29 @@ impl Viewer {
         environment: &[(&str, &str)],
         stream: bool,
     ) -> Self {
+        Self::start_sources_command(
+            paths,
+            columns,
+            rows,
+            numbers,
+            args,
+            environment,
+            stream,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn start_sources_command(
+        paths: &[&std::path::Path],
+        columns: u16,
+        rows: u16,
+        numbers: bool,
+        args: &[&str],
+        environment: &[(&str, &str)],
+        stream: bool,
+        substitution: Option<&str>,
+    ) -> Self {
         let pty = openpty(
             Some(&Winsize {
                 ws_row: rows,
@@ -258,6 +281,16 @@ impl Viewer {
                     "BLAD_TEST_STDIN",
                     format!("/proc/{}/fd/{}", std::process::id(), reader.as_raw_fd()),
                 );
+        }
+        if let Some(source) = substitution {
+            command
+                .args([
+                    "bash",
+                    "-c",
+                    "exec \"$1\" <(printf '%s' \"$BLAD_TEST_SOURCE\") \"${@:2}\"",
+                    "blad-pty",
+                ])
+                .env("BLAD_TEST_SOURCE", source);
         }
         command.arg(env!("CARGO_BIN_EXE_blad")).args(paths);
         command.args(args).envs(environment.iter().copied());
@@ -411,6 +444,124 @@ impl Viewer {
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!("viewer did not quit");
+    }
+}
+
+#[test]
+fn process_substitution_tabs_are_snapshots_with_cwd_links_and_no_editor_or_reload() {
+    let cwd = std::env::current_dir().unwrap();
+    let temp = tempfile::tempdir_in(&cwd).unwrap();
+    let target = temp.path().join("target.md");
+    let source = format!(
+        "<details><summary>Snapshot</summary>body</details>\n\n[target]({})\n\n{}",
+        target.strip_prefix(&cwd).unwrap().display(),
+        "tail\n\n".repeat(20)
+    );
+    std::fs::write(&target, "# Target").unwrap();
+    let mut viewer = Viewer::start_sources_command(
+        &[],
+        90,
+        18,
+        false,
+        &[],
+        &[("EDITOR", "/missing/should-not-run")],
+        false,
+        Some(&source),
+    );
+    assert!(viewer.screen.line(0).contains("fd/"));
+    assert!(viewer.screen.line(1).contains("Snapshot"));
+    assert!(viewer.screen.line(2).contains("body"));
+    viewer.keys(b"e");
+    assert!(viewer.child.try_wait().unwrap().is_none());
+    viewer.read_with_timeout(false, Duration::from_millis(700));
+    assert!(!(0..18).any(|row| viewer.screen.line(row).contains("Error reloading")));
+    viewer.keys_with_frame(b"/body\r");
+    assert!(viewer.screen.line(17).contains("1/1"));
+    viewer.keys_with_frame(b"\x1b");
+    viewer.keys(b"\t");
+    viewer.keys_with_frame(b"\r");
+    assert!(viewer.screen.line(1).contains("# Target"));
+    viewer.keys_with_frame(b"b");
+    assert!(viewer.screen.line(0).contains("fd/"));
+    viewer.resize(60, 16);
+    assert!(viewer.screen.line(1).contains("Snapshot"));
+    viewer.quit();
+}
+
+#[test]
+fn process_substitution_and_live_stdin_remain_distinct_tabs() {
+    let mut viewer = Viewer::start_sources_command(
+        &[std::path::Path::new("-")],
+        90,
+        14,
+        false,
+        &[],
+        &[],
+        true,
+        Some("# Snapshot\n"),
+    );
+    viewer.send_input(b"# Live\n");
+    viewer.read_update(false);
+    assert!(viewer.screen.line(1).contains("# Snapshot"));
+    viewer.keys_with_frame(b"\x1b[6;5~");
+    viewer.wait_for(|screen| screen.line(1).contains("# Live"));
+    viewer.keys_with_frame(b"q");
+    assert!(viewer.screen.line(1).contains("# Snapshot"));
+    viewer.quit();
+}
+
+#[test]
+fn html_streaming_eof_matches_a_finite_document_and_keeps_navigation() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("html.md");
+    let source = "<details>\n<summary>Summary</summary>\nbody<br>next\n\n# Inside\n\n[body](#inside)\n\n</details>\n\n<widget>unknown</widget>\n";
+    let mut viewer = Viewer::start_stream(90, 20);
+    for part in [
+        "<det",
+        "ails>\n<summary>Summary</summary>\nbody",
+        "<br>next\n\n# Inside\n\n[body](#inside)\n\n</details>\n\n<widget>unknown</widget>\n",
+    ] {
+        viewer.send_input(part.as_bytes());
+        viewer.read_update(false);
+    }
+    viewer.input.take();
+    viewer.wait_for(|screen| screen.line(19).contains("EOF"));
+    std::fs::write(&path, source).unwrap();
+    let mut finite = Viewer::start(&path, 90, 20, false);
+    for row in 1..19 {
+        assert_eq!(
+            viewer.screen.content_line(row),
+            finite.screen.content_line(row),
+            "row {row}"
+        );
+    }
+    viewer.keys(b"\t");
+    assert!(viewer.screen.line(19).contains("Links: 1/1"));
+    viewer.quit();
+    finite.quit();
+}
+
+#[test]
+fn html_inline_styles_and_strip_policy_survive_search_and_resize() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("styles.md");
+    std::fs::write(&path, "<details><summary>Summary</summary><b>B</b> <i>I</i> <del>S</del> <kbd>K</kbd> <widget>X</widget></details>\n").unwrap();
+    for strip in [false, true] {
+        let args = if strip { vec!["--strip-html"] } else { vec![] };
+        let mut viewer = Viewer::start_with(&path, 90, 14, false, &args, &[]);
+        assert!(viewer.screen.line(1).contains("Summary"));
+        assert!(viewer.screen.emphasis[1][..7].iter().all(|attrs| attrs[0]));
+        assert_eq!(viewer.screen.emphasis[2][0], [true, false, false]);
+        assert_eq!(viewer.screen.emphasis[2][2], [false, true, false]);
+        assert_eq!(viewer.screen.emphasis[2][4], [false, false, true]);
+        assert!(viewer.screen.reversed[2][6]);
+        assert_eq!(viewer.screen.line(2).contains("<widget>"), !strip);
+        viewer.keys_with_frame(b"/Summary\r");
+        assert!(viewer.screen.line(13).contains("1/1"));
+        viewer.keys_with_frame(b"\x1b");
+        viewer.resize(60, 12);
+        assert!(viewer.screen.emphasis[1][..7].iter().all(|attrs| attrs[0]));
+        viewer.quit();
     }
 }
 

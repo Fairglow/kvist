@@ -146,6 +146,19 @@ device-open effects and kernel/FUSE stalls are not isolated. Session artifact
 loading and caller-supplied rendering strings are outside these file-read
 limits; this is not an unlimited-stream or giant-file pager.
 
+Initial `/dev/fd/N` and `/proc/self/fd/N` arguments instead duplicate inherited
+descriptor `N` with close-on-exec and read a finite UTF-8 snapshot through EOF.
+Regular files and pipes are admitted; other kinds and unreadable
+descriptors fail explicitly. Reads share the inherited file offset, do not
+change its flags and apply the same inclusive 16 MiB/one-probe bound. Equivalent
+descriptor numbers reuse one tab in argument order (different descriptor
+numbers are distinct even if they refer to one object). These paths are not
+canonicalized or reopened. Snapshots finish before viewer entry/output, cannot
+be edited or automatically reloaded, and resolve relative links against the
+working directory. This is not live streaming: an idle producer can wait
+indefinitely; pipe into stdin for the live pager. Named FIFOs/devices and themes
+retain the regular-file policy.
+
 ### Options
 
 | Option | Description |
@@ -160,6 +173,7 @@ limits; this is not an unlimited-stream or giant-file pager.
 | `--math unicode\|source` | Supported mathematical text projection or original TeX; defaults to `unicode` |
 | `--mermaid text\|source` | Supported text diagrams or original source; defaults to `text` |
 | `--diagram-charset unicode\|ascii` | Structural diagram glyphs; defaults to `unicode`; preserves authored Unicode |
+| `--strip-html` | Strip unsupported HTML markup, retaining its text; default preserves literal markup |
 
 `--dump` MUST force escape-free rendered text regardless of color/theme flags.
 Automatic CLI color MUST honor a nonempty `NO_COLOR`, output TTY state and
@@ -299,7 +313,7 @@ Blad does not persist user data; all rendering operates on provided input files.
 ### Terminal Markdown profile
 
 CommonMark parsing and documented extensions are terminal projections, not
-full CommonMark/GFM conformance claims. Raw HTML is omitted; image alternative
+full CommonMark/GFM conformance claims. HTML follows the subset below; image alternative
 text remains visible without graphics. Task items retain `[x]` or `[ ]`
 markers. Tables retain source column order and honor delimiter left/center/right
 alignment as specified below. Table cells support bold, italic and strikethrough,
@@ -314,6 +328,30 @@ links and math keep their semantic colors; bold, italic, strikethrough and
 inline-code reversal compose with the footnote's prose color. After each inline
 span, footnote prose resumes its muted color. Styling ends with the definition,
 does not leak into following prose, and does not change wrapping or plain text.
+
+### HTML text subset
+
+`details` and `summary` are always expanded, not foldable. `p` and `div`
+separate text blocks; `br` creates a hard break and `hr` a text rule.
+`b`/`strong`, `i`/`em`, `s`/`strike`/`del` and `code`/`kbd`/`samp`
+apply bold, italic, strike and code-label styling respectively. Tag names are
+case-insensitive; attributes are ignored, never interpreted. These semantics
+also apply in table cells (block boundaries become cell line breaks; code
+labels retain the reduced styling of Markdown code cells).
+
+Other markup, including HTML tables, anchors, images, comments, declarations,
+scripts and styles, is literal source by default, not browser rendering.
+`RenderOptions::strip_html` / `--strip-html` removes unsupported markup only;
+text contents remain visible. Script/style/textarea contents remain literal,
+not recursively interpreted as HTML. No HTML attribute creates navigation or
+resource access. Markdown inside raw HTML blocks follows CommonMark's block
+rules: separate Markdown bodies from wrapper tags with blank lines.
+
+Raw HTML text decodes `amp`, `lt`, `gt`, `quot`, `apos`, `nbsp` and valid decimal/
+hexadecimal numeric entities; other entities remain source. Incomplete/malformed
+markup remains visible even when stripping. Inline style nesting is limited to
+64; unmatched closing or over-limit style tags use unsupported-markup handling.
+Code/frontmatter remain literal. Source controls are inert in either policy.
 
 ### YAML frontmatter
 

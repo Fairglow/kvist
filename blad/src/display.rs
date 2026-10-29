@@ -8,7 +8,7 @@ use std::io::{self, IsTerminal, Write};
 use std::time::{Duration, Instant};
 
 use crate::RenderOptions;
-use crate::links::{Link, extract_links};
+use crate::links::{Link, extract_links_with_html};
 use crate::markdown::{MarkdownRenderer, inert_source};
 use crate::search::Search;
 #[cfg(feature = "sessions")]
@@ -84,7 +84,10 @@ pub fn view_markdown_files_with_options(
     };
     let files = load_files(paths, interactive)?;
     if interactive {
-        let stream = if files.iter().any(|file| file.path.is_none()) {
+        let stream = if files
+            .iter()
+            .any(|file| file.path.is_none() && file.descriptor.is_none())
+        {
             let keyboard = keyboard.as_ref().ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -189,6 +192,7 @@ fn run_viewer(
 ) -> io::Result<()> {
     let files = vec![OpenFile {
         path: path.map(std::fs::canonicalize).transpose()?,
+        descriptor: None,
         content: content.to_string(),
         position: Position::default(),
     }];
@@ -224,6 +228,7 @@ fn run_open_files(
             anchor.take(),
             &mut painter,
             &mut stream,
+            file.descriptor.is_none(),
         )?;
         match action {
             ViewerAction::Quit => {
@@ -236,6 +241,7 @@ fn run_open_files(
                     return stream.map_or(Ok(()), StdinStream::finish);
                 }
                 if files[active].path.is_none()
+                    && files[active].descriptor.is_none()
                     && let Some(stream) = &mut stream
                 {
                     stream.stop();
@@ -274,6 +280,7 @@ fn run_open_files(
                         read_document_source(&path).map(|content| {
                             files.push(OpenFile {
                                 path: Some(path),
+                                descriptor: None,
                                 content,
                                 position: Position::default(),
                             });
@@ -322,6 +329,7 @@ fn viewer_session(
     anchor: Option<String>,
     painter: &mut Painter,
     stream: &mut Option<StdinStream>,
+    can_stream: bool,
 ) -> io::Result<ViewerAction> {
     use crossterm::event::{
         self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
@@ -329,7 +337,7 @@ fn viewer_session(
     };
 
     let (mut cols, mut rows) = crossterm::terminal::size()?;
-    let stdin_tab = path.is_none() && stream.is_some();
+    let stdin_tab = can_stream && path.is_none() && stream.is_some();
     let source = current_source(content, stream, stdin_tab);
     let mut document =
         Document::render_with_options(source, cols, line_numbers, width_limit, options)?;
@@ -351,7 +359,7 @@ fn viewer_session(
     let mut help_document = Document::render_with_options(HELP, cols, false, width_limit, options)?;
 
     // Source offsets identify actual rendered link spans, including duplicates.
-    let mut links = extract_links(&inert_source(source));
+    let mut links = extract_links_with_html(&inert_source(source), options.strip_html);
     let mut spans: Vec<_> = links
         .iter()
         .map(|link| link_spans(&document, link))
@@ -376,7 +384,7 @@ fn viewer_session(
                 width_limit,
                 options,
             )?;
-            links = extract_links(&inert_source(stream.source()));
+            links = extract_links_with_html(&inert_source(stream.source()), options.strip_html);
             spans = links
                 .iter()
                 .map(|link| link_spans(&document, link))
@@ -408,7 +416,7 @@ fn viewer_session(
                     scroll_offset =
                         scroll_offset.min(document.lines.len().saturating_sub(visible_lines));
                     scroll_x = scroll_x.min(document.max_x());
-                    links = extract_links(&inert_source(content));
+                    links = extract_links_with_html(&inert_source(content), options.strip_html);
                     spans = links
                         .iter()
                         .map(|link| link_spans(&document, link))
@@ -920,7 +928,8 @@ fn viewer_session(
                     && let Some(stream) = stream.as_ref()
                     && refresh.pending(stream.revision)
                 {
-                    links = extract_links(&inert_source(stream.source()));
+                    links =
+                        extract_links_with_html(&inert_source(stream.source()), options.strip_html);
                     selected_link = None;
                     link_index = 0;
                 }

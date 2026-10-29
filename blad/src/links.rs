@@ -146,7 +146,12 @@ pub fn resolve_file(base: Option<&Path>, destination: &str) -> PathBuf {
 /// Inline code and emphasis inside a link label are captured as text, so the
 /// label of ``[`foo.rs`](foo.rs)`` is `foo.rs` rather than an empty string.
 pub fn extract_links(source: &str) -> Vec<Link> {
+    extract_links_with_html(source, false)
+}
+
+pub(crate) fn extract_links_with_html(source: &str, strip_html: bool) -> Vec<Link> {
     let parser = crate::frontmatter::events(source, parser_options());
+    let mut html = crate::html::Html::default();
     let mut links = Vec::new();
     let mut current_text = String::new();
     let mut in_link = false;
@@ -155,7 +160,7 @@ pub fn extract_links(source: &str) -> Vec<Link> {
     let mut link_line = 0;
     let mut link_offset = 0;
 
-    for (event, range) in crate::scripts::events(source, parser) {
+    for (event, range) in crate::html::events(crate::scripts::events(source, parser)) {
         match event {
             Event::Start(Tag::Link { dest_url, .. }) => {
                 in_link = true;
@@ -188,8 +193,15 @@ pub fn extract_links(source: &str) -> Vec<Link> {
                 current_text.push_str(&text);
             }
             Event::SoftBreak | Event::HardBreak if in_link => current_text.push(' '),
-            Event::InlineHtml(html) if in_link => {
-                current_text.push_str(&html);
+            Event::Html(source) | Event::InlineHtml(source) => {
+                for piece in html.project(&source, strip_html) {
+                    if in_link {
+                        match piece {
+                            crate::html::Piece::Text(text, _) => current_text.push_str(&text),
+                            _ => current_text.push(' '),
+                        }
+                    }
+                }
             }
             // Bare autolinks: a plain-text run that is not already inside a
             // link or a code block may contain a bare `http(s)://` URL.
@@ -269,19 +281,34 @@ pub(crate) fn parser_options() -> Options {
         | Options::ENABLE_GFM
 }
 
-pub(crate) fn heading_anchors(source: &str) -> std::collections::BTreeMap<usize, Vec<String>> {
+pub(crate) fn heading_anchors(
+    source: &str,
+    strip_html: bool,
+) -> std::collections::BTreeMap<usize, Vec<String>> {
     let mut anchors = std::collections::BTreeMap::new();
     let mut used = std::collections::BTreeSet::new();
     let mut suffixes = std::collections::BTreeMap::<String, usize>::new();
     let mut heading = None;
     let mut label = String::new();
-    for (event, range) in crate::frontmatter::events(source, parser_options()) {
+    let mut html = crate::html::Html::default();
+    for (event, range) in crate::html::events(crate::frontmatter::events(source, parser_options()))
+    {
         match event {
             Event::Start(Tag::Heading { id, .. }) => {
                 heading = Some((range.start, id.map(|id| id.to_string())));
                 label.clear();
             }
             Event::Text(text) | Event::Code(text) if heading.is_some() => label.push_str(&text),
+            Event::Html(source) | Event::InlineHtml(source) => {
+                for piece in html.project(&source, strip_html) {
+                    if heading.is_some() {
+                        match piece {
+                            crate::html::Piece::Text(text, _) => label.push_str(&text),
+                            _ => label.push(' '),
+                        }
+                    }
+                }
+            }
             Event::SoftBreak | Event::HardBreak if heading.is_some() => label.push(' '),
             Event::End(TagEnd::Heading(_)) => {
                 if let Some((offset, explicit)) = heading.take() {
@@ -357,9 +384,18 @@ mod tests {
 
     #[test]
     fn heading_ids_disambiguate_duplicates_and_preserve_unicode() {
-        let anchors = heading_anchors("# Hello, 世界!\n\n## Hello, 世界!\n\n## Explicit {#custom}");
+        let anchors = heading_anchors(
+            "# Hello, 世界!\n\n## Hello, 世界!\n\n## Explicit {#custom}",
+            false,
+        );
         let ids: Vec<_> = anchors.values().flatten().map(String::as_str).collect();
         assert_eq!(ids, ["hello-世界", "hello-世界-1", "explicit", "custom"]);
+    }
+
+    #[test]
+    fn multiline_html_comments_do_not_change_following_heading_ids() {
+        let anchors = heading_anchors("<!--\n<script>\n-->\n\n# <b>Heading</b>\n", false);
+        assert_eq!(anchors.values().flatten().collect::<Vec<_>>(), ["heading"]);
     }
 
     #[test]

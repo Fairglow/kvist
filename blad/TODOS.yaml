@@ -10,6 +10,46 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "html-fd-write-tests"
+    title: "write_tests: reproduce HTML loss and process-substitution failure"
+    description: "Pin R-077 HTML projection/source fallback/stripping and R-078 inherited descriptor snapshots through library, CLI and PTY tests."
+    kind: test
+    status: completed
+    context: "Reproduced process-substitution canonicalization failure, absent strip-html CLI option and all five initial HTML failures before production code. Two later multiline-comment navigation regressions reproduced the independent observer finding before repair."
+    purpose: "Prevent disappearing HTML sections and rejected inherited pipe paths."
+    expected_outcome: "Fail-first library, CLI and PTY assertions cover R-077/R-078 without relaxing ordinary file/theme safety."
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+  - id: "html-fd-implement-code"
+    title: "implement_code: preserve HTML and snapshot inherited descriptors"
+    description: "Implement bounded inert HTML projection, strip-html CLI/library policy and finite descriptor inputs without relaxing ordinary file/theme policy; update user documentation."
+    kind: implementation
+    status: completed
+    context: "HTML projection and typed strip policy implemented across rendering/navigation; descriptor snapshots remain finite and separate from stdin. Final nextest passed 366 all-feature and 345 default-feature tests, with three existing opt-in skips each; strict Clippy, formatter and rustdoc passed. Updated intent is not accepted; prior component revision metadata is retained."
+    purpose: "Recover useful text and shell input without browser execution or broad device reads."
+    expected_outcome: "R-077/R-078 behavior, errors and documentation are consistent through CLI/library/viewer surfaces."
+    depends_on: ["html-fd-write-tests"]
+    requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+  - id: "html-fd-security-audit"
+    title: "security_audit: derive independent source-only observations"
+    description: "Independently derive a scoped IMPL supplement from source/tests only; exclude intent, queue, prior records, chat and history."
+    kind: security-audit
+    status: completed
+    context: "Independent source-only blad-source-observer derived the scoped IMPL supplement without intent/history/prior records or test execution. It found missing HTML-event joining in navigation; regressions reproduced both failures and the implementer repaired them. Final repair/attribute/entity refinements are explicitly attributed rather than claimed independently re-observed."
+    purpose: "Retain independent observations of HTML safety and raw-descriptor ownership."
+    expected_outcome: "Source-derived observations, concrete findings and evidence limits remain durable."
+    depends_on: ["html-fd-implement-code"]
+    requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+  - id: "html-fd-compliance-review"
+    title: "compliance_review: compare HTML and descriptor evidence"
+    description: "Separately compare local intent with independently observed behavior and execution evidence without source access; retain discrepancies without claiming acceptance."
+    kind: compliance-review
+    status: completed
+    context: "Separate source-blind blad-intent-comparator found broad scoped alignment and one numeric-entity length discrepancy, retained in IMPL for explicit disposition. Implementer reproduced long zero-padded numeric failure, repaired the decoder without narrowing intent and reran both feature suites/lints successfully. Navigation repair and final refinements remain attributed, not independently re-observed; finite evidence limits persist. No receipt, acceptance or compliance certification is claimed."
+    purpose: "Compare final intended behavior against independent observations and attributed execution."
+    expected_outcome: "Scoped discrepancies and evidence limitations are recorded for human arbitration."
+    depends_on: ["html-fd-security-audit"]
+    requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
   - id: "mermaid-discovery-write-tests"
     title: "write_tests: reproduce absent default scheduling policy"
     description: "Pin canonical nextest discovery, Git visibility and consistent repository entrypoints before relocating policy."

@@ -9,6 +9,47 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+### HTML and inherited-descriptor fixes (2026-10-29)
+
+This user-directed increment uses a deliberate advisory exception while receipt
+enforcement is unavailable; no review receipt or acceptance is claimed. It
+implements R-077/R-078, not the entire earlier useful-subset backlog.
+
+Add a private linear HTML scanner shared by rendering and inline-label
+extraction. Scan only parser HTML payloads, respecting quoted `>` characters,
+comments and raw script/style/textarea text across parser chunks. Emit literal
+text, bounded style transitions, block boundaries, breaks and rules; retain
+source for unsupported/malformed tokens unless explicit stripping applies.
+Decode the documented entity subset only in text, then pass it through the
+existing inert-text boundary. Keep HTML style state separate from Markdown
+style counters so unmatched HTML cannot cancel Markdown emphasis. Bound the
+style stack at 64; do not recursively parse HTML or execute attributes.
+HTML blocks finish pending inline output; block boundaries break only nonempty
+lines, while explicit br preserves empty lines. Tables use the same projection
+and span machinery. Preserve raw block text rather than inventing Markdown
+semantics within CommonMark HTML blocks.
+
+Recognize only exact initial /dev/fd/N and /proc/self/fd/N spellings with
+nonnegative decimal descriptor numbers fitting RawFd. Duplicate with
+F_DUPFD_CLOEXEC, not canonicalize/open on proc magic links. Two narrowly scoped
+unsafe operations are necessary to receive an arbitrary raw inherited number:
+fcntl takes only integer arguments and validates invalid/closed numbers in the
+kernel; File::from_raw_fd takes exclusive ownership only after a nonnegative
+successful result. No borrowed descriptor is constructed from an unchecked
+number. No crate-level guard is relaxed. Use safe Rustix access-mode checks
+and opened-descriptor metadata thereafter; do not mutate shared status flags. Read with
+the existing bounded reader (readiness wait for inherited nonblocking streams),
+then validate UTF-8. Reject character/block devices, directories and unsupported
+socket descriptors before reading. Preserve ordinary file/theme/link policy.
+Keep descriptor identity separate from the optional reload/edit path and stdin
+identity. Snapshot tabs have labels but no file path; stdin alone owns live
+ingestion. Relative links therefore resolve from cwd. Do not retain descriptor
+duplicates after snapshot completion or supervise/kill producers.
+
+Write fail-first library/CLI/PTY regressions before production code. Follow
+with independent source-only implementation observations and a separate
+source-blind comparison; neither is acceptance or compliance certification.
+
 Blad is an interactive terminal Markdown viewer with search, navigation, tabs,
 and optional external editing. It uses crossterm for terminal interaction and
 pulldown-cmark for parsing.

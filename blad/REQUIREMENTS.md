@@ -58,7 +58,7 @@ Blad must provide the following capabilities:
 ### Markdown Rendering
 
 14. **R-014 CommonMark:** Parse CommonMark and document its terminal projection:
-    raw HTML is omitted and images display alternative text, not graphics.
+    HTML follows R-077 and images display alternative text, not graphics.
 15. **R-015 GitHub Flavored Markdown:** Support documented extensions including
     tables, strikethrough, task lists, autolinks, footnotes, superscript,
     subscript, and alert blockquotes ([!NOTE], [!TIP], etc.). This is not a
@@ -315,13 +315,13 @@ specified in R-069 through R-072, without another feature toggle.
     into a successful document. Check both opened-file size and actual bytes
     read, consuming at most the limit plus one probe byte if size information
     understates the stream. Apply the limit before UTF-8 decoding and rendering.
-    All initial named files must validate before terminal entry; all inputs
+    All initial named files and descriptor snapshots must validate before terminal entry; all inputs
     must validate before dump/noninteractive output. Live stdin is the
     explicitly incremental exception described in R-069;
     link/reload failure retains the previous usable document and tab/history
     structure. Existing editor-error propagation/restoration remains unchanged.
 57. **R-057 Regular-file inputs:** All standalone document and explicit theme
-    reads must open nonblockingly, reject final symlinks at the opened path,
+    reads, except R-078 inherited descriptors, must open nonblockingly, reject final symlinks at the opened path,
     validate the opened descriptor as regular and read that same descriptor.
     Preserve canonical resolution of explicitly selected initial files,
     file-link destinations and theme paths, including authored symlinks.
@@ -544,6 +544,33 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     link/heading navigation exits from search. Cover effective current/passive
     attributes, same-row and wrapped navigation, styles/Unicode, search phases,
     errors, multi-tab safety, refresh and quit behavior through persistent tests.
+
+### HTML and shell process substitution
+
+77. **R-077 Inert HTML projection:** Show details/summary bodies expanded,
+    regardless of `open`; support paragraph/division boundaries, line breaks,
+    horizontal rules and common inline emphasis/code labels as a documented
+    text-only subset. Unsupported HTML remains visible as literal source by
+    default. An explicit CLI/library option strips unsupported markup but keeps
+    its text content. Never execute scripts, interpret attributes/CSS, fetch
+    resources or create HTML link navigation. Preserve unknown entities and
+    malformed/incomplete markup rather than losing text. Keep code/frontmatter
+    literal, existing Markdown navigation, table geometry, terminal-control
+    safety, writer/cancellation errors and streaming EOF equivalence. Use a
+    linear scanner with bounded style nesting; no browser or new dependency.
+78. **R-078 Inherited descriptor snapshots:** Initial `/dev/fd/N` and
+    `/proc/self/fd/N` arguments read the inherited readable descriptor directly,
+    without canonicalizing its pipe/socket pseudo-target. Support regular files,
+    and pipes with the same inclusive 16 MiB/UTF-8/probe rules.
+    Snapshot through EOF before output/viewer entry; deduplicate descriptor
+    numbers, preserve argument order and do not consume unrelated stdin.
+    Descriptor tabs are not files: no automatic reload/editor handoff, and
+    relative Markdown links use the working directory. Closed, write-only and
+    unsupported descriptors fail explicitly. Ordinary device/FIFO/theme paths
+    retain R-057. Cover real Bash process substitution, multiple descriptors,
+    malformed/oversized input, plain/color output and interactive navigation.
+    This is finite snapshot input, not a live process-substitution pager or a
+    hard I/O deadline; use stdin for interactive live streaming.
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).

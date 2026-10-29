@@ -46,8 +46,10 @@
 //! Width and syntax-theme choices persist when options are replaced.
 //!
 //! CommonMark parsing and selected extensions are terminal projections, not
-//! full CommonMark/GFM conformance: raw HTML is omitted (table-cell `<br>` is a
-//! line-break exception), images show alternative text only, and table cells
+//! full CommonMark/GFM conformance: a small inert HTML subset includes expanded
+//! details/summary, breaks and inline styles; unsupported markup stays literal
+//! unless [`RenderOptions::strip_html`] is enabled. HTML never executes or
+//! fetches resources. Images show alternative text only, and table cells
 //! have no dedicated inline-code appearance or nonbreaking code spans. Tables
 //! honor delimiter alignment and bold/italic/strikethrough combinations.
 //! A leading YAML frontmatter block is displayed as literal highlighted YAML,
@@ -82,9 +84,11 @@ pub use theme::{
 };
 
 mod browser;
+mod descriptor_input;
 mod diagram;
 mod file_input;
 mod frontmatter;
+mod html;
 mod inline;
 pub mod logging;
 mod math;

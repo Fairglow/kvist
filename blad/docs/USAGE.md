@@ -201,6 +201,26 @@ expansion, search/rendering time or kernel/FUSE I/O latency. This is not an
 unlimited-stream or giant-file pager. Strings supplied directly to the rendering library are outside
 these file-read limits.
 
+### Shell process substitution
+
+```bash
+blad <(printf '# Generated\n\nContent\n')
+blad --dump <(cmd ...)
+```
+
+Initial `/dev/fd/N` and `/proc/self/fd/N` paths use the inherited descriptor,
+not canonicalized pipe pseudo-paths. Readable regular files and pipes are
+supported; closed/write-only descriptors, devices, directories and sockets fail
+explicitly. Equivalent descriptor numbers are read once in argument order,
+without consuming unrelated stdin. Reads share the inherited file offset and
+do not change its status flags. The same inclusive 16 MiB and UTF-8 limits apply.
+
+These are finite snapshots: Blad waits for EOF before output or viewer entry.
+An idle producer can therefore wait indefinitely. Use `cmd ... | blad` for the
+live stdin pager. Descriptor tabs have no editable/reloadable file path and
+resolve relative Markdown links against the working directory. Ordinary named
+FIFOs/devices and theme files retain the regular-file checks.
+
 ## Global Options
 
 | Option | Description |
@@ -215,6 +235,7 @@ these file-read limits.
 | `--math unicode\|source` | Mathematical projection policy; default `unicode` |
 | `--mermaid text\|source` | Diagram projection policy; default `text` |
 | `--diagram-charset unicode\|ascii` | Structural glyphs, not authored labels; default `unicode` |
+| `--strip-html` | Strip unsupported HTML markup, keeping its text; default preserves literal source |
 
 ```bash
 blad --theme light --line-numbers document.md
@@ -766,9 +787,34 @@ projection, **not full CommonMark/GFM conformance**:
 - Math expressions (inline `$...$` and display `$$...$$`)
 - Horizontal rules (`***` renders as a stronger double line than `---`)
 
-Raw HTML is omitted rather than rendered or executed; inline `<br>` variants
-in table cells are the line-break exception. Images are alternative text only,
-not downloaded graphics or terminal image protocols.
+HTML has a small, inert text-only projection:
+
+| Elements | Terminal behavior |
+|----------|-------------------|
+| `details`, `summary` | Always-expanded body and bold summary; no folding |
+| `p`, `div` | Text-block boundaries |
+| `br`, `hr` | Hard line break / text rule |
+| `b`, `strong`; `i`, `em`; `s`, `strike`, `del` | Bold; italic; strikethrough |
+| `code`, `kbd`, `samp` | Code-label styling (ordinary text in table cells) |
+
+Names are case-insensitive. Attributes, including `open`, CSS and event
+handlers, are ignored. Unsupported HTML (including HTML tables, anchors, images,
+comments, scripts and styles) remains visible as literal source by default,
+subject to normal prose wrapping. `--strip-html` removes unsupported markup,
+not its contents. It does not strip supported elements' text projection.
+Malformed/incomplete tokens remain visible. Script/style/textarea contents are
+not recursively interpreted as HTML. No HTML executes, fetches resources or
+creates link navigation; use Markdown links for navigation. Keep blank lines
+between HTML wrappers and Markdown bodies to follow CommonMark block rules.
+
+Raw HTML text decodes `amp`, `lt`, `gt`, `quot`, `apos`, `nbsp` and valid decimal/
+hex numeric entities; unknown/invalid entities remain source. Inline styles
+nest up to 64 levels; over-limit tags and unmatched closing tags use the
+unsupported-markup policy. Code and YAML frontmatter stay literal. Plain/color,
+table wrapping, search, resize and stdin snapshots use the same projection.
+The library equivalent is `RenderOptions::strip_html` (default `false`).
+Images expressed in Markdown are alternative text only, not downloaded graphics
+or terminal image protocols.
 
 ### Rendering appearance
 

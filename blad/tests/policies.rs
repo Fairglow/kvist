@@ -133,7 +133,7 @@ fn script_math_html_and_authored_unicode_boundaries_remain_distinct() {
         .unwrap();
     assert_eq!(
         String::from_utf8(plain).unwrap().trim(),
-        "x^2^ x^2^ x^(a~2~) x^(中)"
+        "x^<span>2</span>^ x^<!--hidden-->2^ x^(a~2~) x^(中)"
     );
 }
 

@@ -4,6 +4,12 @@
 
 First standalone crates.io release candidate, not yet published.
 
+- Preserve unsupported HTML literally by default, with `--strip-html` to remove
+  markup without losing text. Render expanded details/summary, block/line
+  breaks, rules and common inline styles without executing HTML or attributes.
+- Read Bash process substitutions and inherited descriptor paths as bounded
+  UTF-8 snapshots, without canonicalizing pipe pseudo-targets or enabling
+  device/FIFO reads, editing or automatic reload.
 - Package name `kvist-blad`; executable and Rust library remain `blad`.
 - Local Markdown viewing, stable tabs, literal/regex search, precise links,
   heading navigation and external editing.

@@ -4,6 +4,81 @@ fn blad() -> Command {
     Command::new(env!("CARGO_BIN_EXE_blad"))
 }
 
+#[test]
+fn bash_process_substitution_is_a_bounded_ordered_descriptor_snapshot() {
+    let output = output_before_deadline(
+        Command::new("bash")
+            .args([
+                "-c",
+                "exec \"$1\" --dump <(printf '# First\\n') <(printf '# Second\\n')",
+                "blad-test",
+            ])
+            .arg(env!("CARGO_BIN_EXE_blad")),
+    );
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b"# First\n# Second\n");
+}
+
+#[test]
+fn descriptor_aliases_reuse_one_snapshot_and_do_not_canonicalize_regular_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("input");
+    std::fs::write(&path, "# Descriptor\n").unwrap();
+    let output = blad()
+        .args(["--dump", "/dev/fd/0", "/proc/self/fd/0"])
+        .stdin(std::fs::File::open(&path).unwrap())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b"# Descriptor\n");
+}
+
+#[test]
+fn descriptor_errors_are_explicit_and_never_output_a_valid_prefix() {
+    for script in [
+        "exec \"$1\" --dump <(printf '# Valid\\n') <(printf '\\377')",
+        "exec \"$1\" --dump <(head -c 16777217 /dev/zero)",
+        "exec \"$1\" --dump /dev/fd/999999",
+        "exec \"$1\" --dump /dev/fd/1",
+    ] {
+        let output = output_before_deadline(
+            Command::new("bash")
+                .args(["-c", script, "blad-test"])
+                .arg(env!("CARGO_BIN_EXE_blad")),
+        );
+        assert_eq!(output.status.code(), Some(1), "{script}: {output:?}");
+        assert!(output.stdout.is_empty(), "{output:?}");
+        assert!(!output.stderr.is_empty() && !output.stderr.contains(&0x1b));
+    }
+}
+
+#[test]
+fn strip_html_keeps_text_but_removes_only_unsupported_markup() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("html.md");
+    std::fs::write(
+        &path,
+        "<details><summary>Summary</summary><custom title=\"a > b\">content</custom><br>tail</details>\n\n<!-- multi\nline -->\n\n<script>literal '<br>'</script>\n",
+    )
+    .unwrap();
+    let output = blad()
+        .args(["--dump", "--strip-html"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("Summary") && text.contains("content\ntail"),
+        "{text:?}"
+    );
+    assert!(text.contains("literal '<br>'"), "{text:?}");
+    assert!(
+        !text.contains("custom") && !text.contains("<!--") && !text.contains("<script>"),
+        "{text:?}"
+    );
+}
+
 fn output_before_deadline(command: &mut Command) -> std::process::Output {
     use std::process::Stdio;
     use std::time::{Duration, Instant};
@@ -181,6 +256,7 @@ fn help_and_version_work_without_opening_files_or_themes() {
         "--math",
         "--mermaid",
         "--diagram-charset",
+        "--strip-html",
         "--line-numbers",
         "--version",
     ] {

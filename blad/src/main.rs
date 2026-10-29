@@ -56,6 +56,10 @@ pub struct Cli {
     #[clap(long, global = true, value_enum, default_value = "unicode")]
     diagram_charset: DiagramCharset,
 
+    /// Strip unsupported HTML markup, retaining its text contents
+    #[clap(long, global = true)]
+    strip_html: bool,
+
     /// Files in tab order; '-' reads redirected stdin (also used with no files)
     #[arg(value_name = "FILE", num_args = 1..)]
     files: Vec<PathBuf>,
@@ -121,6 +125,7 @@ fn render_options(cli: &Cli) -> std::io::Result<RenderOptions> {
         math: cli.math,
         mermaid: cli.mermaid,
         diagram_charset: cli.diagram_charset,
+        strip_html: cli.strip_html,
         palette: file
             .map(|file| file.palette(blad::Palette::for_theme(theme)))
             .transpose()?,
