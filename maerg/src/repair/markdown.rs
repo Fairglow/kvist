@@ -58,11 +58,6 @@ pub(super) fn candidate(path: &str, contents: &str) -> std::result::Result<Candi
     });
     if let Some(kind) = kind {
         if !component_documents::validate(kind, &recovered).is_valid() {
-            if recovered.lines().any(|line| {
-                line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~")
-            }) {
-                return Err("required-section repair with fenced content is ambiguous; use an approved reset rather than guessing at code/prose boundaries".to_owned());
-            }
             recovered = sections(kind, &recovered, &mut reasons);
         }
         let validation = component_documents::validate(kind, &recovered);
@@ -76,7 +71,10 @@ pub(super) fn candidate(path: &str, contents: &str) -> std::result::Result<Candi
             .lines()
             .find(|line| line.starts_with("# "))
             .ok_or("native template has no document heading")?;
-        if !recovered.lines().any(|line| line == heading) {
+        if !crate::markdown_structure::scan(&recovered)
+            .iter()
+            .any(|line| line.heading == Some(1) && line.text == heading)
+        {
             recovered = format!(
                 "{marker}\n{heading}\n\n{}",
                 recovered
@@ -105,11 +103,11 @@ fn sections(kind: DocumentKind, contents: &str, reasons: &mut Vec<String>) -> St
     let mut seen = vec![false; headings.len()];
     let mut extra = String::new();
     let mut current = None;
-    for line in contents.lines() {
-        if let Some(index) = headings
-            .iter()
-            .position(|heading| line.trim().eq_ignore_ascii_case(heading))
-        {
+    for structural in crate::markdown_structure::scan(contents) {
+        let line = structural.text;
+        if let Some(index) = headings.iter().position(|heading| {
+            structural.heading == Some(2) && line.trim().eq_ignore_ascii_case(heading)
+        }) {
             if seen[index] {
                 reasons.push(format!(
                     "merge duplicate `{}` without discarding its paragraphs",
@@ -121,7 +119,7 @@ fn sections(kind: DocumentKind, contents: &str, reasons: &mut Vec<String>) -> St
             seen[index] = true;
             current = Some(index);
         } else {
-            if line.starts_with("## ") {
+            if structural.heading.is_some_and(|level| level <= 2) {
                 current = None;
             }
             let destination = current
@@ -137,8 +135,10 @@ fn sections(kind: DocumentKind, contents: &str, reasons: &mut Vec<String>) -> St
         let mut lines = vec![*heading];
         lines.extend(bodies[index].lines());
         if !component_documents::section_has_content(&lines, 0) {
-            output.push_str("Recovery draft: this required section was missing or empty. Review retained material before accepting.\n\n");
-            reasons.push(format!("add explicitly labeled recovery draft content to `{heading}`; no stakeholder intent is inferred"));
+            output.push_str(&crate::markdown_structure::draft(&format!(
+                "required section `{heading}` was missing or empty; review retained material"
+            )));
+            reasons.push(format!("add a valid but blocking recovery placeholder to `{heading}`; no stakeholder intent is inferred"));
         }
         output.push_str(&bodies[index]);
     }

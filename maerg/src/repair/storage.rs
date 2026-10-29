@@ -15,7 +15,7 @@ use nix::{
     fcntl::{OFlag, open, openat},
     sys::stat::Mode,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{Operation, failure};
@@ -25,7 +25,8 @@ const MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_SNAPSHOT_ENTRIES: usize = 100_000;
 pub(super) const MAX_TEXT_BYTES: u64 = 1024 * 1024;
 
-#[derive(Debug, Clone, Eq, Serialize)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Snapshot {
     pub kind: String,
     pub digest: String,

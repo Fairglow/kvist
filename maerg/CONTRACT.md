@@ -133,7 +133,8 @@ The `kvist` executable provides (the authoritative design is
 - `reverse-discover PATH`
 - `doctor [PROJECT_DIR]`
 - `repair [PROJECT_DIR] [--dry-run] [--salvage] [--reset PATH]...
-  [--clean-slate] [--component-root PATH] [--backup-dir PATH] [--approve SHA256]`
+  [--clean-slate] [--component-root PATH] [--backup-dir PATH] [--approve SHA256]
+  [--ai PROFILE] [--proposal PATH]`
 - `status [PROJECT_DIR] [--format overview|text|json] [--only-documents]
 [--only-impls] [--unfinished]`; the default format is the human-friendly
   overview, and `text`/`json` are the stable report forms for scripts
@@ -297,9 +298,18 @@ configuration inside a project and on the global user configuration outside one
 
 `repair` leaves valid queues exact and automatically normalizes invalid set
 lists and dependency declaration order when strict validation of the candidate
-succeeds. `--salvage` proposes additional queue reconciliation and removal of
+succeeds. Comprehensive salvage planning is enabled by default; `--salvage`
+explicitly requests that same default. Salvage proposes reconciliation and removal of
 unrecoverable tasks and affected dependants. It preserves valid task identities,
 statuses and dependency edges rather than inventing successful verification.
+Missing or invalid timestamps instead propose retaining the task as blocked,
+with epoch recovery-record timestamps, null completion, and
+`timestamps.recovered: true`. This optional boolean defaults to false and is
+omitted when false. True permanently identifies unavailable original timestamp
+history; epoch values are synthetic unknowns, not observed dates. Future explicit
+task transitions record their real update/completion times without clearing this
+provenance. Original claimed status and the unknown-history explanation are shown
+in the proposal and blocker; originals remain in the backup.
 `--reset PATH` (repeatable, project-relative) proposes replacement of a named
 root/component artifact with its native draft template; `--clean-slate` proposes
 all root/component templates plus archiving project-owned `.kvist` and
@@ -307,16 +317,23 @@ all root/component templates plus archiving project-owned `.kvist` and
 Unknown versions require explicit reset, not migration. Reset queue revisions
 are deliberately unaccepted. Existing execution effects remain unknown.
 
-For invalid Markdown, `--salvage` proposes native markers/headings and
+For invalid Markdown, default salvage proposes native markers/headings and
 canonical required sections while preserving prose and unknown sections.
-Missing/empty sections receive explicit recovery-draft placeholders. Known
-unsupported versions are not relabeled; complex fenced section rewrites fall
-back to reset instead of guessing. Markdown candidates pass native validation.
+Missing/empty sections and reset drafts receive visible recovery-draft prose and
+`<!-- kvist-recovery-blocker: REASON -->` on its own line outside code fences.
+These documents pass structural validation but report blocked readiness.
+Acceptance and task execution refuse unresolved local intent/record blockers,
+immediate-parent contract blockers and global project-intent blockers. Removing
+all active markers after resolving their content removes this specific gate;
+ordinary revision acceptance is still required. Marker examples inside fenced
+code are inert. Subordinate headings remain inside their required section, and
+fenced example headings cannot satisfy required sections. Known unsupported
+versions are not relabeled. Fenced text is retained during structural salvage.
 
 Salvage/reset/clean-slate are proposals until `--approve SHA256` matches the
 displayed plan token. The token binds the canonical project location, exact
 original object digests, proposed replacements, reasons and archive scope.
-No proposed operation is applied without approval; `--dry-run` never writes,
+No destructive proposed operation is applied without approval; `--dry-run` never writes,
 even with approval. Rerun the same options with the token to apply. Input changes
 invalidate it. Resetting a queue with retained execution evidence requires
 clean slate, not an ordinary reset that would orphan that evidence.
@@ -332,6 +349,34 @@ The command exits nonzero while any structural artifact problem, discovery
 failure or unapplied proposal remains. JSON retains `state_before`, `state_after`,
 `queues`, `remaining` and adds `plan`, `approval`, and `backup`. Structural
 validity does not assert readiness, acceptance, environmental health or compliance.
+`blockers` reports structurally valid recovery drafts separately from `remaining`;
+structural recovery can succeed while documents/tasks remain blocked.
+Component-validation JSON keeps structural `valid` separate from readiness
+`blocked` and `blockers`; status components also expose `recovery_blockers` paths.
+
+`repair --ai PROFILE --proposal PATH` optionally stages a new, private JSON
+proposal using a native profile from the shared project/user registry, independent
+of `kvist.toml`. PATH must be outside managed artifacts and workflow/VCS storage,
+with real existing directory parents; an existing file is never overwritten.
+Only deterministic failures or data-discarding salvage qualify. Each inference
+contains one target and its local intent bundle, nearest parent contract and root
+contract, never peer internals, and has no tools or workspace executor. There are
+at most eight targets, 64 KiB per target, 256 KiB per context, 256 KiB per response,
+8192 output tokens and a shared 120-second inference deadline. Configured context
+capacity is honored; absent capacity uses an explicit provisional 32768-token
+bound, not a discovery prerequisite. Invalid/unsupported or oversized inputs and
+invalid responses fail without managed writes. AI does not edit execution evidence
+or change queue schema.
+
+`repair --proposal PATH` validates and previews that frozen proposal;
+`repair --proposal PATH --approve SHA256` applies it without inference, using
+ordinary exact-input approval, evidence guards and verified backups. Source,
+context or proposal changes invalidate approval. AI Markdown remains blocked;
+AI queue tasks are blocked with unknown-history provenance and stale revisions,
+never fabricated completion. `--ai` cannot accompany approval, dry-run, reset or
+clean slate; `--proposal` cannot accompany reset or clean slate. Staging is the
+only explicitly requested unapproved write and never overwrites an existing file.
+On failure, deterministic reset/clean slate remain the backed-up fallback.
 Inventory respects project `.gitignore` directory exclusions so ignored scratch
 worktrees are not implicitly repaired. The ignore policy also binds approval.
 Explicitly configured/selected component roots remain inspectable even beneath

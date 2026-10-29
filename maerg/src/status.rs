@@ -123,13 +123,21 @@ fn render_text(
                 escape_text(&component.path.to_string_lossy())
             ));
         } else if component.state == ComponentState::Blocked {
+            if !component.recovery_blockers.is_empty() {
+                output.push_str(&format!(
+                    "\n  Recovery placeholders in {} must be resolved before acceptance or execution.",
+                    escape_text(&component.recovery_blockers.join(", "))
+                ));
+            }
             let component_dir = component_directory(inspection, &component.path);
             let (blocked, decisions) =
                 guidance_entries_for(&component_dir, &component.path.to_string_lossy());
-            output.push_str(&format!(
+            if !blocked.is_empty() {
+                output.push_str(&format!(
                 "\n  Next Step: {} blocked task(s) need resolution; 'kvist help task-states' explains states and transitions.",
                 blocked.len()
-            ));
+                ));
+            }
             if let Some(details) = render_text_entries(&blocked, &decisions) {
                 output.push_str(&details);
             }
@@ -176,6 +184,7 @@ fn project_action_line(inspection: &ProjectInspection) -> String {
             "Run 'kvist repair --reset PATH' to propose a backed-up supported draft, or use a binary supporting the artifact version. No automatic migration is performed.".to_owned()
         }
         ProjectState::Current => String::new(),
+        ProjectState::Blocked => "Resolve the reported `kvist-recovery-blocker` placeholders in global intent; then review and accept affected components. The documents are structurally valid but not ready for execution.".to_owned(),
     }
 }
 
@@ -407,6 +416,13 @@ fn append_component_json(
             }
             append_cause_json(output, cause);
         }
+    }
+    output.push_str("],\"recovery_blockers\":[");
+    for (index, path) in component.recovery_blockers.iter().enumerate() {
+        if index > 0 {
+            output.push(',');
+        }
+        json_string(output, path);
     }
     output.push_str("]}");
 }
@@ -667,10 +683,14 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
             ComponentState::Stale => Some(format!(
                 "Review the changed documents above, then run 'kvist component accept {comp_path_str}'"
             )),
-            ComponentState::Blocked => Some(
-                "Resolve the blocked tasks below; 'kvist help task-states' explains each state and its resolution."
-                    .to_owned(),
-            ),
+            ComponentState::Blocked => Some(if component.recovery_blockers.is_empty() {
+                "Resolve the blocked tasks below; 'kvist help task-states' explains each state and its resolution.".to_owned()
+            } else {
+                format!(
+                    "Resolve recovery placeholders in {}; then review and accept the component. Blocked task records, if any, also require explicit resolution.",
+                    component.recovery_blockers.join(", ")
+                )
+            }),
             ComponentState::Invalid => Some(format!(
                 "Run 'kvist repair' to canonicalize a parseable queue; 'kvist doctor' shows artifact-level detail for {comp_path_str}."
             )),
@@ -738,7 +758,7 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
         for artifact in inspection
             .artifacts
             .iter()
-            .filter(|artifact| !artifact.is_valid())
+            .filter(|artifact| !artifact.is_valid() || artifact.is_blocked())
         {
             output.push_str(&format!("│    {}: {}\n", artifact.path, artifact.status));
         }
@@ -846,6 +866,7 @@ mod tests {
                 expected_revision: format!("sha256:{}", "a".repeat(64)),
                 observed_revision: format!("sha256:{}", "b".repeat(64)),
             }],
+            recovery_blockers: Vec::new(),
         }
     }
 
@@ -921,6 +942,7 @@ tasks:
             state: ComponentState::Blocked,
             artifacts: stale_component().artifacts,
             revalidation_causes: Vec::new(),
+            recovery_blockers: Vec::new(),
         };
         let inspection = inspection_with_component(dir.path(), blocked);
         let text = render_overview(&inspection);

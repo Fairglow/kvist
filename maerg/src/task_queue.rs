@@ -272,12 +272,15 @@ impl std::fmt::Display for Timestamp {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskTimestamps {
-    /// Creation time of this version-1 task record.
+    /// Creation time, or a synthetic unknown epoch when `recovered` is true.
     pub created_at: Timestamp,
-    /// Most recent durable task update.
+    /// Most recent durable update, or the initial unknown recovery sentinel.
     pub updated_at: Timestamp,
     /// Completion transition time, present only for completed tasks.
     pub completed_at: Option<Timestamp>,
+    /// Original timestamp history is unknown; epoch recovery values are not facts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub recovered: bool,
 }
 
 /// A canonical whole-second UTC RFC 3339 instant.
@@ -656,6 +659,9 @@ fn append_task(output: &mut String, task: &Task) {
             &format!("completed_at: {}", yaml_string(&timestamp.0)),
         ),
         None => line(output, 6, "completed_at: null"),
+    }
+    if task.timestamps.recovered {
+        line(output, 6, "recovered: true");
     }
     match &task.blocked_reason {
         Some(reason) => line(
@@ -1265,6 +1271,7 @@ mod tests {
                 created_at: Timestamp::default(),
                 updated_at: Timestamp::default(),
                 completed_at: None,
+                recovered: false,
             },
             blocked_reason: None,
             recovery_state: None,

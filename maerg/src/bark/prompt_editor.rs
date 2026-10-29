@@ -274,6 +274,7 @@ mod tests {
                 created_at: task_queue::Timestamp::default(),
                 updated_at: task_queue::Timestamp::default(),
                 completed_at: None,
+                recovered: false,
             },
             blocked_reason: None,
             recovery_state: None,

@@ -107,10 +107,8 @@ impl KvistCompleter {
 
         // The token under the cursor is the last one unless the cursor sits on
         // trailing whitespace (in which case a fresh, empty token is starting).
-        // A complete `--` separator is consumed rather than treated as a
-        // flag prefix: Tab after `--` completes the next positional.
         let (resolved, active_prefix, active_start) = match tokens.last() {
-            Some(last) if last.end == pos && last.text != "--" => {
+            Some(last) if last.end == pos => {
                 let active = last.text.clone();
                 let start = last.start;
                 (&tokens[..tokens.len() - 1], active, start)
@@ -138,22 +136,29 @@ impl KvistCompleter {
             } else {
                 Vec::new()
             }
-        } else if active_prefix.starts_with('-') {
-            complete_flag(node, &active_prefix, state, current_component, span)
         } else if let Some(flag) = cursor.pending_value_flag() {
             // The previous token was a value-taking option; complete its value.
             complete_option_value(flag, &active_prefix, state, current_component, span)
-        } else if let Some(positional) = node.positionals.get(cursor.positionals_consumed()) {
-            complete_positional(
-                positional,
-                &scope,
-                &active_prefix,
-                state,
-                current_component,
-                span,
-            )
+        } else if active_prefix.starts_with('-') {
+            complete_flag(node, &active_prefix, state, current_component, span)
         } else {
-            complete_subcommands(node, &active_prefix, span)
+            let mut candidates =
+                if let Some(positional) = node.positionals.get(cursor.positionals_consumed()) {
+                    complete_positional(
+                        positional,
+                        &scope,
+                        &active_prefix,
+                        state,
+                        current_component,
+                        span,
+                    )
+                } else {
+                    complete_subcommands(node, &active_prefix, span)
+                };
+            if active_prefix.is_empty() && node.name != root.name {
+                candidates.extend(complete_flag(node, "", state, current_component, span));
+            }
+            candidates
         }
     }
 }
@@ -803,6 +808,13 @@ mod tests {
         candidates.iter().map(|c| c.value.as_str()).collect()
     }
 
+    fn positional_values(candidates: &[Candidate]) -> Vec<&str> {
+        values(candidates)
+            .into_iter()
+            .filter(|value| !value.starts_with('-'))
+            .collect()
+    }
+
     fn complete(c: &KvistCompleter, line: &str) -> Vec<Candidate> {
         c.complete(line, line.len())
     }
@@ -907,9 +919,43 @@ mod tests {
         ] {
             assert!(got.contains(&flag), "missing {flag} in {got:?}");
         }
-        // A complete `--` separator ends flag parsing; `status` has no
-        // positional value domain, so nothing is offered.
-        assert!(complete(&c, "status --").is_empty());
+        assert!(values(&complete(&c, "status --")).contains(&"--format"));
+        assert!(complete(&c, "status -- ").is_empty());
+    }
+
+    #[test]
+    fn repair_options_are_discoverable_without_a_prefix_and_respect_values_and_separator() {
+        let c = completer();
+        for line in ["repair ", "repair -", "repair --", "repair ./project "] {
+            let candidates = complete(&c, line);
+            let got = values(&candidates);
+            for flag in [
+                "--dry-run",
+                "--salvage",
+                "--reset",
+                "--clean-slate",
+                "--approve",
+                "--backup-dir",
+                "--component-root",
+                "--ai",
+                "--proposal",
+            ] {
+                assert!(got.contains(&flag), "{line:?} missing {flag}: {got:?}");
+            }
+        }
+        for line in [
+            "repair --reset ",
+            "repair --approve ",
+            "repair --proposal ",
+            "repair -- ",
+        ] {
+            assert!(
+                !values(&complete(&c, line))
+                    .iter()
+                    .any(|value| value.starts_with("--")),
+                "unexpected flag while completing a value or after separator: {line}"
+            );
+        }
     }
 
     // ---- Stage 3: subcommand recursion ------------------------------------
@@ -918,7 +964,7 @@ mod tests {
     fn task_offers_its_subcommands() {
         let c = completer();
         let res = complete(&c, "task ");
-        let got = values(&res);
+        let got = positional_values(&res);
         for name in [
             "next",
             "transition",
@@ -949,7 +995,7 @@ mod tests {
     fn transition_status_is_a_closed_set() {
         let c = completer();
         let res = complete(&c, "task transition . write-tests ");
-        let got = values(&res);
+        let got = positional_values(&res);
         assert_eq!(
             got,
             vec![
@@ -975,7 +1021,7 @@ mod tests {
     fn finalize_disposition_is_a_closed_set() {
         let c = completer();
         let res = complete(&c, "task finalize . write-tests attempt-0001 ");
-        let got = values(&res);
+        let got = positional_values(&res);
         assert_eq!(got, vec!["accept", "block"]);
     }
 
@@ -983,7 +1029,7 @@ mod tests {
     fn completions_shell_is_a_closed_set() {
         let c = completer();
         assert_eq!(
-            values(&complete(&c, "completions ")),
+            positional_values(&complete(&c, "completions ")),
             vec!["bash", "fish", "powershell", "zsh"]
         );
     }
@@ -1033,6 +1079,7 @@ mod tests {
                 created_at: Timestamp::default(),
                 updated_at: Timestamp::default(),
                 completed_at: None,
+                recovered: false,
             },
             blocked_reason: None,
             recovery_state: None,
@@ -1084,7 +1131,10 @@ mod tests {
     #[test]
     fn component_positional_offers_component_paths() {
         let c = completer_with_state(fixture_state());
-        assert_eq!(values(&complete(&c, "task run ")), vec![".", "maerg"]);
+        assert_eq!(
+            positional_values(&complete(&c, "task run ")),
+            vec![".", "maerg"]
+        );
     }
 
     #[test]
@@ -1097,10 +1147,13 @@ mod tests {
     fn task_positional_is_scoped_to_the_typed_component() {
         let c = completer_with_state(fixture_state());
         assert_eq!(
-            values(&complete(&c, "task run . ")),
+            positional_values(&complete(&c, "task run . ")),
             vec!["write-tests", "implement-code"]
         );
-        assert_eq!(values(&complete(&c, "task run maerg ")), vec!["build-tree"]);
+        assert_eq!(
+            positional_values(&complete(&c, "task run maerg ")),
+            vec!["build-tree"]
+        );
     }
 
     #[test]
@@ -1120,20 +1173,23 @@ mod tests {
         state.scopes.get_mut(".").unwrap().tasks[0].status = TaskStatus::Completed;
         let c = completer_with_state(state);
         // Completed "write-tests" must NOT be listed; "implement-code" must be the first option!
-        assert_eq!(values(&complete(&c, "task run . ")), vec!["implement-code"]);
+        assert_eq!(
+            positional_values(&complete(&c, "task run . ")),
+            vec!["implement-code"]
+        );
     }
 
     #[test]
     fn attempt_positional_is_scoped_to_component_and_task() {
         let c = completer_with_state(fixture_state());
         assert_eq!(
-            values(&complete(&c, "task finalize . write-tests ")),
+            positional_values(&complete(&c, "task finalize . write-tests ")),
             vec!["attempt-0001", "attempt-0002"]
         );
         // A task with no attempts offers nothing.
-        assert!(complete(&c, "task finalize . implement-code ").is_empty());
+        assert!(positional_values(&complete(&c, "task finalize . implement-code ")).is_empty());
         // A task in another component does not leak its attempts here.
-        assert!(complete(&c, "task finalize maerg write-tests ").is_empty());
+        assert!(positional_values(&complete(&c, "task finalize maerg write-tests ")).is_empty());
     }
 
     #[test]
@@ -1164,16 +1220,20 @@ mod tests {
     fn dynamic_values_do_not_leak_across_components() {
         let c = completer_with_state(fixture_state());
         // The root's tasks must not appear when completing maerg tasks.
-        assert_eq!(values(&complete(&c, "task run maerg ")), vec!["build-tree"]);
+        assert_eq!(
+            positional_values(&complete(&c, "task run maerg ")),
+            vec!["build-tree"]
+        );
         // The root's attempts must not appear under tasks.
-        assert!(complete(&c, "task finalize maerg build-tree ").is_empty());
+        assert!(positional_values(&complete(&c, "task finalize maerg build-tree ")).is_empty());
     }
 
     #[test]
     fn empty_state_offers_no_dynamic_values() {
         let c = completer();
-        assert!(complete(&c, "task run ").is_empty());
-        assert!(complete(&c, "task run . ").is_empty());
+        assert!(positional_values(&complete(&c, "task run ")).is_empty());
+        assert!(positional_values(&complete(&c, "task run . ")).is_empty());
+        assert!(values(&complete(&c, "task run ")).contains(&"--stream"));
         assert!(complete(&c, "prompt --model ").is_empty());
         assert!(complete(&c, "import --branch ").is_empty());
     }
@@ -1183,21 +1243,24 @@ mod tests {
     #[test]
     fn current_component_is_offered_first() {
         let c = completer_with_state_and_focus(fixture_state(), Some("maerg"));
-        assert_eq!(values(&complete(&c, "task run ")), vec!["maerg", "."]);
+        assert_eq!(
+            positional_values(&complete(&c, "task run ")),
+            vec!["maerg", "."]
+        );
     }
 
     #[test]
     fn current_component_is_offered_first_in_the_run_builtin() {
         let c = completer_with_state_and_focus(fixture_state(), Some("maerg"));
         // The bare `run` builtin completes its component from the focus.
-        assert_eq!(values(&complete(&c, "run ")), vec!["maerg", "."]);
+        assert_eq!(positional_values(&complete(&c, "run ")), vec!["maerg", "."]);
     }
 
     #[test]
     fn typed_component_still_scopes_tasks_over_the_current_component() {
         let c = completer_with_state_and_focus(fixture_state(), Some("maerg"));
         assert_eq!(
-            values(&complete(&c, "task run . ")),
+            positional_values(&complete(&c, "task run . ")),
             vec!["write-tests", "implement-code"]
         );
     }
@@ -1205,7 +1268,10 @@ mod tests {
     #[test]
     fn unknown_current_component_changes_no_ordering() {
         let c = completer_with_state_and_focus(fixture_state(), Some("ghost"));
-        assert_eq!(values(&complete(&c, "task run ")), vec![".", "maerg"]);
+        assert_eq!(
+            positional_values(&complete(&c, "task run ")),
+            vec![".", "maerg"]
+        );
     }
 
     // ---- Stage 7: rich descriptions and the `--` separator ----------------
@@ -1291,7 +1357,7 @@ mod tests {
         // In the shell, `prompt TASK_ID` authors a prompt: the positional is
         // the task-ID domain, ordered by component.
         assert_eq!(
-            values(&complete(&c, "prompt ")),
+            positional_values(&complete(&c, "prompt ")),
             vec!["write-tests", "implement-code", "build-tree"]
         );
         assert_eq!(values(&complete(&c, "prompt b")), vec!["build-tree"]);
@@ -1326,12 +1392,12 @@ mod tests {
     #[test]
     fn double_dash_is_consumed_and_the_next_positional_completes() {
         let c = completer_with_state(fixture_state());
-        // Tab on a complete `--` completes the next positional (TASK_ID), not
-        // flags: the separator is consumed, not a flag prefix.
+        // Whitespace completes the separator; an unseparated `--` is a prefix.
         assert_eq!(
-            values(&complete(&c, "task run . --")),
+            values(&complete(&c, "task run . -- ")),
             vec!["write-tests", "implement-code"]
         );
+        assert!(values(&complete(&c, "task run . --")).contains(&"--stream"));
         // Subcommand completion after `--` stops (only positionals remain).
         assert!(complete(&c, "task -- r").is_empty());
         // The first `task run` positional is a component: `-- .` offers it.
@@ -1344,7 +1410,7 @@ mod tests {
     fn help_builtin_offers_the_closed_topic_set() {
         let c = completer();
         assert_eq!(
-            values(&complete(&c, "help ")),
+            positional_values(&complete(&c, "help ")),
             vec!["concepts", "lifecycle", "task-states"]
         );
     }

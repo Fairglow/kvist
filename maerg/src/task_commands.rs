@@ -224,7 +224,14 @@ fn validate_context_in_states(
         return Err(KvistError::TaskComponentNotCurrent {
             component: component_path.clone(),
             state: component.state.name().to_owned(),
-            hint: context::component_state_hint(component.state, &component_path),
+            hint: if component.recovery_blockers.is_empty() {
+                context::component_state_hint(component.state, &component_path)
+            } else {
+                format!(
+                    "resolve `kvist-recovery-blocker` placeholders in {} before accepting intent or executing tasks",
+                    component.recovery_blockers.join(", ")
+                )
+            },
         });
     }
     let component_root =
@@ -1776,6 +1783,13 @@ fn validate_accept_context(project_dir: &Path, component_path: &Path) -> Result<
         .artifacts
         .iter()
         .all(|artifact| artifact.state == project_state::ComponentArtifactState::Valid);
+    if !component.recovery_blockers.is_empty() {
+        return Err(KvistError::TaskComponentNotCurrent {
+            component: component_path.clone(),
+            state: "blocked".to_owned(),
+            hint: "resolve `kvist-recovery-blocker` placeholders before accepting intent; placeholders are structurally valid, not reviewed content".to_owned(),
+        });
+    }
     let is_allowed = matches!(
         component.state,
         ComponentState::Current | ComponentState::Stale | ComponentState::Blocked
@@ -2214,6 +2228,16 @@ fn read_validated_document(kind: DocumentKind, path: &Path) -> Result<String> {
         return Err(KvistError::ComponentDocumentValidationFailed {
             path: path.to_path_buf(),
             diagnostics: component_documents::format_diagnostics(&validation.diagnostics),
+        });
+    }
+    let blockers = crate::markdown_structure::blockers(&contents);
+    if !blockers.is_empty() {
+        return Err(KvistError::ComponentDocumentValidationFailed {
+            path: path.to_path_buf(),
+            diagnostics: format!(
+                "structurally valid but blocked: resolve `kvist-recovery-blocker` placeholders: {}",
+                blockers.join("; ")
+            ),
         });
     }
     Ok(contents)

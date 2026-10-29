@@ -298,6 +298,8 @@ pub struct DocumentValidation {
     pub template_version: Option<u32>,
     /// All diagnostics in deterministic source order.
     pub diagnostics: Vec<DocumentDiagnostic>,
+    /// Active recovery placeholders, separate from structural diagnostics.
+    pub recovery_blockers: Vec<String>,
 }
 
 impl DocumentValidation {
@@ -359,6 +361,7 @@ pub fn create(component_dir: &Path) -> Result<GeneratedComponentDocuments> {
 /// Validates one component document without rewriting it.
 pub fn validate(kind: DocumentKind, contents: &str) -> DocumentValidation {
     let lines = contents.lines().collect::<Vec<_>>();
+    let structure = crate::markdown_structure::scan(contents);
     let eof_line = lines.len() + 1;
     let mut diagnostics = Vec::new();
     let template_version = validate_template_version(kind, &lines, &mut diagnostics);
@@ -368,7 +371,7 @@ pub fn validate(kind: DocumentKind, contents: &str) -> DocumentValidation {
         let occurrences = lines
             .iter()
             .enumerate()
-            .filter(|(_, line)| **line == *heading)
+            .filter(|(index, line)| **line == *heading && structure[*index].heading == Some(2))
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
         match occurrences.as_slice() {
@@ -387,7 +390,7 @@ pub fn validate(kind: DocumentKind, contents: &str) -> DocumentValidation {
                     });
                 }
                 previous_line = previous_line.max(line);
-                if !section_has_content(&lines, *index) {
+                if !crate::markdown_structure::section_has_content(&structure, *index) {
                     diagnostics.push(DocumentDiagnostic {
                         kind: DocumentDiagnosticKind::EmptySection { heading },
                         line,
@@ -412,6 +415,7 @@ pub fn validate(kind: DocumentKind, contents: &str) -> DocumentValidation {
         kind,
         template_version,
         diagnostics,
+        recovery_blockers: crate::markdown_structure::blockers(contents),
     }
 }
 
@@ -515,11 +519,10 @@ fn validate_template_version(
 }
 
 pub(crate) fn section_has_content(lines: &[&str], heading_index: usize) -> bool {
-    lines
-        .iter()
-        .skip(heading_index + 1)
-        .take_while(|line| !line.starts_with('#'))
-        .any(|line| !line.trim().is_empty())
+    crate::markdown_structure::section_has_content(
+        &crate::markdown_structure::scan(&lines.join("\n")),
+        heading_index,
+    )
 }
 
 fn diagnostic_message(kind: &DocumentDiagnosticKind) -> String {

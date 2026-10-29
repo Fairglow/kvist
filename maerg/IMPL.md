@@ -5,6 +5,118 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped recovery-defaults observations - 2026-10-29
+
+Independent `recovery-defaults-observer` read only current Maerg implementation
+and test source. Its context excluded intent documents, the queue, prior
+records/reviews, peers, chat/Git history and execution logs. It did not edit
+files or execute checks. These source-derived observations supersede the older
+recovery defaults, timestamp, fence and placeholder statements below within
+this changed scope:
+
+- Salvage planning is enabled by default. Valid queues remain byte-for-byte
+  unchanged. Invalid queues first try lossless set normalization and stable
+  dependency ordering, which can apply without approval but with a backup.
+  Salvage, Markdown reconstruction, reset, clean slate and AI replacement
+  require exact approval; one such operation holds the whole plan.
+- Missing, partial, invalid or completion-deficient timestamp history retains
+  otherwise-valid task data and dependency edges as blocked records. Synthetic
+  epoch creation/update values, null completion and
+  `timestamps.recovered: true` explicitly identify unknown history. Prior
+  finalization references are cleared with an explanation; the original
+  blocker and claimed status remain explained or backed up. Canonical
+  serialization emits true provenance and omits false. Explicit resumption
+  preserves it while later transitions record real dates.
+- Native queue validation still gates candidates. Other salvage can reconcile
+  contradictory dates under explicit assumptions, remove unknown fields,
+  merge identical duplicates, and quarantine invalid/conflicting tasks and
+  affected dependants without weakening edges. Fragment recovery makes a
+  same-indentation segmentation assumption. Unsupported schemas require reset.
+- The bounded Markdown scanner recognizes ATX headings, backtick/tilde fences
+  and HTML comments, not full Markdown semantics. Subordinate sections can
+  contain required-section content; fenced example headings are inert.
+  Reconstruction preserves material and adds active recovery blockers to
+  missing/empty sections. Reset drafts are blocked too; formatting-only repair
+  need not introduce a blocker.
+- Structural validity and readiness are separate. Component validation can
+  succeed while reporting blockers. Global placeholders block project
+  readiness; local placeholders and nearest-parent contract placeholders
+  block components, including across namespaces. Parent private intent does
+  not propagate. Acceptance explicitly rejects placeholders; ordinary task
+  selection requires current state. Removing markers is not semantic
+  verification of the replacement prose.
+- Explicit native AI inference has no tools or workspace executor and stages
+  a new private, no-clobber JSON proposal instead of live edits. Each context
+  contains one target, available local intent, nearest ancestor contract and
+  root contract, not peer implementations. Limits are eight targets, 64 KiB
+  target/replacement text, 256 KiB context/response, 1 MiB proposals, reserved
+  output capacity and a shared 120-second deadline. External profiles,
+  incomplete output and unsuitable destinations fail explicitly.
+- Frozen-proposal inspection/application does not perform inference.
+  Replacements pass native validation. AI queues become stale blocked
+  unknown-history drafts without completion/finalization authority; Markdown
+  receives an active review blocker. Faithful preservation of task identities,
+  edges and authored meaning is requested from the model, not proven by a
+  semantic comparison. Exact complete old/new text is exposed for review.
+- Approval binds the project, inventoried snapshots and ignore policy,
+  operation contents/reasons, backup storage and frozen-proposal fingerprint.
+  Application rechecks inputs and locks, privately copies/synchronizes/verifies
+  ordinary originals, and quarantines links/directories intact without
+  following targets. Quarantine requires same-filesystem storage. Copies
+  preserve bytes and permission bits, not every filesystem attribute.
+- Active/fenced attempts, unresolved evidence and live/stale/malformed locks
+  are not silently bypassed. Approved clean slate archives workflow authority
+  without asserting prior effects are absent. Application is per-file, not
+  transactional; partial changes and lagging manifests remain possible, with
+  retained originals and no automatic rollback/replay.
+- Shell completion offers flags on empty arguments and dash prefixes, but
+  suppresses them for pending values and completed separators. It does not
+  invent approval tokens or provide filesystem-path suggestions.
+
+The observer inspected assertions for timestamp retention/provenance, blocker
+gates and parent boundaries, approval/backups, AI staging/tamper rejection,
+completion and status output. These were source observations, not its execution.
+Source-only follow-ups observed action-qualified discard explanations in AI
+eligibility, including conflicting duplicate identities, without interpreting
+action words inside authored text as loss. Classification still matches
+explanations, not a structural loss analysis. They also observed clarified queue
+reporting that acknowledges listed status/data changes. An intermediate test
+placement error was corrected and its module-level declaration independently
+confirmed before final verification.
+The final diagnostic follow-up observed artifact-specific placeholder guidance
+instead of generic blocked-task transition advice, with a matching regression.
+
+Separately attributed implementer execution: formatting and strict all-target
+Clippy passed; the complete Maerg suite passed **840 tests**, with seven
+existing ignores and no failures. Exact 64 KiB candidate, 256 KiB context and
+64 MiB aggregate text boundaries were exercised. An isolated interactive PTY
+check displayed repair flags after Tab on bare `repair `. An actual-project
+nonmutating preview retained all four timestamp-less Blad tasks in a blocked-record
+proposal and recognized its nested design section as valid. Before/after hashes
+confirmed both live Blad files were unchanged. Destructive applications and
+native-model responses were exercised in isolated fixtures, not against live
+project artifacts or a production model. No acceptance or certification is
+asserted.
+
+Independent source-blind `recovery-defaults-comparator` compared the scoped
+requirements, contract and design with these observations and attributed
+execution evidence, without source access or executing checks. It identified
+one concrete reporting discrepancy: a generic status-preservation explanation
+contradicted the explicit completed-to-blocked conversions in the preview.
+That finding is retained for human arbitration; the generic explanation has
+since been clarified to acknowledge all listed status/data changes, with a
+regression assertion and updated nonmutating preview. The initial comparison
+established no other definite behavioral contradiction. It could not establish
+every diagnostic, filesystem failure mode, command gate or AI grammar/capacity
+obligation, nor prove AI semantic faithfulness. Live destructive application
+and production-model behavior remain unverified. These limits are not
+certification, an acceptance receipt or permission to apply a recovery plan.
+Its source-blind follow-up found the current preview's reporting inconsistency
+resolved, confirmed the attributed 840-pass/seven-ignore/zero-failure totals
+without double-counting targeted runs, and retained the earlier finding and
+limitations. It did not execute checks, certify compliance or authorize
+recovery.
+
 ## Scoped artifact-recovery observations - 2026-10-29
 
 Independent `recovery-observer` read only recovery, CLI, queue, storage,

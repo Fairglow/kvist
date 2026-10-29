@@ -6,7 +6,7 @@ use serde_yaml::Value;
 
 use crate::task_queue::{
     self, ComponentState, Revalidation, RevalidationState, StalenessCause, StalenessCauseKind,
-    Task, TaskQueue, TaskStatus, Timestamp,
+    Task, TaskQueue, TaskStatus, TaskTimestamps, Timestamp,
 };
 
 pub(super) struct Candidate {
@@ -100,7 +100,7 @@ pub(super) fn candidate(contents: &str, salvage: bool) -> std::result::Result<Ca
     // Removing a lifecycle-invalid task also removes its dependent closure.
     // Validation of each prefix above rejects dangling edges without dropping them.
     let contents = task_queue::serialize(&queue).map_err(|error| error.to_string())?;
-    reasons.push("normalize set lists and stable dependency declaration order; preserve retained task statuses and edges".to_owned());
+    reasons.push("normalize set lists and stable dependency declaration order; status/data changes and task removals are listed above; retained dependency edges are not weakened".to_owned());
     Ok(Candidate { contents, reasons })
 }
 
@@ -237,6 +237,7 @@ fn salvage_queue(
                 keep
             });
         }
+        recover_timestamps(&mut recovered_entry, id, reasons);
         match serde_yaml::from_value::<Task>(recovered_entry) {
             Ok(mut task) => {
                 reconcile(&mut task, reasons);
@@ -278,6 +279,69 @@ fn salvage_queue(
         component,
         tasks,
     })
+}
+
+fn recover_timestamps(entry: &mut Value, id: &str, reasons: &mut Vec<String>) {
+    let status = entry["status"].as_str().unwrap_or("<unknown>").to_owned();
+    let valid = serde_yaml::from_value::<TaskTimestamps>(entry["timestamps"].clone()).is_ok_and(
+        |timestamps| {
+            timestamps.created_at.validate("created_at").is_ok()
+                && timestamps.updated_at.validate("updated_at").is_ok()
+                && timestamps
+                    .completed_at
+                    .as_ref()
+                    .is_none_or(|date| date.validate("completed_at").is_ok())
+                && (status != "completed" || timestamps.completed_at.is_some())
+        },
+    );
+    if valid {
+        return;
+    }
+    let Some(fields) = entry.as_mapping_mut() else {
+        return;
+    };
+    let prior_reason = fields
+        .get(Value::String("blocked_reason".to_owned()))
+        .and_then(Value::as_str)
+        .filter(|reason| !reason.trim().is_empty())
+        .map(|reason| format!(" Original blocker: {reason}"))
+        .unwrap_or_default();
+    let reason = format!(
+        "Recovery: original timestamp history is unknown or invalid (original claimed status: {status}); epoch timestamps are synthetic unknowns, not observed dates or completion evidence. Review the backup before explicit resumption.{prior_reason}"
+    );
+    fields.insert(
+        Value::String("status".to_owned()),
+        Value::String("blocked".to_owned()),
+    );
+    fields.insert(
+        Value::String("blocked_reason".to_owned()),
+        Value::String(reason),
+    );
+    for field in ["acceptance_id", "disposition"] {
+        if fields
+            .get(Value::String(field.to_owned()))
+            .is_some_and(|value| !value.is_null())
+        {
+            fields.insert(Value::String(field.to_owned()), Value::Null);
+            reasons.push(format!("task `{id}` {field} -> null: unknown timestamp history cannot assert prior finalization authority; original reference retained in backup"));
+        }
+    }
+    let mut timestamps = serde_yaml::Mapping::new();
+    for field in ["created_at", "updated_at"] {
+        timestamps.insert(
+            Value::String(field.to_owned()),
+            Value::String(Timestamp::default_instant().to_string()),
+        );
+    }
+    timestamps.insert(Value::String("completed_at".to_owned()), Value::Null);
+    timestamps.insert(Value::String("recovered".to_owned()), Value::Bool(true));
+    fields.insert(
+        Value::String("timestamps".to_owned()),
+        Value::Mapping(timestamps),
+    );
+    reasons.push(format!(
+        "retain task `{id}` and its dependency edges: missing/invalid timestamps; status {status} -> blocked, completed_at -> null, created_at/updated_at -> synthetic epoch, timestamps.recovered -> true; original history is unknown and preserved in the backup, not reconstructed"
+    ));
 }
 
 fn reconcile(task: &mut Task, reasons: &mut Vec<String>) {

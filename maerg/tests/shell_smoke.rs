@@ -43,6 +43,7 @@ fn add_confirmation_task(dir: &tempfile::TempDir) -> (std::path::PathBuf, String
             created_at: timestamp.clone(),
             updated_at: timestamp,
             completed_at: None,
+            recovered: false,
         },
         blocked_reason: None,
         recovery_state: None,

@@ -1,5 +1,6 @@
 //! Backup-preserving artifact recovery, independent of configuration validity.
 
+mod ai;
 mod markdown;
 mod queue;
 mod storage;
@@ -19,11 +20,11 @@ use crate::{
 use storage::Snapshot;
 
 /// Explicit recovery choices. Destructive choices are proposals until approved.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct RepairOptions {
     /// Preview only; never create backups or modify artifacts.
     pub dry_run: bool,
-    /// Propose task reconciliation and prose-preserving Markdown salvage.
+    /// Plan comprehensive salvage (enabled by default).
     pub salvage: bool,
     /// Project-relative root/component artifacts to reset to drafts.
     pub reset: Vec<PathBuf>,
@@ -35,6 +36,26 @@ pub struct RepairOptions {
     pub backup_dir: Option<PathBuf>,
     /// Component root for replacement configuration, not an implicit config edit.
     pub component_root: Option<PathBuf>,
+    /// Native shared-registry profile for a new bounded staged AI proposal.
+    pub ai: Option<String>,
+    /// Explicit new proposal destination, or a frozen proposal to inspect/apply.
+    pub proposal: Option<PathBuf>,
+}
+
+impl Default for RepairOptions {
+    fn default() -> Self {
+        Self {
+            dry_run: false,
+            salvage: true,
+            reset: Vec::new(),
+            clean_slate: false,
+            approve: None,
+            backup_dir: None,
+            component_root: None,
+            ai: None,
+            proposal: None,
+        }
+    }
 }
 
 /// A queue's repair outcome, retained for existing report consumers.
@@ -80,6 +101,8 @@ pub struct RepairReport {
     pub queues: Vec<QueueRepair>,
     /// Invalid artifacts or unapplied proposals.
     pub remaining: Vec<(String, String)>,
+    /// Structurally valid recovery drafts requiring explicit resolution.
+    pub blockers: Vec<(String, String)>,
     /// Preview-only invocation.
     pub dry_run: bool,
     /// Exact proposed/applied operations.
@@ -88,6 +111,8 @@ pub struct RepairReport {
     pub approval: Option<String>,
     /// Retained originals and progress manifest.
     pub backup: Option<PathBuf>,
+    /// Explicitly staged/loaded frozen AI proposal, never a live artifact edit.
+    pub proposal: Option<PathBuf>,
 }
 
 impl RepairReport {
@@ -125,6 +150,13 @@ impl std::fmt::Display for RepairReport {
             for reason in &operation.reasons {
                 writeln!(formatter, "    {reason}")?;
             }
+            if let Some(path) = &self.proposal {
+                writeln!(
+                    formatter,
+                    "frozen AI proposal: {} (review with --proposal PATH; applying never invokes the model)",
+                    path.display()
+                )?;
+            }
         }
         if let Some(backup) = &self.backup {
             writeln!(
@@ -154,8 +186,11 @@ impl std::fmt::Display for RepairReport {
             }
             writeln!(
                 formatter,
-                "hint: use --salvage for recoverable tasks, --reset PATH for an offending artifact, or --clean-slate for fresh drafts and archived workflow state; each destructive proposal requires its exact --approve token"
+                "hint: salvage planning is the default; review any pending proposal. For data that cannot be preserved deterministically, stage --ai PROFILE --proposal PATH; --reset PATH resets one artifact and --clean-slate replaces managed drafts and archives workflow state. Destructive changes require the exact --approve token"
             )?;
+        }
+        for (path, reason) in &self.blockers {
+            writeln!(formatter, "  {path}: valid but blocked - {reason}")?;
         }
         Ok(())
     }
@@ -180,6 +215,7 @@ pub fn repair(project_dir: &Path, dry_run: bool) -> Result<RepairReport> {
 
 /// Plans or applies recovery, never treating drafts as accepted intent.
 pub fn repair_with_options(project_dir: &Path, options: &RepairOptions) -> Result<RepairReport> {
+    ai::validate_options(options)?;
     let root = storage::root(project_dir)?;
     let backup_storage = options
         .backup_dir
@@ -321,6 +357,14 @@ pub fn repair_with_options(project_dir: &Path, options: &RepairOptions) -> Resul
                     &format!("component_root = {}", toml::Value::String(value.to_owned())),
                 );
             }
+            if path.ends_with(".md") {
+                contents.push_str(&format!(
+                    "\n{}",
+                    crate::markdown_structure::draft(
+                        "this artifact was reset to an unreviewed native template"
+                    )
+                ));
+            }
             let mut reasons = vec!["replace all existing content/object with a native draft; original retained intact; intent and queue revisions are unaccepted, not recovered meaning".to_owned()];
             if options.clean_slate {
                 reasons.push("clean slate abandons prior workflow authority; existing execution effects remain unknown; inspect source before recreating or replaying tasks".to_owned());
@@ -387,8 +431,17 @@ pub fn repair_with_options(project_dir: &Path, options: &RepairOptions) -> Resul
             });
             continue;
         }
-        match queue::candidate(contents, options.salvage) {
-            Ok(candidate) => {
+        let candidate = queue::candidate(contents, false)
+            .map(|candidate| (candidate, false))
+            .or_else(|error| {
+                if options.salvage {
+                    queue::candidate(contents, true).map(|candidate| (candidate, true))
+                } else {
+                    Err(error)
+                }
+            });
+        match candidate {
+            Ok((candidate, salvage)) => {
                 let component = root.join(
                     Path::new(path)
                         .parent()
@@ -398,15 +451,11 @@ pub fn repair_with_options(project_dir: &Path, options: &RepairOptions) -> Resul
                     Ok(()) => {
                         operations.push(operation(
                             path,
-                            if options.salvage {
-                                "salvage"
-                            } else {
-                                "normalize"
-                            },
+                            if salvage { "salvage" } else { "normalize" },
                             original,
                             Some(candidate.contents),
                             candidate.reasons,
-                            options.salvage,
+                            salvage,
                         ));
                         queues.push(QueueRepair {
                             path: path.clone(),
@@ -484,12 +533,13 @@ pub fn repair_with_options(project_dir: &Path, options: &RepairOptions) -> Resul
             }
         }
     }
+    let proposal = ai::prepare(&root, options, &inputs, &mut operations)?;
     operations.sort_by(|left, right| left.path.cmp(&right.path));
     let approval = if operations.is_empty() {
         None
     } else {
         let payload = serde_json::to_vec(&serde_json::json!({
-            "schema_version": 1, "project": root, "backup_storage": backup_storage, "inputs": inputs, "operations": operations,
+            "schema_version": 1, "project": root, "backup_storage": backup_storage, "inputs": inputs, "operations": operations, "proposal": proposal,
         }))
         .map_err(|error| failure(error.to_string()))?;
         Some(storage::digest(&payload))
@@ -529,6 +579,9 @@ pub fn repair_with_options(project_dir: &Path, options: &RepairOptions) -> Resul
                 .any(|parent| Path::new(path) != parent && Path::new(path).starts_with(parent))
             {
                 continue;
+            }
+            if let Some(proposal) = &proposal {
+                ai::verify(proposal)?;
             }
             if storage::snapshot(&root, Path::new(path))?.as_ref() != expected.as_ref() {
                 return Err(failure(format!(
@@ -601,17 +654,58 @@ pub fn repair_with_options(project_dir: &Path, options: &RepairOptions) -> Resul
         }
     }
     let state_after = structural_state(&remaining);
+    let blockers = recovery_blockers(&root, &specs, &remaining)?;
     Ok(RepairReport {
         project_dir: root,
         state_before,
         state_after,
         queues,
         remaining,
+        blockers,
         dry_run: options.dry_run,
         plan: operations,
         approval,
         backup,
+        proposal: proposal.map(|input| input.path),
     })
+}
+
+fn recovery_blockers(
+    root: &Path,
+    specs: &BTreeSet<String>,
+    problems: &[(String, String)],
+) -> Result<Vec<(String, String)>> {
+    let mut blockers = Vec::new();
+    for path in specs {
+        if problems.iter().any(|(problem, _)| problem == path) {
+            continue;
+        }
+        let Some(text) =
+            storage::snapshot(root, Path::new(path))?.and_then(|snapshot| snapshot.text)
+        else {
+            continue;
+        };
+        if path.ends_with(".md") {
+            blockers.extend(
+                crate::markdown_structure::blockers(&text)
+                    .into_iter()
+                    .map(|reason| (path.clone(), reason)),
+            );
+        } else if path.ends_with("TODOS.yaml")
+            && let Ok(queue) = task_queue::parse(&text)
+        {
+            for task in queue.tasks {
+                if task.status == task_queue::TaskStatus::Blocked
+                    && let Some(reason) = task
+                        .blocked_reason
+                        .filter(|reason| reason.starts_with("Recovery:"))
+                {
+                    blockers.push((path.clone(), format!("task `{}`: {reason}", task.id)));
+                }
+            }
+        }
+    }
+    Ok(blockers)
 }
 
 fn operation(

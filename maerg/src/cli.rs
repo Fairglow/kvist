@@ -130,8 +130,8 @@ pub enum Command {
         /// Preview without changing artifacts or creating backups.
         #[arg(long)]
         dry_run: bool,
-        /// Propose task reconciliation and prose-preserving Markdown salvage.
-        #[arg(long)]
+        /// Explicitly request default salvage planning; destructive changes require approval.
+        #[arg(long, default_value_t = true)]
         salvage: bool,
         /// Propose resetting this project-relative artifact to a native draft.
         #[arg(long, value_name = "PATH")]
@@ -148,6 +148,12 @@ pub enum Command {
         /// Component tree for a reset configuration; defaults to ".".
         #[arg(long, value_name = "PATH")]
         component_root: Option<PathBuf>,
+        /// Stage bounded tool-free recovery with this native shared-registry profile.
+        #[arg(long, value_name = "PROFILE")]
+        ai: Option<String>,
+        /// New AI staging file, or a frozen proposal to preview/apply without inference.
+        #[arg(long, value_name = "PATH")]
+        proposal: Option<PathBuf>,
     },
     /// Reverse-discover and generate Kvist artifacts from an existing implementation.
     ReverseDiscover {
@@ -936,10 +942,10 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     "{{\"status\":\"success\",\"command\":\"doctor\",\"inspection\":{status_json}}}"
                 )))
             }
-            Command::Repair { path, dry_run, salvage, reset, clean_slate, approve, backup_dir, component_root } => {
+            Command::Repair { path, dry_run, salvage, reset, clean_slate, approve, backup_dir, component_root, ai, proposal } => {
                 let project = context::ProjectContext::resolve(path.as_deref())?;
                 let report = repair::repair_with_options(&project.project_dir, &repair::RepairOptions {
-                    dry_run, salvage, reset, clean_slate, approve, backup_dir, component_root,
+                    dry_run, salvage, reset, clean_slate, approve, backup_dir, component_root, ai, proposal,
                 }).map_err(|error| KvistError::JsonCommandFailure {
                     output: serde_json::json!({"status":"error","command":"repair","error":error.to_string()}).to_string(),
                 })?;
@@ -973,9 +979,13 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     "state_after": report.state_after.name(),
                     "queues": queues_json,
                     "remaining": remaining_json,
+                    "blockers": report.blockers.iter().map(|(path, reason)| {
+                        serde_json::json!({"path": path, "reason": reason})
+                    }).collect::<Vec<_>>(),
                     "plan": report.plan,
                     "approval": report.approval,
                     "backup": report.backup,
+                    "proposal": report.proposal,
                 })
                 .to_string();
                 if report.complete() {
@@ -1225,12 +1235,19 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 let valid = validations
                     .iter()
                     .all(|(_, validation)| validation.is_valid());
+                let blockers = validations.iter().flat_map(|(path, validation)| {
+                    validation.recovery_blockers.iter().map(move |reason| {
+                        serde_json::json!({"document": path, "reason": reason})
+                    })
+                }).collect::<Vec<_>>();
                 let response = serde_json::json!({
                     "status": if valid { "success" } else { "error" },
                     "command": "component-validate",
                     "valid": valid,
                     "component_dir": component,
                     "diagnostics": diagnostics,
+                    "blocked": !blockers.is_empty(),
+                    "blockers": blockers,
                 })
                 .to_string();
                 if valid {
@@ -1501,6 +1518,8 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 approve,
                 backup_dir,
                 component_root,
+                ai,
+                proposal,
             } => {
                 let project = context::ProjectContext::resolve(path.as_deref())?;
                 let report = repair::repair_with_options(
@@ -1513,6 +1532,8 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                         approve,
                         backup_dir,
                         component_root,
+                        ai,
+                        proposal,
                     },
                 )?;
                 if report.complete() {
@@ -1700,8 +1721,16 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     .all(|(_, validation)| validation.is_valid())
                 {
                     Ok(CommandOutput::message(format!(
-                        "valid component documents: {}",
-                        component.display()
+                        "valid component documents: {}{}",
+                        component.display(),
+                        if validations
+                            .iter()
+                            .any(|(_, validation)| !validation.recovery_blockers.is_empty())
+                        {
+                            " (blocked: resolve kvist-recovery-blocker placeholders before acceptance or execution)"
+                        } else {
+                            ""
+                        }
                     )))
                 } else {
                     let diagnostics = validations

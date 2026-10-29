@@ -110,6 +110,13 @@ without overwriting an existing document. It MUST validate each document's
 version marker, required section order, uniqueness, and nonempty content and
 return line-aware diagnostics without rewriting user content.
 
+Required-section content MUST include subordinate Markdown headings and their
+bodies. Fenced examples MUST NOT declare required sections. A recovery placeholder
+MUST be structurally valid but durably block acceptance and task execution until
+resolved. Inspection MUST distinguish this condition from malformed documents.
+Immediate-parent contract and global project-intent blockers MUST propagate,
+without introducing implicit peer context.
+
 ### REQ-DISCOVERY-STATUS
 
 Kvist MUST discover the configured recursive component hierarchy
@@ -132,11 +139,12 @@ never a renderer-side truncation with ellipsis.
 ### REQ-PROJECT-REPAIR
 
 Kvist MUST provide bounded recovery without requiring manual artifact edits.
-Default repair MAY normalize invalid queue set lists and reorder an otherwise
-valid acyclic queue to put dependencies first. Valid queues MUST remain exact.
+Default repair MUST plan comprehensive deterministic salvage, first trying
+lossless queue normalization and dependency declaration ordering. Valid queues
+MUST remain exact.
 Every rewrite MUST retain a private, durable original and report its location.
 
-Explicit salvage MUST preserve independently valid tasks, explain every
+Salvage MUST preserve independently valid tasks, explain every
 reconciliation and removal, and validate the resulting queue with the ordinary
 strict validator. Missing dependencies, cycles, conflicting identities and
 missing lifecycle predecessors MUST NOT be repaired by silently weakening
@@ -144,11 +152,20 @@ dependencies or manufacturing verification. Ambiguous timestamp reconciliation,
 field removal and task removal require approval of the exact proposed changes.
 Unsupported schemas MUST NOT be silently migrated.
 
+Absent, incomplete, or malformed historical timestamps alone MUST NOT discard a
+task or its dependency closure. Approval MAY convert it to an explicitly blocked
+recovery record retaining identity, authored fields and edges. Synthetic epoch
+timestamps MUST carry durable machine-readable unknown-history provenance;
+they MUST NOT imply observed creation, update, completion or verification.
+Subsequent explicit transitions MAY resume work but MUST preserve that provenance.
+
 Every root/component artifact MUST have a template-reset fallback, including
 malformed syntax, invalid encoding, missing files and wrong filesystem types.
-Before reset, explicit Markdown salvage SHOULD preserve prose while repairing
+Before reset, Markdown salvage SHOULD preserve prose while repairing
 current-format markers/headings and required-section structure. Missing content
-MUST be labeled a recovery draft, not invented stakeholder intent or evidence.
+MUST be labeled a recovery draft with a durable blocker, not invented stakeholder
+intent or evidence. Fences alone MUST NOT force a reset when section boundaries
+are unambiguous. Native reset drafts MUST also retain a blocker.
 An explicit clean slate MUST offer fresh root/component drafts and archive
 project-owned workflow state, preserving source and VCS data. Reset drafts and
 salvaged queues MUST NOT constitute acceptance, certification or proof that
@@ -159,7 +176,9 @@ approved clean slate may archive it, with an effects-remain-unknown warning.
 Destructive recovery MUST first preview affected paths, old/new values or task
 removals and reasons, then require a content-bound approval token. Changes to
 the inspected inputs invalidate approval. Dry runs and unapproved proposals
-MUST write nothing. Backup failure MUST prevent mutation; partial application
+MUST NOT modify managed artifacts or create backups. The sole staging exception
+is an explicitly requested new AI proposal file; dry runs MUST NOT create it.
+Backup failure MUST prevent mutation; partial application
 MUST retain originals and a manifest explaining progress. Recovery MUST operate
 with alternative private backup storage when the default is obstructed.
 Intact quarantine MAY require same-filesystem storage, with an explicit
@@ -175,6 +194,22 @@ approval binding, resets, backups, invalid configuration and filesystem gates.
 This human-requested expansion has an explicit per-bundle advisory exception
 while review receipts are unavailable; independent observation/comparison remain
 separate from implementation.
+
+The shell MUST discover repair options at an empty argument and at `-` or `--`,
+without requiring a prefix. A completed `-- ` separator and pending option values
+MUST retain their normal positional/value semantics.
+
+An opt-in native local-model fallback MUST attempt bounded, tool-free proposed
+replacements when deterministic salvage cannot preserve data. It MUST work
+independently of valid project configuration, never infer original timestamps or
+certify authored intent, never edit managed files directly, and never require
+serving-capacity discovery. Strict native validation MUST gate staged candidates.
+The proposal MUST freeze model output and original/context fingerprints; applying
+it MUST not invoke the model again. Unknown paths, unsupported schemas, active
+execution, malformed output, stale inputs, exceeded bounds and unavailable models
+MUST fail explicitly without managed writes. AI-authored Markdown requires a
+blocker; AI-recovered queues require stale authority and blocked, unknown-history
+tasks. Approval MUST bind the exact frozen proposal as well as ordinary inputs.
 
 ### REQ-REVISION-PROVENANCE
 

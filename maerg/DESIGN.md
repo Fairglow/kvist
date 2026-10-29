@@ -1138,11 +1138,17 @@ Template queues use sentinel revisions and stale evidence,
 never current-document hashes masquerading as human acceptance.
 
 The queue recovery module first tries strict parsing. For invalid version-one
-typed queues it normalizes set lists and uses stable topological ordering.
+typed queues it first tries normalization and stable topological ordering without
+salvage; only if that fails does default comprehensive salvage plan a proposal.
 Salvage additionally trims bounded text, reconciles existing valid timestamps
 forward with explicit old/new diagnostics, removes contradictory optional state
 only with approval, and supplies a truthful recovery blocker when the original
-reason is missing. It never guesses an absent completion instant. Independently
+reason is missing. Missing/invalid timestamp history converts the task to blocked,
+with epoch sentinels, null completion and `timestamps.recovered: true`; its original
+claimed status remains in the recovery explanation. This permanent optional flag
+survives explicit transitions, distinguishing synthetic history from later real
+updates. Conversion requires approval and does not remove identity or edges.
+It never guesses an absent completion instant. Independently
 unparseable/invalid tasks are quarantined; conflicting IDs, dangling edges,
 cycles and missing lifecycle predecessors remove offending tasks and their
 dependent closure. Strict validation gates every emitted candidate. Broken
@@ -1155,15 +1161,40 @@ refuse this path. Unsupported versions and ambiguous fragments fall back to rese
 Markdown salvage preserves prose while adding native markers/headings,
 canonicalizing and merging duplicate required sections, and moving required
 sections into native order. Missing/empty content receives recovery-draft
-placeholders, not fabricated intent/evidence. Known unsupported versions refuse
-salvage. Rewriting required sections containing fences refuses ambiguity;
-marker-only repairs may preserve fenced content without rewriting it. All
+placeholders, not fabricated intent/evidence. A shared bounded ATX-heading/fence
+scanner recognizes subordinate sections and ignores fenced examples. Section
+reconstruction preserves fences and their content. Active single-line
+`<!-- kvist-recovery-blocker: ... -->` markers distinguish structural validity
+from readiness, including reset/AI drafts. Component artifact inspection reports
+blocked state before revision staleness; acceptance explicitly refuses blockers
+even though ordinary blocked task queues remain acceptable. Parent contracts
+propagate only their own blockers. Root global intent blockers gate project
+readiness. Known unsupported versions refuse salvage. All
 candidates pass the same native validators. Retained artifact text is bounded
 to 1 MiB per artifact and 64 MiB total; clean slate skips text parsing but not
 filesystem snapshot/inventory bounds.
 
 A deterministic JSON projection binds all inspected objects, replacements and
-reasons to a SHA-256 approval. Proposals and dry runs do not create state.
+reasons to a SHA-256 approval. Deterministic proposals and dry runs do not create
+state. Optional AI stages an explicitly selected new private file only: its
+schema-one JSON records the canonical project, exact captured source/context
+fingerprints and strictly validated replacement text. A no-clobber write and
+real-parent checks prevent replacing existing files or traversing links. Loading
+the proposal revalidates target eligibility, structure, authority downgrades and
+captured inputs. Its exact bytes/path become approval inputs and are rechecked
+under the ordinary operation locks; inference never occurs during application.
+The registry is loaded directly rather than requiring project configuration.
+Only a pinned native local transport is used, without tools, subprocess agents,
+capacity probes or retrying model effects. One target per request isolates peer
+components. Enforce eight targets, 64 KiB targets, 256 KiB context/response bounds,
+8192 output tokens, configured/provisional 32768-token capacity and a shared
+120-second deadline. AI queues pass deterministic salvage and strict validation,
+then all retained tasks become blocked unknown-history drafts; Markdown receives
+an active review blocker. Unsupported versions, evidence fences, malformed or
+incomplete model output and stale inputs fail before managed mutation. Staging
+errors leave managed originals untouched and give reset/clean-slate alternatives.
+Shell completion merges flags at empty argument positions except pending values
+and completed separators; an unseparated `--` remains an option prefix.
 Application uses the same per-component operation locks used
 by tasks, rechecks captured inputs, prepares synchronized private backup storage and
 writes a progress manifest before mutations. Regular file originals are copied

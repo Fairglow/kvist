@@ -72,6 +72,8 @@ pub enum ProjectState {
     Uninitialized,
     /// Every root artifact is a current, valid regular file.
     Current,
+    /// Structurally valid global intent contains unresolved recovery placeholders.
+    Blocked,
     /// Some, but not all, root artifacts exist and those present are valid.
     Partial,
     /// An artifact has an invalid type or content.
@@ -86,6 +88,7 @@ impl ProjectState {
         match self {
             Self::Uninitialized => "uninitialized",
             Self::Current => "current",
+            Self::Blocked => "blocked",
             Self::Partial => "partial",
             Self::Invalid => "invalid",
             Self::UnsupportedVersion => "unsupported-version",
@@ -115,6 +118,7 @@ pub struct ArtifactStatus {
 enum ArtifactClass {
     Missing,
     Valid,
+    Blocked,
     Invalid,
     UnsupportedVersion,
 }
@@ -122,7 +126,12 @@ enum ArtifactClass {
 impl ArtifactStatus {
     /// Whether the artifact is a valid, supported regular file.
     pub fn is_valid(&self) -> bool {
-        self.class == ArtifactClass::Valid
+        matches!(self.class, ArtifactClass::Valid | ArtifactClass::Blocked)
+    }
+
+    /// Whether a structurally valid global document has a recovery blocker.
+    pub fn is_blocked(&self) -> bool {
+        self.class == ArtifactClass::Blocked
     }
 }
 
@@ -202,6 +211,8 @@ impl ComponentState {
 pub enum ComponentArtifactState {
     /// A supported, valid artifact was read and parsed.
     Valid,
+    /// Structurally valid, but unresolved recovery placeholders prevent use.
+    Blocked,
     /// No artifact exists at the expected path.
     Missing,
     /// An artifact has an invalid type, encoding, or content.
@@ -215,6 +226,7 @@ impl ComponentArtifactState {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Valid => "valid",
+            Self::Blocked => "blocked",
             Self::Missing => "missing",
             Self::Invalid => "invalid",
             Self::UnsupportedVersion => "unsupported-version",
@@ -255,6 +267,8 @@ pub struct ComponentInspection {
     pub artifacts: Vec<ComponentArtifactInspection>,
     /// Recorded and freshly derived document evidence explaining stale state.
     pub revalidation_causes: Vec<RevalidationCause>,
+    /// Local artifact or immediate-parent contract paths with recovery placeholders.
+    pub recovery_blockers: Vec<String>,
 }
 
 impl fmt::Display for ProjectInspection {
@@ -643,7 +657,7 @@ fn inspect_components(
     project_dir: &Path,
     project_state: ProjectState,
 ) -> Result<(Option<PathBuf>, Vec<ComponentInspection>, Option<String>)> {
-    if project_state != ProjectState::Current {
+    if !matches!(project_state, ProjectState::Current | ProjectState::Blocked) {
         return Ok((None, Vec::new(), None));
     }
 
@@ -713,6 +727,11 @@ fn inspect_component(
 
     let mut revalidation_causes = Vec::new();
     let mut context_is_invalid = false;
+    let mut recovery_blockers = artifacts
+        .iter()
+        .filter(|artifact| artifact.state == ComponentArtifactState::Blocked)
+        .map(|artifact| artifact.path.to_owned())
+        .collect::<Vec<_>>();
     let mut queue_is_stale = false;
     let mut has_blocked_task = false;
     if let Some(queue) = queue {
@@ -767,13 +786,19 @@ fn inspect_component(
                     parent_component_dir.join(ComponentArtifact::Contract.filename());
                 let (state, contents) =
                     inspect_component_document(DocumentKind::Contract, &parent_contract)?;
-                if state != ComponentArtifactState::Valid {
+                if !matches!(
+                    state,
+                    ComponentArtifactState::Valid | ComponentArtifactState::Blocked
+                ) {
                     context_is_invalid = true;
                 } else if let Some(contents) = contents {
                     let relative_parent_path = relative_parent_contract_path(
                         &component.relative_path,
                         &parent_relative_path,
                     );
+                    if state == ComponentArtifactState::Blocked {
+                        recovery_blockers.push(relative_parent_path.clone());
+                    }
                     if parent.path != relative_parent_path {
                         context_is_invalid = true;
                     }
@@ -809,6 +834,8 @@ fn inspect_component(
         .any(|artifact| artifact.state == ComponentArtifactState::Missing)
     {
         ComponentState::Missing
+    } else if !recovery_blockers.is_empty() {
+        ComponentState::Blocked
     } else if queue_is_stale || !revalidation_causes.is_empty() {
         ComponentState::Stale
     } else if has_blocked_task {
@@ -826,6 +853,7 @@ fn inspect_component(
         state,
         artifacts,
         revalidation_causes,
+        recovery_blockers,
     })
 }
 
@@ -903,7 +931,12 @@ fn inspect_component_document(
     };
     let validation = component_documents::validate(kind, &contents);
     if validation.is_valid() {
-        Ok((ComponentArtifactState::Valid, Some(contents)))
+        let state = if crate::markdown_structure::blockers(&contents).is_empty() {
+            ComponentArtifactState::Valid
+        } else {
+            ComponentArtifactState::Blocked
+        };
+        Ok((state, Some(contents)))
     } else if validation.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.kind,
@@ -1026,10 +1059,17 @@ fn markdown_component_state(
     if version != supported_version {
         return ComponentArtifactState::UnsupportedVersion;
     }
-    if !contents.lines().any(|line| line == required_heading) {
+    if !crate::markdown_structure::scan(contents)
+        .iter()
+        .any(|line| line.heading == Some(1) && line.text == required_heading)
+    {
         return ComponentArtifactState::Invalid;
     }
-    ComponentArtifactState::Valid
+    if crate::markdown_structure::blockers(contents).is_empty() {
+        ComponentArtifactState::Valid
+    } else {
+        ComponentArtifactState::Blocked
+    }
 }
 
 fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {
@@ -1251,7 +1291,14 @@ fn validate_artifact(project_dir: &Path, artifact: &Artifact) -> Result<Artifact
             if validation.is_valid() {
                 Ok(valid_status(
                     &artifact.path,
-                    format!("valid ({} version {})", kind.filename(), kind.version()),
+                    if validation.recovery_blockers.is_empty() {
+                        format!("valid ({} version {})", kind.filename(), kind.version())
+                    } else {
+                        format!(
+                            "valid but blocked (unresolved recovery placeholders: {})",
+                            validation.recovery_blockers.join("; ")
+                        )
+                    },
                 ))
             } else if let Some(DocumentDiagnosticKind::UnsupportedTemplateVersion {
                 found, ..
@@ -1335,11 +1382,31 @@ fn validate_markdown_version(
             format!("unsupported version {version} (supported version {supported_version})"),
         ));
     }
-    if !contents.lines().any(|line| line == required_heading) {
+    if !crate::markdown_structure::scan(&contents)
+        .iter()
+        .any(|line| line.heading == Some(1) && line.text == required_heading)
+    {
         return Ok(invalid_status(
             relative_path,
             format!("invalid (missing required heading `{required_heading}`)"),
         ));
+    }
+    let blockers = crate::markdown_structure::blockers(&contents);
+    if !blockers.is_empty() {
+        let mut status = valid_status(
+            relative_path,
+            format!(
+                "valid but blocked (unresolved recovery placeholders: {})",
+                blockers.join("; ")
+            ),
+        );
+        if matches!(
+            relative_path,
+            "VISION.md" | "ARCHITECTURE.md" | "ROOT_CONTRACT.md"
+        ) {
+            status.class = ArtifactClass::Blocked;
+        }
+        return Ok(status);
     }
     Ok(valid_status(
         relative_path,
@@ -1415,11 +1482,12 @@ fn classify(artifacts: &[ArtifactStatus]) -> ProjectState {
         .all(|artifact| artifact.class == ArtifactClass::Missing)
     {
         ProjectState::Uninitialized
-    } else if artifacts
-        .iter()
-        .all(|artifact| artifact.class == ArtifactClass::Valid)
-    {
-        ProjectState::Current
+    } else if artifacts.iter().all(ArtifactStatus::is_valid) {
+        if artifacts.iter().any(ArtifactStatus::is_blocked) {
+            ProjectState::Blocked
+        } else {
+            ProjectState::Current
+        }
     } else {
         ProjectState::Partial
     }
@@ -1429,6 +1497,9 @@ fn guidance(state: ProjectState) -> &'static str {
     match state {
         ProjectState::Uninitialized => "run `kvist init` to create the Phase 1 root artifacts",
         ProjectState::Current => "project is ready for Phase 1 read-only commands",
+        ProjectState::Blocked => {
+            "resolve `kvist-recovery-blocker` placeholders in global intent before component acceptance or task execution; structural validity is not readiness"
+        }
         ProjectState::Partial | ProjectState::Invalid | ProjectState::UnsupportedVersion => {
             "Phase 1 never repairs or migrates artifacts automatically; preserve user content, inspect these diagnostics, and repair or migrate explicitly. A future explicit migration/repair command must define every rewrite."
         }

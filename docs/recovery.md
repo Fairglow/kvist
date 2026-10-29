@@ -11,13 +11,14 @@ Ordinary repair sorts/deduplicates invalid dependency and requirement lists and
 stably orders otherwise-valid tasks so dependencies precede consumers.
 Without `--dry-run`, those unambiguous repairs are applied with a backup.
 
-For other queue errors or malformed Markdown structure, run:
+Other queue errors and malformed Markdown structure are also examined by default:
 
 ```text
-kvist repair --salvage
+kvist repair
 ```
 
-This proposes changes but writes nothing. It reports reconciled values,
+Destructive changes are proposals only. `--salvage` explicitly requests the same
+default planning; it is no longer necessary. The plan reports reconciled values,
 discarded fields, removed tasks, and dependent-task consequences. Review the
 proposal, then rerun the same options with `--approve` and the displayed
 `sha256:...` token. Do not retain `--dry-run` when applying.
@@ -25,6 +26,9 @@ proposal, then rerun the same options with `--approve` and the displayed
 The token binds the project location, inspected originals and permissions,
 backup location, replacements and reasons. A changed input invalidates approval.
 One approved proposal never authorizes a different destructive repair.
+In the interactive shell, type `repair ` and press Tab to see its options.
+`repair --` also completes options; `-- ` with a trailing space is the normal
+end-of-options separator.
 
 ## Recovery choices
 
@@ -33,7 +37,8 @@ One approved proposal never authorizes a different destructive repair.
 | Unsorted/duplicate set lists; acyclic declaration order | Ordinary repair, with a backup. |
 | Valid but noncanonical queue | Leave it untouched. |
 | Valid timestamps in contradictory order | Salvage proposes moving update/completion forward, with exact old/new values and an explicit assumption. This reconciles metadata, not completion evidence. |
-| Missing/invalid dates, invalid IDs, text bounds, requirement locators or task kinds | Keep independently valid tasks; propose quarantining invalid tasks and affected dependants. Missing completion dates are never invented. |
+| Missing/incomplete/invalid timestamp history | Retain the task and dependency edges as an approval-gated blocked recovery record; never invent completion. Epoch sentinels and `timestamps.recovered: true` explicitly identify unknown history. |
+| Invalid IDs, text bounds, requirement locators or task kinds | Preserve independently valid tasks; offer bounded AI fallback or propose quarantining invalid tasks and affected dependants. |
 | Unknown task/top-level fields | Salvage can remove those fields while retaining valid task data; originals remain in the backup. |
 | Identical duplicate task data | Propose merging into one task identity. |
 | Conflicting duplicate identities | Do not choose an identity's meaning; propose removing conflicting entries and affected dependants. |
@@ -42,7 +47,7 @@ One approved proposal never authorizes a different destructive repair.
 | Invalid component revision/revalidation metadata | Propose an explicitly stale, unaccepted draft. Salvaged queues require component acceptance before task selection. |
 | Partially broken YAML | When the version-one header and same-indent task fragments parse independently, propose fragment salvage with an explicit segmentation assumption. Otherwise offer reset. |
 | Unsupported schemas | Explicit reset, never silent migration. |
-| Missing/malformed Markdown markers/headings, missing/duplicate/empty sections | Salvage preserves prose and adds labeled recovery-draft placeholders. Unsupported versions or ambiguous fenced-section rewrites require reset. |
+| Missing/malformed Markdown markers/headings, missing/duplicate/empty sections | Salvage preserves prose and fenced examples. Genuine missing content becomes valid but blocked recovery placeholders; subordinate headings count as section content. Unsupported versions require explicit reset. |
 | Malformed TOML, unknown configuration values, bad encoding, oversized artifacts or unrecoverable Markdown | Reset the named artifact to a native draft; review the original in the backup. |
 | A directory, link or special object where an artifact belongs | Approved reset moves the object intact into the backup. Link targets are not followed or changed. |
 | Obstructing component parent | Approved clean slate quarantines the obstructing object and creates real directories for drafts. |
@@ -76,6 +81,64 @@ are archived. Global provider configuration and user-owned grants are not
 silently modified. Fresh drafts grant no execution authority and are not a
 reconstruction of stakeholder intent or independent implementation evidence.
 Inspect retained effects before defining or replaying work.
+
+## Valid but blocked drafts
+
+Missing dates do not justify throwing away a task. Review the proposed conversion
+from its original status to `blocked`, with null completion and synthetic epoch
+dates. The durable `timestamps.recovered: true` flag means original history is
+unknown, not that the epoch is an observed creation date. Prior finalization
+references are cleared with an explicit explanation and retained in the backup.
+After reviewing and accepting the component's intent, an explicit
+`kvist task transition COMPONENT TASK pending` can resume the work. Real future
+transitions update timestamps but retain the unknown-history flag.
+
+Missing document content and reset drafts include a visible explanation and an
+active `<!-- kvist-recovery-blocker: REASON -->` line. They pass structural
+validation while status reports them as **blocked**, not invalid. Acceptance and
+task execution cannot clear this gate. Resolve the placeholder's content and
+remove its marker after review, then accept the changed intent normally.
+Code-fenced examples of markers are inert. Only an immediate parent's contract
+propagates component blockers; its private requirements/design do not. Global
+project-intent placeholders also block readiness.
+
+JSON recovery reports list these valid drafts under `blockers`, separately from
+invalid artifacts and unapplied proposals under `remaining`. Component validation
+reports structural `valid` and readiness `blocked` independently. Structural
+recovery can succeed without granting execution authority.
+
+## Optional AI fallback
+
+When deterministic recovery would discard data or cannot reconstruct a document,
+a native local model can propose a replacement without tools or live file access.
+Select a native profile from the shared `.kvist/providers.toml` or user registry;
+this does not require valid `kvist.toml`. Use a new JSON path with an existing real
+parent directory, outside managed artifacts and workflow/VCS storage:
+
+```text
+kvist repair --ai repair-profile --proposal /private/directory/recovery.json
+kvist repair --proposal /private/directory/recovery.json
+kvist repair --proposal /private/directory/recovery.json --approve sha256:...
+```
+
+The first command stages a private, no-clobber proposal only. It displays the
+complete old/new text and exact approval token; no managed artifacts change.
+Inspect the frozen file before approving. The later commands **never invoke the
+model again**. Source, context, proposal bytes, or choices changing invalidate
+approval. Application uses the ordinary verified backups and evidence guards.
+AI-authored documents remain blocked drafts; recovered tasks are blocked and
+stale, with synthetic unknown-history metadata and no completion/acceptance
+authority. AI cannot certify or silently apply its own proposal.
+
+Inference is limited to eight targets, 64 KiB per target, 256 KiB per local context
+and response, 8192 output tokens, and a shared 120-second deadline. Only local
+intent, the nearest parent contract and root contract accompany each target;
+peer implementations are excluded. Explicit native capacity is honored; absent
+capacity uses a provisional 32768-token bound without serving-capacity discovery.
+Malformed/incomplete output, unsupported schemas, active/fenced execution and
+exceeded bounds fail explicitly. Reset or clean slate remain the backed-up
+fallback. `--ai` cannot accompany approval, dry-run, reset or clean slate.
+`--dry-run --proposal PATH` can inspect an existing frozen file without writes.
 
 ## Backups and failures
 

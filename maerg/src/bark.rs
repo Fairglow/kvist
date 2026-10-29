@@ -1425,6 +1425,9 @@ fn render_help(theme: Theme) -> String {
         "  status                       human-friendly project overview and next steps\n",
     );
     text.push_str(
+        "  repair [OPTIONS]               plan preservation-first recovery; Tab lists options\n",
+    );
+    text.push_str(
         "  help [TOPIC]               this list; topics: concepts, lifecycle, task-states\n",
     );
     text.push_str(
@@ -2163,6 +2166,7 @@ mod tests {
                 created_at: task_queue::Timestamp::default(),
                 updated_at: task_queue::Timestamp::default(),
                 completed_at: None,
+                recovered: false,
             },
             blocked_reason: None,
             recovery_state: None,

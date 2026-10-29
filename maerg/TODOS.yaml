@@ -10,6 +10,77 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "recovery-defaults-write-tests"
+    title: "write_tests: specify preservation-first recovery and blocked drafts"
+    description: "Pin shell discovery, default salvage, unknown timestamps, Markdown scopes, readiness gates and frozen bounded AI proposals."
+    context: "Observed failing recovery-defaults and authority regressions before production fixes, including obsolete salvage guidance. Final recovery integrations and full Maerg suite pass. Intent retains the explicit advisory exception; no receipt or acceptance is claimed."
+    purpose: "Specify recovery and authority boundaries before changing implementation."
+    expected_outcome: "Regressions expose the current recovery failures."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T21:16:32Z"
+      updated_at: "2026-10-29T21:54:12Z"
+      completed_at: "2026-10-29T21:54:12Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "recovery-defaults-implement-code"
+    title: "implement_code: preserve recoverable data and stage AI fallback"
+    description: "Implement default planning, unknown-history tasks, valid blocking placeholders, shell discovery and approved frozen AI proposals."
+    context: "Implemented all five approved improvements with matching documentation. Final Maerg suite: 840 passes, seven existing ignores; formatter, strict all-target Clippy and isolated shell PTY check pass. Actual-project preview retains all four Blad tasks and recognizes its design; live Blad bytes are unchanged. No live destructive recovery or acceptance was performed."
+    purpose: "Recover structural validity without silent data loss or invented authority."
+    expected_outcome: "Recovery works through plain, JSON and shell surfaces."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "recovery-defaults-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T21:16:32Z"
+      updated_at: "2026-10-29T21:54:12Z"
+      completed_at: "2026-10-29T21:54:12Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "recovery-defaults-security-audit"
+    title: "security_audit: independently observe recovery authority boundaries"
+    description: "Derive source-only observations without intent, queue, prior records or implementation chat."
+    context: "Independent recovery-defaults-observer derived scoped source/test observations and narrow supplements without intent, prior records or execution. IMPL records authority, context, filesystem, AI semantic-preservation and explanation-classification limits. This is not broad security certification."
+    purpose: "Keep implementation observation independent from author intent."
+    expected_outcome: "An attributed observation is persisted in IMPL."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "recovery-defaults-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T21:16:32Z"
+      updated_at: "2026-10-29T21:54:12Z"
+      completed_at: "2026-10-29T21:54:12Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "recovery-defaults-compliance-review"
+    title: "compliance_review: compare recovery defaults intent and observations"
+    description: "Compare scoped intent with independent observed and attributed execution evidence without source access."
+    context: "Independent source-blind recovery-defaults-comparator compared scoped intent, observations and attributed execution. IMPL retains its status-reporting inconsistency finding, the clarified preview and confirming follow-up, plus unverified obligations for human arbitration. No compliance certification, acceptance receipt or recovery authorization is claimed."
+    purpose: "Expose unsupported guarantees independently."
+    expected_outcome: "An attributed source-blind comparison and unresolved limits are recorded."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "recovery-defaults-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T21:16:32Z"
+      updated_at: "2026-10-29T21:54:12Z"
+      completed_at: "2026-10-29T21:54:12Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "artifact-recovery-write-tests"
     title: "write_tests: specify recoverable artifacts and approval boundaries"
     description: "Reproduce completion timestamps and ordering; cover salvage, resets, backups, stale approvals and invalid configuration."

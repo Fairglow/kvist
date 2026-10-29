@@ -451,8 +451,10 @@ fn malformed_individual_tasks_do_not_destroy_valid_siblings() {
             .iter()
             .map(|task| task.id.as_str())
             .collect::<Vec<_>>(),
-        ["keep", "unknown-field"]
+        ["keep", "unknown-field", "no-completion"]
     );
+    assert_eq!(repaired.tasks[2].status, task_queue::TaskStatus::Blocked);
+    assert!(repaired.tasks[2].timestamps.recovered);
 }
 
 #[test]
@@ -587,12 +589,36 @@ fn markdown_reset_cannot_bypass_an_active_component_task() {
 fn aggregate_text_limit_accepts_exactly_64_mib_and_rejects_an_additional_queue() {
     let project = fixture();
     let original = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("queue");
+    let markdown_bytes = [
+        "VISION.md",
+        "ARCHITECTURE.md",
+        "ROOT_CONTRACT.md",
+        "src/REQUIREMENTS.md",
+        "src/CONTRACT.md",
+        "src/DESIGN.md",
+        "src/IMPL.md",
+    ]
+    .iter()
+    .map(|path| {
+        fs::read(project.path().join(path))
+            .expect("native Markdown")
+            .len()
+    })
+    .sum::<usize>();
     let padded = format!(
         "{original}#{}\n",
         "x".repeat(1024 * 1024 - original.len() - 2)
     );
     assert_eq!(padded.len(), 1024 * 1024);
-    fs::write(project.path().join("src/TODOS.yaml"), &padded).expect("padded queue");
+    let root_padded = format!(
+        "{original}#{}\n",
+        "x".repeat(1024 * 1024 - markdown_bytes - original.len() - 2)
+    );
+    assert_eq!(
+        root_padded.len() + markdown_bytes + 63 * padded.len(),
+        64 * 1024 * 1024
+    );
+    fs::write(project.path().join("src/TODOS.yaml"), &root_padded).expect("padded queue");
     for index in 0..63 {
         let directory = project.path().join(format!("src/bundle-{index}"));
         fs::create_dir(&directory).expect("bundle");
