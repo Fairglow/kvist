@@ -3,8 +3,6 @@
 
 # Ignore settings
 /.cargo
-/.config/*
-!/.config/nextest.toml
 /.idea
 .kvist
 /.vscode
@@ -16,10 +14,11 @@ kvist.toml
 /*.txt
 /*.log
 /_*.md
+.kvist-attempts
+.review-scratch
 
 # Ignore skott runtime data (session journals + transcripts)
 .skott/
-.review-scratch/
 
 # Ignore Gemini CLI deps
 /node_modules

@@ -567,16 +567,16 @@ tasks:
     purpose: "Prevent implementer self-certification."
     expected_outcome: "Persistent scoped observations and comparison."
     kind: compliance-review
-    status: blocked
+    status: pending
     depends_on:
       - "shared-runtime-security-audit"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"
     timestamps:
       created_at: "2026-10-23T22:00:00Z"
-      updated_at: "2026-10-24T00:00:55Z"
+      updated_at: "2026-10-29T23:17:33Z"
       completed_at: null
-    blocked_reason: "Formal readiness is blocked by pre-existing lifecycle task timestamps and managed-toolchain diagnostics, plus retained discrepancies for human arbitration. The diagnostic comparison does not mint a compliance pass or waiver."
+    blocked_reason: null
     recovery_state: null
   - id: "lifecycle-write-tests"
     title: "Pin responsive startup and router selection"
@@ -709,16 +709,16 @@ tasks:
     purpose: "Prevent implementer self-certification."
     expected_outcome: "Discrepancies and evidence limits recorded for human arbitration."
     kind: compliance-review
-    status: blocked
+    status: pending
     depends_on:
       - "steering-security-audit"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"
     timestamps:
       created_at: "2026-10-17T17:30:00Z"
-      updated_at: "2026-10-24T00:00:55Z"
+      updated_at: "2026-10-29T23:17:19Z"
       completed_at: null
-    blocked_reason: "Diagnostic comparison completed; formal compliance remains blocked by existing project readiness and retained requirement discrepancies. No automatic acceptance or certification."
+    blocked_reason: null
     recovery_state: null
   - id: "repository-isolation-write-tests"
     title: "Pin nextest repository trial exclusivity"
@@ -2380,7 +2380,7 @@ tasks:
     purpose: "Make the CLI's documented exit-code and naming contract observable."
     expected_outcome: "Distinct failure classes exit with their documented codes and --list-models prints the llama-server/ollama spellings."
     kind: implementation
-    status: blocked
+    status: pending
     depends_on:
       - "skott-llama-server-integration"
     requirements:
@@ -2388,9 +2388,9 @@ tasks:
       - "CONTRACT.md#Error-Result"
     timestamps:
       created_at: "2026-09-19T17:40:00Z"
-      updated_at: "2026-09-23T22:27:04Z"
+      updated_at: "2026-10-29T23:17:07Z"
       completed_at: null
-    blocked_reason: "test-command verification blocked: missing test-command policy for component `skott`. Please define a command for it in `kvist.toml` under `[test_policy]` and approve it"
+    blocked_reason: null
     recovery_state: null
   - id: "skott-docs-drift-reconcile"
     title: "Reconcile remaining documentation drift from the implementation review"

@@ -922,16 +922,16 @@ tasks:
     purpose: "Prevent self-certification."
     expected_outcome: "Observed behavior and discrepancies remain durable."
     kind: compliance-review
-    status: blocked
+    status: pending
     depends_on:
       - "shared-runtime-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
     timestamps:
       created_at: "2026-10-23T22:00:00Z"
-      updated_at: "2026-10-29T12:05:06Z"
+      updated_at: "2026-10-29T23:16:07Z"
       completed_at: null
-    blocked_reason: "agent execution timed out while contacting the local model gateway. Bounded redacted logs are written to: /opt/proj/kvist/./maerg/.kvist/logs/shared-runtime-compliance-review_2026-10-29T12-00-05Z.log\nCause: inference for model `Qwen3.8-27B-Coder390-EfficientThink-Q8_0-MTP` at http://127.0.0.1:9931 stopped after 1/3 attempt(s), 300.133s elapsed: approved task wall budget exhausted: model transport timed out"
+    blocked_reason: null
     recovery_state: null
     disposition: block
   - id: "bin-only-path-write-tests"

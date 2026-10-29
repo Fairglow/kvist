@@ -829,7 +829,7 @@ tasks:
     purpose: "Create a small stable seam that keeps provider libraries replaceable and leaves authorization, execution, promotion, and compliance evidence with the embedding host."
     expected_outcome: "Public runtime contracts contain no Kvist, Rig, or provider SDK type and cannot directly execute tools, access credentials, broaden resources, promote artifacts, or write canonical compliance evidence."
     kind: implementation
-    status: blocked
+    status: pending
     depends_on:
       - "sa-08-write-tests"
     requirements:
@@ -837,9 +837,9 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-09-17T22:05:39Z"
+      updated_at: "2026-10-29T23:16:27Z"
       completed_at: null
-    blocked_reason: "agent failed during task execution. Bounded redacted logs are written to: /opt/proj/kvist/./sav/.kvist/logs/sa-08-implement-code_2026-09-17T22-05-39Z.log"
+    blocked_reason: null
     recovery_state: null
   - id: "sa-08-security-audit"
     title: "Audit layered runtime boundaries"
