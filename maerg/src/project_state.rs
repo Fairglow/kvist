@@ -1501,7 +1501,7 @@ fn guidance(state: ProjectState) -> &'static str {
             "resolve `kvist-recovery-blocker` placeholders in global intent before component acceptance or task execution; structural validity is not readiness"
         }
         ProjectState::Partial | ProjectState::Invalid | ProjectState::UnsupportedVersion => {
-            "Phase 1 never repairs or migrates artifacts automatically; preserve user content, inspect these diagnostics, and repair or migrate explicitly. A future explicit migration/repair command must define every rewrite."
+            "run `kvist repair --dry-run` to inspect backed-up recovery; `kvist repair` applies lossless metadata repairs. Destructive recovery requires exact approval; unsupported versions require an explicit reset."
         }
     }
 }

@@ -808,7 +808,9 @@ fn status_text_and_json_report_root_artifact_diagnostics() {
     assert!(stdout.contains(
         "root-artifact: VISION.md: invalid (line 1 must be `<!-- kvist-vision-version: <positive integer> -->`)"
     ));
-    assert!(stdout.contains("Next Step: Run 'kvist repair --salvage' to propose recovery;"));
+    assert!(stdout.contains("Next Step: Run 'kvist repair'"));
+    assert!(stdout.contains("Destructive changes require approval of the exact proposal"));
+    assert!(!stdout.contains("repair --salvage"));
 
     let json = run_kvist(&[
         "status",

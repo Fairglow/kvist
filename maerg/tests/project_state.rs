@@ -41,7 +41,11 @@ fn doctor_reports_state_diagnostics_without_writing() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("state: partial"));
     assert!(stdout.contains("ROOT_CONTRACT.md: missing"));
-    assert!(stdout.contains("Phase 1 never repairs or migrates artifacts automatically"));
+    assert!(stdout.contains("run `kvist repair --dry-run`"));
+    assert!(stdout.contains("`kvist repair` applies lossless metadata repairs"));
+    assert!(stdout.contains("Destructive recovery requires exact approval"));
+    assert!(!stdout.contains("future explicit migration/repair command"));
+    assert!(!project.path().join(".kvist-recovery").exists());
     assert_eq!(
         fs::read_to_string(project.path().join("kvist.toml")).expect("read after"),
         before

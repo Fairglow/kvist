@@ -10,6 +10,77 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "timestamp-metadata-write-tests"
+    title: "write_tests: specify lossless missing timestamp recovery"
+    description: "Pin automatic metadata augmentation, retained task state and authority, native unknown completion, backups, dry runs and evidence guards."
+    context: "Observed red metadata-preservation, unknown-completion and obsolete-guidance regressions before fixes. Native validation and recovery assertions cover task state, authority, known dates, pre-epoch dates, backups, idempotence, mixed proposals and retained evidence. The existing advisory exception applies; no acceptance receipt is claimed."
+    purpose: "Distinguish absent bookkeeping from destructive historical reconciliation."
+    expected_outcome: "Regressions expose status downgrades and approval-only handling."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T22:25:28Z"
+      updated_at: "2026-10-29T22:39:18Z"
+      completed_at: "2026-10-29T22:39:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "timestamp-metadata-implement-code"
+    title: "implement_code: repair absent history without changing task state"
+    description: "Augment missing dates before typed parsing, retain known metadata and allow explicitly unknown completion without bypassing authority guards."
+    context: "Automatic missing metadata repair preserves task state and recorded authority, marks unknown dates and retains ordinary guards. Full Maerg suite: 845 passes, seven existing ignores; formatter, strict Clippy and release build pass. Installed release updated; ordinary repair preserved all 156 Blad task identities/statuses and exact component metadata, with byte-verified original backup. Doctor reports current; repeat repair is empty. No intent acceptance, task replay or other queue repair occurred."
+    purpose: "Return the project to structural validity without destructive approval."
+    expected_outcome: "Default repair succeeds while retaining completed tasks."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "timestamp-metadata-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T22:25:28Z"
+      updated_at: "2026-10-29T22:39:18Z"
+      completed_at: "2026-10-29T22:39:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "timestamp-metadata-security-audit"
+    title: "security_audit: independently observe metadata-only boundaries"
+    description: "Derive scoped source/test observations without intent, queues, prior records or implementation chat."
+    context: "Independent timestamp-metadata-observer read scoped source and test source only, excluding intent, queues, prior records/history and execution logs. IMPL records its observations and task-wide provenance, backup/evidence-internals limitations. No concrete scoped defect was identified; no execution or broad security certification is claimed."
+    purpose: "Keep implementation observation independent."
+    expected_outcome: "Attributed source-only evidence is recorded in IMPL."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "timestamp-metadata-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T22:25:28Z"
+      updated_at: "2026-10-29T22:39:18Z"
+      completed_at: "2026-10-29T22:39:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "timestamp-metadata-compliance-review"
+    title: "compliance_review: compare lossless repair intent and evidence"
+    description: "Compare scoped intent with independent observations and attributed execution without implementation access."
+    context: "Independent source-blind timestamp-metadata-comparator compared scoped intent, observations and attributed execution. It found no definite contradiction and retained unobserved internals, assertion-inspection and preview-versus-application limits for human arbitration. Subsequent live execution is separately attributed in IMPL; no acceptance, certification or recovery authorization was fabricated."
+    purpose: "Expose unsupported recovery guarantees."
+    expected_outcome: "A separate source-blind comparison is recorded."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "timestamp-metadata-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T22:25:28Z"
+      updated_at: "2026-10-29T22:39:18Z"
+      completed_at: "2026-10-29T22:39:18Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "recovery-defaults-write-tests"
     title: "write_tests: specify preservation-first recovery and blocked drafts"
     description: "Pin shell discovery, default salvage, unknown timestamps, Markdown scopes, readiness gates and frozen bounded AI proposals."

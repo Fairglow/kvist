@@ -177,7 +177,7 @@ fn project_action_line(inspection: &ProjectInspection) -> String {
             if repairable {
                 "Run 'kvist repair' to canonicalize the affected TODO queues (it sorts and deduplicates their set-like lists), then re-run 'kvist status'.".to_owned()
             } else {
-                "Run 'kvist repair --salvage' to propose recovery; '--reset PATH' and '--clean-slate' offer backed-up draft resets. Review the proposal before supplying its '--approve' token.".to_owned()
+                "Run 'kvist repair' to restore missing timestamp metadata and normalize recoverable queues with backups. Destructive changes require approval of the exact proposal; use '--dry-run' to preview.".to_owned()
             }
         }
         ProjectState::UnsupportedVersion => {

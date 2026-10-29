@@ -111,13 +111,179 @@ fn track(project: &Path) {
 }
 
 #[test]
-fn default_salvage_preserves_missing_partial_and_invalid_timestamp_tasks_and_edges() {
+fn missing_timestamp_metadata_is_repaired_without_changing_task_state_or_authority() {
     for timestamps in [
         String::new(),
         "    timestamps: null\n".to_owned(),
+        "    timestamps: {}\n".to_owned(),
         TIMESTAMPS.replace("      created_at: 2026-10-29T10:00:00Z\n", ""),
         TIMESTAMPS.replace("      updated_at: 2026-10-29T10:00:00Z\n", ""),
         TIMESTAMPS.replace("      completed_at: 2026-10-29T10:00:00Z\n", ""),
+        TIMESTAMPS.replace("completed_at: 2026-10-29T10:00:00Z", "completed_at: null"),
+        TIMESTAMPS
+            .replace("      created_at: 2026-10-29T10:00:00Z\n", "")
+            .replace("2026-10-29", "1950-10-29"),
+    ] {
+        let project = fixture();
+        fs::create_dir(project.path().join("src/.kvist-attempts")).expect("empty evidence storage");
+        let original = write_tasks(
+            project.path(),
+            &(task("retain", "", &timestamps)
+                .replace(
+                    "    recovery_state: null",
+                    "    recovery_state: null\n    acceptance_id: recorded-reference\n    disposition: accept",
+                )
+                + &task("dependant", "retain", TIMESTAMPS)),
+        );
+        let path = project.path().join("src/TODOS.yaml");
+        let before: serde_yaml::Value = serde_yaml::from_str(&original).expect("original YAML");
+        assert!(
+            project_state::inspect(project.path())
+                .expect("inspection")
+                .guidance
+                .contains("kvist repair")
+        );
+        let state = TempDir::new().expect("private user state");
+        let status = Command::new(env!("CARGO_BIN_EXE_kvist"))
+            .env("HOME", state.path())
+            .env("XDG_CONFIG_HOME", state.path())
+            .env("XDG_STATE_HOME", state.path())
+            .current_dir(project.path())
+            .arg("status")
+            .output()
+            .expect("status");
+        let guidance = String::from_utf8_lossy(&status.stdout);
+        assert!(guidance.contains("Run 'kvist repair'"), "{guidance}");
+        assert!(!guidance.contains("repair --salvage"), "{guidance}");
+        let (ok, preview) = repair(project.path(), &["--dry-run"]);
+        assert!(!ok, "{preview}");
+        assert_eq!(preview["plan"][0]["requires_approval"], false, "{preview}");
+        assert_eq!(fs::read_to_string(&path).expect("unchanged"), original);
+        assert!(!project.path().join(".kvist-recovery").exists());
+        let (ok, report) = repair(project.path(), &[]);
+        assert!(
+            ok,
+            "missing metadata needs no destructive approval: {report}"
+        );
+        assert_eq!(report["plan"][0]["kind"], "normalize");
+        assert_eq!(report["plan"][0]["requires_approval"], false);
+        assert!(report["blockers"].as_array().expect("blockers").is_empty());
+        let contents = fs::read_to_string(&path).expect("repaired");
+        let recovered = task_queue::parse(&contents).expect("strict native validity");
+        let after: serde_yaml::Value = serde_yaml::from_str(&contents).expect("repaired YAML");
+        assert_eq!(before["component"], after["component"]);
+        let mut original_task = before["tasks"][0].clone();
+        let mut repaired_task = after["tasks"][0].clone();
+        original_task
+            .as_mapping_mut()
+            .expect("task")
+            .remove("timestamps");
+        repaired_task
+            .as_mapping_mut()
+            .expect("task")
+            .remove("timestamps");
+        assert_eq!(
+            original_task, repaired_task,
+            "only timestamp metadata may change"
+        );
+        assert_eq!(recovered.tasks[0].status, task_queue::TaskStatus::Completed);
+        assert!(recovered.tasks[0].timestamps.recovered);
+        for field in ["created_at", "updated_at", "completed_at"] {
+            if !before["tasks"][0]["timestamps"][field].is_null() {
+                assert_eq!(
+                    before["tasks"][0]["timestamps"][field], after["tasks"][0]["timestamps"][field],
+                    "{field}"
+                );
+            }
+        }
+        assert_eq!(before["tasks"][1], after["tasks"][1]);
+        let backup = Path::new(report["backup"].as_str().expect("backup"));
+        assert_eq!(
+            fs::read_to_string(backup.join("originals/src/TODOS.yaml")).expect("backup"),
+            original
+        );
+        let (ok, repeat) = repair(project.path(), &[]);
+        assert!(ok, "{repeat}");
+        assert!(repeat["plan"].as_array().expect("plan").is_empty());
+        assert_eq!(fs::read_to_string(&path).expect("idempotent"), contents);
+    }
+}
+
+#[test]
+fn missing_dates_preserve_pending_and_blocked_states_and_existing_blockers() {
+    for status in ["pending", "blocked", "awaiting-decision"] {
+        let project = fixture();
+        let reason = if status == "pending" {
+            "null"
+        } else {
+            "\"Original human decision\""
+        };
+        write_tasks(
+            project.path(),
+            &task("retain", "", "")
+                .replace("status: completed", &format!("status: {status}"))
+                .replace("blocked_reason: null", &format!("blocked_reason: {reason}")),
+        );
+        let (ok, report) = repair(project.path(), &[]);
+        assert!(ok, "{report}");
+        let text = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("repaired");
+        let queue: serde_yaml::Value = serde_yaml::from_str(&text).expect("queue");
+        assert_eq!(queue["tasks"][0]["status"].as_str(), Some(status));
+        if status != "pending" {
+            assert_eq!(
+                queue["tasks"][0]["blocked_reason"].as_str(),
+                Some("Original human decision")
+            );
+        }
+    }
+}
+
+#[test]
+fn missing_metadata_does_not_bypass_unresolved_execution_evidence() {
+    let project = fixture();
+    let original = write_tasks(project.path(), &task("retain", "", ""));
+    fs::create_dir(project.path().join("src/.kvist-attempts")).expect("evidence");
+    for evidence in ["unreadable evidence\n", "{\"schema_version\":1}\n"] {
+        fs::write(
+            project.path().join("src/.kvist-attempts/retain.jsonl"),
+            evidence,
+        )
+        .expect("unresolved");
+        let (ok, report) = repair(project.path(), &[]);
+        assert!(!ok, "{report}");
+        assert_eq!(
+            fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("unchanged"),
+            original
+        );
+        assert!(!project.path().join(".kvist-recovery").exists());
+    }
+}
+
+#[test]
+fn metadata_repair_waits_for_approval_of_other_destructive_operations() {
+    let project = fixture();
+    let original = write_tasks(project.path(), &task("retain", "", ""));
+    fs::write(project.path().join("VISION.md"), "Preserve draft intent.\n").expect("broken");
+    let (ok, report) = repair(project.path(), &[]);
+    assert!(!ok, "{report}");
+    assert!(
+        report["plan"]
+            .as_array()
+            .expect("plan")
+            .iter()
+            .any(|op| op["requires_approval"] == true)
+    );
+    assert_eq!(
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("unchanged"),
+        original
+    );
+    assert!(!project.path().join(".kvist-recovery").exists());
+}
+
+#[test]
+fn malformed_timestamp_history_requires_approved_blocked_recovery() {
+    for timestamps in [
+        "    timestamps: malformed-metadata\n".to_owned(),
         TIMESTAMPS.replace("2026-10-29T10:00:00Z", "not-a-date"),
     ] {
         let project = fixture();
@@ -293,9 +459,14 @@ fn marker_examples_in_code_fences_are_inert_but_root_drafts_block_readiness() {
 #[test]
 fn recovered_timestamp_provenance_survives_explicit_resumption() {
     let project = fixture();
-    write_tasks(project.path(), &task("retain", "", ""));
-    let (_, preview) = repair(project.path(), &[]);
-    approve(project.path(), &preview);
+    write_tasks(
+        project.path(),
+        &task("retain", "", "")
+            .replace("status: completed", "status: blocked")
+            .replace("blocked_reason: null", "blocked_reason: Original blocker"),
+    );
+    let (ok, report) = repair(project.path(), &[]);
+    assert!(ok, "{report}");
     track(project.path());
     task_commands::accept(project.path(), Path::new("."), false, None, false)
         .expect("accept structurally valid blocked queue");

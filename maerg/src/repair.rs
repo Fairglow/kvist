@@ -447,7 +447,12 @@ pub fn repair_with_options(project_dir: &Path, options: &RepairOptions) -> Resul
                         .parent()
                         .ok_or_else(|| failure("queue has no component"))?,
                 );
-                match task_commands::guard_repair_evidence(&component, Some(contents)) {
+                let evidence_contents = if salvage {
+                    contents
+                } else {
+                    &candidate.contents
+                };
+                match task_commands::guard_repair_evidence(&component, Some(evidence_contents)) {
                     Ok(()) => {
                         operations.push(operation(
                             path,
@@ -599,6 +604,11 @@ pub fn repair_with_options(project_dir: &Path, options: &RepairOptions) -> Resul
                     .get(&queue_path)
                     .and_then(Option::as_ref)
                     .and_then(|snapshot| snapshot.text.as_deref());
+                let contents = operations
+                    .iter()
+                    .find(|candidate| candidate.path == queue_path && candidate.kind == "normalize")
+                    .and_then(|candidate| candidate.contents.as_deref())
+                    .or(contents);
                 task_commands::guard_repair_evidence(&root.join(component), contents)?;
             }
         }

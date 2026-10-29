@@ -8,7 +8,9 @@ intent. Destructive recovery always requires approval of an exact proposal.
 
 Run `kvist repair --dry-run`. Valid queues remain byte-for-byte unchanged.
 Ordinary repair sorts/deduplicates invalid dependency and requirement lists and
-stably orders otherwise-valid tasks so dependencies precede consumers.
+stably orders otherwise-valid tasks so dependencies precede consumers. It also
+fills missing timestamp metadata without changing task status or accepted
+component revisions.
 Without `--dry-run`, those unambiguous repairs are applied with a backup.
 
 Other queue errors and malformed Markdown structure are also examined by default:
@@ -37,7 +39,8 @@ end-of-options separator.
 | Unsorted/duplicate set lists; acyclic declaration order | Ordinary repair, with a backup. |
 | Valid but noncanonical queue | Leave it untouched. |
 | Valid timestamps in contradictory order | Salvage proposes moving update/completion forward, with exact old/new values and an explicit assumption. This reconciles metadata, not completion evidence. |
-| Missing/incomplete/invalid timestamp history | Retain the task and dependency edges as an approval-gated blocked recovery record; never invent completion. Epoch sentinels and `timestamps.recovered: true` explicitly identify unknown history. |
+| Missing timestamp object or historical date fields | Ordinary repair with a backup, no approval. Preserve status, edges, known dates and authority; mark unknown history with `timestamps.recovered: true`. Missing completion stays null, even on a completed task. |
+| Malformed supplied timestamp history | Propose an approved blocked recovery record; never invent completion or silently replace malformed data. Synthetic sentinels and `timestamps.recovered: true` identify unknown history. |
 | Invalid IDs, text bounds, requirement locators or task kinds | Preserve independently valid tasks; offer bounded AI fallback or propose quarantining invalid tasks and affected dependants. |
 | Unknown task/top-level fields | Salvage can remove those fields while retaining valid task data; originals remain in the backup. |
 | Identical duplicate task data | Propose merging into one task identity. |
@@ -84,11 +87,20 @@ Inspect retained effects before defining or replaying work.
 
 ## Valid but blocked drafts
 
-Missing dates do not justify throwing away a task. Review the proposed conversion
-from its original status to `blocked`, with null completion and synthetic epoch
-dates. The durable `timestamps.recovered: true` flag means original history is
-unknown, not that the epoch is an observed creation date. Prior finalization
-references are cleared with an explicit explanation and retained in the backup.
+Missing dates do not justify throwing away or downgrading a task. Run
+`kvist repair`: absent timestamp metadata is filled automatically, with no
+destructive options or approval token. Existing statuses, blockers, dependencies,
+known dates, finalization references and component revisions remain unchanged.
+Missing creation/update values use synthetic chronological lower bounds
+(normally the epoch); missing completion stays null. A completed task remains
+completed, not newly verified. `timestamps.recovered: true` means historical
+dates are unavailable, not that synthetic values are observed facts.
+Future transitions record real dates without clearing this provenance.
+
+Malformed supplied dates may instead need a proposed conversion to `blocked`,
+with null completion and synthetic recovery dates. This still requires exact
+approval. Prior finalization references are cleared only by that explained,
+approved conversion and remain in the backup.
 After reviewing and accepting the component's intent, an explicit
 `kvist task transition COMPONENT TASK pending` can resume the work. Real future
 transitions update timestamps but retain the unknown-history flag.

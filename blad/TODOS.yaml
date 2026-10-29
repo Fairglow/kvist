@@ -20,6 +20,13 @@ tasks:
     expected_outcome: "Fail-first library, CLI and PTY assertions cover R-077/R-078 without relaxing ordinary file/theme safety."
     depends_on: []
     requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+    timestamps:
+      created_at: "1970-01-01T00:00:00Z"
+      updated_at: "1970-01-01T00:00:00Z"
+      completed_at: null
+      recovered: true
+    blocked_reason: null
+    recovery_state: null
   - id: "html-fd-implement-code"
     title: "implement_code: preserve HTML and snapshot inherited descriptors"
     description: "Implement bounded inert HTML projection, strip-html CLI/library policy and finite descriptor inputs without relaxing ordinary file/theme policy; update user documentation."
@@ -30,6 +37,13 @@ tasks:
     expected_outcome: "R-077/R-078 behavior, errors and documentation are consistent through CLI/library/viewer surfaces."
     depends_on: ["html-fd-write-tests"]
     requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+    timestamps:
+      created_at: "1970-01-01T00:00:00Z"
+      updated_at: "1970-01-01T00:00:00Z"
+      completed_at: null
+      recovered: true
+    blocked_reason: null
+    recovery_state: null
   - id: "html-fd-security-audit"
     title: "security_audit: derive independent source-only observations"
     description: "Independently derive a scoped IMPL supplement from source/tests only; exclude intent, queue, prior records, chat and history."
@@ -40,6 +54,13 @@ tasks:
     expected_outcome: "Source-derived observations, concrete findings and evidence limits remain durable."
     depends_on: ["html-fd-implement-code"]
     requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+    timestamps:
+      created_at: "1970-01-01T00:00:00Z"
+      updated_at: "1970-01-01T00:00:00Z"
+      completed_at: null
+      recovered: true
+    blocked_reason: null
+    recovery_state: null
   - id: "html-fd-compliance-review"
     title: "compliance_review: compare HTML and descriptor evidence"
     description: "Separately compare local intent with independently observed behavior and execution evidence without source access; retain discrepancies without claiming acceptance."
@@ -50,6 +71,13 @@ tasks:
     expected_outcome: "Scoped discrepancies and evidence limitations are recorded for human arbitration."
     depends_on: ["html-fd-security-audit"]
     requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+    timestamps:
+      created_at: "1970-01-01T00:00:00Z"
+      updated_at: "1970-01-01T00:00:00Z"
+      completed_at: null
+      recovered: true
+    blocked_reason: null
+    recovery_state: null
   - id: "mermaid-discovery-write-tests"
     title: "write_tests: reproduce absent default scheduling policy"
     description: "Pin canonical nextest discovery, Git visibility and consistent repository entrypoints before relocating policy."

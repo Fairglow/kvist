@@ -1140,10 +1140,22 @@ never current-document hashes masquerading as human acceptance.
 The queue recovery module first tries strict parsing. For invalid version-one
 typed queues it first tries normalization and stable topological ordering without
 salvage; only if that fails does default comprehensive salvage plan a proposal.
+Before typed deserialization, augment absent/null timestamp objects and missing
+or null date fields without altering any non-timestamp task field. Preserve
+supplied dates and reject malformed nonmapping metadata from this lossless path.
+Missing creation uses the minimum of the epoch and available update/completion
+date bounds; missing update uses creation. Missing completion remains null.
+Set unknown-history provenance whenever a required historical date is missing.
+Native validation permits null completion on a completed task only with that
+provenance; all supplied calendar values and chronology still validate normally.
+This augmentation does not stale component authority or downgrade task status.
+Evidence checks may inspect the strictly validated lossless candidate, whose
+identities and authority references are preserved, while exact original
+snapshots still bind backups and application. Unresolved journals remain fenced.
 Salvage additionally trims bounded text, reconciles existing valid timestamps
 forward with explicit old/new diagnostics, removes contradictory optional state
 only with approval, and supplies a truthful recovery blocker when the original
-reason is missing. Missing/invalid timestamp history converts the task to blocked,
+reason is missing. Malformed supplied timestamp history converts the task to blocked,
 with epoch sentinels, null completion and `timestamps.recovered: true`; its original
 claimed status remains in the recovery explanation. This permanent optional flag
 survives explicit transitions, distinguishing synthetic history from later real

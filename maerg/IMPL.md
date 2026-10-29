@@ -5,6 +5,73 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped absent-timestamp recovery observations - 2026-10-29
+
+Independent `timestamp-metadata-observer` read only scoped current Maerg
+implementation and test source, excluding all intent, queues, prior records,
+reviews, architecture/root intent, implementation chat, Git/history and
+execution logs. It neither edited files nor executed checks. Its observations
+supersede the prior missing-timestamp blocked-record behavior below:
+
+- Missing/null timestamp containers and absent creation/update dates receive
+  synthetic values. Creation uses the earliest of the epoch and valid available
+  date bounds; missing update copies creation. Supplied dates remain unchanged.
+  Unknown completion remains null; `recovered: true` identifies uncertainty,
+  not observed completion.
+- Known dates retain whole-second UTC calendar and chronology validation.
+  Completed tasks may have null completion only with recovered provenance;
+  non-completed tasks still cannot carry completion dates.
+- Augmentation preserves task status, authored data, dependencies, blockers,
+  finalization references and component metadata. Separate normalization sorts
+  set-like lists and dependency order. Malformed supplied history still uses
+  the approval-gated blocked/stale salvage path.
+- Lossless normalization independently needs no approval. Any approval-required
+  operation holds the entire plan; dry runs never apply it. Application
+  rechecks snapshots and evidence under locks, creates the original-byte
+  backup before mutation and records progress. Partial failures remain possible
+  and explicitly reported.
+- Evidence guards inspect validated normalization candidates or salvage
+  originals. Active/fenced tasks are rejected; application repeats ordinary
+  guards. Source assertions cover empty evidence storage and refusal of
+  unreadable/schema-bearing unresolved journals.
+- Inspection and status recommend ordinary repair for missing metadata.
+  Assertions cover preserved fields/authority, pre-epoch dates, backups,
+  idempotence, mixed-plan deferral, explicit resumption, supplied-date
+  validation and valid siblings.
+
+The observer identified no concrete scoped defect. Provenance remains
+task-wide rather than field-specific; it did not inspect backup-storage or
+evidence-parser internals and did not execute the assertions.
+
+Separately attributed implementer execution observed failing metadata,
+unknown-completion and obsolete-guidance regressions before their fixes.
+Formatting, strict all-target Clippy and the release build passed. The full
+Maerg suite passed **845 tests**, with seven existing ignores and no failures.
+An actual-project nonmutating preview planned only `blad/TODOS.yaml`, retaining
+the four completed task statuses without requiring approval or changing live
+bytes. These observations and results are not acceptance or certification.
+
+Independent source-blind `timestamp-metadata-comparator` compared the scoped
+requirements, contract and design with these source observations and attributed
+execution evidence, without source access or execution. It found no definite
+scoped contradiction and confirmed the 845-pass/seven-ignore totals without
+double-counting targeted runs. It retained unobserved backup/evidence internals,
+the lack of independent assertion inspection and the distinction between preview
+and application evidence for human arbitration. Its comparison grants no
+certification, acceptance or authorization.
+
+Subsequent implementer application installed the verified release and ran
+ordinary repair without an approval, reset or clean slate. Only
+`blad/TODOS.yaml` changed: all 156 task identities/statuses and the exact
+component metadata header were preserved; the four absent timestamp records
+received explicit unknown-history metadata. Other component queues were
+unchanged by repair. The complete manifest and byte-verified original remain at
+`.kvist-recovery/recovery-gPqp2N/originals/blad/TODOS.yaml`. Installed `doctor`
+reports a current, structurally valid project, and repeated repair proposes no
+operations or new backup. Existing component staleness/task blockers were not
+accepted or bypassed. This live execution is implementer-attributed, not an
+independent compliance determination.
+
 ## Scoped recovery-defaults observations - 2026-10-29
 
 Independent `recovery-defaults-observer` read only current Maerg implementation

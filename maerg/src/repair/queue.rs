@@ -47,7 +47,7 @@ pub(super) fn empty_queue() -> std::result::Result<String, String> {
 
 pub(super) fn candidate(contents: &str, salvage: bool) -> std::result::Result<Candidate, String> {
     let mut reasons = Vec::new();
-    let value: Value = match serde_yaml::from_str(contents) {
+    let mut value: Value = match serde_yaml::from_str(contents) {
         Ok(value) => value,
         Err(error) if salvage => recover_fragments(contents, &mut reasons)
             .map_err(|reason| format!("{error}; fragment recovery unavailable: {reason}"))?,
@@ -58,10 +58,11 @@ pub(super) fn candidate(contents: &str, salvage: bool) -> std::result::Result<Ca
             "unsupported or missing schema; use an approved --reset, not migration".to_owned(),
         );
     }
+    fill_missing_timestamp_metadata(&mut value, &mut reasons);
     let mut queue = if salvage {
         salvage_queue(value, &mut reasons)?
     } else {
-        serde_yaml::from_str::<TaskQueue>(contents).map_err(|error| error.to_string())?
+        serde_yaml::from_value::<TaskQueue>(value).map_err(|error| error.to_string())?
     };
     if salvage {
         queue.component.revalidation = unaccepted_component().revalidation;
@@ -102,6 +103,85 @@ pub(super) fn candidate(contents: &str, salvage: bool) -> std::result::Result<Ca
     let contents = task_queue::serialize(&queue).map_err(|error| error.to_string())?;
     reasons.push("normalize set lists and stable dependency declaration order; status/data changes and task removals are listed above; retained dependency edges are not weakened".to_owned());
     Ok(Candidate { contents, reasons })
+}
+
+fn fill_missing_timestamp_metadata(value: &mut Value, reasons: &mut Vec<String>) {
+    let Some(entries) = value["tasks"].as_sequence_mut() else {
+        return;
+    };
+    for entry in entries {
+        let id = entry["id"].as_str().unwrap_or("<missing ID>").to_owned();
+        let status = entry["status"].as_str().unwrap_or("<unknown>").to_owned();
+        let Some(fields) = entry.as_mapping_mut() else {
+            continue;
+        };
+        let mut timestamps = match fields.get("timestamps") {
+            None | Some(Value::Null) => serde_yaml::Mapping::new(),
+            Some(Value::Mapping(timestamps)) => timestamps.clone(),
+            Some(_) => continue,
+        };
+        if timestamps
+            .get("recovered")
+            .is_some_and(|value| !value.is_bool())
+        {
+            continue;
+        }
+        let missing_creation = timestamps.get("created_at").is_none_or(Value::is_null);
+        let missing_update = timestamps.get("updated_at").is_none_or(Value::is_null);
+        let unknown_completion = timestamps.get("completed_at").is_none_or(Value::is_null);
+        if !missing_creation
+            && !missing_update
+            && !(status == "completed"
+                && unknown_completion
+                && timestamps.get("recovered").and_then(Value::as_bool) != Some(true))
+        {
+            continue;
+        }
+        let mut lower_bound = Timestamp::default_instant();
+        let mut valid = true;
+        for field in ["created_at", "updated_at", "completed_at"] {
+            if let Some(value) = timestamps.get(field).filter(|value| !value.is_null()) {
+                match serde_yaml::from_value::<Timestamp>(value.clone()) {
+                    Ok(date) if date.validate(field).is_ok() => {
+                        lower_bound = lower_bound.min(date);
+                    }
+                    _ => {
+                        valid = false;
+                        break;
+                    }
+                }
+            }
+        }
+        if !valid {
+            continue;
+        }
+        let mut changes = Vec::new();
+        if missing_creation {
+            changes.push(format!(
+                "created_at -> {lower_bound} (synthetic lower bound)"
+            ));
+            timestamps.insert("created_at".into(), Value::String(lower_bound.to_string()));
+        }
+        if missing_update {
+            let creation = timestamps["created_at"].clone();
+            changes.push(format!(
+                "updated_at -> {creation:?} (synthetic lower bound)"
+            ));
+            timestamps.insert("updated_at".into(), creation);
+        }
+        if status == "completed" && unknown_completion {
+            changes.push("completed_at -> null (unknown, not an inferred completion)".to_owned());
+        }
+        timestamps
+            .entry("completed_at".into())
+            .or_insert(Value::Null);
+        timestamps.insert("recovered".into(), Value::Bool(true));
+        fields.insert("timestamps".into(), Value::Mapping(timestamps));
+        reasons.push(format!(
+            "fill missing timestamp metadata for task `{id}`: {}; timestamps.recovered -> true; preserve status `{status}`, task data, dependency edges and recorded authority",
+            changes.join("; ")
+        ));
+    }
 }
 
 fn recover_fragments(
@@ -291,7 +371,9 @@ fn recover_timestamps(entry: &mut Value, id: &str, reasons: &mut Vec<String>) {
                     .completed_at
                     .as_ref()
                     .is_none_or(|date| date.validate("completed_at").is_ok())
-                && (status != "completed" || timestamps.completed_at.is_some())
+                && (status != "completed"
+                    || timestamps.completed_at.is_some()
+                    || timestamps.recovered)
         },
     );
     if valid {

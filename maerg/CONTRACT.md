@@ -302,14 +302,22 @@ succeeds. Comprehensive salvage planning is enabled by default; `--salvage`
 explicitly requests that same default. Salvage proposes reconciliation and removal of
 unrecoverable tasks and affected dependants. It preserves valid task identities,
 statuses and dependency edges rather than inventing successful verification.
-Missing or invalid timestamps instead propose retaining the task as blocked,
-with epoch recovery-record timestamps, null completion, and
-`timestamps.recovered: true`. This optional boolean defaults to false and is
-omitted when false. True permanently identifies unavailable original timestamp
-history; epoch values are synthetic unknowns, not observed dates. Future explicit
+Missing timestamp objects/fields are repaired automatically with a backup and
+without approval. Task status, authored fields, blockers, dependency edges,
+finalization references and component revision/revalidation metadata are
+preserved. Existing dates remain exact. Missing creation uses the earlier of
+the epoch and available date bounds; missing update uses creation as a synthetic
+lower bound. Missing completion stays null, even for an already-completed task.
+`timestamps.recovered: true` identifies this unavailable history. Native
+validation allows completed tasks with null completion only with that flag;
+supplied dates retain ordinary calendar and ordering validation. This optional
+boolean defaults to false and is omitted when false. True permanently
+identifies unavailable original timestamp history; synthetic values are not
+observed dates. Malformed supplied history still proposes an approved blocked
+recovery record rather than silently replacing data. Future explicit
 task transitions record their real update/completion times without clearing this
 provenance. Original claimed status and the unknown-history explanation are shown
-in the proposal and blocker; originals remain in the backup.
+in any destructive proposal and blocker; originals remain in the backup.
 `--reset PATH` (repeatable, project-relative) proposes replacement of a named
 root/component artifact with its native draft template; `--clean-slate` proposes
 all root/component templates plus archiving project-owned `.kvist` and

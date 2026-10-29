@@ -276,7 +276,7 @@ pub struct TaskTimestamps {
     pub created_at: Timestamp,
     /// Most recent durable update, or the initial unknown recovery sentinel.
     pub updated_at: Timestamp,
-    /// Completion transition time, present only for completed tasks.
+    /// Completion transition time; null may mean unknown on recovered completed tasks.
     pub completed_at: Option<Timestamp>,
     /// Original timestamp history is unknown; epoch recovery values are not facts.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -955,6 +955,7 @@ pub(crate) fn validate_task(
                 )));
             }
         }
+        (TaskStatus::Completed, None) if task.timestamps.recovered => {}
         (TaskStatus::Completed, None) => {
             return Err(TaskQueueError::invalid(format!(
                 "completed task `{}` requires timestamps.completed_at",
@@ -1443,6 +1444,22 @@ mod tests {
         assert!(validate_task(&task, true).is_err());
         task.timestamps.completed_at = None;
         assert!(validate_task(&task, true).is_ok());
+    }
+
+    #[test]
+    fn unknown_completion_requires_provenance_without_weakening_known_date_validation() {
+        let mut task = task_with_status("historic", TaskStatus::Completed, None);
+        assert!(validate_task(&task, true).is_err());
+        task.timestamps.recovered = true;
+        assert!(validate_task(&task, true).is_ok());
+        task.timestamps.completed_at = Some(Timestamp("2019-01-01T00:00:00Z".to_owned()));
+        assert!(validate_task(&task, true).is_err());
+        task.timestamps.completed_at = Some(Timestamp("2020-02-31T00:00:00Z".to_owned()));
+        assert!(validate_task(&task, true).is_err());
+        task.timestamps.completed_at = Some(task.timestamps.updated_at.clone());
+        assert!(validate_task(&task, true).is_ok());
+        task.status = TaskStatus::Pending;
+        assert!(validate_task(&task, true).is_err());
     }
 
     const REPAIRABLE_QUEUE: &str = r#"

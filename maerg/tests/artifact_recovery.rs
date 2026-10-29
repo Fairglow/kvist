@@ -453,7 +453,7 @@ fn malformed_individual_tasks_do_not_destroy_valid_siblings() {
             .collect::<Vec<_>>(),
         ["keep", "unknown-field", "no-completion"]
     );
-    assert_eq!(repaired.tasks[2].status, task_queue::TaskStatus::Blocked);
+    assert_eq!(repaired.tasks[2].status, task_queue::TaskStatus::Completed);
     assert!(repaired.tasks[2].timestamps.recovered);
 }
 

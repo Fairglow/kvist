@@ -127,7 +127,7 @@ MUST explain a non-current project state: each non-valid root artifact with
 its exact reason, any project-root diagnostic and discovery error, and a
 concrete next action that names the unblocking command (`kvist init` for
 uninitialized projects, `kvist repair` when the only defect is an unsorted or
-duplicated TODO-queue set list).
+duplicated TODO-queue set list or missing timestamp metadata).
 
 The overview report MUST keep its layout aligned: the per-document
 `expected`/`observed` revision lines under a changed document MUST carry the
@@ -140,7 +140,8 @@ never a renderer-side truncation with ellipsis.
 
 Kvist MUST provide bounded recovery without requiring manual artifact edits.
 Default repair MUST plan comprehensive deterministic salvage, first trying
-lossless queue normalization and dependency declaration ordering. Valid queues
+lossless queue normalization, missing timestamp metadata and dependency
+declaration ordering. Valid queues
 MUST remain exact.
 Every rewrite MUST retain a private, durable original and report its location.
 
@@ -152,12 +153,22 @@ dependencies or manufacturing verification. Ambiguous timestamp reconciliation,
 field removal and task removal require approval of the exact proposed changes.
 Unsupported schemas MUST NOT be silently migrated.
 
-Absent, incomplete, or malformed historical timestamps alone MUST NOT discard a
-task or its dependency closure. Approval MAY convert it to an explicitly blocked
-recovery record retaining identity, authored fields and edges. Synthetic epoch
-timestamps MUST carry durable machine-readable unknown-history provenance;
-they MUST NOT imply observed creation, update, completion or verification.
+Absent historical timestamp metadata MUST be repaired automatically with a
+backup, without approval, task removal, status/blocker changes, weakened edges,
+cleared finalization references or changed component acceptance metadata.
+Existing valid dates MUST remain exact. Missing creation/update dates MAY use
+explicitly synthetic chronological lower bounds; missing completion MUST remain
+null, including for a previously completed task. Such tasks MUST carry durable
+machine-readable unknown-history provenance, not fabricated completion evidence.
+An otherwise-valid completed task with this provenance and unknown completion
+MUST pass native validation. Known dates MUST still satisfy ordinary validation.
+Malformed supplied history alone MUST NOT discard a task or its dependency
+closure; approval MAY convert it to an explicitly blocked recovery record
+retaining identity, authored fields and edges. Synthetic recovery timestamps
+MUST NOT imply observed creation, update, completion or verification.
 Subsequent explicit transitions MAY resume work but MUST preserve that provenance.
+Lossless metadata repair MUST retain ordinary lock and attempt-evidence guards;
+unresolved execution evidence MUST NOT become implicitly accepted.
 
 Every root/component artifact MUST have a template-reset fallback, including
 malformed syntax, invalid encoding, missing files and wrong filesystem types.
