@@ -39,6 +39,27 @@ delegating task approval or effect authority to their clients.
 
 ### Live task diagnostics and controls
 
+Native context configuration bypasses discovery. Without it, startup makes one
+optional metadata request bounded to one second and one tenth of remaining task
+time. Missing capacity, HTTP 404/405/501 and transient availability failures
+continue with a stderr/journal warning. Malformed metadata, other persistent
+errors, cancellation and recording failures remain errors. Discovery is not
+retried and cannot consume the whole approved task budget.
+
+When capacity is unknown, the local working budget is
+`max(32768, estimated_initial_request + response_reserve + 8192)`, capped at
+1,048,576 tokens. The reserve is explicitly configured or 8192. This is a
+provisional compaction budget, not a claim about the server's context window;
+the server may reject it explicitly. If estimated initial input, reserve and
+8192-token history headroom exceed that ceiling, startup fails explicitly
+instead of silently reducing headroom or truncating input.
+Known capacity retains the configured
+reserve or `min(8192, max(1, context/4))`. Diagnostics identify configured,
+provider or provisional budget provenance, estimated initial input, reserve and
+remaining wall time. Neither discovery nor fallback changes approved limits.
+Explicit command-endpoint profiles retain their existing 8192-token local context
+and 1024-token output reserve without a metadata probe (`source: default`).
+
 Protected native authoring has no implicit 64-generation ceiling. Role
 `timeout_seconds` is a positive whole-task budget, defaults to 300 and accepts
 up to 2,592,000 seconds (30 days). Explicit `token_limit` remains cumulative.
@@ -80,7 +101,12 @@ accounting is retained. Completion closes the control capability. There is no
 automatic replay/resume. An observer never needs control access.
 
 The native request materializes only selected local artifacts and exact
-root/parent contract mounts. Reads reject links, non-regular files, traversal,
+root/parent contract mounts. `TODOS.yaml` is strictly validated in full, then
+represented by its schema version and the selected task's exact `id`, `title`,
+`description`, `context`, `purpose`, `expected_outcome`, `kind`, `depends_on`
+and `requirements`. Other tasks, component revision metadata and lifecycle
+evidence are not inline model context. Other selected artifacts remain exact.
+Reads reject links, non-regular files, traversal,
 invalid text and size overflow; invalid selected context fails instead of
 disappearing. Profile token limits cover the cumulative run, including
 conservative reservations for unknown/interrupted attempts. Known provider
@@ -169,7 +195,7 @@ and changes no durable state. The shell obtains this confirmation before its
 working stage; streamed task commands do not run a competing terminal spinner.
 Long result lines wrap without discarding error details or command arguments.
 
-Protected model calls and capacity discovery share automatic transient retries:
+Protected inference calls use automatic transient retries:
 the selected native profile's `max_attempts` (1-32, default 3), exponential
 backoff capped by `retry_max_delay_secs`, and jitter between half and all of
 each scheduled delay. Explicit command-endpoint profiles use three attempts

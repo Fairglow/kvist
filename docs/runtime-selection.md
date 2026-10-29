@@ -63,7 +63,7 @@ spinner, so prompts, retry notices and provider output cannot be overwritten by
 cursor animation. The elapsed time formerly shown by the spinner included time
 spent waiting for confirmation; it was not model execution time.
 
-Capacity discovery and inference retry transient socket failures, transport
+Inference retries transient socket failures, transport
 watchdogs and HTTP 429/500/502/503/504/507 automatically. The pinned native
 profile's `max_attempts` includes the first request (default 3, allowed 1-32);
 `retry_base_delay_secs` and `retry_max_delay_secs` set the exponential schedule
@@ -84,6 +84,41 @@ and running `kvist task approve-policy` again. Cancellation, malformed responses
 invalid configuration and recording failures stop
 without retry. Tool effects, verification commands and entire tasks are never
 automatically replayed: an interrupted operation may already have changed files.
+
+Protected task startup does not require serving-capacity metadata. A configured
+native `context_limit` skips the probe. Otherwise one optional GET has at most
+one second or 10% of remaining task time, whichever is smaller. Missing capacity,
+an unsupported metadata route or a transient failure produces a warning and a
+`capacity_unavailable` event, then inference proceeds. Invalid metadata,
+authorization failures and cancellation still stop explicitly. Inference retains
+its own retries; optional metadata consumes none of those generation attempts.
+
+Unknown capacity uses a **provisional local working budget**, not an inferred
+server limit: the larger of 32768 and estimated initial input plus output reserve
+plus 8192 tokens of history headroom, capped at 1048576. A native profile's output
+reserve is configured or 8192. Explicit command-endpoint profiles retain their
+existing 8192-token local context and 1024-token output reserve without a probe.
+If estimated initial input, reserve and headroom exceed the provisional ceiling,
+startup fails explicitly rather than silently dropping headroom or input.
+The provider can reject a request exceeding its actual window. Set the shared
+profile's `context_limit` to the actual per-request serving window for predictable
+compaction; context size does not measure throughput or predict prefill duration.
+Skott's separate workspace startup still requires configured or discovered capacity.
+
+The reported 2026-10-29 Maerg attempt-0002 reached inference: its journal records
+`context_limit: 262144`, then an inference request before the 300-second timeout.
+The server was still processing a roughly 130000-token prompt when Kvist
+cancelled it. That is not failed capacity discovery. Protected prompts previously
+included the entire local task queue (about 280 KB in this incident), including
+unrelated completed-task history. They now validate the complete queue but inline
+only the selected task's authored definition; all other selected artifacts remain
+exact. Diagnostics announce inference separately, with estimated input, output
+reserve and remaining approved time. Estimates are not exact provider token counts.
+Large intent documents or a slow/cold model can still exhaust five minutes.
+Choose a faster model or explicitly increase the architect role's
+`timeout_seconds` and, if needed, its shared profile's `deadline_secs` (maximum
+600 per request), then review and reapprove policy. No timeout or approval is
+silently increased, and this repair does not rerun or complete the blocked task.
 
 The transport's historical "slot allocation" error actually measured time until
 HTTP response headers, not provider slot ownership. The streaming header

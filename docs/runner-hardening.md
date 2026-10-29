@@ -87,8 +87,10 @@ Plain text escapes terminal controls except LF/tab; JSON retains original text.
 Token estimates are byte-aware heuristics, **not exact tokenizer guarantees**.
 The shared token budget charges complete estimated input plus reserved output
 for every attempt, including retries; it is not provider billing accounting.
-Production startup uses explicit CLI/model context or bounded selected-model
+Skott workspace startup uses explicit CLI/model context or bounded selected-model
 serving-capacity discovery; it has no assumed 8192-token context fallback.
+Protected Kvist task startup instead permits explicitly provisional operation
+when optional metadata is unavailable; see [runtime selection](runtime-selection.md).
 The initial output reserve is explicit CLI/model configuration or
 `min(8192, max(1, context/4))`. Sandboxed native tasks have no default turn,
 wall-time or cumulative-token cutoff. Optional `--max-turns N`,

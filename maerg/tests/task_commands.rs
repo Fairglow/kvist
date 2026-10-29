@@ -986,14 +986,17 @@ command = "/usr/bin/echo 'mocking verify'"
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8(output.stderr.clone()).expect("diagnostic text");
-    assert_eq!(stderr.lines().count(), 2);
+    assert_eq!(stderr.lines().count(), 4);
+    assert_eq!(
+        stderr.matches("Starting inference: approximately ").count(),
+        2
+    );
     assert!(stderr.contains("role `developer`, selected model"));
     assert!(
         stderr
             .lines()
-            .any(|line| line.starts_with("live run journal: "))
+            .any(|line| line.starts_with("live run journal: ") && line.ends_with(".events.jsonl"))
     );
-    assert!(stderr.ends_with(".events.jsonl\n"));
     let stdout_str = String::from_utf8_lossy(&output.stdout);
     assert!(stdout_str.contains("executed and verified successfully"));
     assert!(stdout_str.contains("Logs written to"));
@@ -1864,7 +1867,7 @@ fn shared_task_project(endpoint: &str) -> TempDir {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn task_run_retries_capacity_and_inference_without_replaying_the_task() {
+fn task_run_skips_unavailable_capacity_and_retries_inference_without_replaying_the_task() {
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -1883,7 +1886,7 @@ fn task_run_retries_capacity_and_inference_without_replaying_the_task() {
                         r#"{"default_generation_settings":{"n_ctx":32768}}"#.into(),
                     )
                 }
-            } else if counts.1.fetch_add(1, Ordering::SeqCst) < 1 {
+            } else if counts.1.fetch_add(1, Ordering::SeqCst) < 4 {
                 (429, "{}".into())
             } else {
                 (200, gateway_text_body("reviewable result"))
@@ -1897,11 +1900,15 @@ fn task_run_retries_capacity_and_inference_without_replaying_the_task() {
     assert!(output.status.success(), "{diagnostic}");
     assert_eq!(
         capacity.load(Ordering::SeqCst),
-        4,
-        "profile permits more than three attempts"
+        1,
+        "optional metadata must not consume inference retries"
     );
-    assert_eq!(inference.load(Ordering::SeqCst), 2);
-    assert!(diagnostic.contains("capacity discovery"));
+    assert_eq!(
+        inference.load(Ordering::SeqCst),
+        5,
+        "profile permits more than three inference attempts"
+    );
+    assert!(diagnostic.contains("serving capacity is unknown"));
     assert!(diagnostic.contains("inference"));
     assert_eq!(diagnostic.matches("Retrying automatically").count(), 4);
     let path = fs::read_dir(project.path().join("src/.kvist/runs"))
@@ -1995,7 +2002,10 @@ fn capacity_failure_records_a_blocked_outcome_instead_of_fencing_itself() {
         "{diagnostic}"
     );
     assert!(diagnostic.contains("capacity discovery"), "{diagnostic}");
-    assert!(diagnostic.contains("1/5 attempt(s)"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("cannot select a provisional budget"),
+        "{diagnostic}"
+    );
     assert!(diagnostic.contains("HTTP status 400"), "{diagnostic}");
     assert!(!diagnostic.contains("Retrying automatically"));
     let log = run_kvist(&project, &["task", "log", ".", "implement-code"]);
@@ -2017,7 +2027,7 @@ fn capacity_failure_records_a_blocked_outcome_instead_of_fencing_itself() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn capacity_retry_exhaustion_reports_attempts_endpoint_and_persisted_state() {
+fn unavailable_capacity_preserves_inference_retry_limits_and_persisted_state() {
     let gateway = MockGateway::serve_with_status(|_| (503, "{}".into()), std::time::Duration::ZERO);
     let project = shared_task_project(&gateway.endpoint);
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
@@ -2025,6 +2035,11 @@ fn capacity_retry_exhaustion_reports_attempts_endpoint_and_persisted_state() {
     assert!(!output.status.success());
     assert_eq!(diagnostic.matches("Retrying automatically").count(), 4);
     assert!(diagnostic.contains("5/5 attempt(s)"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("serving capacity is unknown"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("inference"), "{diagnostic}");
     assert!(
         diagnostic.contains("configured attempt limit exhausted"),
         "{diagnostic}"

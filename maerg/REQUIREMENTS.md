@@ -52,6 +52,23 @@ the root component.
 
 ### REQ-SHARED-RUNTIME
 
+Protected task startup MUST NOT require serving-capacity discovery to succeed.
+An explicit native context limit MUST bypass discovery. Otherwise a single
+optional metadata probe MUST take at most one second and one tenth of the
+remaining task budget. Missing/unsupported metadata and transient availability
+failures MUST produce a visible, recorded warning and permit inference using a
+bounded provisional working budget, not an asserted model capacity. Cancellation,
+malformed metadata, invalid configuration and recording failures MUST still fail.
+The provisional budget MUST fit the complete initial request plus its output
+reserve and history headroom, without dropping approved intent or increasing
+approved wall/token/effect authority. Provider context rejection remains explicit.
+Task context MUST include only the selected task's authored queue definition,
+not unrelated tasks or queue lifecycle evidence; the complete queue MUST still
+be validated and bounded before projection. Startup diagnostics MUST distinguish
+capacity discovery from inference and report estimated request size.
+This human-requested repair has an explicit advisory exception while receipts
+are unavailable; independent observation and comparison remain separate.
+
 Delivered human guidance MUST renew model-generation attempts, without
 resetting approved task wall/token budgets. Both shared-native and explicit
 endpoint transports MUST clip individual calls to their independent deadline
@@ -145,7 +162,7 @@ Suggested-task confirmation MUST finish before execution progress starts.
 Progress MUST NOT overwrite terminal input, retry notices, or streamed output.
 Result presentation MUST retain complete diagnostics and actionable commands.
 
-Protected model requests, including capacity discovery, MUST automatically
+Protected inference requests MUST automatically
 retry transient transport failures and HTTP 429/500/502/503/504/507 responses
 within the approved wall/token budgets and selected attempt limit. Backoff
 MUST grow exponentially with bounded jitter and remain cancellable. Each retry

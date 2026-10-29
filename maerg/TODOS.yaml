@@ -10,6 +10,77 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "model-startup-write-tests"
+    title: "write_tests: reproduce capacity-gated and oversized task startup"
+    description: "Pin optional bounded metadata, unknown-capacity inference, exact selected-task projection and startup diagnostics."
+    context: "Before production changes, regressions reproduced fatal missing capacity and unrelated queue history in the prompt. Coverage includes quiet probes, configured limits, malformed/authorization refusal, preserved large input, explicit provider rejection and exact selected-task projection. Explicit advisory exception is recorded in intent."
+    purpose: "Prevent optional provider metadata and unrelated task history from blocking useful inference."
+    expected_outcome: "Regressions reproduce startup gates before production changes."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-29T12:19:47Z"
+      updated_at: "2026-10-29T12:31:15Z"
+      completed_at: "2026-10-29T12:31:15Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "model-startup-implement-code"
+    title: "implement_code: decouple inference from serving metadata"
+    description: "Bound optional metadata and use explicit provisional budgets; project selected queue intent and expose inference size."
+    context: "Optional metadata is clipped to one second and 10% of remaining task time; provisional provenance is explicit. Full queue validation precedes selected authored-field projection. Independent comparison exposed lost headroom at the ceiling; explicit rejection and exact-boundary tests repair it. Full Maerg suite passes 785 tests with seven existing ignores; strict lint and formatting pass. Final affected checks follow records."
+    purpose: "Reach inference without knowing serving capacity and reduce unrelated prefill."
+    expected_outcome: "Targeted regressions and affected checks pass."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "model-startup-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-29T12:19:47Z"
+      updated_at: "2026-10-29T12:34:26Z"
+      completed_at: "2026-10-29T12:31:15Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "model-startup-security-audit"
+    title: "security_audit: independently observe startup boundaries"
+    description: "Derive scoped source and test observations without intent, queues, prior records or history."
+    context: "Clean-slate startup-observer and a narrower startup-ceiling-observer inspected only permitted source/test assertions, excluding intent, queues, prior records/reviews, history, operational evidence and peers. IMPL persists observations, explicit headroom rejection and timing/estimation/duplicate-selection limits. No executed-test, isolation or broad security certification."
+    purpose: "Retain independent observations of fallback, validation and authority preservation."
+    expected_outcome: "Persist bounded source-derived observations with limitations."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "model-startup-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-29T12:19:47Z"
+      updated_at: "2026-10-29T12:31:15Z"
+      completed_at: "2026-10-29T12:31:15Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "model-startup-compliance-review"
+    title: "compliance_review: compare startup intent and observations"
+    description: "Compare scoped intent with independent observations and attributed execution without implementation access."
+    context: "Source-blind startup-comparator supported scoped behavior but exposed headroom loss at the ceiling. After repair, separate startup-ceiling-comparator used fresh narrow source-only observations and attributed tests without source/tools; it found that specific contradiction addressed. IMPL retains timing/estimation and final-rerun limits. No certification, receipt, intent acceptance or operational task replay."
+    purpose: "Retain discrepancies and evidence limits for human arbitration."
+    expected_outcome: "Persist a separate source-blind comparison."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "model-startup-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-29T12:19:47Z"
+      updated_at: "2026-10-29T12:34:26Z"
+      completed_at: "2026-10-29T12:34:26Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "dogfood-fixture-write-tests"
     title: "write_tests: reproduce growing workflow fixture context"
     description: "Pin bounded native artifact content, unchanged profile limits and fixture creation without repository authority."

@@ -104,7 +104,7 @@ fn selected_context_is_bounded_and_never_follows_links_or_expands_source() {
 fn selected_context_aggregate_bound_and_context_window_fail_without_omission() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
     let root = dir.path().canonicalize().expect("absolute workspace");
-    let names = ["REQUIREMENTS.md", "CONTRACT.md", "DESIGN.md", "TODOS.yaml"];
+    let names = ["REQUIREMENTS.md", "CONTRACT.md", "DESIGN.md", "IMPL.md"];
     let mut selected = Vec::new();
     for name in names {
         fs::write(root.join(name), vec![b'a'; 1024 * 1024]).expect("artifact");
@@ -142,6 +142,56 @@ fn selected_context_aggregate_bound_and_context_window_fail_without_omission() {
     )];
     request.context_paths = &extended;
     request.read_only_mounts = &mounts;
+    assert!(context::system_context(&request, "").is_err());
+}
+
+#[test]
+fn selected_queue_context_contains_only_exact_authored_task_fields() {
+    let dir = tempfile::tempdir().expect("workspace");
+    let template = crate::artifacts::root_artifacts()
+        .iter()
+        .find(|artifact| artifact.relative_path == "src/TODOS.yaml")
+        .unwrap();
+    let mut queue = crate::task_queue::parse(template.contents).unwrap();
+    let mut previous = Vec::<String>::new();
+    for (id, kind) in [
+        ("selected", "test"),
+        ("implementation", "implementation"),
+        ("audit", "security-audit"),
+        ("review", "compliance-review"),
+    ] {
+        queue.tasks.push(serde_json::from_value(serde_json::json!({
+            "id":id, "kind":kind, "title":format!("title {id}"),
+            "description":format!("description {id}"),
+            "context":if id == "selected" { "exact selected context".into() } else { "unrelated history ".repeat(200).trim().to_owned() },
+            "purpose":"fixture purpose", "expected_outcome":"fixture result",
+            "requirements":["REQUIREMENTS.md#REQ-FIXTURE"], "depends_on":previous,
+            "status":"pending",
+            "timestamps":{"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","completed_at":null},
+            "blocked_reason":null
+        })).unwrap());
+        previous = vec![id.to_owned()];
+    }
+    let contents = crate::task_queue::serialize(&queue).unwrap();
+    fs::write(dir.path().join("TODOS.yaml"), &contents).unwrap();
+    let mut request = tests::test_execution_request(dir.path());
+    let selected = [PathBuf::from("/workspace/component/TODOS.yaml")];
+    request.context_paths = &selected;
+    request.task_id = "selected";
+    let system = context::system_context(&request, "").unwrap();
+    assert!(system.contains("exact selected context"));
+    assert!(!system.contains("unrelated history"));
+    assert!(!system.contains("requirements_revision"));
+    assert!(!system.contains("timestamps"));
+    assert!(system.len() < 2048, "{} bytes", system.len());
+    request.task_id = "absent";
+    assert!(context::system_context(&request, "").is_err());
+    request.task_id = "selected";
+    fs::write(
+        dir.path().join("TODOS.yaml"),
+        contents.replace("schema_version: 1", "schema_version: 99"),
+    )
+    .unwrap();
     assert!(context::system_context(&request, "").is_err());
 }
 

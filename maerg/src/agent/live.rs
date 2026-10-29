@@ -94,7 +94,9 @@ pub(super) struct ObservedTransport<'a, T> {
 impl<T: ModelTransport> ObservedTransport<'_, T> {
     fn request(&self, request: &ModelRequest) -> sav::Result<()> {
         self.live.record(&json!({"type":"model_request","data":{
-            "model":request.model,"message_count":request.messages.len(),"tool_count":request.tools.len()
+            "model":request.model,"message_count":request.messages.len(),"tool_count":request.tools.len(),
+            "estimated_input_tokens":sav::runtime::context::estimate_request(request),
+            "response_reserve":request.max_output_tokens
         }}), false)
     }
 

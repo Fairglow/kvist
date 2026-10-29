@@ -861,3 +861,127 @@ These are attributed execution results, not independent certification. A
 final complete-target rerun follows this last evidence/queue update so the
 record itself cannot invalidate the checked fixture inputs. No intent was
 accepted, installed executable replaced or operational task replayed.
+
+## Protected model startup supplement (2026-10-29)
+
+### Independent source-only observation
+
+The clean-slate `startup-observer` inspected only the scoped Maerg startup,
+context, diagnostic, budget and execution-loop source and test assertions. It
+did not read intent, queues, prior records/reviews, chat or Git history, live
+logs, operational attempts or peer implementations. It made no edits and ran
+no tests. These are source observations, not executed results or certification.
+
+Execution creates logs, its required journal and controls before starting the
+wall budget; context construction is inside that budget. Cancellation precedes
+expiry in deadline checks. Configured native capacity skips discovery.
+Otherwise discovery uses a transport deadline of the smaller of one second
+and remaining task time divided by ten, with a 1 MiB response bound. Missing
+capacity, transient-classified errors and HTTP 404/405/501 permit provisional
+operation. Other discovery errors, transport-construction failures and required
+recording failures propagate. Cancellation and expiry are checked again after
+discovery.
+
+An explicit native output reserve wins. Otherwise known capacity uses
+`clamp(limit/4, 1, 8192)` and unknown capacity uses 8192. Let `I` estimate the
+complete initial request after setting its output cap, and `R` be that reserve.
+Unknown native capacity uses `clamp(I + R + 8192, 32768, 1048576)` with saturating
+addition. Known limits remain unchanged. Explicit command-endpoint profiles
+retain their default context constant and 1024 reserve; a test asserts 8192
+context. Budget records distinguish configuration, provider, provisional and
+default sources and report whether serving capacity is known.
+
+Selected context is limited to five named local artifacts and exact root/parent
+mounts, with at most seven selections and 4096 bytes per selected path.
+Descriptor-relative reads do not follow links, reject traversal, require regular
+UTF-8 files, and check size and modification/change timestamps around reading.
+Bounds are 1 MiB per file and 4 MiB aggregate. Raw queue bytes count before
+projection. The complete selected queue is parsed; an absent task fails.
+Projection contains schema version, a projection marker and only the selected
+task's id, title, description, context, purpose, expected outcome, kind,
+dependencies and requirement references. Other selected artifacts stay exact.
+The original task appears in both system and user context.
+
+Required journal recording includes discovery, unavailability, budget provenance,
+request estimates/counts, bounded results/errors, stream text and loop events.
+Recording failures propagate, including failures during streamed relay.
+Configured string redactions apply to diagnostic values except event type tags.
+Request summaries do not contain complete prompts. Stderr distinguishes optional
+discovery, provisional fallback and inference estimates.
+
+Inspected tests assert optional missing/unsupported/transient capacity, quiet
+probe bounds, authoritative configured/provider limits, malformed metadata and
+authorization refusal, preserved large input, hard-ceiling overflow without
+truncation, explicit provider rejection, cancellation/expiry/recording failure,
+unchanged endpoint defaults, no-follow/bounded context, selected-task projection,
+independent inference retry limits and retained blocked outcomes. The observer
+had no execution evidence. A subsequent implementing-context test refinement
+also checks recorded probe deadlines against both the one-second and 10% bounds;
+this refinement was not independently re-observed.
+
+Limits retained by the observer: earlier setup is outside the task timeout;
+individual context reads do not check it internally. Raw byte bounds exclude
+JSON/prompt expansion and do not guarantee model fit. Duplicate selections are
+not rejected. Whole-queue validation means malformed unrelated queue entries
+still prevent startup. Estimator internals, transient classification, journal
+durability internals and later effect execution were outside its allowed scope.
+
+### Attributed implementing-context evidence
+
+The retained attempt-0002 journal records a discovered 262144-token capacity
+and 8192 reserve, followed by inference before timeout. No operational evidence
+or task disposition was modified by this repair. The original missing-capacity
+regression failed before production changes because unavailable metadata was
+fatal. With a valid fixture, the queue-projection regression failed because
+unrelated task history remained in the prompt.
+
+The complete Maerg package suite passed **784 tests, zero failures, seven
+existing ignores** after implementation, with strict all-target Clippy,
+formatting, whitespace and structural component validation passing. These
+results precede this record and the final deadline-assertion/task-name refinement.
+The final affected-target rerun must follow all intent, queue and evidence
+updates. Synthetic loopback providers demonstrate local control flow, not
+throughput or successful completion on the operator's large model. No real
+inference replay, policy expansion, intent acceptance, installed executable
+replacement or completion of the blocked compliance task is claimed.
+
+### Independent comparison and ceiling correction
+
+The separate source-blind `startup-comparator` received only isolated intent,
+task definitions, the independent observation and attributed execution. It used
+no source or tools. It supported optional discovery, warned fallback,
+selected-task projection and provenance, but identified a real headroom
+ambiguity: saturating the local budget at 1048576 could silently discard the
+promised history allowance. It also retained cooperative-timing and pending
+post-record verification limits. That finding was not concealed as compliance.
+
+The implementing context added an explicit ceiling rejection and exact-boundary
+assertions. A fresh, narrowly scoped `startup-ceiling-observer` read only startup
+source and its tests, excluding all intent, queues, prior records/reviews,
+history, logs and peers, and performed no edits or execution. It observed:
+
+- estimated input, reserve and 8192 headroom are saturating-added;
+- totals greater than 1048576 fail explicitly; otherwise the minimum is 32768;
+- with reserve 8192, input 1032192 is accepted exactly at the ceiling and
+  1032193 is rejected; arithmetic overflow cannot wrap to an accepted value;
+- only a cloned request receives the estimation output cap, so rejection
+  neither mutates nor truncates caller input;
+- assertions cover minimum/exact/over-ceiling totals, integer saturation,
+  unchanged oversized input, preserved large content, and recorded positive
+  probe deadlines no greater than 500/1000 ms for 5/30-second task budgets.
+
+A separate source-blind `startup-ceiling-comparator` compared the narrow intent
+and fresh observation with attributed targeted execution, without tools/source.
+It found the particular headroom contradiction addressed, with no remaining
+narrow contradiction demonstrated. Recorded deadlines and inference within two
+seconds do not establish hard real-time enforcement; the tests do not separately
+assert the `optional` event field. Estimates are not real-model capacity or
+throughput validation. It retained the final post-record rerun as pending at
+comparison time and made no certification, receipt or acceptance claim.
+
+After the ceiling correction, the implementing context passed four startup unit
+tests, six startup integration tests and strict all-target Clippy. The complete
+Maerg package suite then passed **785 tests, zero failures, seven existing
+ignores**. Formatting also passed. Those executions precede this final record;
+the affected targets and structural checks run again afterward. No accepted
+intent revisions or operational task state are rewritten by these observations.

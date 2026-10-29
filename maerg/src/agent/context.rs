@@ -160,8 +160,12 @@ pub(super) fn system_context(request: &AgentExecutionRequest<'_>, system: &str) 
         if selected.as_os_str().len() > 4096 {
             return Err(invalid("selected context path exceeds 4096 bytes"));
         }
-        let contents = read_file(&source(request, selected)?, MAX_CONTEXT_BYTES - bytes)?;
+        let host_path = source(request, selected)?;
+        let mut contents = read_file(&host_path, MAX_CONTEXT_BYTES - bytes)?;
         bytes += contents.len();
+        if host_path == request.target_dir.join("TODOS.yaml") {
+            contents = selected_task(&contents, request.task_id)?;
+        }
         files.push(serde_json::json!({"path":selected,"contents":contents}));
     }
     let mut prompt = system.to_owned();
@@ -174,4 +178,29 @@ pub(super) fn system_context(request: &AgentExecutionRequest<'_>, system: &str) 
         prompt.push_str(&serde_json::Value::Array(files).to_string());
     }
     Ok(prompt)
+}
+
+fn selected_task(contents: &str, task_id: &str) -> Result<String> {
+    let queue = crate::task_queue::parse(contents)
+        .map_err(|error| invalid(format!("selected TODOS.yaml is invalid: {error}")))?;
+    let task = queue
+        .tasks
+        .iter()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| {
+            invalid(format!(
+                "selected task `{task_id}` is absent from TODOS.yaml"
+            ))
+        })?;
+    Ok(serde_json::json!({
+        "schema_version":queue.schema_version,
+        "projection":"selected_task_definition",
+        "task":{
+            "id":task.id,"title":task.title,"description":task.description,
+            "context":task.context,"purpose":task.purpose,
+            "expected_outcome":task.expected_outcome,"kind":task.kind,
+            "depends_on":task.depends_on,"requirements":task.requirements
+        }
+    })
+    .to_string())
 }

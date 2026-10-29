@@ -4,6 +4,26 @@
 
 ## Shared registry realization (ADR 0015)
 
+Build and validate the selected local context before probing metadata. Parse
+the entire bounded queue with the existing strict parser, select the exact task
+ID and serialize only its authored fields as quoted JSON data under the original
+artifact path. Missing tasks and malformed queues fail rather than disappearing.
+Keep raw-file byte accounting before projection; never truncate other artifacts.
+
+Use one optional capacity probe, clipped to the smaller of one second and 10%
+of remaining task time. Do not retry metadata. Reuse transport transient-error
+classification plus explicit unsupported-route statuses 404/405/501; only these
+and absent capacity can select provisional operation. Propagate malformed input,
+cancellation, expired task time and required-recording failures. Keep configured
+limits authoritative. Estimate the initial complete canonical request with its
+output cap before choosing the provisional working budget and preserve a bounded
+8192-token history allowance. Reject provisional input/reserve/headroom totals
+above 1048576 rather than silently losing headroom at the ceiling; ordinary
+preflight still rejects irreducible overflow for known limits. Record provenance and warnings
+before inference, and announce inference separately with estimated input/reserve
+and remaining approved time. No capacity throughput or prefill-time prediction
+is inferred from context-window metadata.
+
 Long-running protected authoring removes only the hard-coded generation
 counter cutoff. `TurnBudget` and optional token accounting remain authoritative
 across guidance. Parse role wall budgets up to 30 days, retain the five-minute

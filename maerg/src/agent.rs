@@ -17,6 +17,7 @@ use redaction::StreamRedactor;
 mod accounting;
 mod context;
 mod retry;
+mod startup;
 use accounting::TokenBudget;
 use retry::ModelRetry;
 #[cfg(test)]
@@ -1105,7 +1106,7 @@ fn execute_agent_inner(
     cancellation: &CancellationToken,
     allow_control: bool,
 ) -> Result<AgentRunResult> {
-    let mut choice = select_model_choice(profile, request.role, None)?;
+    let choice = select_model_choice(profile, request.role, None)?;
     eprintln!(
         "{}",
         redact_bounded(
@@ -1184,44 +1185,6 @@ fn execute_agent_inner(
             None
         };
         let budget = TurnBudget::new(Duration::from_secs(profile.timeout_seconds));
-        let mut context = if let Some(native) = &mut choice.native {
-            let limit = match native.context_limit {
-                Some(limit) => limit,
-                None => {
-                    eprintln!("Discovering selected model serving capacity before inference...");
-                    let mut attempt = 0u32;
-                    ModelRetry {
-                        policy: model_retry_policy(Some(native)),
-                        budget: &budget, cancellation, live: Some(&live),
-                        phase: "capacity discovery", model: &native.model,
-                        endpoint: &native.base_url, redactions: &redactions,
-                    }.run(&mut attempt, || {
-                        let result = (|| {
-                        let transport = native.transport_bounded(
-                            budget.model_deadline(cancellation)?,
-                            profile.max_output_bytes,
-                        )?;
-                        transport.context_limit(&native.model, cancellation)?
-                            .ok_or_else(|| KvistError::Runtime(sav::runtime::Error::Config {
-                                    path: None,
-                                    reason: "shared native serving capacity is unavailable; configure context_limit in the selected registry profile".into(),
-                                }))
-                        })();
-                        (result, false)
-                    })?
-                }
-            };
-            let reserve = native
-                .response_reserve
-                .unwrap_or((limit / 4).clamp(1, 8192) as u32);
-            native.context_limit = Some(limit);
-            native.response_reserve = Some(reserve);
-            live.record(&serde_json::json!({"type":"model_budget","data":{"context_limit":limit,"response_reserve":reserve}}),true)?;
-            sav::runtime::ContextManager::new(limit, 4)
-        } else {
-            sav::runtime::ContextManager::new(sav::runtime::DEFAULT_CONTEXT_TOKENS, 4)
-        };
-
         let mut conversation = sav::runtime::AgentSession::new(
             sav::runtime::ModelIdentity {
                 id: choice.model.clone(),
@@ -1242,6 +1205,19 @@ fn execute_agent_inner(
             )?,
         );
         conversation.push_user(request.prompt);
+        let initial_request = conversation.next_request().ok_or_else(|| {
+            KvistError::Runtime(sav::runtime::Error::InvalidModelTurn {
+                reason: "protected conversation lost its original task".into(),
+            })
+        })?;
+        let (mut context, reserve) = startup::model_context(
+            choice.native.as_ref(),
+            &initial_request,
+            &budget,
+            cancellation,
+            &live,
+            &redactions,
+        )?;
 
         let mut generations = 0u64;
         let mut model_attempts = 0;
@@ -1260,11 +1236,6 @@ fn execute_agent_inner(
             //    as the durable log.
             generations = generations.saturating_add(1);
             let operation = sav::runtime::Operation::start(cancellation, controls)?;
-            let reserve = choice
-                .native
-                .as_ref()
-                .and_then(|native| native.response_reserve)
-                .unwrap_or(1024);
             let (model_request, compaction) = conversation
                 .prepare_request(&mut context, reserve)?
                 .ok_or_else(|| {
@@ -1275,6 +1246,12 @@ fn execute_agent_inner(
             if let Some(compaction) = compaction {
                 live.record(&serde_json::json!({"type":"context_compaction","data":{"completed_groups":compaction.compacted_turns,"compactions":context.compactions(),"lossy":true,"canonical_evidence":false}}),true)?;
             }
+            eprintln!(
+                "Starting inference: approximately {} input tokens, {} output tokens reserved; {:.1}s approved task time remains.",
+                sav::runtime::context::estimate_request(&model_request),
+                reserve,
+                budget.remaining().as_secs_f64(),
+            );
             let generated = execute_host_turn(
                 &choice,
                 profile,
