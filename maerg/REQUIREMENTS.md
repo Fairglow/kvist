@@ -141,6 +141,34 @@ compliance review.
 
 ### REQ-TASK-LIFECYCLE
 
+Suggested-task confirmation MUST finish before execution progress starts.
+Progress MUST NOT overwrite terminal input, retry notices, or streamed output.
+Result presentation MUST retain complete diagnostics and actionable commands.
+
+Protected model requests, including capacity discovery, MUST automatically
+retry transient transport failures and HTTP 429/500/502/503/504/507 responses
+within the approved wall/token budgets and selected attempt limit. Backoff
+MUST grow exponentially with bounded jitter and remain cancellable. Each retry
+MUST report its phase, model, attempt, cause and delay on stderr and in the live
+journal. Exhaustion MUST identify the stopping bound and selected endpoint.
+Transient failures after provisional streamed progress MUST be retried without
+executing incomplete proposals; discarded progress MUST be explicitly reported
+on stderr and in the journal. Cancellation, invalid input and required-recording
+failures MUST NOT be retried. Effects and verification commands MUST
+NOT be replayed automatically when their effects may be unknown.
+
+Ordinary execution and verification failures MUST return failure, persist a
+blocked task with the underlying cause, and identify the attempt and inspection
+and retry commands. Evidence-persistence failures MUST preserve the unresolved
+attempt and explicitly report that state instead of hiding the original error.
+Attempts started within the same clock second MUST retain distinct logs and
+diagnostic journals without overwriting prior evidence.
+Selection MUST NOT silently skip an unresolved attempt; batch execution MUST
+stop at failures, decisions and pending human finalization without claiming
+completion. Existing ambiguous attempts MUST NOT be retrospectively certified.
+This human-requested repair has an explicit advisory exception while receipts
+are unavailable; independent review remains separate from acceptance.
+
 Task selection and transition MUST require a current, completely VCS-tracked
 component. Writes MUST use exclusive user-owned locking, legal transitions,
 atomic queue replacement, and append-only prepared/committed attempt evidence.

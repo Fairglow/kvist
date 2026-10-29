@@ -54,6 +54,82 @@ dependency phases, verification and human finalization.
 `sav-run` remains a small diagnostic/setup/supervision client. Its continued
 existence does not imply a second first-party native engine.
 
+## Protected task retries and failure recovery
+
+`task run` without an ID asks `Run suggested next task ...? [Y/n]`.
+ENTER accepts; `n`, EOF or cancellation declines without execution. The shell
+asks before opening its working stage. Streamed task execution has no competing
+spinner, so prompts, retry notices and provider output cannot be overwritten by
+cursor animation. The elapsed time formerly shown by the spinner included time
+spent waiting for confirmation; it was not model execution time.
+
+Capacity discovery and inference retry transient socket failures, transport
+watchdogs and HTTP 429/500/502/503/504/507 automatically. The pinned native
+profile's `max_attempts` includes the first request (default 3, allowed 1-32);
+`retry_base_delay_secs` and `retry_max_delay_secs` set the exponential schedule
+(defaults 2 and 30 seconds). Each delay is jittered between half and all of the
+capped schedule. Explicit command-endpoint profiles use those defaults.
+Each retry reports phase, selected model/endpoint, failed attempt, cause, wait
+and remaining task time on stderr and in the `*.events.jsonl` journal.
+No logging flag or further confirmation is required to continue. Streamed
+progress is provisional until the complete response validates: transient stream
+failures report that partial output is discarded before retrying. No incomplete
+tool proposal is executed.
+
+Requests and backoff consume the same approved role `timeout_seconds`; retries
+never extend it, reset cumulative token charges or change authority. A request
+can exhaust the remaining budget before all permitted attempts run. Increasing
+role limits or changing the registry requires reviewing the effective policy
+and running `kvist task approve-policy` again. Cancellation, malformed responses,
+invalid configuration and recording failures stop
+without retry. Tool effects, verification commands and entire tasks are never
+automatically replayed: an interrupted operation may already have changed files.
+
+The transport's historical "slot allocation" error actually measured time until
+HTTP response headers, not provider slot ownership. The streaming header
+watchdog remains bounded, but unary generation and metadata GETs now use the
+complete caller request deadline. A slow metadata response can represent model
+loading/switching, a blocked route or a stalled server; free inference slots do
+not prove that metadata is responsive. Provider logs are needed to distinguish
+these causes. A shared role binding can also select a different model from the
+shell's convenience model: execution reports the actual role and model.
+
+An ordinary exhausted or persistent failure returns nonzero and records
+`blocked`, the underlying diagnostic, attempt identity and inspection commands.
+Read its log with `kvist task log COMPONENT TASK`, inspect retained effects, fix
+the cause, then deliberately return it to `pending` with `task transition`
+before starting a new attempt. A successful implementation remains
+`in-progress` pending the reported exact `task finalize ... accept` command.
+Multi-task selections stop there or at a decision/failure; they do not call it
+completed or silently proceed. `task next` refuses unresolved attempt evidence.
+
+If failure evidence or the final queue update cannot be persisted, the error
+reports both the original cause and the persistence problem. Completion is
+unconfirmed; inspect the retained journal rather than deleting the fence.
+`task recover ... --disposition execution-did-not-start` is only for
+host-authenticated runner-descriptor failures proving no launch/write exposure;
+missing model turns or diagnostic logs alone cannot establish that proof.
+
+For the reported 2026-10-28 Maerg incident, the saved journal contains
+`run_start`, `profile_selected`, then `run_end: failed`; the trajectory has zero
+turns and the canonical attempt has only `prepared`. The files end about
+15 seconds after the run began. The incident-era capacity-discovery call had
+no retries; later source added a retry loop but still retained the hidden GET
+header limit. The repair preserves the old evidence and does not mark its
+`shared-runtime-compliance-review` task complete.
+After reviewing the evidence and any current intent staleness, a human can
+explicitly abandon that attempt, without claiming rollback or no execution:
+
+```sh
+kvist task finalize maerg shared-runtime-compliance-review attempt-0001 block \
+  --reason "Abandon failed capacity-discovery attempt after reviewing retained effects; completion is not certified."
+kvist task transition maerg shared-runtime-compliance-review pending
+```
+
+Use the rebuilt/reinstalled binary for a new run. Review any stale intent before
+`component accept`; do not accept it merely to bypass a gate. A different
+next-ready task never establishes the preceding task's completion.
+
 ## Observation and control
 
 Run owners append versioned live diagnostic records during execution.

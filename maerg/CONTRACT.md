@@ -165,7 +165,34 @@ directory. Failing outside a project names the missing marker and suggests
 executes it only after an explicit interactive confirmation (a bare ENTER
 accepts; a refusal changes no state). When no task is ready, or when standard
 input is not an interactive terminal, it fails with an actionable diagnostic
-and changes no durable state. `component commit` retries or performs the
+and changes no durable state. The shell obtains this confirmation before its
+working stage; streamed task commands do not run a competing terminal spinner.
+Long result lines wrap without discarding error details or command arguments.
+
+Protected model calls and capacity discovery share automatic transient retries:
+the selected native profile's `max_attempts` (1-32, default 3), exponential
+backoff capped by `retry_max_delay_secs`, and jitter between half and all of
+each scheduled delay. Explicit command-endpoint profiles use three attempts
+with 2-second base and 30-second cap. All waits and requests consume the same
+approved role wall budget; token reservations remain cumulative. Retry notices
+are redacted, emitted on stderr without requiring logging configuration, and
+recorded in the live journal. Exhaustion names phase, model, endpoint, attempts,
+elapsed time and stopping bound. HTTP 429/500/502/503/504/507, transient socket
+errors and transport watchdogs are retryable even after provisional stream
+progress: a notice and diagnostic event explicitly discard the incomplete
+response, whose proposals were never executable. No retry replays effects,
+verification, or an entire task.
+
+Execution/verification failures return nonzero, retain the cause in the blocked
+task and report the attempt, log and explicit retry command. A failure to
+persist that disposition instead reports the unresolved attempt and retains
+its fence. Separate attempts retain distinct evidence even when started within
+one clock second. `task next` and automatic selection refuse unresolved attempts.
+Multi-task selections stop at pending finalization or decisions, rather than
+calling an unfinished task completed. Diagnostic EOF or a different next-ready
+task is never evidence of completion.
+
+`component commit` retries or performs the
 isolated index commit for an already accepted set (the acceptance id is
 reported when `component accept --commit` records the acceptance but cannot
 create the Git commit).

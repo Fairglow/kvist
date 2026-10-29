@@ -5,6 +5,78 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped resilient task execution repair - 2026-10-28
+
+Independent clean-slate `resilient-source-observer` inspected the current
+retry, agent, task-command, shell and corresponding test source only.
+`disposition-followup-observer` independently observed the narrow subsequent
+cause-preservation, disposition-fence and evidence-identity changes.
+Both excluded intent, queues, prior records, reviews, peer implementations,
+chat and Git history. Neither edited files, executed tests or certified
+compliance. Their source-derived observations are:
+
+- Capacity discovery and generation have separately counted retry scopes,
+  sharing the approved task wall budget. Native policy supplies attempt and
+  backoff limits; explicit endpoints use defaults. Upper-half jitter is
+  capped by remaining time; cancellation interrupts backoff.
+- Required records precede requests/retries. Recording and entropy failures
+  stop dispatch and preserve the preceding model cause text alongside the
+  secondary error. This preservation is textual, not a typed source chain.
+- Stream events are provisional. Only a completed validated turn reaches the
+  broker; retries explicitly discard partial output without executing partial
+  proposals. Token reservations remain cumulative. No retry loop encloses
+  effects, verification or the whole task.
+- Failed execution evidence precedes blocked disposition. Execution evidence
+  alone no longer releases an in-progress/pending attempt fence. Observed
+  execution plus a terminal queue status, an associated committed disposition,
+  or pending/explicit human disposition resolves the guard. Only the
+  lock-owning run's terminal transition exempts its exact task/attempt pair.
+  Other attempts and recovery states remain checked. Durable disposition
+  remains recognized after deliberate blocked-to-pending transitions.
+- Failed persistence reports unconfirmed completion and both causes.
+  Required evidence/control closure failures are returned even when execution
+  already failed. Wrapped model errors retain timeout/output-limit flags.
+- Successful implementation and verification leave pending human disposition;
+  batches reread status and stop unless the preceding task actually completed.
+  Guarded next-task selection refuses unresolved attempts.
+- Suggested-task confirmation precedes working output and spinner creation;
+  streaming dispatch suppresses a competing spinner. Full multiline and long
+  diagnostics reach the existing wrapping renderer, which was not re-observed.
+- Exclusive log creation tries the timestamp identity and 1023 ordered
+  suffixes, never overwriting prior logs. Live journal and trajectory names
+  derive from that identity. Log and journal reservation is not transactional:
+  journal creation can still fail explicitly after an empty log is reserved.
+
+The first observer identified cause loss during failed retry recording and
+premature fence release. Implementer-attributed regressions reproduced both;
+the narrow follow-up observed the repairs and identified no concrete defect
+in those changed routines. A rapid explicit retry also reproduced same-second
+log-name collision, which was repaired and independently observed.
+
+Other bounded observations remain outside this repair: explicit human
+finalization does not itself require successful execution/verification evidence;
+its digest reads can be skipped on failure; produced change inventory covers
+only immediate readable test files and is not a complete change set.
+These are retained limitations, not automatically arbitrated intent changes.
+
+Implementer-attributed execution: `cargo test --offline --locked -p kvist -p sav`
+passes 988 tests across 58 suites with seven existing ignored tests. This
+includes real PTY confirmation, retry exhaustion/recovery, interrupted-stream
+discard, failure-persistence and deliberate reattempt regressions. Execution
+output is retained in the session's `affected-tests-final.log`; it is not an
+independently executed qualification or whole-component acceptance.
+
+Independent source-blind `isolated-repair-comparator` compared the bounded
+intent/task-definition bundle with these source-derived observations and
+attributed named execution results, without tools, source or older records.
+It established no concrete repair-scoped mismatch. Execution remains
+implementer-attributed; exhaustive retry-status/boundary coverage, universal
+EOF precedence and re-observation of the wrapping renderer remain gaps.
+The earlier comparator read outside its allowlist and is not counted as
+independence evidence. Neither comparison accepts revisions, resolves the
+historical attempt or certifies the broader finalization/change-inventory
+limitations. Those remain available for explicit human arbitration.
+
 ## Scoped Rust inventory parity repair - 2026-10-27
 
 Independent clean-slate `rust-inventory-observer` read only the authoring Rust

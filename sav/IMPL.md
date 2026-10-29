@@ -1,6 +1,59 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped HTTP response deadline repair - 2026-10-28
+
+Independent clean-slate `transport-source-observer` read only current
+`src/direct_transport.rs`, `src/error.rs` and `tests/model_transport.rs`.
+It excluded intent, queues, prior records, reviews, peer implementations,
+chat and Git history, made no edits, ran no tests and made no compliance
+determination. Its source-derived observations are:
+
+- Metadata GET and unary requests do not apply streaming header, TTFT or
+  cadence watchdogs. They retain caller deadlines and response bounds.
+  Router metadata discovery shares a nominal deadline across its requests.
+- Streaming alone applies the default 15-second header watchdog, measured
+  after request transmission until the header terminator. It does not inspect
+  slots. Overall deadline wins a tie; cooperative paired checks prioritize
+  cancellation. Reads/writes poll with 100-ms timeouts.
+- EOF before complete headers, declared Content-Length or required chunk
+  framing/body/trailers yields retryable `ModelTransportIo(UnexpectedEof)`.
+  Close-delimited EOF is ordinary framing completion. Complete invalid framing,
+  JSON or missing protocol terminal records remains malformed. A decoded
+  malformed record can fail before a later transport truncation is observed.
+- Partial events do not constitute a complete returned model turn. A protocol
+  terminal record does not replace required HTTP framing completion.
+- This transport performs no attempt-level retries. Existing retryability
+  includes transport watchdogs, selected interrupted-connection I/O kinds and
+  HTTP 429/500/502/503/504/507; cancellation, malformed responses and bounds
+  are not retryable.
+- Test source asserts unary/header separation, metadata arriving after 15.25
+  seconds within a 25-second caller budget, five HTTP-truncation cases and
+  complete-malformed-stream rejection. These are assertions, not observed runs.
+
+The observer retained pre-existing limits: TTFT measures initial body arrival
+rather than a decoded token; builder watchdog setters do not repeat constructor
+validation; synchronous callbacks cannot be preempted; network deadlines and
+response parsing are not universal whole-call timing guarantees. Its bounded
+EOF regression observation covered unary Ollama; peer-host stream retry was
+not part of its source-only context. These mechanisms were not redesigned.
+
+Implementer-attributed execution: the affected Maerg/Sav package command passes
+988 tests across 58 suites with seven existing ignored tests; Sav's 49
+model-transport tests include the actual 15.25-second metadata response and
+framing-EOF regressions. The session retains `affected-tests-final.log`.
+The observer did not execute those tests; passing them is not acceptance or
+whole-component certification.
+
+Independent source-blind `isolated-repair-comparator` compared only the
+bounded intent/task-definition excerpts, these observations and attributed
+named execution results, using no tools or implementation source. It
+established no concrete repair-scoped contradiction. Independent execution,
+exhaustive EOF/protocol precedence coverage and all retry/boundary paths
+remain unqualified. An earlier comparison exceeded its read allowlist and
+is not counted as independence evidence. No acceptance or certification is
+claimed; the existing timing/validation limitations remain documented.
+
 ## Evidence scope
 
 This record was derived afresh from `sav/src/**`, `sav/tests/**`, and

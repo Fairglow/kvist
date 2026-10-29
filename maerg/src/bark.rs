@@ -646,22 +646,26 @@ impl Shell {
         let suggested = task.is_none();
         let task = match task {
             Some(task) => task,
-            None => {
-                match resolve_next_ready_task(&DynamicState::load(&self.project_dir), &component) {
-                    Some(task_id) => task_id,
-                    None => {
-                        report_error(
-                            self.theme,
-                            &format!(
-                                "no ready tasks in `{component}`; pass a TASK_ID or inspect `tasks`"
-                            ),
-                        );
-                        self.journal.append(journal_entry(line, "no ready task"));
-                        self.note(true);
-                        return LoopAction::Continue;
-                    }
+            None => match task_commands::next(&self.project_dir, Path::new(&component)) {
+                Ok(task_id) if task_id != "no ready task" => task_id,
+                Ok(_) => {
+                    report_error(
+                        self.theme,
+                        &format!(
+                            "no ready tasks in `{component}`; pass a TASK_ID or inspect `tasks`"
+                        ),
+                    );
+                    self.journal.append(journal_entry(line, "no ready task"));
+                    self.note(true);
+                    return LoopAction::Continue;
                 }
-            }
+                Err(error) => {
+                    let _ = error.print();
+                    self.journal.append(journal_entry(line, &error.to_string()));
+                    self.note(true);
+                    return LoopAction::Continue;
+                }
+            },
         };
         if suggested && !self.confirm_suggested_run(&task, line) {
             return LoopAction::Continue;
@@ -875,6 +879,43 @@ impl Shell {
         // as `cd maerg && kvist task next` does in the regular CLI.
         inject_command_focus(&mut cmd, self.current_component().as_deref());
 
+        if let cli::Command::Task {
+            command:
+                cli::TaskCommand::Run {
+                    component_dir,
+                    task_id,
+                    ..
+                },
+        } = &mut cmd
+            && task_id.is_none()
+        {
+            let component = component_dir.as_deref().unwrap_or(Path::new("."));
+            let selected = match task_commands::next(&self.project_dir, component) {
+                Ok(selected) if selected != "no ready task" => selected,
+                Ok(_) => {
+                    report_error(
+                        self.theme,
+                        "No ready task; inspect `tasks` or `kvist status`.",
+                    );
+                    self.journal
+                        .append(journal_entry(journal_line, "no ready task"));
+                    self.note(true);
+                    return;
+                }
+                Err(error) => {
+                    let _ = error.print();
+                    self.journal
+                        .append(journal_entry(journal_line, &error.to_string()));
+                    self.note(true);
+                    return;
+                }
+            };
+            if !self.confirm_suggested_run(&selected, journal_line) {
+                return;
+            }
+            *task_id = Some(selected);
+        }
+
         // Destructive operations require an explicit in-shell confirmation.
         if let Some(gate) = destructive_gate(&cmd)
             && !confirm(&format!("confirm {gate}? [y/N] "))
@@ -911,7 +952,7 @@ impl Shell {
         // visibly progressing rather than hung. Interactive commands drive their
         // own prompt (a wizard here) and must not be covered by a spinner that
         // would imply a background agent run while the command waits for input.
-        let spinner = if interactive {
+        let spinner = if interactive || streaming {
             None
         } else {
             Some(self.stream_manager.start_spinner(&program))
@@ -1164,6 +1205,7 @@ fn parse_run_args(args: &[String]) -> std::result::Result<RunArgs, String> {
 /// Resolves the next ready task (the first pending task whose recorded
 /// dependencies are all completed) for a component from a snapshot, or
 /// `None` when the component has no readable queue or no task is ready.
+#[cfg(test)]
 fn resolve_next_ready_task(state: &DynamicState, component: &str) -> Option<String> {
     let scope = state.scopes.get(component)?;
     task_queue::next_ready_task_id(&scope.tasks)
@@ -1482,6 +1524,8 @@ fn is_interactive_command(command: &cli::Command) -> bool {
         command,
         cli::Command::Agent {
             command: cli::AgentCommand::Setup { .. }
+        } | cli::Command::Task {
+            command: cli::TaskCommand::Run { task_id: None, .. }
         }
     )
 }
@@ -1826,6 +1870,26 @@ mod tests {
             command: cli::AgentCommand::List,
         };
         assert!(!is_streaming_command(&agent_list));
+    }
+
+    #[test]
+    fn suggested_task_is_interactive_but_an_explicit_task_is_not() {
+        let mut command = cli::Command::Task {
+            command: cli::TaskCommand::Run {
+                component_dir: None,
+                task_id: None,
+                stream: false,
+                allow_control: false,
+            },
+        };
+        assert!(is_interactive_command(&command));
+        if let cli::Command::Task {
+            command: cli::TaskCommand::Run { task_id, .. },
+        } = &mut command
+        {
+            *task_id = Some("selected".into());
+        }
+        assert!(!is_interactive_command(&command));
     }
 
     #[test]
@@ -2222,11 +2286,13 @@ mod tests {
     }
 
     #[test]
-    fn run_builtin_without_a_ready_task_reports_and_continues() {
+    fn run_builtin_on_uninitialized_project_reports_actionable_state_and_continues() {
         let dir = tempdir().unwrap();
         let (mut shell, history) = test_shell(dir.path());
         assert_eq!(shell.handle_line("run", &history), LoopAction::Continue);
-        assert_eq!(shell.journal.entries()[0].result, "no ready task");
+        let result = &shell.journal.entries()[0].result;
+        assert!(result.contains("not current (state: uninitialized)"));
+        assert!(result.contains("kvist doctor"));
     }
 
     #[test]

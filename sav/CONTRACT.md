@@ -192,6 +192,17 @@ observer/client loss cannot terminate the run.
 
 ### Additional runtime and transport mechanisms
 
+Bounded metadata GETs and unary inference allow response headers to arrive
+within the complete caller request deadline. Only streaming inference applies
+the configured `slot_allocation_timeout` header watchdog (default 15 seconds).
+`SlotAllocationTimedOut` means HTTP response headers were not received within
+that watchdog; it does not observe or prove provider slot exhaustion. Overall
+deadline and cancellation still bound every I/O stage. The transport performs
+one request; the embedding host owns safe retries.
+Premature HTTP-framing EOF is `ModelTransportIo` with `UnexpectedEof`; invalid
+complete framing/payloads remain malformed responses. Partial stream events are
+provisional and never constitute a complete executable turn.
+
 The shared runtime boundary described in ADR 0015 separates registry,
 native-loop, external-agent and observation interfaces. Registry facts and
 resolution belong to Sav; application role bindings and authorization do not.

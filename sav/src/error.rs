@@ -75,8 +75,10 @@ pub enum Error {
     #[error("model transport timed out")]
     ModelTransportTimedOut,
 
-    /// Slot allocation timeout elapsed before the local provider accepted the request.
-    #[error("slot allocation timed out after {timeout:?}")]
+    /// The streaming response-header watchdog elapsed; provider slot state is unknown.
+    #[error(
+        "model response headers not received within {timeout:?}; the provider may be loading, queued or stalled (slot occupancy is unknown)"
+    )]
     SlotAllocationTimedOut { timeout: std::time::Duration },
 
     /// Time-to-first-token watchdog elapsed before the local provider streamed initial tokens.

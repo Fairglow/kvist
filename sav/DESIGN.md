@@ -78,9 +78,17 @@ before returning them. No model-qualified GET or inference is used.
 Direct transport reuses bounded loopback GET for llama-server model-qualified
 properties and Ollama loaded-model metadata. Encode the model query as percent
 escaped UTF-8, validate positive integer capacity within 1048576 tokens, and
-return absent capacity distinctly. Limit discovery to 1 MiB and 60 seconds:
+return absent capacity distinctly. Limit discovery to 1 MiB and the caller's
+request deadline (at most 24 hours):
 the provider may have to load, or switch to, the selected model before it
 answers a bare metadata probe, and a large local model can take minutes.
+Represent the response-header watchdog as optional: absent for metadata and
+unary generation, present for streaming inference. Bound all stages by the
+overall deadline. Report missing response headers rather than claiming to
+know provider slot occupancy; prefer the overall timeout when it expires first.
+Classify socket EOF before headers, declared Content-Length, or HTTP chunks
+complete as `ModelTransportIo(UnexpectedEof)`, preserving safe host retry
+classification. Complete but invalid protocol records remain malformed.
 Streaming OpenAI-compatible requests ask for include_usage, preserving nullable
 usage and finish classification. Raise only the complete request byte ceiling
 to 8 MiB so larger validated context is not constrained by the old 2-MiB wire

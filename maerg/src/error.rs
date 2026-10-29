@@ -328,6 +328,21 @@ pub enum KvistError {
         /// Underlying connection diagnostic from the operating system.
         reason: String,
     },
+    /// A model request stopped without replaying any task effects.
+    #[error("{reason}: {source}")]
+    AgentModelRequestFailed {
+        /// Phase, selected endpoint/model and exhausted bound.
+        reason: String,
+        /// The last provider or transport failure.
+        #[source]
+        source: sav::Error,
+    },
+    /// Required run evidence could not be completed; effects are retained.
+    #[error("could not complete required agent evidence: {reason}")]
+    AgentEvidenceFailed {
+        /// Execution failure, if any, plus the failed evidence operations.
+        reason: String,
+    },
     /// The selected agent model command does not target a local model gateway.
     ///
     /// The supervised task path performs the model turn on the host against a
@@ -521,11 +536,8 @@ pub enum KvistError {
         /// Component-root-relative component path.
         component: PathBuf,
     },
-    /// A task run failed and the task has been transitioned to blocked.
-    #[error(
-        "task `{task_id}` failed during execution and has been transitioned to blocked: {reason}\n\n\
-         hint: run `kvist task log <component> {task_id}` to inspect the execution error and failure logs"
-    )]
+    /// A task failed; the diagnostic describes its persisted disposition.
+    #[error("task `{task_id}` failed: {reason}")]
     TaskRunFailed {
         /// The task that failed.
         task_id: String,

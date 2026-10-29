@@ -199,6 +199,16 @@ be forwarded as setup presentation.
 
 ### AR-REQ-MODEL-TRANSPORT
 
+Capacity metadata and unary generation MUST use their caller's complete
+request deadline for response headers, not the streaming 15-second header
+watchdog. A header timeout MUST describe the observed missing HTTP headers,
+not assert exhausted model slots. Streaming header and first-body stages MUST
+remain separately bounded and cancellation MUST retain precedence.
+Premature EOF within HTTP headers, a declared body or chunk framing MUST be a
+retryable transport error, not a complete turn or a malformed-payload fallback.
+This human-requested repair has an explicit advisory exception while receipts
+are unavailable.
+
 The direct transport MUST expose bounded selected-model serving-context
 discovery without inference or tool execution, preserve local-only endpoint
 policy, distinguish unavailable capacity from a numeric limit, and reject

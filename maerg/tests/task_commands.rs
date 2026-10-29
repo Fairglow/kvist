@@ -195,6 +195,39 @@ impl MockGateway {
         respond: impl Fn(&[u8]) -> String + Send + 'static,
         delay: std::time::Duration,
     ) -> Self {
+        Self::serve_with_status(
+            move |request| {
+                let header_end = request
+                    .windows(4)
+                    .position(|part| part == b"\r\n\r\n")
+                    .unwrap()
+                    + 4;
+                (200, respond(&request[header_end..]))
+            },
+            delay,
+        )
+    }
+
+    fn serve_with_status(
+        respond: impl Fn(&[u8]) -> (u16, String) + Send + 'static,
+        delay: std::time::Duration,
+    ) -> Self {
+        Self::serve_raw(
+            move |request| {
+                let (status, body) = respond(request);
+                format!(
+                    "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+            },
+            delay,
+        )
+    }
+
+    fn serve_raw(
+        respond: impl Fn(&[u8]) -> String + Send + 'static,
+        delay: std::time::Duration,
+    ) -> Self {
         use std::io::{Read, Write};
         use std::net::TcpListener;
         use std::sync::Arc;
@@ -272,13 +305,8 @@ impl MockGateway {
                 if !delay.is_zero() {
                     thread::sleep(delay);
                 }
-                let body = respond(&request[header_end..]);
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len()
-                );
+                let response = respond(&request);
                 let _ = stream.write_all(response.as_bytes());
-                let _ = stream.write_all(body.as_bytes());
                 let _ = stream.flush();
             }
         });
@@ -958,8 +986,13 @@ command = "/usr/bin/echo 'mocking verify'"
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8(output.stderr.clone()).expect("diagnostic text");
-    assert_eq!(stderr.lines().count(), 1);
-    assert!(stderr.starts_with("live run journal: "));
+    assert_eq!(stderr.lines().count(), 2);
+    assert!(stderr.contains("role `developer`, selected model"));
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("live run journal: "))
+    );
     assert!(stderr.ends_with(".events.jsonl\n"));
     let stdout_str = String::from_utf8_lossy(&output.stdout);
     assert!(stdout_str.contains("executed and verified successfully"));
@@ -1458,14 +1491,11 @@ printf 'approved request runner\n' > sandbox-request.json
     // The mutated runner is refused before it can service the verification
     // request: the run reports the blocked transition and the mutated runner
     // never writes a request file.
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout_str = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout_str.contains("verification blocked and transitioned to blocked"));
-    assert!(stdout_str.contains("runner identity or content has changed"));
+    assert!(!output.status.success());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("transitioned to blocked"));
+    assert!(diagnostic.contains("test-command verification blocked"));
+    assert!(diagnostic.contains("runner identity or content has changed"));
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
     assert!(queue_contents.contains("status: blocked"));
@@ -1753,15 +1783,480 @@ command = "/usr/bin/echo verify"
 
     // Run task and verify failure
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
-    assert!(output.status.success()); // Kvist CLI handles failures gracefully and exits 0 but marks task Blocked
-    let stdout_str = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout_str.contains("failed during execution and has been transitioned to blocked"));
+    assert!(!output.status.success());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        diagnostic.contains("transitioned to blocked"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("attempt-0001"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("kvist task log . implement-code"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("numeric loopback"), "{diagnostic}");
 
     // Verify task status is Blocked in TODOS.yaml and contains the blocker_reason
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
     assert!(queue_contents.contains("status: blocked"));
-    assert!(queue_contents.contains("agent failed during task execution"));
+    assert!(queue_contents.contains("numeric loopback"));
+    let attempts = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl"),
+    )
+    .unwrap();
+    assert!(attempts.contains("\"phase\":\"agent-execution\""));
+    assert!(attempts.contains("\"success\":false"));
+    let transition = run_kvist(
+        &project,
+        &["task", "transition", ".", "implement-code", "pending"],
+    );
+    assert!(
+        transition.status.success(),
+        "{}",
+        String::from_utf8_lossy(&transition.stderr)
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn task_next_refuses_to_skip_a_prepared_attempt() {
+    let project = TempDir::new().unwrap();
+    initialize(project.path()).unwrap();
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).unwrap();
+    track_project(&project);
+    fs::create_dir_all(project.path().join("src/.kvist-attempts")).unwrap();
+    fs::write(
+        project.path().join("src/.kvist-attempts/implement-code.jsonl"),
+        "{\"phase\":\"prepared\",\"task_id\":\"implement-code\",\"from_status\":\"pending\",\"to_status\":\"in-progress\",\"timestamp\":\"2026-08-16T12:54:50Z\",\"reason\":null}\n",
+    ).unwrap();
+    let output = run_kvist(&project, &["task", "next", "."]);
+    assert!(
+        !output.status.success(),
+        "must not suggest a different task"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("recovery"));
+}
+
+#[cfg(target_os = "linux")]
+fn shared_task_project(endpoint: &str) -> TempDir {
+    let project = TempDir::new().unwrap();
+    initialize(project.path()).unwrap();
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).unwrap();
+    let endpoint = endpoint.trim_end_matches("/v1/chat/completions");
+    fs::write(project.path().join("providers.toml"), format!(
+        "schema_version = 1\n[profiles.fixture.backend]\nkind = \"native\"\nprovider = \"llama-server\"\nmodel = \"cold-model\"\nbase_url = \"{endpoint}\"\nmax_attempts = 5\nretry_base_delay_secs = 0\nretry_max_delay_secs = 0\n"
+    )).unwrap();
+    fs::write(project.path().join("kvist.toml"),
+        "schema_version = 1\ncomponent_root = \"src\"\n[agent.registry]\npath = \"providers.toml\"\n[agent.roles.developer]\nprofile = \"fixture\"\n[test_policy]\nschema_version = 1\nworking_directory = \"component\"\nenvironment_allowlist = []\ntimeout_seconds = 5\nmax_output_bytes = 1000\n[[test_policy.commands]]\ncomponent = \".\"\ncommand = \"/usr/bin/true\"\n",
+    ).unwrap();
+    track_project(&project);
+    let approval = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(
+        approval.status.success(),
+        "{}",
+        String::from_utf8_lossy(&approval.stderr)
+    );
+    project
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn task_run_retries_capacity_and_inference_without_replaying_the_task() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let capacity = Arc::new(AtomicUsize::new(0));
+    let inference = Arc::new(AtomicUsize::new(0));
+    let counts = (capacity.clone(), inference.clone());
+    let gateway = MockGateway::serve_with_status(
+        move |request| {
+            if request.starts_with(b"GET /props?") {
+                if counts.0.fetch_add(1, Ordering::SeqCst) < 3 {
+                    (503, "{}".into())
+                } else {
+                    (
+                        200,
+                        r#"{"default_generation_settings":{"n_ctx":32768}}"#.into(),
+                    )
+                }
+            } else if counts.1.fetch_add(1, Ordering::SeqCst) < 1 {
+                (429, "{}".into())
+            } else {
+                (200, gateway_text_body("reviewable result"))
+            }
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = shared_task_project(&gateway.endpoint);
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{diagnostic}");
+    assert_eq!(
+        capacity.load(Ordering::SeqCst),
+        4,
+        "profile permits more than three attempts"
+    );
+    assert_eq!(inference.load(Ordering::SeqCst), 2);
+    assert!(diagnostic.contains("capacity discovery"));
+    assert!(diagnostic.contains("inference"));
+    assert_eq!(diagnostic.matches("Retrying automatically").count(), 4);
+    let path = fs::read_dir(project.path().join("src/.kvist/runs"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.to_string_lossy().ends_with(".events.jsonl"))
+        .unwrap();
+    let journal = fs::read_to_string(path).unwrap();
+    assert_eq!(journal.matches("\"type\":\"model_retry\"").count(), 4);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("not completed yet"));
+    assert!(stdout.contains("kvist task finalize . implement-code attempt-0001 accept"));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn interrupted_stream_discards_provisional_output_and_incomplete_tool_proposals_before_retry() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let gateway = MockGateway::serve_raw(
+        move |request| {
+            let body = if request.starts_with(b"GET /props?") {
+                r#"{"default_generation_settings":{"n_ctx":32768}}"#.to_owned()
+            } else if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                let delta = serde_json::json!({"model":"cold-model","choices":[{"index":0,"delta":{
+                    "content":"provisional ",
+                    "tool_calls":[{"index":0,"id":"incomplete-write","type":"function","function":{
+                        "name":"write_file","arguments":"{\"destination\":\"src/should-not-exist.rs\","
+                    }}]
+                }}]});
+                let body = format!("data: {delta}\n\n");
+                return format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len() + 100
+                );
+            } else {
+                gateway_stream_body(&["recovered"])
+            };
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = shared_task_project(&gateway.endpoint);
+    let output = run_kvist(
+        &project,
+        &["task", "run", ".", "implement-code", "--stream"],
+    );
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{diagnostic}");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(
+        diagnostic.contains("Discarding provisional streamed progress"),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("Retrying automatically"),
+        "{diagnostic}"
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("recovered"));
+    assert!(
+        !project.path().join("agent-sandbox-request.json").exists(),
+        "no incomplete tool proposal may be dispatched"
+    );
+    let path = fs::read_dir(project.path().join("src/.kvist/runs"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.to_string_lossy().ends_with(".events.jsonl"))
+        .unwrap();
+    let events = fs::read_to_string(path).unwrap();
+    assert!(events.contains("\"type\":\"provisional_output_discarded\""));
+    assert!(events.contains("\"proposals_executed\":false"));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn capacity_failure_records_a_blocked_outcome_instead_of_fencing_itself() {
+    let gateway = MockGateway::serve_with_status(|_| (400, "{}".into()), std::time::Duration::ZERO);
+    let project = shared_task_project(&gateway.endpoint);
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        diagnostic.contains("transitioned to blocked"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("capacity discovery"), "{diagnostic}");
+    assert!(diagnostic.contains("1/5 attempt(s)"), "{diagnostic}");
+    assert!(diagnostic.contains("HTTP status 400"), "{diagnostic}");
+    assert!(!diagnostic.contains("Retrying automatically"));
+    let log = run_kvist(&project, &["task", "log", ".", "implement-code"]);
+    assert!(
+        log.status.success(),
+        "blocked tasks must retain readable logs"
+    );
+    assert!(String::from_utf8_lossy(&log.stdout).contains("capacity discovery"));
+    let transition = run_kvist(
+        &project,
+        &["task", "transition", ".", "implement-code", "pending"],
+    );
+    assert!(
+        transition.status.success(),
+        "{}",
+        String::from_utf8_lossy(&transition.stderr)
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn capacity_retry_exhaustion_reports_attempts_endpoint_and_persisted_state() {
+    let gateway = MockGateway::serve_with_status(|_| (503, "{}".into()), std::time::Duration::ZERO);
+    let project = shared_task_project(&gateway.endpoint);
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert_eq!(diagnostic.matches("Retrying automatically").count(), 4);
+    assert!(diagnostic.contains("5/5 attempt(s)"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("configured attempt limit exhausted"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("HTTP status 503"), "{diagnostic}");
+    assert!(
+        diagnostic.contains(gateway.endpoint.trim_end_matches("/v1/chat/completions")),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("transitioned to blocked"),
+        "{diagnostic}"
+    );
+    assert!(!diagnostic.contains("could not persist"), "{diagnostic}");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn human_can_explicitly_abandon_a_historical_prepared_attempt_without_certifying_it() {
+    let gateway = MockGateway::serve_with_status(|_| (400, "{}".into()), std::time::Duration::ZERO);
+    let project = shared_task_project(&gateway.endpoint);
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(!output.status.success());
+    let attempt_path = project
+        .path()
+        .join("src/.kvist-attempts/implement-code.jsonl");
+    let events = fs::read_to_string(&attempt_path).unwrap();
+    let prepared = events
+        .lines()
+        .take_while(|line| !line.contains("\"phase\":\"agent-execution\""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&attempt_path, format!("{prepared}\n")).unwrap();
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let mut tasks = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    tasks.tasks[1].status = kvist::task_queue::TaskStatus::InProgress;
+    tasks.tasks[1].blocked_reason = None;
+    fs::write(&queue_path, kvist::task_queue::serialize(&tasks).unwrap()).unwrap();
+    let next = run_kvist(&project, &["task", "next", "."]);
+    assert!(
+        !next.status.success(),
+        "historical prepared attempt is unresolved"
+    );
+    let disposition = run_kvist(
+        &project,
+        &[
+            "task",
+            "finalize",
+            ".",
+            "implement-code",
+            "attempt-0001",
+            "block",
+            "--reason",
+            "Abandon this failed attempt after inspecting retained effects; do not certify completion.",
+        ],
+    );
+    assert!(
+        disposition.status.success(),
+        "{}",
+        String::from_utf8_lossy(&disposition.stderr)
+    );
+    let transition = run_kvist(
+        &project,
+        &["task", "transition", ".", "implement-code", "pending"],
+    );
+    assert!(
+        transition.status.success(),
+        "{}",
+        String::from_utf8_lossy(&transition.stderr)
+    );
+    let events = fs::read_to_string(attempt_path).unwrap();
+    assert!(events.contains("\"disposition\":\"blocked\""));
+    assert!(!events.contains("execution-did-not-start"));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn failure_disposition_errors_retain_the_original_model_cause() {
+    let (sender, receiver) = std::sync::mpsc::channel::<std::path::PathBuf>();
+    let gateway = MockGateway::serve_with_status(
+        move |_| {
+            let path = receiver.recv().unwrap();
+            fs::remove_file(&path).unwrap();
+            fs::create_dir(&path).unwrap();
+            (400, "{}".into())
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = shared_task_project(&gateway.endpoint);
+    sender
+        .send(
+            project
+                .path()
+                .join("src/.kvist-attempts/implement-code.jsonl"),
+        )
+        .unwrap();
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(diagnostic.contains("HTTP status 400"), "{diagnostic}");
+    assert!(diagnostic.contains("Could not persist"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("attempt remains unresolved"),
+        "{diagnostic}"
+    );
+    assert!(
+        !diagnostic.contains("transitioned to blocked"),
+        "{diagnostic}"
+    );
+    let tasks = kvist::task_queue::parse(
+        &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        tasks.tasks[1].status,
+        kvist::task_queue::TaskStatus::InProgress
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn execution_evidence_without_durable_disposition_does_not_release_the_attempt_fence() {
+    let gateway = MockGateway::serve_with_status(|_| (400, "{}".into()), std::time::Duration::ZERO);
+    let project = shared_task_project(&gateway.endpoint);
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(!output.status.success());
+    let path = project
+        .path()
+        .join("src/.kvist-attempts/implement-code.jsonl");
+    let journal = fs::read_to_string(&path).unwrap();
+    let interrupted = journal
+        .lines()
+        .filter(|line| {
+            serde_json::from_str::<serde_json::Value>(line).unwrap()["schema_version"] == 1
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(interrupted.contains("\"phase\":\"agent-execution\""));
+    fs::write(&path, format!("{interrupted}\n")).unwrap();
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let mut tasks = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    tasks.tasks[1].status = kvist::task_queue::TaskStatus::InProgress;
+    tasks.tasks[1].blocked_reason = None;
+    fs::write(&queue_path, kvist::task_queue::serialize(&tasks).unwrap()).unwrap();
+    for args in [
+        vec!["task", "next", "."],
+        vec!["task", "run", ".", "implement-code"],
+        vec!["task", "transition", ".", "implement-code", "pending"],
+    ] {
+        let output = run_kvist(&project, &args);
+        assert!(
+            !output.status.success(),
+            "unresolved attempt must fence {args:?}"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("unresolved"),
+            "{output:?}"
+        );
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_durably_blocked_attempt_can_be_deliberately_returned_to_pending_and_retried() {
+    let gateway = MockGateway::serve_with_status(|_| (400, "{}".into()), std::time::Duration::ZERO);
+    let project = shared_task_project(&gateway.endpoint);
+    assert!(
+        !run_kvist(&project, &["task", "run", ".", "implement-code"])
+            .status
+            .success()
+    );
+    let transition = run_kvist(
+        &project,
+        &["task", "transition", ".", "implement-code", "pending"],
+    );
+    assert!(transition.status.success(), "{transition:?}");
+    let rerun = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    let diagnostic = String::from_utf8_lossy(&rerun.stderr);
+    assert!(!rerun.status.success());
+    assert!(diagnostic.contains("HTTP status 400"), "{diagnostic}");
+    assert!(diagnostic.contains("attempt-0002"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("transitioned to blocked"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn batch_stops_at_pending_finalization_without_claiming_completion() {
+    let gateway = MockGateway::serve_with_status(
+        |request| {
+            if request.starts_with(b"GET /props?") {
+                (
+                    200,
+                    r#"{"default_generation_settings":{"n_ctx":32768}}"#.into(),
+                )
+            } else {
+                (200, gateway_text_body("reviewable result"))
+            }
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = shared_task_project(&gateway.endpoint);
+    let path = project.path().join("src/TODOS.yaml");
+    let mut tasks = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut followup = tasks.tasks[1].clone();
+    followup.id = "followup".into();
+    tasks.tasks.push(followup);
+    fs::write(path, kvist::task_queue::serialize(&tasks).unwrap()).unwrap();
+    let output = run_kvist(&project, &["task", "run", ".", "all"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Batch stopped at task `implement-code` in state in-progress"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("0/2 tasks completed"), "{stdout}");
+    assert!(stdout.contains("kvist task finalize . implement-code attempt-0001 accept"));
+    assert!(!stdout.contains("completed successfully"));
+    let tasks = kvist::task_queue::parse(
+        &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        tasks.tasks[2].status,
+        kvist::task_queue::TaskStatus::Pending
+    );
 }
 
 #[test]
@@ -1807,8 +2302,8 @@ command = "/usr/bin/echo verify"
 
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
 
-    assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("output limit"));
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("output limit"));
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
     assert!(queue_contents.contains("status: blocked"));
@@ -1872,8 +2367,8 @@ command = "/usr/bin/echo verify"
 
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
 
-    assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("timed out"));
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("timed out"));
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
     assert!(queue_contents.contains("agent execution timed out"));
@@ -2014,7 +2509,7 @@ command = "/usr/bin/echo verification-secret"
         .current_dir(project.path())
         .output()
         .expect("run task");
-    assert!(output.status.success());
+    assert!(!output.status.success());
     let cli_output = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
@@ -2282,11 +2777,10 @@ commands = []
 
     // Run task - should block due to missing command for .
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
-    assert!(output.status.success());
-    let stdout_str = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout_str.contains(
-        "verification blocked and transitioned to blocked: missing test-command policy for component `.`"
-    ));
+    assert!(!output.status.success());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("transitioned to blocked"));
+    assert!(diagnostic.contains("missing test-command policy for component `.`"));
 
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
@@ -2331,9 +2825,10 @@ command = "/usr/bin/false"
 
     // Run task - should run verification, fail, and block
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
-    assert!(output.status.success());
-    let stdout_str = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout_str.contains("failed test-command verification and transitioned to blocked"));
+    assert!(!output.status.success());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("transitioned to blocked"));
+    assert!(diagnostic.contains("test-command verification failed"));
 
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
@@ -2382,9 +2877,10 @@ command = "/usr/bin/sleep 5"
     let started = Instant::now();
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
     assert!(started.elapsed() < Duration::from_secs(3));
-    assert!(output.status.success());
-    let stdout_str = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout_str.contains("failed test-command verification and transitioned to blocked"));
+    assert!(!output.status.success());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("transitioned to blocked"));
+    assert!(diagnostic.contains("test-command verification failed"));
 
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
@@ -2435,7 +2931,7 @@ command = "/usr/bin/echo emit-and-fail"
 
     // Run task
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
-    assert!(output.status.success());
+    assert!(!output.status.success());
 
     // Verify task status is indeed Blocked in TODOS.yaml and the recorded reason is capped
     let queue_contents =

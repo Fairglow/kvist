@@ -1622,15 +1622,107 @@ fn slot_allocation_timeout_aborts_stalled_connection() {
 
     let start = Instant::now();
     let error = transport
-        .complete(&request(ToolChoice::Auto), &CancellationToken::new())
+        .stream(
+            &request(ToolChoice::Auto),
+            &CancellationToken::new(),
+            &mut |_| Ok(()),
+        )
         .expect_err("slot allocation timeout must stop stalled server");
 
     let elapsed = start.elapsed();
     assert!(elapsed < Duration::from_secs(2), "elapsed: {:?}", elapsed);
     assert!(
-        error.to_string().contains("slot allocation timed out"),
+        error.to_string().contains("response headers"),
         "error: {error}"
     );
+}
+
+#[test]
+fn unary_generation_is_not_clipped_by_the_streaming_header_watchdog() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let worker = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("request");
+        capture_request(&mut stream);
+        thread::sleep(Duration::from_millis(250));
+        let body =
+            r#"{"model":"test","message":{"role":"assistant","content":"done"},"done":true}"#;
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+    });
+    let result = DirectModelTransport::new(
+        LocalModelProvider::Ollama,
+        &endpoint,
+        Duration::from_secs(3),
+        4096,
+    )
+    .unwrap()
+    .with_slot_timeout(Duration::from_millis(50))
+    .complete(&request(ToolChoice::None), &CancellationToken::new());
+    worker.join().unwrap();
+    assert_eq!(result.expect("unary gets the request budget").text, "done");
+}
+
+#[test]
+fn premature_http_framing_eof_is_retryable_and_never_a_complete_turn() {
+    for response in [
+        "HTTP/1.1 200 OK\r\nContent-Len",
+        "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nx",
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}",
+    ] {
+        let (endpoint, _) = serve_once(vec![response.as_bytes().to_vec()]);
+        let error = DirectModelTransport::new(
+            LocalModelProvider::Ollama,
+            &endpoint,
+            Duration::from_secs(3),
+            4096,
+        )
+        .unwrap()
+        .complete(&request(ToolChoice::None), &CancellationToken::new())
+        .unwrap_err();
+        assert!(
+            matches!(&error, Error::ModelTransportIo { source, .. } if source.kind() == std::io::ErrorKind::UnexpectedEof),
+            "{error}"
+        );
+        assert!(error.is_retryable());
+    }
+}
+
+#[test]
+fn capacity_discovery_waits_past_the_fifteen_second_streaming_header_limit() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let worker = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut bytes = [0; 4096];
+        let count = stream.read(&mut bytes).unwrap();
+        assert!(String::from_utf8_lossy(&bytes[..count]).starts_with("GET /props?model="));
+        thread::sleep(Duration::from_millis(15_250));
+        let body = r#"{"default_generation_settings":{"n_ctx":32768}}"#;
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+    });
+    let result = DirectModelTransport::new(
+        LocalModelProvider::LlamaServer,
+        &endpoint,
+        Duration::from_secs(25),
+        4096,
+    )
+    .unwrap()
+    .context_limit("cold-model", &CancellationToken::new());
+    worker.join().unwrap();
+    assert_eq!(result.expect("metadata keeps its full budget"), Some(32768));
 }
 
 #[test]

@@ -33,6 +33,7 @@ use crate::{
 /// suggestion.
 pub fn next(project_dir: &Path, component_path: &Path) -> Result<String> {
     let context = validate_context(project_dir, component_path)?;
+    ensure_component_attempts_recovered(&context.component_dir)?;
     let queue = read_queue(&context.component_dir)?;
     Ok(next_ready_task_id(&queue.tasks).unwrap_or_else(|| "no ready task".to_owned()))
 }
@@ -49,7 +50,7 @@ pub fn transition(
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let lock = TaskLock::for_context(&context, task_id, &started_at)?;
 
-    let result = transition_locked(&context, &lock, task_id, target, reason, &started_at);
+    let result = transition_locked(&context, &lock, task_id, target, reason, &started_at, None);
 
     let release = lock.release();
     match (result, release) {
@@ -66,9 +67,14 @@ fn transition_locked(
     target: TaskStatus,
     reason: Option<&str>,
     timestamp: &Timestamp,
+    permitted_attempt: Option<&str>,
 ) -> Result<String> {
     let mut queue = read_queue(&context.component_dir)?;
-    ensure_component_attempts_recovered(&context.component_dir)?;
+    ensure_component_attempts_recovered_except(
+        &context.component_dir,
+        &queue,
+        permitted_attempt.map(|attempt_id| (task_id, attempt_id)),
+    )?;
     let task_index = queue
         .tasks
         .iter()
@@ -1287,7 +1293,7 @@ fn ensure_component_attempts_recovered_except(
         {
             return Err(unresolved_attempt_error(&attempt_path));
         }
-        ensure_task_attempt_recovered(component_dir, &task.id, permitted_attempt)?;
+        ensure_task_attempt_recovered(component_dir, &task.id, task.status, permitted_attempt)?;
     }
     Ok(())
 }
@@ -1295,6 +1301,7 @@ fn ensure_component_attempts_recovered_except(
 fn ensure_task_attempt_recovered(
     component_dir: &Path,
     task_id: &str,
+    status: TaskStatus,
     permitted_attempt: Option<&str>,
 ) -> Result<()> {
     let path = existing_attempt_path(component_dir, task_id);
@@ -1319,7 +1326,7 @@ fn ensure_task_attempt_recovered(
     let secret = load_existing_recovery_secret()?;
     let assessed = assess_attempt_journal(&path, journal, task_id, &secret)?;
     if assessed.attempts.iter().any(|(attempt_id, attempt)| {
-        !attempt.is_fully_recovered() && Some(attempt_id.as_str()) != permitted_attempt
+        !attempt.is_fully_recovered(status) && Some(attempt_id.as_str()) != permitted_attempt
     }) {
         return Err(unresolved_attempt_error(&path));
     }
@@ -1329,7 +1336,7 @@ fn ensure_task_attempt_recovered(
 fn unresolved_attempt_error(path: &Path) -> KvistError {
     KvistError::TaskQueueUnavailable {
         path: path.to_path_buf(),
-        reason: "a fenced or unresolved authenticated task attempt requires `kvist task recover` before another transition"
+        reason: "a fenced or unresolved authenticated task attempt requires inspection before another transition. Inspect the retained attempt journal and effects; explicitly abandon it with `kvist task finalize ... block --reason ...` if appropriate. `kvist task recover` applies only when authenticated host evidence proves execution did not start. Do not delete evidence or blindly replay the task"
             .to_owned(),
     }
 }
@@ -1341,11 +1348,20 @@ struct AssessedAttempt {
     recovery_prepared: Option<RecoveryPreparedAttempt>,
     recovered: Option<RecoveredAttempt>,
     lifecycle_advanced: bool,
+    execution_observed: bool,
+    execution_disposed: bool,
 }
 
 impl AssessedAttempt {
-    fn is_fully_recovered(&self) -> bool {
-        if self.lifecycle_advanced {
+    fn is_fully_recovered(&self, status: TaskStatus) -> bool {
+        if self.lifecycle_advanced
+            || self.execution_disposed
+            || (self.execution_observed
+                && matches!(
+                    status,
+                    TaskStatus::Blocked | TaskStatus::Completed | TaskStatus::AwaitingDecision
+                ))
+        {
             return true;
         }
         matches!(
@@ -1371,8 +1387,24 @@ fn assess_attempt_journal(
     secret: &[u8],
 ) -> Result<AssessedJournal> {
     let mut attempts = BTreeMap::<String, AssessedAttempt>::new();
+    let mut active_attempt_id = None::<String>;
     for event in journal.events {
         let Some(version) = event.get("schema_version") else {
+            let has_disposition = ["from_status", "to_status"].iter().any(|field| {
+                matches!(
+                    event.get(field).and_then(Value::as_str),
+                    Some("blocked" | "completed" | "awaiting-decision")
+                )
+            });
+            if event.get("phase").and_then(Value::as_str) == Some("committed")
+                && has_disposition
+                && let Some(attempt) = active_attempt_id
+                    .as_ref()
+                    .and_then(|id| attempts.get_mut(id))
+                && attempt.execution_observed
+            {
+                attempt.execution_disposed = true;
+            }
             continue;
         };
         if version != &Value::from(ATTEMPT_SCHEMA_VERSION) {
@@ -1404,6 +1436,7 @@ fn assess_attempt_journal(
                 "versioned attempt evidence has an invalid attempt_id",
             ));
         }
+        active_attempt_id = Some(event_attempt_id.to_owned());
         let phase = event
             .get("phase")
             .and_then(Value::as_str)
@@ -1433,12 +1466,11 @@ fn assess_attempt_journal(
                 }
                 attempt.prepared = Some(prepared);
             }
-            "execution-finished"
-            | "verification-finished"
-            | "pending-human-disposition"
-            | "human-finalized"
-            | "agent-execution" => {
+            "pending-human-disposition" | "human-finalized" => {
                 attempt.lifecycle_advanced = true;
+            }
+            "execution-finished" | "verification-finished" | "agent-execution" => {
+                attempt.execution_observed = true;
             }
             "pre-spawn-failure" => {
                 if attempt.prepared.is_none()
@@ -4062,6 +4094,7 @@ pub fn run_task_with_controls(
     // This single lock covers selection, execution, evidence, and the terminal
     // transition. It prevents a second runner from selecting the same ready task.
     let lock = TaskLock::for_context(&context, task_id, &started_at)?;
+    let mut active_attempt = None;
     let result = (|| {
         let context = validate_context(project_dir, component_path)?;
         ensure_component_attempts_recovered(&context.component_dir)?;
@@ -4093,6 +4126,7 @@ pub fn run_task_with_controls(
                 TaskStatus::InProgress,
                 None,
                 &transition_at,
+                None,
             )?;
             // Re-read queue to reflect transition
             queue = read_queue(&context.component_dir)?;
@@ -4152,6 +4186,7 @@ pub fn run_task_with_controls(
             &prepared,
             "append prepared run_task attempt",
         )?;
+        active_attempt = Some(attempt_id.clone());
 
         let mut context_files = vec![
             PathBuf::from("/workspace/component/REQUIREMENTS.md"),
@@ -4187,7 +4222,10 @@ pub fn run_task_with_controls(
             sandbox_backend = %sandbox_probe.backend.kind,
             "running task model turn on host (effect sandbox reserved)"
         );
-        println!("Running task `{task_id}` via external agent...");
+        println!(
+            "Running protected task `{task_id}` (attempt `{attempt_id}`, role `{}`)...",
+            role.as_str()
+        );
 
         // 6. Execute agent model turn on the host, outside the effect sandbox.
         // The approved runner identity and capability-confirmed probe are passed
@@ -4221,6 +4259,39 @@ pub fn run_task_with_controls(
                 );
                 let transition_at =
                     Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+                let model_error = match &error {
+                    KvistError::Sav(source)
+                    | KvistError::AgentModelRequestFailed { source, .. } => Some(source),
+                    _ => None,
+                };
+                append_agent_execution(
+                    &agent_attempt_path,
+                    AgentExecutionRecord {
+                        schema_version: ATTEMPT_SCHEMA_VERSION,
+                        attempt_id: &attempt_id,
+                        phase: "agent-execution",
+                        task_id,
+                        timestamp: &transition_at,
+                        success: false,
+                        timed_out: model_error.is_some_and(|source| {
+                            matches!(
+                                source,
+                                sav::Error::ModelTransportTimedOut
+                                    | sav::Error::SlotAllocationTimedOut { .. }
+                                    | sav::Error::TtftTimedOut { .. }
+                                    | sav::Error::InterTokenCadenceTimedOut { .. }
+                            )
+                        }),
+                        output_limit_exceeded: model_error.is_some_and(|source| {
+                            matches!(source, sav::Error::ModelResponseLimitExceeded { .. })
+                        }),
+                        stdout: "",
+                        stderr: &reason,
+                    },
+                )
+                .map_err(|recording| {
+                    unresolved_run_error(&context, task_id, &attempt_id, &reason, &recording)
+                })?;
                 let _ = transition_locked(
                     &context,
                     &lock,
@@ -4228,11 +4299,18 @@ pub fn run_task_with_controls(
                     TaskStatus::Blocked,
                     Some(&reason),
                     &transition_at,
-                )?;
-                return Err(KvistError::TaskRunFailed {
-                    task_id: task_id.to_owned(),
-                    reason,
-                });
+                    Some(&attempt_id),
+                )
+                .map_err(|recording| {
+                    unresolved_run_error(&context, task_id, &attempt_id, &reason, &recording)
+                })?;
+                return Err(blocked_run_error(
+                    &context,
+                    task_id,
+                    &attempt_id,
+                    &reason,
+                    None,
+                ));
             }
         };
         let agent_timestamp =
@@ -4251,7 +4329,16 @@ pub fn run_task_with_controls(
                 stdout: &run_result.stdout,
                 stderr: &run_result.stderr,
             },
-        )?;
+        )
+        .map_err(|recording| {
+            unresolved_run_error(
+                &context,
+                task_id,
+                &attempt_id,
+                &run_result.stderr,
+                &recording,
+            )
+        })?;
 
         // 7. Transition task status depending on outcome
         if run_result.surfaced_decision {
@@ -4282,6 +4369,7 @@ pub fn run_task_with_controls(
                 TaskStatus::AwaitingDecision,
                 Some(&decision_reason),
                 &transition_at,
+                Some(&attempt_id),
             )?;
             Ok(format!(
                 "task `{task_id}` paused and transitioned to awaiting-decision. A decision is required before implementation continues. Proposal evidence is at {}.\nLogs written to: {}\nNext Step: review the proposal, decide, then re-review and accept the updated intent; the run resumes from the awaiting-decision state.",
@@ -4349,11 +4437,13 @@ pub fn run_task_with_controls(
                                 "task_id": task_id,
                                 "phase": "pending-human-disposition"
                             });
-                            let mut journal_content =
-                                fs::read_to_string(&agent_attempt_path).unwrap_or_default();
-                            journal_content
-                                .push_str(&format!("{exec_fin}\n{verif_fin}\n{pend_disp}\n"));
-                            replace_file_atomically(&agent_attempt_path, &journal_content)?;
+                            for event in [exec_fin, verif_fin, pend_disp] {
+                                append_json_attempt(
+                                    &agent_attempt_path,
+                                    &event,
+                                    "append successful execution evidence",
+                                )?;
+                            }
 
                             let token_summary =
                                 match (run_result.tokens_input, run_result.tokens_output) {
@@ -4366,9 +4456,10 @@ pub fn run_task_with_controls(
                                     _ => "".to_owned(),
                                 };
                             Ok(format!(
-                                "task `{task_id}` executed and verified successfully. Awaiting human finalization with `kvist task finalize`.{}\nLogs written to: {}",
+                                "task `{task_id}` executed and verified successfully; it is not completed yet. Awaiting human finalization.{}\nAttempt: {attempt_id}\nLogs written to: {}\nNext Step: `kvist task finalize {} {task_id} {attempt_id} accept` after reviewing the changes and evidence.",
                                 token_summary,
-                                run_result.log_path.display()
+                                run_result.log_path.display(),
+                                component_path.display(),
                             ))
                         } else {
                             let timed_out_msg = if verify_res.timed_out {
@@ -4397,12 +4488,23 @@ pub fn run_task_with_controls(
                                 TaskStatus::Blocked,
                                 Some(&blocker_reason),
                                 &transition_at,
-                            )?;
-                            Ok(format!(
-                                "task `{task_id}` failed test-command verification and transitioned to blocked.\nLogs written to: {}\nNext Step: Run 'kvist task log {} {}' to inspect the detailed verification and execution logs.",
-                                run_result.log_path.display(),
-                                component_path.display(),
-                                task_id
+                                Some(&attempt_id),
+                            )
+                            .map_err(|recording| {
+                                unresolved_run_error(
+                                    &context,
+                                    task_id,
+                                    &attempt_id,
+                                    &blocker_reason,
+                                    &recording,
+                                )
+                            })?;
+                            Err(blocked_run_error(
+                                &context,
+                                task_id,
+                                &attempt_id,
+                                &blocker_reason,
+                                Some(&run_result.log_path),
                             ))
                         }
                     }
@@ -4423,12 +4525,23 @@ pub fn run_task_with_controls(
                             TaskStatus::Blocked,
                             Some(&blocker_reason),
                             &transition_at,
-                        )?;
-                        Ok(format!(
-                            "task `{task_id}` verification blocked and transitioned to blocked: {}\nNext Step: Run 'kvist task log {} {}' to inspect the logs and check the test command configuration.",
-                            verification_error,
-                            component_path.display(),
-                            task_id
+                            Some(&attempt_id),
+                        )
+                        .map_err(|recording| {
+                            unresolved_run_error(
+                                &context,
+                                task_id,
+                                &attempt_id,
+                                &blocker_reason,
+                                &recording,
+                            )
+                        })?;
+                        Err(blocked_run_error(
+                            &context,
+                            task_id,
+                            &attempt_id,
+                            &blocker_reason,
+                            Some(&run_result.log_path),
                         ))
                     }
                 }
@@ -4442,6 +4555,7 @@ pub fn run_task_with_controls(
                     TaskStatus::Completed,
                     None,
                     &transition_at,
+                    Some(&attempt_id),
                 )?;
 
                 let token_summary = match (run_result.tokens_input, run_result.tokens_output) {
@@ -4460,7 +4574,7 @@ pub fn run_task_with_controls(
             }
         } else {
             // Transition to Blocked
-            let blocker_reason = if run_result.timed_out {
+            let summary = if run_result.timed_out {
                 format!(
                     "agent execution timed out while contacting the local model gateway. Bounded redacted logs are written to: {}",
                     run_result.log_path.display()
@@ -4476,6 +4590,11 @@ pub fn run_task_with_controls(
                     run_result.log_path.display()
                 )
             };
+            let blocker_reason = redact_bounded(
+                format!("{summary}\nCause: {}", run_result.stderr),
+                &evidence_redactions(&config),
+                MAX_VERIFICATION_EVIDENCE_BYTES,
+            );
             let transition_at =
                 Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
             let _ = transition_locked(
@@ -4485,27 +4604,91 @@ pub fn run_task_with_controls(
                 TaskStatus::Blocked,
                 Some(&blocker_reason),
                 &transition_at,
-            )?;
-            Ok(format!(
-                "task `{task_id}` {} and has been transitioned to blocked.\nLogs written to: {}\nNext Step: Run 'kvist task log {} {}' to inspect the execution error and failure logs.",
-                if run_result.timed_out {
-                    "timed out"
-                } else if run_result.output_limit_exceeded {
-                    "exceeded the combined output limit"
-                } else {
-                    "failed during execution"
-                },
-                run_result.log_path.display(),
-                component_path.display(),
-                task_id
+                Some(&attempt_id),
+            )
+            .map_err(|recording| {
+                unresolved_run_error(&context, task_id, &attempt_id, &blocker_reason, &recording)
+            })?;
+            Err(blocked_run_error(
+                &context,
+                task_id,
+                &attempt_id,
+                &blocker_reason,
+                Some(&run_result.log_path),
             ))
         }
     })();
+    let result = match (result, active_attempt) {
+        (Err(error), Some(attempt_id)) if !matches!(error, KvistError::TaskRunFailed { .. }) => {
+            Err(KvistError::TaskRunFailed {
+                task_id: task_id.to_owned(),
+                reason: redact_bounded(
+                    format!(
+                        "attempt `{attempt_id}` could not persist its complete outcome: {error}\n\
+                     Completion is not confirmed; retained state/effects must be inspected, not replayed.\n\
+                     Attempt journal: {}\n\
+                     hint: inspect `kvist status`, `kvist task log {} {task_id}` and the attempt journal before explicit recovery/disposition; do not delete the fence.",
+                        existing_attempt_path(&context.component_dir, task_id).display(),
+                        component_path.display(),
+                    ),
+                    &evidence_redactions(&config),
+                    MAX_VERIFICATION_EVIDENCE_BYTES,
+                ),
+            })
+        }
+        (result, _) => result,
+    };
     let release = lock.release();
     match (result, release) {
         (Ok(output), Ok(())) => Ok(output),
         (Ok(_), Err(error)) => Err(error),
         (Err(error), _) => Err(error),
+    }
+}
+
+fn unresolved_run_error(
+    context: &TaskContext,
+    task_id: &str,
+    attempt_id: &str,
+    cause: &str,
+    recording: &KvistError,
+) -> KvistError {
+    KvistError::TaskRunFailed {
+        task_id: task_id.to_owned(),
+        reason: format!(
+            "attempt `{attempt_id}` failed: {cause}\n\
+             Could not persist the complete failure disposition: {recording}\n\
+             Completion is unconfirmed; the attempt remains unresolved. Do not replay or delete its evidence.\n\
+             Attempt journal: {}\n\
+             hint: inspect `kvist status`, `kvist task log {} {task_id}` and the retained journal before explicit recovery/disposition.",
+            existing_attempt_path(&context.component_dir, task_id).display(),
+            context.component_path.display(),
+        ),
+    }
+}
+
+fn blocked_run_error(
+    context: &TaskContext,
+    task_id: &str,
+    attempt_id: &str,
+    cause: &str,
+    log_path: Option<&Path>,
+) -> KvistError {
+    let log = log_path.map_or_else(String::new, |path| {
+        format!("\nLogs written to: {}", path.display())
+    });
+    KvistError::TaskRunFailed {
+        task_id: task_id.to_owned(),
+        reason: format!(
+            "attempt `{attempt_id}` failed and transitioned to blocked; it was not completed or deferred.\n\
+             {cause}{log}\nAttempt journal: {}\n\
+             hint: inspect `kvist task log {} {task_id}`; after resolving the cause and reviewing retained effects, \
+             run `kvist task transition {} {task_id} pending` then `kvist task run {} {task_id}`. No whole-task replay was attempted.",
+            existing_attempt_path(&context.component_dir, task_id).display(),
+            context.component_path.display(),
+            context.component_path.display(),
+            context.component_path.display(),
+        ),
     }
 }
 
@@ -4570,6 +4753,7 @@ pub fn run_task_or_item_with_controls(
 
     let task_spec = match task_spec {
         None => {
+            ensure_component_attempts_recovered(&context.component_dir)?;
             let task_id = next_ready_task_id(&queue.tasks).ok_or(KvistError::NoReadyTasks {
                 component: context.component_path.clone(),
             })?;
@@ -4658,6 +4842,19 @@ pub fn run_task_or_item_with_controls(
         );
         match run_task_with_controls(project_dir, component_path, task_id, stream, allow_control) {
             Ok(output) => {
+                let queue = read_queue(&context.component_dir)?;
+                let status = task_by_id(&queue.tasks, task_id)
+                    .ok_or_else(|| KvistError::TaskNotFound {
+                        component: component_path.to_path_buf(),
+                        task_id: task_id.clone(),
+                    })?
+                    .status;
+                if status != TaskStatus::Completed {
+                    return Ok(format!(
+                        "Batch stopped at task `{task_id}` in state {}; {completed_count}/{total} tasks completed in this selection.\n{output}",
+                        status_name(status),
+                    ));
+                }
                 println!("✓ [{step}/{total}] Task `{task_id}` completed successfully.");
                 completed_count += 1;
                 if !stream && !output.is_empty() {
@@ -4723,7 +4920,7 @@ fn is_runnable_task(task: &Task, tasks: &[Task]) -> bool {
 
 /// Reads and returns the most recent execution log file for a specific task.
 pub fn task_log(project_dir: &Path, component_path: &Path, task_id: &str) -> Result<String> {
-    let context = validate_context(project_dir, component_path)?;
+    let context = validate_transition_context(project_dir, component_path)?;
     let logs_dir = context.component_dir.join(".kvist").join("logs");
 
     let logs_metadata = fs::symlink_metadata(&logs_dir).ok();

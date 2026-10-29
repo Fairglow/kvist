@@ -10,6 +10,50 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "resilient-run-write-tests"
+    title: "write_tests: reproduce hidden prompts and ambiguous failures"
+    description: "Pin transient retries, jitter bounds, prompt ordering, failure exits, unresolved selection and batch stop semantics."
+    context: "Failing regressions reproduced hidden prompt classification, truncated diagnostics, HTTP 429 handling, failure exits, premature disposition-fence release and lost retry-recording causes. Source intent includes the explicit advisory exception. Historical run evidence remains unchanged."
+    purpose: "Define visible safe recovery before implementation."
+    expected_outcome: "Regressions reproduce the incident paths before repair."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+  - id: "resilient-run-implement-code"
+    title: "implement_code: retain outcomes and retry transient model failures"
+    description: "Repair confirmation presentation, bounded observable retries and durable failure disposition without replaying effects."
+    context: "Implemented bounded jittered capacity/generation retries, explicit partial-stream discard, nonzero failures and safe disposition fences, batch stops, visible confirmation and complete diagnostics. A rapid deliberate reattempt exposed and fixed same-second evidence-name collision. Affected-package command passed 988 tests with seven existing ignores; named regressions and strict all-target Clippy also pass. No installed binary or historical attempt was changed."
+    purpose: "Make task execution resilient and inspectable."
+    expected_outcome: "Retryable outages recover automatically; terminal outcomes are explicit."
+    kind: implementation
+    status: completed
+    depends_on: ["resilient-run-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+  - id: "resilient-run-security-audit"
+    title: "security_audit: derive independent retry boundary observations"
+    description: "Observe source and tests without intent, prior records or history; inspect no-replay, cancellation and recording boundaries."
+    context: "Independent source-only resilient-source-observer and narrow disposition-followup-observer produced the dated IMPL supplement. They ran no tests and read no intent, peer implementation, prior records or history. Cause-loss and premature-fence findings were reproduced, repaired and re-observed. Broader finalization-evidence and change-inventory limits remain documented; no certification."
+    purpose: "Keep implementation observations independent."
+    expected_outcome: "Persist a source-derived scoped record, not certification."
+    kind: security-audit
+    status: completed
+    depends_on: ["resilient-run-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+  - id: "resilient-run-compliance-review"
+    title: "compliance_review: compare resilient-run evidence"
+    description: "Compare local intent with independently derived observations and test evidence without reading source."
+    context: "Independent source-blind isolated-repair-comparator used only isolated intent/task definitions, source-derived observations and attributed named execution; no concrete scoped contradiction established. Earlier comparator exceeded its read allowlist and does not qualify as independence evidence. Coverage gaps, broader finalization/change-inventory limits and stale accepted revisions remain explicit in IMPL; no acceptance or historical-task disposition."
+    purpose: "Expose discrepancies for human arbitration."
+    expected_outcome: "Persist scoped comparison without accepting intent or historical attempts."
+    kind: compliance-review
+    status: completed
+    depends_on: ["resilient-run-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:57:08Z", completed_at: "2026-10-28T23:57:08Z"}
   - id: "long-sessions-write-tests"
     title: "write_tests: cross protected generation ceiling"
     description: "Test more than 64 generations and positive multi-day role timeouts with invalid-bound rejection."

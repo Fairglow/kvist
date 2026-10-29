@@ -10,6 +10,50 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "response-deadline-write-tests"
+    title: "write_tests: pin metadata and unary header budgets"
+    description: "Reproduce the streaming header watchdog incorrectly clipping metadata and unary requests."
+    context: "Regressions reproduced the 15-second metadata-header cutoff, unary clipping by the streaming watchdog and premature HTTP EOF misclassification before production fixes. Intent records the explicit advisory exception."
+    purpose: "Pin actual HTTP-stage semantics."
+    expected_outcome: "Regressions fail before the transport repair."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+  - id: "response-deadline-implement-code"
+    title: "implement_code: honor metadata and unary deadlines"
+    description: "Apply the header watchdog only to streaming inference and describe header timeout observations accurately."
+    context: "Metadata/unary headers honor the full request deadline; definite framing EOF is retryable UnexpectedEof while complete malformed responses remain persistent. Sav's 49 transport tests pass, including the actual 15.25-second capacity response. The full affected-package command passed 988 tests with seven existing ignores; strict all-target Clippy and formatting pass."
+    purpose: "Allow slow cold-start responses within approved deadlines."
+    expected_outcome: "Caller budgets, cancellation and response bounds remain effective."
+    kind: implementation
+    status: completed
+    depends_on: ["response-deadline-write-tests"]
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+  - id: "response-deadline-security-audit"
+    title: "security_audit: observe transport timeout boundaries"
+    description: "Derive source-only observations of deadline, cancellation and byte bounds without intent or prior records."
+    context: "Independent clean-slate transport-source-observer produced the dated IMPL supplement without reading intent, prior records, peer implementations or history and without executing tests. Existing TTFT body-arrival semantics, builder-validation gaps and cooperative timing limits remain explicit. No compliance certification."
+    purpose: "Keep independent boundary evidence."
+    expected_outcome: "Persist scoped source-derived observations."
+    kind: security-audit
+    status: completed
+    depends_on: ["response-deadline-implement-code"]
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+  - id: "response-deadline-compliance-review"
+    title: "compliance_review: compare header-budget evidence"
+    description: "Compare scoped intent with independent observations and execution evidence without source."
+    context: "Independent source-blind isolated-repair-comparator compared isolated scoped intent/task definitions, observations and attributed named tests without source/tools; no concrete scoped contradiction established. Earlier comparator exceeded its allowlist and is not qualifying evidence. Cooperative timing, existing validation limits and nonexhaustive EOF/retry coverage remain explicit in IMPL. No certification, receipt or acceptance."
+    purpose: "Retain discrepancies without self-certification."
+    expected_outcome: "Persist independent scoped comparison, not acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: ["response-deadline-security-audit"]
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:57:08Z", completed_at: "2026-10-28T23:57:08Z"}
   - id: "long-sessions-write-tests"
     title: "write_tests: reproduce lifetime cutoffs"
     description: "Cross 500 turns and 64 MiB; pin optional budgets, guidance renewal and compaction accounting."

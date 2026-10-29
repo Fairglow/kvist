@@ -16,15 +16,18 @@ mod redaction;
 use redaction::StreamRedactor;
 mod accounting;
 mod context;
+mod retry;
 use accounting::TokenBudget;
+use retry::ModelRetry;
 #[cfg(test)]
 mod regression_tests;
 
+#[cfg(test)]
+use std::thread;
 use std::{
     fs::{self, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
-    thread,
     time::{Duration, Instant},
 };
 
@@ -392,24 +395,8 @@ fn extract_provider_model(command: &str) -> Option<String> {
     None
 }
 
-/// Brief connect attempts made while proving the gateway is accepting traffic.
-/// A down gateway fails on the first attempt; these ride out a gateway that is
-/// still starting its listeners. Every attempt and pause draws from the turn's
-/// shared wall-clock budget.
-const GATEWAY_PROBE_ATTEMPTS: u32 = 3;
-
-/// Pause between gateway liveness-probe connect attempts.
-const GATEWAY_PROBE_BACKOFF: Duration = Duration::from_millis(200);
-
-/// Maximum model-turn attempts when the gateway passes the liveness probe but a
-/// turn still hits a transient availability error (for example the gateway had
-/// not finished spawning the model onto its ephemeral port). This counts the
-/// first attempt plus `MODEL_TURN_MAX_ATTEMPTS - 1` retries.
+#[cfg(test)]
 const MODEL_TURN_MAX_ATTEMPTS: u32 = 3;
-
-/// Pause between model-turn retries. Short and fixed keeps agent runs
-/// deterministic while still letting a cold-starting gateway recover.
-const MODEL_TURN_RETRY_BACKOFF: Duration = Duration::from_millis(250);
 
 /// In-sandbox mount destination of one staged authoring intent.
 const STAGED_INTENT_MOUNT_PATH: &str = "/workspace/authoring/intent.json";
@@ -480,81 +467,28 @@ fn probe_gateway_reachable(
         }));
     }
 
-    let mut attempt = 1u32;
-    loop {
-        if cancellation.is_cancelled() {
-            return Err(KvistError::Sav(ModelError::ModelTransportCancelled));
-        }
-        let remaining = budget.remaining();
-        if remaining.is_zero() {
-            return Err(KvistError::Sav(ModelError::ModelTransportTimedOut));
-        }
-        let connect_timeout = Duration::from_millis(100).min(remaining);
-        match std::net::TcpStream::connect_timeout(&addr, connect_timeout) {
-            Ok(_) => return Ok(()),
-            Err(source) if attempt < GATEWAY_PROBE_ATTEMPTS => {
-                tracing::warn!(
-                    attempt,
-                    %source,
-                    endpoint,
-                    "local model gateway not yet accepting connections; retrying liveness probe"
-                );
-                let until = Instant::now() + GATEWAY_PROBE_BACKOFF.min(budget.remaining());
-                while Instant::now() < until && !cancellation.is_cancelled() {
-                    thread::sleep(
-                        Duration::from_millis(10)
-                            .min(until.saturating_duration_since(Instant::now())),
-                    );
-                }
-                attempt += 1;
-            }
-            Err(source) => {
-                return Err(KvistError::LocalModelGatewayUnreachable {
-                    endpoint: endpoint.to_owned(),
-                    reason: source.to_string(),
-                });
-            }
-        }
-    }
+    let remaining = budget.model_deadline(cancellation)?;
+    std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(100).min(remaining))
+        .map(|_| ())
+        .map_err(|source| {
+            KvistError::Sav(ModelError::ModelTransportIo {
+                operation: "probing local model gateway",
+                source,
+            })
+        })
 }
 
-/// Whether a transport failure is worth retrying: only transient gateway
-/// availability problems (nothing is listening yet, the port is still starting
-/// up, or the model slot has not been allocated yet). Response-level failures
-/// (bad HTTP status, malformed body, oversized response, cancellation) are
-/// never retried, since they indicate a real answer rather than an unavailable
-/// gateway.
+/// Reuse shared transient classification, retaining interrupted socket handling.
 fn is_retryable_transport_error(error: &ModelError) -> bool {
-    match error {
-        // The slot-allocation timeout fires when the gateway accepted the
-        // connection but has not finished loading or spawning the model; the
-        // request has not started generating, so retrying is safe.
-        ModelError::ModelTransportTimedOut | ModelError::SlotAllocationTimedOut { .. } => true,
-        ModelError::ModelTransportIo { source, .. } => {
-            // A refused, timed-out, interrupted, or peer-reset socket is a
-            // gateway that is not ready to serve yet (nothing listening, still
-            // loading a model, or mid-cold-start); it is safe to retry. A peer
-            // reset is included for this reason, because it commonly
-            // accompanies a gateway that accepted the connection before it was
-            // fully up rather than a real rejection of the payload.
-            matches!(
-                source.kind(),
-                io::ErrorKind::ConnectionRefused
-                    | io::ErrorKind::TimedOut
-                    | io::ErrorKind::Interrupted
-                    | io::ErrorKind::ConnectionReset
-            )
-        }
-        _ => false,
-    }
+    error.is_retryable()
+        || matches!(error, ModelError::ModelTransportIo { source, .. } if source.kind() == io::ErrorKind::Interrupted)
 }
 
 /// Runs one streaming attempt, relaying redacted text deltas to standard
-/// output as they arrive, and reports whether any text was emitted.
+/// output, and reports whether any model progress was published.
 ///
-/// Emitted text cannot be retracted, so a streamed attempt that fails after
-/// emitting must not be retried; the assembled turn is returned so the caller
-/// can record it in the log and evidence either way.
+/// Published partials remain provisional; the retry owner must explicitly
+/// discard them before another request. Incomplete proposals are never applied.
 fn run_stream_attempt<T: ModelTransport>(
     transport: &T,
     request: &ModelRequest,
@@ -564,8 +498,8 @@ fn run_stream_attempt<T: ModelTransport>(
     let mut emitted = false;
     let mut redactor = StreamRedactor::new(redactions);
     let mut relay = |event: ModelStreamEvent| -> sav::Result<()> {
+        emitted = true;
         if let ModelStreamEvent::TextDelta(delta) = event {
-            emitted = true;
             StreamRedactor::emit_to_stdout(&redactor.absorb(&delta));
         }
         Ok(())
@@ -578,10 +512,8 @@ fn run_stream_attempt<T: ModelTransport>(
 /// Performs one model turn, retrying transient gateway-availability failures
 /// under the shared wall-clock budget.
 ///
-/// A turn that already streamed text to standard output is never retried,
-/// because streamed bytes cannot be retracted. Real response failures
-/// (non-success status, malformed or oversized body, cancellation) are
-/// returned immediately so they are never masked by a retry.
+/// Retried partial progress is explicitly discarded. Malformed or oversized
+/// responses and cancellation are returned without retry.
 #[cfg(test)]
 fn complete_turn<T: ModelTransport>(
     make_transport: impl Fn() -> Result<T>,
@@ -590,91 +522,65 @@ fn complete_turn<T: ModelTransport>(
     budget: &TurnBudget,
     stream_output: bool,
     redactions: &[String],
-    task_id: &str,
+    _task_id: &str,
 ) -> Result<ModelTurn> {
     complete_turn_counted(
         make_transport,
         request,
-        cancellation,
-        budget,
         stream_output,
         redactions,
-        task_id,
         &mut 0,
-        &sav::runtime::RetryPolicy::new(
-            MODEL_TURN_MAX_ATTEMPTS,
-            MODEL_TURN_RETRY_BACKOFF,
-            MODEL_TURN_RETRY_BACKOFF,
-        ),
+        &ModelRetry {
+            policy: sav::runtime::RetryPolicy::new(
+                MODEL_TURN_MAX_ATTEMPTS,
+                Duration::from_millis(1),
+                Duration::from_millis(2),
+            ),
+            budget,
+            cancellation,
+            live: None,
+            phase: "inference",
+            model: &request.model,
+            endpoint: "test-loopback",
+            redactions,
+        },
         &mut TokenBudget::new(None),
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn complete_turn_counted<T: ModelTransport>(
     make_transport: impl Fn() -> Result<T>,
     request: &ModelRequest,
-    cancellation: &CancellationToken,
-    budget: &TurnBudget,
     stream_output: bool,
     redactions: &[String],
-    task_id: &str,
     attempts: &mut u32,
-    retry: &sav::runtime::RetryPolicy,
+    retry: &ModelRetry<'_>,
     tokens: &mut TokenBudget,
 ) -> Result<ModelTurn> {
-    loop {
-        if cancellation.is_cancelled() {
-            return Err(KvistError::Sav(ModelError::ModelTransportCancelled));
-        }
-        if *attempts >= retry.max_attempts {
-            return Err(sav::runtime::Error::RunBudget {
-                reason:
-                    "model generation attempt limit exhausted, including steering interruptions"
-                        .into(),
-            }
-            .into());
-        }
-        if budget.remaining().is_zero() {
-            return Err(KvistError::Sav(ModelError::ModelTransportTimedOut));
-        }
-        *attempts += 1;
-        let transport = make_transport()?;
-        let mut request = request.clone();
-        let reservation = tokens.reserve(&mut request)?;
-        let (outcome, emitted) = if stream_output {
-            run_stream_attempt(&transport, &request, cancellation, redactions)
-        } else {
-            (transport.complete(&request, cancellation), false)
+    retry.run(attempts, || {
+        let transport = match make_transport() {
+            Ok(transport) => transport,
+            Err(error) => return (Err(error), false),
         };
-        match outcome {
+        let mut request = request.clone();
+        let reservation = match tokens.reserve(&mut request) {
+            Ok(reservation) => reservation,
+            Err(error) => return (Err(error), false),
+        };
+        let (outcome, emitted) = if stream_output {
+            run_stream_attempt(&transport, &request, retry.cancellation, redactions)
+        } else {
+            (transport.complete(&request, retry.cancellation), false)
+        };
+        let result = match outcome {
             Ok(turn) => {
                 tokens.finish(reservation, turn.usage);
-                return Ok(turn);
+                Ok(turn)
             }
-            Err(source)
-                if is_retryable_transport_error(&source)
-                    && *attempts < retry.max_attempts
-                    && !emitted =>
-            {
-                tracing::warn!(
-                    task_id,
-                    attempt = *attempts,
-                    %source,
-                    "local model gateway unavailable during turn; retrying"
-                );
-                let deadline =
-                    Instant::now() + retry.backoff_delay(*attempts + 1).min(budget.remaining());
-                while Instant::now() < deadline && !cancellation.is_cancelled() {
-                    thread::sleep(
-                        Duration::from_millis(10)
-                            .min(deadline.saturating_duration_since(Instant::now())),
-                    );
-                }
-            }
-            Err(source) => return Err(KvistError::Sav(source)),
-        }
-    }
+            Err(source) => Err(KvistError::Sav(source)),
+        };
+        (result, emitted)
+    })
 }
 
 /// Performs one model turn on the host, outside the effect sandbox, within the
@@ -749,8 +655,6 @@ fn execute_host_turn(
     } else {
         DirectModelTransport::new(provider, &endpoint, deadline, profile.max_output_bytes)?;
     }
-    probe_gateway_reachable(&endpoint, budget, cancellation)?;
-
     // llama-server/ollama gateways route on the provider-facing model identifier,
     // which the command embeds; the selector alone is not a model the gateway
     // recognizes (it returns 400). Fall back to the selector when the command
@@ -763,6 +667,7 @@ fn execute_host_turn(
             } else {
                 DirectModelTransport::new(provider, &endpoint, deadline, profile.max_output_bytes)?
             };
+            probe_gateway_reachable(&endpoint, budget, cancellation)?;
             Ok(ObservedTransport {
                 transport,
                 live,
@@ -770,30 +675,31 @@ fn execute_host_turn(
             })
         },
         &model_request,
-        cancellation,
-        budget,
         request.stream_output,
         redactions,
-        request.task_id,
         attempts,
-        &native.map_or_else(
-            || {
-                sav::runtime::RetryPolicy::new(
-                    MODEL_TURN_MAX_ATTEMPTS,
-                    MODEL_TURN_RETRY_BACKOFF,
-                    MODEL_TURN_RETRY_BACKOFF,
-                )
-            },
-            |model| {
-                sav::runtime::RetryPolicy::new(
-                    model.max_attempts.min(MODEL_TURN_MAX_ATTEMPTS),
-                    Duration::from_secs(model.retry_base_delay_secs),
-                    Duration::from_secs(model.retry_max_delay_secs),
-                )
-            },
-        ),
+        &ModelRetry {
+            policy: model_retry_policy(native),
+            budget,
+            cancellation,
+            live: Some(live),
+            phase: "inference",
+            model: &choice.model,
+            endpoint: &endpoint,
+            redactions,
+        },
         tokens,
     )
+}
+
+fn model_retry_policy(native: Option<&sav::registry::NativeModel>) -> sav::runtime::RetryPolicy {
+    native.map_or_else(sav::runtime::RetryPolicy::default, |model| {
+        sav::runtime::RetryPolicy::new(
+            model.max_attempts,
+            Duration::from_secs(model.retry_base_delay_secs),
+            Duration::from_secs(model.retry_max_delay_secs),
+        )
+    })
 }
 
 /// The approved, capability-confirmed sandbox context for effect application.
@@ -1064,7 +970,11 @@ struct TurnFailure {
 impl TurnFailure {
     fn from_kvist_error(error: &KvistError) -> Self {
         let (timed_out, output_limit_exceeded, cancelled) = match error {
-            KvistError::Sav(model_error) => match model_error {
+            KvistError::Sav(model_error)
+            | KvistError::AgentModelRequestFailed {
+                source: model_error,
+                ..
+            } => match model_error {
                 sav::Error::ModelTransportTimedOut
                 | sav::Error::SlotAllocationTimedOut { .. }
                 | sav::Error::TtftTimedOut { .. }
@@ -1196,6 +1106,19 @@ fn execute_agent_inner(
     allow_control: bool,
 ) -> Result<AgentRunResult> {
     let mut choice = select_model_choice(profile, request.role, None)?;
+    eprintln!(
+        "{}",
+        redact_bounded(
+            &format!(
+                "Protected task `{}`: role `{}`, selected model `{}`.",
+                request.task_id,
+                request.role.as_str(),
+                choice.model
+            ),
+            &profile.redaction_values,
+            1024,
+        )
+    );
 
     tracing::info!(
         task_id = %request.task_id,
@@ -1207,12 +1130,12 @@ fn execute_agent_inner(
     let logs_dir = ensure_logs_directory(request.target_dir)?;
 
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-    let session_id = format!(
+    let session_stem = format!(
         "{}_{}",
         request.task_id,
         timestamp.to_string().replace(":", "-")
     );
-    let log_path = logs_dir.join(format!("{session_id}.log"));
+    let (session_id, log_path, mut log_file) = create_run_log(&logs_dir, &session_stem)?;
 
     tracing::debug!(
         task_id = %request.task_id,
@@ -1221,16 +1144,6 @@ fn execute_agent_inner(
         timeout_seconds = profile.timeout_seconds,
         "prepared host-side agent model turn"
     );
-    let mut log_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&log_path)
-        .map_err(|source| KvistError::Io {
-            operation: "create agent log file",
-            path: log_path.clone(),
-            source,
-        })?;
-
     let runs_dir = request.target_dir.join(".kvist").join("runs");
     ensure_real_directory(&runs_dir, "create live run directory")?;
     let live = LiveRun::create(
@@ -1275,50 +1188,27 @@ fn execute_agent_inner(
             let limit = match native.context_limit {
                 Some(limit) => limit,
                 None => {
-                    let retry = sav::runtime::RetryPolicy::new(
-                        MODEL_TURN_MAX_ATTEMPTS,
-                        MODEL_TURN_RETRY_BACKOFF,
-                        MODEL_TURN_RETRY_BACKOFF,
-                    );
+                    eprintln!("Discovering selected model serving capacity before inference...");
                     let mut attempt = 0u32;
-                    loop {
-                        attempt += 1;
+                    ModelRetry {
+                        policy: model_retry_policy(Some(native)),
+                        budget: &budget, cancellation, live: Some(&live),
+                        phase: "capacity discovery", model: &native.model,
+                        endpoint: &native.base_url, redactions: &redactions,
+                    }.run(&mut attempt, || {
+                        let result = (|| {
                         let transport = native.transport_bounded(
                             budget.model_deadline(cancellation)?,
                             profile.max_output_bytes,
                         )?;
-                        match transport.context_limit(&native.model, cancellation) {
-                            Ok(Some(limit)) => break limit,
-                            Ok(None) => {
-                                return Err(KvistError::Runtime(sav::runtime::Error::Config {
+                        transport.context_limit(&native.model, cancellation)?
+                            .ok_or_else(|| KvistError::Runtime(sav::runtime::Error::Config {
                                     path: None,
                                     reason: "shared native serving capacity is unavailable; configure context_limit in the selected registry profile".into(),
-                                }));
-                            }
-                            Err(source) => {
-                                if is_retryable_transport_error(&source)
-                                    && attempt < retry.max_attempts
-                                {
-                                    tracing::warn!(
-                                        task_id = %request.task_id,
-                                        attempt,
-                                        %source,
-                                        "context-limit discovery failed; retrying"
-                                    );
-                                    let deadline = Instant::now()
-                                        + retry.backoff_delay(attempt + 1).min(budget.remaining());
-                                    while Instant::now() < deadline && !cancellation.is_cancelled()
-                                    {
-                                        thread::sleep(Duration::from_millis(10).min(
-                                            deadline.saturating_duration_since(Instant::now()),
-                                        ));
-                                    }
-                                } else {
-                                    return Err(KvistError::Sav(source));
-                                }
-                            }
-                        }
-                    }
+                                }))
+                        })();
+                        (result, false)
+                    })?
                 }
             };
             let reserve = native
@@ -1673,12 +1563,14 @@ fn execute_agent_inner(
         tokens.uncertain_attempts,
     );
     let outcome = match outcome {
-        Err(error) => {
-            if let Err(recording) = &recorded {
-                tracing::error!(%recording, "could not retain interrupted agent evidence");
-            }
-            Err(error)
-        }
+        Err(error) => match recorded {
+            Err(recording) => Err(KvistError::AgentEvidenceFailed {
+                reason: format!(
+                    "execution failed: {error}; retaining interrupted run evidence also failed: {recording}"
+                ),
+            }),
+            Ok(_) => Err(error),
+        },
         Ok(_) => recorded,
     };
     let closed = steering.close();
@@ -1692,9 +1584,22 @@ fn execute_agent_inner(
         Err(_) => "failed",
     };
     let finished = live.finish(disposition);
-    if outcome.is_ok() {
-        closed?;
-        finished?;
+    let evidence_failures = [closed, finished]
+        .into_iter()
+        .filter_map(std::result::Result::err)
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>();
+    if !evidence_failures.is_empty() {
+        let execution = outcome.as_ref().err().map_or_else(
+            || "execution result was recorded".to_owned(),
+            |error| format!("execution failed: {error}"),
+        );
+        return Err(KvistError::AgentEvidenceFailed {
+            reason: format!(
+                "{execution}; closing controls/journal failed: {}",
+                evidence_failures.join("; ")
+            ),
+        });
     }
     outcome
 }
@@ -1976,6 +1881,36 @@ fn record_turn_outcome(
     })
 }
 
+fn create_run_log(logs_dir: &Path, stem: &str) -> Result<(String, PathBuf, fs::File)> {
+    for suffix in 0..1024 {
+        let session_id = if suffix == 0 {
+            stem.to_owned()
+        } else {
+            format!("{stem}_{suffix:04}")
+        };
+        let path = logs_dir.join(format!("{session_id}.log"));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((session_id, path, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(source) => {
+                return Err(KvistError::Io {
+                    operation: "create agent log file",
+                    path,
+                    source,
+                });
+            }
+        }
+    }
+    Err(KvistError::Io {
+        operation: "allocate unique agent log identity",
+        path: logs_dir.to_owned(),
+        source: io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "1024 run identities already exist for this timestamp; retained evidence was not overwritten",
+        ),
+    })
+}
+
 fn ensure_logs_directory(target_dir: &Path) -> Result<PathBuf> {
     let kvist_dir = target_dir.join(".kvist");
     ensure_real_directory(&kvist_dir, "create agent state directory")?;
@@ -2143,6 +2078,37 @@ mod tests {
     use crate::config::Model;
 
     #[test]
+    fn same_timestamp_attempts_allocate_distinct_evidence_identities_without_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let stem = "task_2026-10-28T11-23-31Z";
+        let (first_id, first_path, mut first) = create_run_log(dir.path(), stem).unwrap();
+        first.write_all(b"first attempt").unwrap();
+        let (second_id, second_path, mut second) = create_run_log(dir.path(), stem).unwrap();
+        second.write_all(b"second attempt").unwrap();
+        assert_eq!(first_id, stem);
+        assert_eq!(second_id, format!("{stem}_0001"));
+        assert_ne!(first_path, second_path);
+        assert_eq!(fs::read_to_string(first_path).unwrap(), "first attempt");
+        assert_eq!(fs::read_to_string(second_path).unwrap(), "second attempt");
+    }
+
+    #[test]
+    fn evidence_identity_allocation_is_bounded_and_reports_exhaustion() {
+        let dir = tempfile::tempdir().unwrap();
+        for _ in 0..1024 {
+            let _ = create_run_log(dir.path(), "same-time").unwrap();
+        }
+        let error = create_run_log(dir.path(), "same-time")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("1024 run identities already exist"),
+            "{error}"
+        );
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1024);
+    }
+
+    #[test]
     fn extract_loopback_endpoint_strips_path_and_keeps_loopback_authority() {
         let command = r#"curl --silent --request POST --json '{"model":"m"}' -- "http://127.0.0.1:43329/api/chat""#;
         assert_eq!(
@@ -2276,13 +2242,10 @@ mod tests {
         let budget = TurnBudget::new(Duration::from_secs(300));
         let error = probe_gateway_reachable(&endpoint, &budget, &CancellationToken::new())
             .expect_err("gateway should be unreachable");
-        match error {
-            KvistError::LocalModelGatewayUnreachable {
-                endpoint: returned_endpoint,
-                ..
-            } => assert_eq!(returned_endpoint, endpoint),
-            other => panic!("unexpected error kind: {other:?}"),
-        }
+        assert!(matches!(
+            error,
+            KvistError::Sav(ModelError::ModelTransportIo { .. })
+        ));
     }
 
     #[test]
@@ -2390,13 +2353,13 @@ mod tests {
         assert!(!is_retryable_transport_error(
             &ModelError::ModelTransportCancelled
         ));
-        assert!(!is_retryable_transport_error(&ModelError::TtftTimedOut {
+        assert!(is_retryable_transport_error(&ModelError::TtftTimedOut {
             timeout: Duration::from_secs(45)
         }));
         assert!(!is_retryable_transport_error(
             &ModelError::ModelResponseLimitExceeded { max_bytes: 1024 }
         ));
-        assert!(!is_retryable_transport_error(
+        assert!(is_retryable_transport_error(
             &ModelError::ModelProviderStatus { status: 500 }
         ));
         assert!(!is_retryable_transport_error(
@@ -2530,7 +2493,7 @@ mod tests {
             *attempts += 1;
             drop(attempts);
             // Stream some text, then fail with a transient error: the emitted
-            // text must rule out any retry of this attempt.
+            // text stays provisional when this attempt fails.
             on_event(ModelStreamEvent::TextDelta("partial ".to_owned()))?;
             Err(self.failure.into_error())
         }
@@ -2576,7 +2539,7 @@ mod tests {
 
     #[test]
     fn non_retryable_failure_is_surfaced_immediately() {
-        let transport = FlakyTransport::new(3, FailureKind::ProviderStatus(500));
+        let transport = FlakyTransport::new(3, FailureKind::ProviderStatus(400));
         let budget = TurnBudget::new(Duration::from_secs(60));
         let error = complete_turn(
             || Ok::<FlakyTransport, KvistError>(transport.clone()),
@@ -2591,11 +2554,33 @@ mod tests {
         assert!(
             matches!(
                 error,
-                KvistError::Sav(ModelError::ModelProviderStatus { status: 500 })
+                KvistError::AgentModelRequestFailed {
+                    source: ModelError::ModelProviderStatus { status: 400 },
+                    ..
+                }
             ),
             "unexpected error: {error:?}"
         );
         assert_eq!(transport.attempt_count(), 1);
+    }
+
+    #[test]
+    fn turn_retry_recovers_from_transient_provider_status() {
+        for status in [429, 500, 502, 503, 504, 507] {
+            let transport = FlakyTransport::new(1, FailureKind::ProviderStatus(status));
+            let turn = complete_turn(
+                || Ok(transport.clone()),
+                &test_request("model-a"),
+                &CancellationToken::new(),
+                &TurnBudget::new(Duration::from_secs(60)),
+                false,
+                &[],
+                "status-retry",
+            )
+            .expect("transient HTTP status recovers");
+            assert_eq!(turn.text, "recovered");
+            assert_eq!(transport.attempt_count(), 2);
+        }
     }
 
     #[test]
@@ -2613,14 +2598,20 @@ mod tests {
         )
         .expect_err("retries must be bounded");
         assert!(
-            matches!(error, KvistError::Sav(ModelError::ModelTransportIo { .. })),
+            matches!(
+                error,
+                KvistError::AgentModelRequestFailed {
+                    source: ModelError::ModelTransportIo { .. },
+                    ..
+                }
+            ),
             "the last transient error must be surfaced: {error:?}"
         );
         assert_eq!(transport.attempt_count(), MODEL_TURN_MAX_ATTEMPTS);
     }
 
     #[test]
-    fn streamed_text_is_never_retried() {
+    fn streamed_transient_failure_retries_without_executing_partial_proposals() {
         let transport = FlakyTransport::new(10, FailureKind::Transient);
         let budget = TurnBudget::new(Duration::from_secs(60));
         let error = complete_turn(
@@ -2632,15 +2623,18 @@ mod tests {
             &[],
             "task-streamed",
         )
-        .expect_err("a streamed attempt that emitted text must fail, not retry");
+        .expect_err("repeated stream failures exhaust the attempt policy");
         assert!(matches!(
             error,
-            KvistError::Sav(ModelError::ModelTransportIo { .. })
+            KvistError::AgentModelRequestFailed {
+                source: ModelError::ModelTransportIo { .. },
+                ..
+            }
         ));
         assert_eq!(
             transport.attempt_count(),
-            1,
-            "emitted text cannot be retracted, so the attempt must not repeat"
+            MODEL_TURN_MAX_ATTEMPTS,
+            "provisional text does not authorize effects or prevent bounded retries"
         );
     }
 

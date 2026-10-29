@@ -27,7 +27,7 @@ const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_RECORD_BYTES: usize = 1024 * 1024;
 const IO_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-/// Default slot allocation timeout for local model requests (15 seconds).
+/// Default response-header watchdog for streaming model requests (15 seconds).
 pub const DEFAULT_SLOT_ALLOCATION_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Default Time-To-First-Token watchdog timeout for streaming local model requests (45 seconds).
@@ -177,7 +177,7 @@ impl DirectModelTransport {
         })
     }
 
-    /// Configures the slot allocation timeout.
+    /// Configures the streaming response-header watchdog, not a provider slot query.
     pub fn with_slot_timeout(mut self, timeout: Duration) -> Self {
         self.slot_allocation_timeout = timeout;
         self
@@ -420,7 +420,7 @@ impl DirectModelTransport {
         write_checked(&mut socket, head.as_bytes(), cancellation, deadline)?;
         write_checked(&mut socket, &body, cancellation, deadline)?;
         let watchdogs = ResponseWatchdogs {
-            slot_allocation_timeout: self.slot_allocation_timeout,
+            slot_allocation_timeout: stream.then_some(self.slot_allocation_timeout),
             ttft_watchdog_timeout: self.ttft_watchdog_timeout,
             cadence_watchdog_timeout: self.cadence_watchdog_timeout,
             is_streaming: stream,
@@ -500,7 +500,7 @@ pub(crate) fn get_bounded(
     write_checked(&mut socket, head.as_bytes(), cancellation, expires)?;
     let mut body = Vec::new();
     let watchdogs = ResponseWatchdogs {
-        slot_allocation_timeout: DEFAULT_SLOT_ALLOCATION_TIMEOUT,
+        slot_allocation_timeout: None,
         ttft_watchdog_timeout: DEFAULT_TTFT_WATCHDOG_TIMEOUT,
         cadence_watchdog_timeout: None,
         is_streaming: false,
@@ -1192,7 +1192,7 @@ fn write_checked(
 
 #[derive(Debug, Clone, Copy)]
 struct ResponseWatchdogs {
-    slot_allocation_timeout: Duration,
+    slot_allocation_timeout: Option<Duration>,
     ttft_watchdog_timeout: Duration,
     cadence_watchdog_timeout: Option<Duration>,
     is_streaming: bool,
@@ -1270,7 +1270,9 @@ fn read_response(
     on_body: &mut dyn FnMut(&[u8]) -> Result<bool>,
 ) -> Result<()> {
     let mut received = Vec::new();
-    let slot_deadline = Instant::now() + watchdogs.slot_allocation_timeout;
+    let slot_deadline = watchdogs
+        .slot_allocation_timeout
+        .map(|timeout| Instant::now() + timeout);
     let header_end = loop {
         if let Some(index) = received.windows(4).position(|value| value == b"\r\n\r\n") {
             break index + 4;
@@ -1281,7 +1283,7 @@ fn read_response(
             });
         }
         let mut buffer = [0_u8; 4096];
-        let current_header_deadline = deadline.min(slot_deadline);
+        let current_header_deadline = slot_deadline.map_or(deadline, |slot| deadline.min(slot));
         let count = match read_checked(
             &mut stream,
             &mut buffer,
@@ -1290,16 +1292,19 @@ fn read_response(
             "reading response headers",
         ) {
             Ok(n) => n,
-            Err(Error::ModelTransportTimedOut) if Instant::now() >= slot_deadline => {
-                let _ = stream.shutdown(std::net::Shutdown::Both);
-                return Err(Error::SlotAllocationTimedOut {
-                    timeout: watchdogs.slot_allocation_timeout,
-                });
+            Err(error) => {
+                if matches!(error, Error::ModelTransportTimedOut)
+                    && current_header_deadline < deadline
+                    && let Some(timeout) = watchdogs.slot_allocation_timeout
+                {
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    return Err(Error::SlotAllocationTimedOut { timeout });
+                }
+                return Err(error);
             }
-            Err(error) => return Err(error),
         };
         if count == 0 {
-            return malformed("response ended before HTTP headers completed");
+            return unexpected_eof("reading response headers");
         }
         received.extend_from_slice(&buffer[..count]);
     };
@@ -1376,7 +1381,7 @@ fn read_response(
             body_watchdog.check(cancellation)?;
             if count == 0 {
                 if content_length.is_some() {
-                    return malformed("response body ended before Content-Length");
+                    return unexpected_eof("reading declared response body");
                 }
                 break;
             }
@@ -1504,7 +1509,7 @@ fn read_chunked_body(
                 .map_err(|error| watchdog.map_error(error))?;
             watchdog.check(cancellation)?;
             if chunk.is_empty() {
-                return malformed("chunked response ended before chunk completed");
+                return unexpected_eof("reading chunked response body");
             }
             body_bytes += chunk.len();
             remaining -= chunk.len();
@@ -1559,7 +1564,7 @@ impl BufferedSocket {
             "reading chunked response",
         )?;
         if count == 0 {
-            return malformed("chunked response ended before terminal chunk");
+            return unexpected_eof("reading chunked response");
         }
         Ok(byte[0])
     }
@@ -1588,7 +1593,7 @@ impl BufferedSocket {
                 "reading chunked response body",
             )?;
             if count == 0 {
-                return malformed("chunked response ended before chunk completed");
+                return unexpected_eof("reading chunked response body");
             }
             output.extend_from_slice(&buffer[..count]);
         }
@@ -1616,6 +1621,16 @@ impl BufferedSocket {
             line.push(byte);
         }
     }
+}
+
+fn unexpected_eof<T>(operation: &'static str) -> Result<T> {
+    Err(Error::ModelTransportIo {
+        operation,
+        source: io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "provider closed before HTTP response completed",
+        ),
+    })
 }
 
 fn read_checked(

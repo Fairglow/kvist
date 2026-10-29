@@ -302,8 +302,7 @@ impl StreamManager {
                 let text = output.to_string();
                 let trimmed = text.trim();
                 for line in trimmed.lines() {
-                    let truncated = crate::bark::truncate(line, limit);
-                    let padded = super::style::pad_right(&truncated, limit);
+                    let padded = super::style::pad_right(line, limit);
                     rows.push(self.theme.agent_result(&padded));
                 }
                 if let Some(feedback) = self.find_latest_agent_feedback(target) {
@@ -342,7 +341,11 @@ impl StreamManager {
                 }
             }
             Err(error) => {
-                rows.push(format!("✘ Execution failed: {error}"));
+                rows.extend(
+                    format!("✘ Execution failed: {error}")
+                        .lines()
+                        .map(str::to_owned),
+                );
             }
         }
         rows
@@ -358,17 +361,11 @@ impl StreamManager {
         target: &FeedbackTarget<'_>,
     ) {
         let rows = self.result_stage_rows(result, target);
-        let inner = style::titled_box_width(STAGE_TITLE, &rows, self.width()).saturating_sub(4);
-        let bottom = style::titled_box(self.theme, STAGE_TITLE, &rows, self.width()).bottom;
-        for row in &rows {
-            println!(
-                "{}{}{}",
-                self.theme.dim("│  "),
-                super::style::pad_right(row, inner),
-                self.theme.dim("│")
-            );
+        let titled = style::titled_box(self.theme, STAGE_TITLE, &rows, self.width());
+        for row in &titled.rows {
+            println!("{row}");
         }
-        println!("{bottom}");
+        println!("{}", titled.bottom);
     }
 }
 
@@ -435,6 +432,30 @@ mod tests {
         for row in &rows {
             assert_eq!(style::visible_len(row), inner);
         }
+    }
+
+    #[test]
+    fn result_stage_retains_long_outcomes_and_multiline_errors() {
+        let dir = tempdir().unwrap();
+        let manager = StreamManager::new(dir.path(), Theme::plain());
+        let command = format!(
+            "kvist task finalize maerg {} attempt-0001 accept",
+            "long-task-".repeat(12)
+        );
+        let rows = manager.result_stage_rows(
+            &Ok(cli::CommandOutput::message(&command)),
+            &FeedbackTarget::None,
+        );
+        assert_eq!(rows.join("\n").trim(), command);
+        let rows = manager.result_stage_rows(
+            &Err(crate::KvistError::TaskRunFailed {
+                task_id: "task".into(),
+                reason: "cause\ninspection command".into(),
+            }),
+            &FeedbackTarget::None,
+        );
+        assert!(rows.iter().all(|row| !row.contains('\n')), "{rows:?}");
+        assert!(rows.iter().any(|row| row == "inspection command"));
     }
 
     #[test]

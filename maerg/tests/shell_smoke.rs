@@ -21,6 +21,49 @@ fn init_project(dir: &std::path::Path) {
     assert!(status.success(), "kvist init must succeed in {dir:?}");
 }
 
+#[cfg(unix)]
+fn add_confirmation_task(dir: &tempfile::TempDir) -> (std::path::PathBuf, String) {
+    let queue_path = dir.path().join("src/TODOS.yaml");
+    let mut queue =
+        kvist::task_queue::parse(&std::fs::read_to_string(&queue_path).unwrap()).unwrap();
+    let timestamp: kvist::task_queue::Timestamp =
+        serde_json::from_str("\"2026-10-28T23:00:00Z\"").unwrap();
+    queue.tasks.push(kvist::task_queue::Task {
+        id: "confirmation-test".into(),
+        title: "Test confirmation".into(),
+        description: "Never execute this task in the terminal fixture.".into(),
+        context: "The terminal fixture declines this task.".into(),
+        purpose: "Keep terminal input visible.".into(),
+        expected_outcome: "A refusal has no durable effects.".into(),
+        kind: kvist::task_queue::TaskKind::Test,
+        status: kvist::task_queue::TaskStatus::Pending,
+        depends_on: vec![],
+        requirements: vec!["REQUIREMENTS.md#Task-selection-and-state-updates".into()],
+        timestamps: kvist::task_queue::TaskTimestamps {
+            created_at: timestamp.clone(),
+            updated_at: timestamp,
+            completed_at: None,
+        },
+        blocked_reason: None,
+        recovery_state: None,
+        acceptance_id: None,
+        disposition: None,
+    });
+    let queue_before = kvist::task_queue::serialize(&queue).unwrap();
+    std::fs::write(&queue_path, &queue_before).unwrap();
+    for args in [vec!["init", "--quiet"], vec!["add", "."]] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    (queue_path, queue_before)
+}
+
 #[test]
 fn shell_rejects_a_non_interactive_stdin() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -208,6 +251,7 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     init_project(dir.path());
+    let (queue_path, queue_before) = add_confirmation_task(&dir);
     // Isolate the child from the user's real state and configuration.
     let state_home = dir.path().join("state");
     let config_home = dir.path().join("config");
@@ -260,6 +304,10 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
     let mut consumed = 0usize;
     let mut buffer = [0u8; 8192];
     let mut help_sent = false;
+    let mut run_sent = false;
+    let mut run_start = 0;
+    let mut confirmation_seen = None;
+    let mut refused = false;
     let mut exit_sent = false;
 
     loop {
@@ -309,17 +357,35 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
             write(master.as_fd(), b"help\n").expect("send `help`");
             help_sent = true;
         }
-        if help_sent && !exit_sent && output.contains("Kvist shell — builtins") {
+        if help_sent && !run_sent && output.contains("Kvist shell — builtins") {
             // Phase 2: the `help` builtin, with the themed prompt redrawn.
             assert!(output.contains("kvist ❯"), "prompt: {output}");
             assert!(output.contains("cd [COMPONENT]"), "help output: {output}");
+            run_start = bytes.len();
+            write(master.as_fd(), b"task run\n").expect("send `task run`");
+            run_sent = true;
+        }
+        if run_sent
+            && !refused
+            && output.contains("Run suggested next task `confirmation-test`? [Y/n]")
+        {
+            let seen = confirmation_seen.get_or_insert_with(Instant::now);
+            if seen.elapsed() >= Duration::from_millis(350) {
+                let waiting = utf8_prefix(&bytes[run_start..]);
+                assert!(!waiting.contains("Agent Working"), "{waiting}");
+                assert!(!waiting.contains("Running task"), "{waiting}");
+                write(master.as_fd(), b"n\n").expect("decline the suggested task");
+                refused = true;
+            }
+        }
+        if refused && !exit_sent && output.contains("Cancelled: did not run the suggested task") {
             write(master.as_fd(), b"exit\n").expect("send `exit`");
             exit_sent = true;
         }
     }
 
     assert!(
-        help_sent && exit_sent,
+        help_sent && run_sent && refused && exit_sent,
         "the banner and help phases must complete; output so far:\n{}",
         utf8_prefix(&bytes)
     );
@@ -329,4 +395,5 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
         "the shell must exit cleanly; output:\n{}",
         utf8_prefix(&bytes)
     );
+    assert_eq!(std::fs::read_to_string(queue_path).unwrap(), queue_before);
 }

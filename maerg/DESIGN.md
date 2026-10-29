@@ -209,14 +209,45 @@ Native accounting/cancellation fixtures allow scheduling and durable-recording
 slack within their run budget and bound provider accepts, so an early client
 failure cannot strand the test waiting for a nonexistent next request. Only
 transient availability failures — a socket connection refused, timed out,
-interrupted, or reset error, a slot-allocation timeout, or the overall transport
-timeout — are retried, up to three attempts with a short fixed backoff, to ride
-out a cold-starting gateway that has not finished spawning the model onto its
-ephemeral port. Non-retryable failures (a non-success HTTP status, a malformed
-or oversized response, or cancellation) are returned immediately. A streamed
-attempt that has already emitted text is never retried. An exhausted retry or a
-failed probe yields a single clear, actionable gateway-unreachable error instead
-of an opaque transport failure.
+interrupted, reset, aborted, broken-pipe or unexpected-EOF error, a transport
+watchdog, or HTTP 429/500/502/503/504/507 — are retried using the selected native
+profile's full attempt/backoff settings. Explicit endpoint profiles use the
+shared default retry policy. One retry helper serves discovery and inference,
+adds OS-entropy jitter in the upper half of the capped exponential delay, and
+polls cancellation during waits. Entropy failure is explicit. Required journal
+recording precedes each request/retry; recording failure stops execution and
+retains the preceding model cause alongside the local recording/entropy error.
+Human-readable redacted retry notices do not depend on tracing filters.
+Published text, reasoning or tool events remain provisional until a complete
+turn validates. Before retrying a transiently interrupted stream, record
+`provisional_output_discarded` and print an explicit discard notice. Never
+execute proposals from an incomplete attempt. Failed attempts retain their
+conservative token reservations.
+Terminal diagnostics retain phase, selected model/endpoint, actual attempts,
+elapsed time, last cause, and whether attempts, wall budget or a persistent error
+stopped retries. Generation retries never replay prior tool effects.
+
+The shell resolves/confirms an omitted task before opening its working stage.
+Streaming commands use their own durable progress rather than a background
+spinner competing for the cursor. Result rows use the existing soft-wrapping
+box renderer, not truncation. Task selection checks unresolved attempt evidence
+before suggesting another task.
+
+When agent execution returns an error, append failed `agent-execution` evidence
+before transitioning to blocked. Only the lock-owning run may exclude its own
+attempt from this transition's unresolved-attempt guard. Execution evidence
+alone does not release a fence: a durable terminal queue disposition, pending
+human disposition or explicit human finalization is required. If recording or
+disposition fails, retain the fence and return both errors with the exact
+attempt and journal path.
+Ordinary agent/verification failure returns `TaskRunFailed`, not success-shaped
+text. Include the redacted underlying diagnostic in the blocked reason.
+Allocate log identities with exclusive creation, trying the timestamp stem then
+up to 1023 ordered numeric suffixes on collisions. Derive diagnostic journal
+and trajectory identities from that unique log stem; never overwrite evidence.
+After a successful batch invocation, reread task state; only `completed` counts
+toward completion. In-progress or awaiting-decision stops with exact finalize
+or decision guidance. Existing unbound historical failures stay unresolved.
 
 Significant artifact separation rationale is retained in
 `docs/decisions/0001-separate-component-intent.md`.
