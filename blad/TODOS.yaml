@@ -1,25 +1,27 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:a35608d2f5e1a450d9d6423f6bb86a5867dcb32f5eff5fe5cbd86674f2381d10"
-  contract_revision: "sha256:2a470c3e9799640482928b9fe72b2a9b70a4e39c415acf4593815840778cebd0"
-  design_revision: "sha256:103a80db8f5534a3b1ca08bc9e868530fc59f848c2ae6077867847fed21648ba"
+  requirements_revision: "sha256:58e5c477349a5ec417a85ec7513bdc7fed40d985b8aadf8a80782a330003361f"
+  contract_revision: "sha256:790a6eb1e0c354eb28820d661a4192bf2ac4347d5cabb564d4492a86ac00a2bb"
+  design_revision: "sha256:b5d6f58ea93715eb6b475157ce2059082c207a68d75dc74e0d052ebb57104de4"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-27T21:22:43Z"
+    checked_at: "2026-10-29T22:50:02Z"
     stale_since: null
     causes: []
 tasks:
   - id: "html-fd-write-tests"
     title: "write_tests: reproduce HTML loss and process-substitution failure"
     description: "Pin R-077 HTML projection/source fallback/stripping and R-078 inherited descriptor snapshots through library, CLI and PTY tests."
-    kind: test
-    status: completed
     context: "Reproduced process-substitution canonicalization failure, absent strip-html CLI option and all five initial HTML failures before production code. Two later multiline-comment navigation regressions reproduced the independent observer finding before repair."
     purpose: "Prevent disappearing HTML sections and rejected inherited pipe paths."
     expected_outcome: "Fail-first library, CLI and PTY assertions cover R-077/R-078 without relaxing ordinary file/theme safety."
+    kind: test
+    status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+    requirements:
+      - "REQUIREMENTS.md#R-077"
+      - "REQUIREMENTS.md#R-078"
     timestamps:
       created_at: "1970-01-01T00:00:00Z"
       updated_at: "1970-01-01T00:00:00Z"
@@ -30,13 +32,16 @@ tasks:
   - id: "html-fd-implement-code"
     title: "implement_code: preserve HTML and snapshot inherited descriptors"
     description: "Implement bounded inert HTML projection, strip-html CLI/library policy and finite descriptor inputs without relaxing ordinary file/theme policy; update user documentation."
-    kind: implementation
-    status: completed
     context: "HTML projection and typed strip policy implemented across rendering/navigation; descriptor snapshots remain finite and separate from stdin. Final nextest passed 366 all-feature and 345 default-feature tests, with three existing opt-in skips each; strict Clippy, formatter and rustdoc passed. Updated intent is not accepted; prior component revision metadata is retained."
     purpose: "Recover useful text and shell input without browser execution or broad device reads."
     expected_outcome: "R-077/R-078 behavior, errors and documentation are consistent through CLI/library/viewer surfaces."
-    depends_on: ["html-fd-write-tests"]
-    requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+    kind: implementation
+    status: completed
+    depends_on:
+      - "html-fd-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-077"
+      - "REQUIREMENTS.md#R-078"
     timestamps:
       created_at: "1970-01-01T00:00:00Z"
       updated_at: "1970-01-01T00:00:00Z"
@@ -47,13 +52,16 @@ tasks:
   - id: "html-fd-security-audit"
     title: "security_audit: derive independent source-only observations"
     description: "Independently derive a scoped IMPL supplement from source/tests only; exclude intent, queue, prior records, chat and history."
-    kind: security-audit
-    status: completed
     context: "Independent source-only blad-source-observer derived the scoped IMPL supplement without intent/history/prior records or test execution. It found missing HTML-event joining in navigation; regressions reproduced both failures and the implementer repaired them. Final repair/attribute/entity refinements are explicitly attributed rather than claimed independently re-observed."
     purpose: "Retain independent observations of HTML safety and raw-descriptor ownership."
     expected_outcome: "Source-derived observations, concrete findings and evidence limits remain durable."
-    depends_on: ["html-fd-implement-code"]
-    requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "html-fd-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#R-077"
+      - "REQUIREMENTS.md#R-078"
     timestamps:
       created_at: "1970-01-01T00:00:00Z"
       updated_at: "1970-01-01T00:00:00Z"
@@ -64,13 +72,16 @@ tasks:
   - id: "html-fd-compliance-review"
     title: "compliance_review: compare HTML and descriptor evidence"
     description: "Separately compare local intent with independently observed behavior and execution evidence without source access; retain discrepancies without claiming acceptance."
-    kind: compliance-review
-    status: completed
     context: "Separate source-blind blad-intent-comparator found broad scoped alignment and one numeric-entity length discrepancy, retained in IMPL for explicit disposition. Implementer reproduced long zero-padded numeric failure, repaired the decoder without narrowing intent and reran both feature suites/lints successfully. Navigation repair and final refinements remain attributed, not independently re-observed; finite evidence limits persist. No receipt, acceptance or compliance certification is claimed."
     purpose: "Compare final intended behavior against independent observations and attributed execution."
     expected_outcome: "Scoped discrepancies and evidence limitations are recorded for human arbitration."
-    depends_on: ["html-fd-security-audit"]
-    requirements: ["REQUIREMENTS.md#R-077", "REQUIREMENTS.md#R-078"]
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "html-fd-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-077"
+      - "REQUIREMENTS.md#R-078"
     timestamps:
       created_at: "1970-01-01T00:00:00Z"
       updated_at: "1970-01-01T00:00:00Z"
@@ -82,46 +93,77 @@ tasks:
     title: "write_tests: reproduce absent default scheduling policy"
     description: "Pin canonical nextest discovery, Git visibility and consistent repository entrypoints before relocating policy."
     context: "The supplied timing failure was not reproduced in 20 isolated cold-process runs. Default discovery did reject profile ci. Four new Python policy failures and both coupled Rust scheduling failures were reproduced before repair, then passed. No renderer assertion or bound was weakened."
-    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:46:41Z", completed_at: "2026-10-28T22:46:41Z"}
     purpose: "Prevent standard nextest commands silently bypassing native Mermaid isolation."
     expected_outcome: "Missing/ignored default configuration and divergent entrypoints fail regressions."
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-28T22:41:05Z"
+      updated_at: "2026-10-28T22:46:41Z"
+      completed_at: "2026-10-28T22:46:41Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "mermaid-discovery-implement-code"
     title: "implement_code: discover existing scheduling policy automatically"
     description: "Relocate the sole policy to .config/nextest.toml, expose only it through ignore rules and wire normal discovery through recipes and CI."
     context: "Canonical relocation and automatic recipe/CI discovery implemented with rendering source, 500ms deadline and allocation rules unchanged. Orchestrator execution: 341 all-feature default-profile and 320 standalone CI-profile passes; three existing skips each. Ten selected CI stress iterations passed 350 cases. Full-suite events show zero reserved overlap and ordinary concurrency 20. All 22 Python tool tests and scoped strict Clippy/format checks pass."
-    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:46:41Z", completed_at: "2026-10-28T22:46:41Z"}
     purpose: "Apply established isolation without requiring an extra command-line flag."
     expected_outcome: "Direct and inherited-CI nextest runs use the same policy."
     kind: implementation
     status: completed
-    depends_on: ["mermaid-discovery-write-tests"]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    depends_on:
+      - "mermaid-discovery-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-28T22:41:05Z"
+      updated_at: "2026-10-28T22:46:41Z"
+      completed_at: "2026-10-28T22:46:41Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "mermaid-discovery-security-audit"
     title: "security_audit: observe discovery and retained rendering boundaries"
     description: "Independently derive source-only observations, excluding intent, queues and prior records."
     context: "Independent source-only observer 3b16ef03-8fab-426d-a0d5-12dc1f2ffb23 excluded intent/history/prior records and executed no commands. Its IMPL supplement observes exact selectors, full-pool priority, runtime ceilings and Interrupted cancellation propagation; no concrete scoped bug identified. Static assertions are not execution proof; external-load and alternate-runner limits remain explicit."
-    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:46:41Z", completed_at: "2026-10-28T22:46:41Z"}
     purpose: "Retain independent observations rather than self-certification."
     expected_outcome: "A scoped source-derived IMPL supplement with explicit evidence limits."
     kind: security-audit
     status: completed
-    depends_on: ["mermaid-discovery-implement-code"]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    depends_on:
+      - "mermaid-discovery-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-28T22:41:05Z"
+      updated_at: "2026-10-28T22:46:41Z"
+      completed_at: "2026-10-28T22:46:41Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "mermaid-discovery-compliance-review"
     title: "compliance_review: compare discovery intent and finite evidence"
     description: "Compare local intent with independent observations and execution evidence in a source-blind context."
     context: "Independent source-blind comparator 25f11ef7-8451-4689-b27a-93546c08f3a5 found no concrete scoped contradiction. Source observations support discovery and retained bounds; attributed full-suite events support reservation and ordinary concurrency. Missing-policy and regression failures were reproduced, not the original admission timeout. Actual tracked-only clean-checkout and recipe/CI execution were not established; stress supplied no overlap conclusion. External load and separate runners remain outside the guarantee. No certification, receipt or acceptance; revised intent remains unaccepted."
-    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:47:58Z", completed_at: "2026-10-28T22:47:58Z"}
     purpose: "Retain discrepancies and remaining runner/host limitations."
     expected_outcome: "A recorded scoped comparison without certification."
     kind: compliance-review
     status: completed
-    depends_on: ["mermaid-discovery-security-audit"]
-    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-039"]
+    depends_on:
+      - "mermaid-discovery-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#R-038"
+      - "REQUIREMENTS.md#R-039"
+    timestamps:
+      created_at: "2026-10-28T22:41:05Z"
+      updated_at: "2026-10-28T22:47:58Z"
+      completed_at: "2026-10-28T22:47:58Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "blad-markdown-subset-intent-tests"
     title: "write_tests: pin the current useful-subset baseline"
     description: "Before bounding the backlog, pin the currently supported Markdown subset and its terminal projection so intent changes have a stable fail-first baseline."

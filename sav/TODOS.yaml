@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:9ff3c186909107d80f66be90505889c91bf1abbe126a0ac6a080c9945b482986"
-  contract_revision: "sha256:6a588c19af95d9c84b5539a52d9d9f01ec7dea2b8f9b702ea6007dfe6dd842a3"
-  design_revision: "sha256:57213b3d9ab1289a500d36f2b5d3269c958f714e88854124a6bdd0b3f2eab2ae"
+  requirements_revision: "sha256:6382dfb1a742ea1ad245edc462345d59a695b1d5e3cb003264b7811f2fc55133"
+  contract_revision: "sha256:12160de295a13ed382cf8153874777b099e594444d23a8195881c3d5fa2a5ccc"
+  design_revision: "sha256:bf6ce774760f0bf22770f9ec924d1b5515bc412707c6b2ac88a3959c374f55d1"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-27T21:23:38Z"
+    checked_at: "2026-10-29T22:50:44Z"
     stale_since: null
     causes: []
 tasks:
@@ -19,8 +19,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-28T23:40:00Z"
+      updated_at: "2026-10-28T23:53:44Z"
+      completed_at: "2026-10-28T23:53:44Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "response-deadline-implement-code"
     title: "implement_code: honor metadata and unary deadlines"
     description: "Apply the header watchdog only to streaming inference and describe header timeout observations accurately."
@@ -29,9 +35,16 @@ tasks:
     expected_outcome: "Caller budgets, cancellation and response bounds remain effective."
     kind: implementation
     status: completed
-    depends_on: ["response-deadline-write-tests"]
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+    depends_on:
+      - "response-deadline-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-28T23:40:00Z"
+      updated_at: "2026-10-28T23:53:44Z"
+      completed_at: "2026-10-28T23:53:44Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "response-deadline-security-audit"
     title: "security_audit: observe transport timeout boundaries"
     description: "Derive source-only observations of deadline, cancellation and byte bounds without intent or prior records."
@@ -40,9 +53,16 @@ tasks:
     expected_outcome: "Persist scoped source-derived observations."
     kind: security-audit
     status: completed
-    depends_on: ["response-deadline-implement-code"]
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:53:44Z", completed_at: "2026-10-28T23:53:44Z"}
+    depends_on:
+      - "response-deadline-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-28T23:40:00Z"
+      updated_at: "2026-10-28T23:53:44Z"
+      completed_at: "2026-10-28T23:53:44Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "response-deadline-compliance-review"
     title: "compliance_review: compare header-budget evidence"
     description: "Compare scoped intent with independent observations and execution evidence without source."
@@ -51,53 +71,87 @@ tasks:
     expected_outcome: "Persist independent scoped comparison, not acceptance."
     kind: compliance-review
     status: completed
-    depends_on: ["response-deadline-security-audit"]
-    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
-    timestamps: {created_at: "2026-10-28T23:40:00Z", updated_at: "2026-10-28T23:57:08Z", completed_at: "2026-10-28T23:57:08Z"}
+    depends_on:
+      - "response-deadline-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-28T23:40:00Z"
+      updated_at: "2026-10-28T23:57:08Z"
+      completed_at: "2026-10-28T23:57:08Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-write-tests"
     title: "write_tests: reproduce lifetime cutoffs"
     description: "Cross 500 turns and 64 MiB; pin optional budgets, guidance renewal and compaction accounting."
     context: "Regressions reproduced the 500-turn and aggregate journal cutoffs, guidance-attempt exhaustion and lifetime read-notice retention before repair; exact message-count and optional-budget boundaries are covered. Advisory exception is recorded in intent."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:07:55Z", completed_at: "2026-10-28T19:07:55Z"}
     purpose: "Support multi-day conversations without hidden ceilings."
     expected_outcome: "Regressions fail before implementation."
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#AR-REQ-LONG-SESSIONS"]
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-LONG-SESSIONS"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:07:55Z"
+      completed_at: "2026-10-28T19:07:55Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-implement-code"
     title: "implement_code: separate task budgets from session lifetime"
     description: "Implement optional run caps, guidance renewal, compaction counts and bounded journal rotation."
     context: "Optional caps, retained compaction, renewed guidance and held-directory journal rotation implemented; notice cache is bounded separately from effect protection. Orchestrator execution: nextest 71505598-2bf0-47b7-aacf-37cdfe23f4c8 passed 1466 affected-package tests with 10 existing skips; strict all-target Clippy and formatting passed. No endurance or acceptance claim."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:07:55Z", completed_at: "2026-10-28T19:07:55Z"}
     purpose: "Keep safety mechanisms without arbitrary lifetime stops."
     expected_outcome: "Targeted regressions pass without broader authority."
     kind: implementation
     status: completed
-    depends_on: ["long-sessions-write-tests"]
-    requirements: ["REQUIREMENTS.md#AR-REQ-LONG-SESSIONS"]
+    depends_on:
+      - "long-sessions-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-LONG-SESSIONS"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:07:55Z"
+      completed_at: "2026-10-28T19:07:55Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-security-audit"
     title: "security_audit: observe long-session boundaries"
     description: "Independently derive source-only observations of budgets, cancellation, journal paths and bounded reads."
     context: "Independent source-only observer excluded intent, queues, prior IMPL and Git history; its dated IMPL supplement is persisted. Held-directory rotation, failed-recording stops and finite read/effect tracking were observed. Its terminal-batch finding was reproduced, repaired and re-observed; no concrete flaw remained in that narrow fix. Observer executed no commands. Final orchestrator suite ab6f4e27-e93a-421f-9d4c-4bb6773be8cb: 1467 passed, 10 existing skips."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:13:28Z", completed_at: "2026-10-28T19:13:28Z"}
     purpose: "Retain independent observations."
     expected_outcome: "Source-derived observations persist without certification."
     kind: security-audit
     status: completed
-    depends_on: ["long-sessions-implement-code"]
-    requirements: ["REQUIREMENTS.md#AR-REQ-LONG-SESSIONS"]
+    depends_on:
+      - "long-sessions-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-LONG-SESSIONS"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:13:28Z"
+      completed_at: "2026-10-28T19:13:28Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-compliance-review"
     title: "compliance_review: compare long-session evidence"
     description: "Compare intent with independent observations and test evidence without source access."
     context: "Independent source-blind comparator e695c030-f655-4293-823c-573ba50ec13e supports scoped uncapped defaults, guidance renewal, fresh budgets, atomic fitting and rotation. Source-derived counter addendum plus exact named nextest run 5cea9539-b4ce-4665-a7a3-a5aed9c9179d close the specific no-op/error observation gap, not exhaustive qualification. No further concrete scoped contradiction established. Disk/memory growth, lossy summaries and lack of days-long endurance remain human considerations. No certification, receipt or acceptance; accepted revisions remain stale."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:18:43Z", completed_at: "2026-10-28T19:18:43Z"}
     purpose: "Expose discrepancies for human arbitration."
     expected_outcome: "Scoped comparison persists; no acceptance is inferred."
     kind: compliance-review
     status: completed
-    depends_on: ["long-sessions-security-audit"]
-    requirements: ["REQUIREMENTS.md#AR-REQ-LONG-SESSIONS"]
+    depends_on:
+      - "long-sessions-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-LONG-SESSIONS"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:18:43Z"
+      completed_at: "2026-10-28T19:18:43Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "shared-runtime-write-tests"
     title: "Pin shared registry, runtime controls and observation"
     description: "Write deterministic failing tests for shared profile resolution, backend distinctions, native control handoff, live journals, malformed input, bounds and failure propagation."
@@ -158,16 +212,16 @@ tasks:
     purpose: "Retain discrepancies for human arbitration."
     expected_outcome: "Observed behavior and comparison limits persist beside the component."
     kind: compliance-review
-    status: blocked
+    status: pending
     depends_on:
       - "shared-runtime-security-audit"
     requirements:
       - "REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"
     timestamps:
       created_at: "2026-10-23T22:00:00Z"
-      updated_at: "2026-10-24T00:00:55Z"
+      updated_at: "2026-10-29T11:58:47Z"
       completed_at: null
-    blocked_reason: "Formal review readiness is blocked by pre-existing project queue/toolchain diagnostics and retained requirement discrepancies requiring human arbitration. Diagnostic comparison is complete; no compliance pass, waiver or receipt."
+    blocked_reason: null
     recovery_state: null
   - id: "active-model-write-tests"
     title: "Reproduce router loaded-model discovery"

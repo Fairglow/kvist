@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:43bf8c7c4e280f0df2cb66c33e74f1036df70932fcbb25fb22fc34b3f35c74de"
-  contract_revision: "sha256:57efa50c20364c8d608672f8480efe58fbf641c1c712de2b4c133b5470d952e8"
-  design_revision: "sha256:fffde31a018b009ab2d4f0fd87151c16542488d47e16625bdc679a63c325b3dc"
+  requirements_revision: "sha256:1b032f0ca2319dc7aae9a23f7631909a45a33e1386234c4debaac903e8e3ce8b"
+  contract_revision: "sha256:9843739c5fe853c4d298e1bfad9c44fb5a1376c3f207d115f6d2ff7a2726961d"
+  design_revision: "sha256:1062f1a4a65b5918a46cb0f80cc0bca0bcf9f829a201d1c958c0a9ec1d53efec"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-29T09:50:30Z"
+    checked_at: "2026-10-29T22:50:18Z"
     stale_since: null
     causes: []
 tasks:
@@ -310,6 +310,7 @@ tasks:
       updated_at: "2026-10-29T10:50:39Z"
       completed_at: "2026-10-29T10:50:39Z"
     blocked_reason: null
+    recovery_state: null
   - id: "dogfood-fixture-implement-code"
     title: "implement_code: isolate compact workflow artifact fixtures"
     description: "Materialize native templates for workflow root and child documents while preserving real boundary checks."
@@ -327,6 +328,7 @@ tasks:
       updated_at: "2026-10-29T10:50:39Z"
       completed_at: "2026-10-29T10:50:39Z"
     blocked_reason: null
+    recovery_state: null
   - id: "dogfood-fixture-security-audit"
     title: "security_audit: independently observe fixture isolation"
     description: "Observe scoped fixture and regression source without intent, queues, prior records or history."
@@ -344,6 +346,7 @@ tasks:
       updated_at: "2026-10-29T10:50:39Z"
       completed_at: "2026-10-29T10:50:39Z"
     blocked_reason: null
+    recovery_state: null
   - id: "dogfood-fixture-compliance-review"
     title: "compliance_review: compare fixture intent and observations"
     description: "Compare scoped intent with independent observations and attributed execution without implementation access."
@@ -361,6 +364,7 @@ tasks:
       updated_at: "2026-10-29T10:55:31Z"
       completed_at: "2026-10-29T10:55:31Z"
     blocked_reason: null
+    recovery_state: null
   - id: "transition-matrix-write-tests"
     title: "write_tests: verify command-level transitions and recovery gates"
     description: "Exercise every state pair, reason, dependency and stale gate; reproduce paused-state and stale recovery defects."
@@ -377,6 +381,7 @@ tasks:
       updated_at: "2026-10-29T10:11:58Z"
       completed_at: "2026-10-29T10:11:58Z"
     blocked_reason: null
+    recovery_state: null
   - id: "transition-matrix-implement-code"
     title: "implement_code: repair demonstrated lifecycle gate defects"
     description: "Repair pause transitions and stale non-accepting recovery gates while preserving execution and evidence authority."
@@ -394,6 +399,7 @@ tasks:
       updated_at: "2026-10-29T10:11:58Z"
       completed_at: "2026-10-29T10:11:58Z"
     blocked_reason: null
+    recovery_state: null
   - id: "transition-matrix-security-audit"
     title: "security_audit: independently observe lifecycle guard behavior"
     description: "Derive scoped implementation observations from source and tests without intent or prior records."
@@ -411,6 +417,7 @@ tasks:
       updated_at: "2026-10-29T10:14:57Z"
       completed_at: "2026-10-29T10:14:57Z"
     blocked_reason: null
+    recovery_state: null
   - id: "transition-matrix-compliance-review"
     title: "compliance_review: compare transition intent and independent evidence"
     description: "Compare scoped intent with independent observations and attributed execution without implementation access."
@@ -428,6 +435,7 @@ tasks:
       updated_at: "2026-10-29T10:17:51Z"
       completed_at: "2026-10-29T10:17:51Z"
     blocked_reason: null
+    recovery_state: null
   - id: "stale-abandon-write-tests"
     title: "write_tests: reproduce stale intent and unresolved attempt deadlock"
     description: "Pin stale rejection, acceptance ordering, unchanged evidence, identity and fence guards, and interrupted block recording."
@@ -914,16 +922,16 @@ tasks:
     purpose: "Prevent self-certification."
     expected_outcome: "Observed behavior and discrepancies remain durable."
     kind: compliance-review
-    status: pending
+    status: blocked
     depends_on:
       - "shared-runtime-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
     timestamps:
       created_at: "2026-10-23T22:00:00Z"
-      updated_at: "2026-10-29T09:50:40Z"
+      updated_at: "2026-10-29T12:05:06Z"
       completed_at: null
-    blocked_reason: null
+    blocked_reason: "agent execution timed out while contacting the local model gateway. Bounded redacted logs are written to: /opt/proj/kvist/./maerg/.kvist/logs/shared-runtime-compliance-review_2026-10-29T12-00-05Z.log\nCause: inference for model `Qwen3.8-27B-Coder390-EfficientThink-Q8_0-MTP` at http://127.0.0.1:9931 stopped after 1/3 attempt(s), 300.133s elapsed: approved task wall budget exhausted: model transport timed out"
     recovery_state: null
     disposition: block
   - id: "bin-only-path-write-tests"

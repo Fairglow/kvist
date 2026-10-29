@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:e5f518969b33ac4b154e7f64237a1d9e0db443c317da1036c480f1c5c10215e7"
-  contract_revision: "sha256:fc1d38fbeb4e0abe8b1ff458e1b0062b0efd7590b829502a4175d587711d5fd0"
-  design_revision: "sha256:f3f2207ddbc9399a66f808883affacb68f154e9b4a1e58dc8effdabee0b5ef99"
+  requirements_revision: "sha256:77d80b898c21e0575ae3181a224fa3c7e6a6b0670f0463eaa02f00f9550ba765"
+  contract_revision: "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03"
+  design_revision: "sha256:1f3428305bba6a9f7f46152d7fc0fb3df5cf5e8c71298d83c97ca1c65950ea6a"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-27T21:23:41Z"
+    checked_at: "2026-10-29T22:50:41Z"
     stale_since: null
     causes: []
 tasks:
@@ -19,8 +19,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-29T15:39:01Z", updated_at: "2026-10-29T15:42:05Z", completed_at: "2026-10-29T15:42:05Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-29T15:39:01Z"
+      updated_at: "2026-10-29T15:42:05Z"
+      completed_at: "2026-10-29T15:42:05Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "external-fixture-implement-code"
     title: "implement_code: isolate external CLI fixture registries"
     description: "Set private HOME and XDG_CONFIG_HOME on listing and refused execution child processes."
@@ -29,9 +35,16 @@ tasks:
     expected_outcome: "External-agent and related registry/configuration tests pass."
     kind: implementation
     status: completed
-    depends_on: ["external-fixture-write-tests"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-29T15:39:01Z", updated_at: "2026-10-29T15:42:05Z", completed_at: "2026-10-29T15:42:05Z"}
+    depends_on:
+      - "external-fixture-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-29T15:39:01Z"
+      updated_at: "2026-10-29T15:42:05Z"
+      completed_at: "2026-10-29T15:42:05Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "external-fixture-security-audit"
     title: "security_audit: independently observe fixture boundaries"
     description: "Observe only changed test source without intent, queues, prior records or runtime source."
@@ -40,9 +53,16 @@ tasks:
     expected_outcome: "Persist a source-derived IMPL supplement."
     kind: security-audit
     status: completed
-    depends_on: ["external-fixture-implement-code"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-29T15:39:01Z", updated_at: "2026-10-29T15:42:05Z", completed_at: "2026-10-29T15:42:05Z"}
+    depends_on:
+      - "external-fixture-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-29T15:39:01Z"
+      updated_at: "2026-10-29T15:42:05Z"
+      completed_at: "2026-10-29T15:42:05Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "external-fixture-compliance-review"
     title: "compliance_review: compare fixture intent and observations"
     description: "Compare scoped intent with independent observations and attributed execution without implementation access."
@@ -51,141 +71,229 @@ tasks:
     expected_outcome: "Persist a separate source-blind comparison."
     kind: compliance-review
     status: completed
-    depends_on: ["external-fixture-security-audit"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-29T15:39:01Z", updated_at: "2026-10-29T15:42:05Z", completed_at: "2026-10-29T15:42:05Z"}
+    depends_on:
+      - "external-fixture-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-29T15:39:01Z"
+      updated_at: "2026-10-29T15:42:05Z"
+      completed_at: "2026-10-29T15:42:05Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "scope-preflight-write-tests"
     title: "write_tests: reproduce serial scope inspection"
     description: "Pin concurrent directory visitation, aggregate bounds, link/cycle coverage, cancellation and stage diagnostics."
+    context: "Both regressions failed in nextest b7db785b-dc0e-4cce-9fed-4efdb56d78d8: serialized directory visitation and missing preflight stage diagnostics. Final affected coverage passes."
     purpose: "Expose cold-filesystem serialization without a timing benchmark."
     expected_outcome: "The overlap and diagnostic regressions fail before the repair."
     kind: test
     status: completed
-    context: "Both regressions failed in nextest b7db785b-dc0e-4cce-9fed-4efdb56d78d8: serialized directory visitation and missing preflight stage diagnostics. Final affected coverage passes."
-    timestamps: {created_at: "2026-10-28T23:08:46Z", updated_at: "2026-10-28T23:15:59Z", completed_at: "2026-10-28T23:15:59Z"}
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT"]
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT"
+    timestamps:
+      created_at: "2026-10-28T23:08:46Z"
+      updated_at: "2026-10-28T23:15:59Z"
+      completed_at: "2026-10-28T23:15:59Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "scope-preflight-implement-code"
     title: "implement_code: bound concurrent preflight inspection"
     description: "Use owned, joined directory workers and stage-aware diagnostics without raising quotas or the deadline."
+    context: "Nextest 833bcc4d-ca9e-49cf-87e0-05734be821ce passed all 290 affected unit/integration tests; adf80568-4b51-40d9-8d1c-28ddd13f596e passed 36 native file-tool callers. Five stress iterations 5d42873c-9a00-4b97-bb48-c81f1f53314b each passed the actual repository trial plus six worker regressions. Complete checkout counts independently matched: 200568 entries, 8826 directories; scope 44-68ms, total preflight 56-76ms. Strict scoped Clippy, formatting and whitespace checks passed. Original timeout not reproduced; no controlled cold-cache/endurance claim."
     purpose: "Reduce independent directory I/O latency while retaining complete inspection."
     expected_outcome: "Focused regressions and the real native repository trial pass."
     kind: implementation
     status: completed
-    context: "Nextest 833bcc4d-ca9e-49cf-87e0-05734be821ce passed all 290 affected unit/integration tests; adf80568-4b51-40d9-8d1c-28ddd13f596e passed 36 native file-tool callers. Five stress iterations 5d42873c-9a00-4b97-bb48-c81f1f53314b each passed the actual repository trial plus six worker regressions. Complete checkout counts independently matched: 200568 entries, 8826 directories; scope 44-68ms, total preflight 56-76ms. Strict scoped Clippy, formatting and whitespace checks passed. Original timeout not reproduced; no controlled cold-cache/endurance claim."
-    timestamps: {created_at: "2026-10-28T23:08:46Z", updated_at: "2026-10-28T23:15:59Z", completed_at: "2026-10-28T23:15:59Z"}
-    depends_on: ["scope-preflight-write-tests"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT"]
+    depends_on:
+      - "scope-preflight-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT"
+    timestamps:
+      created_at: "2026-10-28T23:08:46Z"
+      updated_at: "2026-10-28T23:15:59Z"
+      completed_at: "2026-10-28T23:15:59Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "scope-preflight-security-audit"
     title: "security_audit: derive independent preflight observations"
     description: "Observe implementation and tests in a source-only context, without intent, queue or prior records."
+    context: "Fresh source-only observer excluded intent, queues, prior records/reviews, chat and Git history and executed no tests/builds. Its IMPL supplement records shared quotas, owned workers, stop/join behavior, inspection and diagnostics. An unrelated existing grant metadata-error path-shadowing defect is retained explicitly; no traversal-specific correctness finding, certification or original-host causal claim."
     purpose: "Keep implementation evidence independent."
     expected_outcome: "A persisted source-derived IMPL supplement."
     kind: security-audit
     status: completed
-    context: "Fresh source-only observer excluded intent, queues, prior records/reviews, chat and Git history and executed no tests/builds. Its IMPL supplement records shared quotas, owned workers, stop/join behavior, inspection and diagnostics. An unrelated existing grant metadata-error path-shadowing defect is retained explicitly; no traversal-specific correctness finding, certification or original-host causal claim."
-    timestamps: {created_at: "2026-10-28T23:08:46Z", updated_at: "2026-10-28T23:15:59Z", completed_at: "2026-10-28T23:15:59Z"}
-    depends_on: ["scope-preflight-implement-code"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT"]
+    depends_on:
+      - "scope-preflight-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT"
+    timestamps:
+      created_at: "2026-10-28T23:08:46Z"
+      updated_at: "2026-10-28T23:15:59Z"
+      completed_at: "2026-10-28T23:15:59Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "scope-preflight-compliance-review"
     title: "compliance_review: compare preflight intent and evidence"
     description: "Compare local intent with independent observations and attributed execution without implementation access."
+    context: "Separate source-blind comparator found no concrete scoped contradiction between intent and independent observations of shared quotas/deadline, eight joined workers, complete inspection, failure-before-dispatch and diagnostics. It treated inspected assertions separately from attributed 290+36+35 passing executions and census agreement, without independently verifying execution. Original timeout causation, controlled cold-cache performance and broader preparation-cost guarantees remain unverified; mutable filesystem and cooperative blocking/join limits remain explicit. Existing grant-path diagnostic defect remains outside scope. Structural intent validation passed; no certification, receipt or acceptance, and accepted revision hashes remain unchanged."
     purpose: "Retain discrepancies and unverified original-host causation."
     expected_outcome: "A scoped comparison without acceptance or certification."
     kind: compliance-review
     status: completed
-    context: "Separate source-blind comparator found no concrete scoped contradiction between intent and independent observations of shared quotas/deadline, eight joined workers, complete inspection, failure-before-dispatch and diagnostics. It treated inspected assertions separately from attributed 290+36+35 passing executions and census agreement, without independently verifying execution. Original timeout causation, controlled cold-cache performance and broader preparation-cost guarantees remain unverified; mutable filesystem and cooperative blocking/join limits remain explicit. Existing grant-path diagnostic defect remains outside scope. Structural intent validation passed; no certification, receipt or acceptance, and accepted revision hashes remain unchanged."
-    timestamps: {created_at: "2026-10-28T23:08:46Z", updated_at: "2026-10-28T23:18:30Z", completed_at: "2026-10-28T23:18:30Z"}
-    depends_on: ["scope-preflight-security-audit"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT"]
+    depends_on:
+      - "scope-preflight-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT"
+    timestamps:
+      created_at: "2026-10-28T23:08:46Z"
+      updated_at: "2026-10-28T23:18:30Z"
+      completed_at: "2026-10-28T23:18:30Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "mermaid-discovery-write-tests"
     title: "write_tests: pin shared scheduling discovery"
     description: "Update repository scheduling regressions for the canonical auto-discovered policy and test recipe."
     context: "Both updated Rust regressions failed before relocation: missing default policy and a recipe bypassing automatic discovery. Both passed afterward in nextest cad22611-ecd7-46e7-b720-c533e5410a9b; existing repository-trial full-pool assertion retained."
-    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:46:41Z", completed_at: "2026-10-28T22:46:41Z"}
     purpose: "Prevent recipes and direct nextest commands diverging."
     expected_outcome: "Tests reject the old non-discoverable policy placement."
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-28T22:41:05Z"
+      updated_at: "2026-10-28T22:46:41Z"
+      completed_at: "2026-10-28T22:46:41Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "mermaid-discovery-implement-code"
     title: "implement_code: share automatically discovered scheduling"
     description: "Wire canonical .config/nextest.toml through repository recipes, CI and documentation without changing allocation semantics."
     context: "Repository recipes/CI now exercise canonical discovery. The exact repository trial rule, two priority-100 reservations and priority-50 inventory rule are retained; all six policy tests and all 22 Python tool tests pass. Scoped strict all-target/all-feature Clippy and formatting passed. No runner/executor or renderer production code changes; no new native sandbox trial claimed."
-    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:46:41Z", completed_at: "2026-10-28T22:46:41Z"}
     purpose: "Retain existing whole-pool protections with standard nextest discovery."
     expected_outcome: "Direct, recipe and inherited-CI scheduling agree."
     kind: implementation
     status: completed
-    depends_on: ["mermaid-discovery-write-tests"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    depends_on:
+      - "mermaid-discovery-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-28T22:41:05Z"
+      updated_at: "2026-10-28T22:46:41Z"
+      completed_at: "2026-10-28T22:46:41Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "mermaid-discovery-security-audit"
     title: "security_audit: observe shared discovery boundaries"
     description: "Independently observe configuration, tests and entrypoints without intent or prior records."
     context: "Independent source-only observer 3b16ef03-8fab-426d-a0d5-12dc1f2ffb23 excluded intent/history/prior records and ran no commands. Its IMPL supplement observes canonical discovery, Git visibility, recipe/CI flags, exact reservation/priorities and static regressions; no concrete scoped bug identified. Separate invocations, external CPU and cargo test remain outside this policy."
-    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:46:41Z", completed_at: "2026-10-28T22:46:41Z"}
     purpose: "Keep implementation evidence independent."
     expected_outcome: "Persist a scoped source-derived supplement."
     kind: security-audit
     status: completed
-    depends_on: ["mermaid-discovery-implement-code"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    depends_on:
+      - "mermaid-discovery-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-28T22:41:05Z"
+      updated_at: "2026-10-28T22:46:41Z"
+      completed_at: "2026-10-28T22:46:41Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "mermaid-discovery-compliance-review"
     title: "compliance_review: compare shared scheduling evidence"
     description: "Compare local intent with independent observations and attributed execution without implementation access."
     context: "Independent source-blind comparator 25f11ef7-8451-4689-b27a-93546c08f3a5 found no concrete scoped contradiction in discovery, canonical visibility, exact reservations/priorities/inheritance and entrypoint consistency. It retained unverified tracked-only clean-checkout and actual recipe/CI execution, attributed rather than independently verified event evidence, and absent original-host causation. No new native sandbox trial claimed. Separate runners, external load, alternate configs and interrupted fixtures remain limitations. No certification, receipt or acceptance."
-    timestamps: {created_at: "2026-10-28T22:41:05Z", updated_at: "2026-10-28T22:47:58Z", completed_at: "2026-10-28T22:47:58Z"}
     purpose: "Record discrepancies for human arbitration."
     expected_outcome: "A persisted scoped comparison."
     kind: compliance-review
     status: completed
-    depends_on: ["mermaid-discovery-security-audit"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    depends_on:
+      - "mermaid-discovery-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-28T22:41:05Z"
+      updated_at: "2026-10-28T22:47:58Z"
+      completed_at: "2026-10-28T22:47:58Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-write-tests"
     title: "write_tests: reproduce premature task exhaustion"
     description: "Test beyond 500 turns, successive prompts, repeated guidance, optional CLI caps and compaction stats."
     context: "Regressions reproduced the 500-turn cutoff and active new-session stale state before repair. Tests cover 541 turns, message-count fitting, fresh task budgets, positive optional CLI caps and compaction-count layout/reset. Advisory exception is recorded in intent."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:07:55Z", completed_at: "2026-10-28T19:07:55Z"}
     purpose: "Pin multi-day session semantics."
     expected_outcome: "Regressions fail before implementation."
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET"]
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-BUDGET"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:07:55Z"
+      completed_at: "2026-10-28T19:07:55Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-implement-code"
     title: "implement_code: expose optional task limits and compaction count"
     description: "Wire uncapped sandbox defaults, optional limits, renewed guidance and cumulative compaction stats."
     context: "Optional sandbox caps and cumulative compaction statistics wired through TUI/headless; fresh conversations clear transient state. Host/review caps remain. Orchestrator execution: nextest 71505598-2bf0-47b7-aacf-37cdfe23f4c8 passed 1466 affected-package tests with 10 existing skips; strict all-target Clippy and formatting passed. No endurance or acceptance claim."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:07:55Z", completed_at: "2026-10-28T19:07:55Z"}
     purpose: "Keep host policy and safety protections while allowing long tasks."
     expected_outcome: "Regressions pass across interactive and headless surfaces."
     kind: implementation
     status: completed
-    depends_on: ["long-sessions-write-tests"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET"]
+    depends_on:
+      - "long-sessions-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-BUDGET"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:07:55Z"
+      completed_at: "2026-10-28T19:07:55Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-security-audit"
     title: "security_audit: observe session safety boundaries"
     description: "Derive source-only observations of changed runtime and presentation behavior."
     context: "Independent source-only observer excluded intent, queues, prior IMPL and Git history; its dated IMPL supplement is persisted. Required headless recording and unchanged host policy were observed. Its stale-new-session finding was reproduced, repaired and re-observed. Observer executed no commands. Final orchestrator suite ab6f4e27-e93a-421f-9d4c-4bb6773be8cb: 1467 passed, 10 existing skips."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:13:28Z", completed_at: "2026-10-28T19:13:28Z"}
     purpose: "Retain independent observations."
     expected_outcome: "Scoped source-derived record without certification."
     kind: security-audit
     status: completed
-    depends_on: ["long-sessions-implement-code"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET"]
+    depends_on:
+      - "long-sessions-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-BUDGET"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:13:28Z"
+      completed_at: "2026-10-28T19:13:28Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "long-sessions-compliance-review"
     title: "compliance_review: compare long-session behavior"
     description: "Compare intent, independent observations and test evidence without source access."
     context: "Independent source-blind comparator e695c030-f655-4293-823c-573ba50ec13e found the displayed Progress signature omitted the already specified compactions field; final refresh confirms this contradiction resolved without changing production behavior. Observations and finite regressions support >500 turns, task/guidance semantics and compaction persistence/display/reset. Nonrotating transcripts and bounded history remain explicit. No further concrete scoped contradiction established; broader authority conflicts remain outside this repair and unaccepted. No certification, receipt or acceptance; accepted revisions remain stale."
-    timestamps: {created_at: "2026-10-28T18:41:02Z", updated_at: "2026-10-28T19:18:43Z", completed_at: "2026-10-28T19:18:43Z"}
     purpose: "Retain discrepancies for human arbitration."
     expected_outcome: "Scoped comparison without acceptance claims."
     kind: compliance-review
     status: completed
-    depends_on: ["long-sessions-security-audit"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET"]
+    depends_on:
+      - "long-sessions-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-BUDGET"
+    timestamps:
+      created_at: "2026-10-28T18:41:02Z"
+      updated_at: "2026-10-28T19:18:43Z"
+      completed_at: "2026-10-28T19:18:43Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "test-performance-write-tests"
     title: "Pin isolated nested builds and performance evidence"
     description: "Test held Cargo target locks, complete serial/parallel snapshots, scheduling, build watches and profiler metrics, failures and cleanup before implementation."
