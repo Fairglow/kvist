@@ -131,15 +131,50 @@ never a renderer-side truncation with ellipsis.
 
 ### REQ-PROJECT-REPAIR
 
-Kvist MUST provide an explicit, bounded repair command that applies the only
-defined artifact rewrite: sorting and deduplicating TODO-queue dependency and
-requirement lists followed by the canonical queue serialization, written
-atomically. It MUST repair a queue only when the queue fails strict parsing
-solely because of that defect; it MUST NOT modify parseable queues, fenced
-queues, unparseable queues, or non-queue artifacts, and MUST report each of
-them with its reason. A dry-run mode MUST report the planned rewrites without
-writing. The command MUST exit nonzero while any non-valid artifact remains
-after the repair.
+Kvist MUST provide bounded recovery without requiring manual artifact edits.
+Default repair MAY normalize invalid queue set lists and reorder an otherwise
+valid acyclic queue to put dependencies first. Valid queues MUST remain exact.
+Every rewrite MUST retain a private, durable original and report its location.
+
+Explicit salvage MUST preserve independently valid tasks, explain every
+reconciliation and removal, and validate the resulting queue with the ordinary
+strict validator. Missing dependencies, cycles, conflicting identities and
+missing lifecycle predecessors MUST NOT be repaired by silently weakening
+dependencies or manufacturing verification. Ambiguous timestamp reconciliation,
+field removal and task removal require approval of the exact proposed changes.
+Unsupported schemas MUST NOT be silently migrated.
+
+Every root/component artifact MUST have a template-reset fallback, including
+malformed syntax, invalid encoding, missing files and wrong filesystem types.
+Before reset, explicit Markdown salvage SHOULD preserve prose while repairing
+current-format markers/headings and required-section structure. Missing content
+MUST be labeled a recovery draft, not invented stakeholder intent or evidence.
+An explicit clean slate MUST offer fresh root/component drafts and archive
+project-owned workflow state, preserving source and VCS data. Reset drafts and
+salvaged queues MUST NOT constitute acceptance, certification or proof that
+prior execution had no effects. Live operations MUST block mutation. Ordinary
+repair MUST preserve fenced or unresolved attempt evidence; only an explicitly
+approved clean slate may archive it, with an effects-remain-unknown warning.
+
+Destructive recovery MUST first preview affected paths, old/new values or task
+removals and reasons, then require a content-bound approval token. Changes to
+the inspected inputs invalidate approval. Dry runs and unapproved proposals
+MUST write nothing. Backup failure MUST prevent mutation; partial application
+MUST retain originals and a manifest explaining progress. Recovery MUST operate
+with alternative private backup storage when the default is obstructed.
+Intact quarantine MAY require same-filesystem storage, with an explicit
+alternative-directory hint rather than deletion of an unbacked object.
+Recovery MUST operate
+without valid project configuration, inspect recursively within explicit bounds,
+reject traversal and link-like parents, and report discovery/I/O/bounds failures
+rather than claiming success. Disk and permission failures remain actionable
+environmental blockers, not permission to discard unbacked data. The command
+MUST exit nonzero while structural artifact problems or unapplied proposals
+remain. Tests MUST cover the reported completion timestamp, ordering, salvage,
+approval binding, resets, backups, invalid configuration and filesystem gates.
+This human-requested expansion has an explicit per-bundle advisory exception
+while review receipts are unavailable; independent observation/comparison remain
+separate from implementation.
 
 ### REQ-REVISION-PROVENANCE
 

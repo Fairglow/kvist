@@ -10,6 +10,77 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "artifact-recovery-write-tests"
+    title: "write_tests: specify recoverable artifacts and approval boundaries"
+    description: "Reproduce completion timestamps and ordering; cover salvage, resets, backups, stale approvals and invalid configuration."
+    context: "Human requested recovery without manual file edits, with exact approval and backups for destructive changes. Advisory exception is recorded in intent."
+    purpose: "Pin preservation, recoverability and authority before implementation."
+    expected_outcome: "Regressions fail on the narrow existing repair engine."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T13:39:11Z"
+      updated_at: "2026-10-29T14:23:17Z"
+      completed_at: "2026-10-29T14:23:17Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "artifact-recovery-implement-code"
+    title: "implement_code: add backup-preserving approved artifact recovery"
+    description: "Implement queue salvage and artifact reset fallback with content-bound approval, protected writes and complete diagnostics."
+    context: "Preserved strict validators, unrelated source, evidence boundaries and original bytes. Full Maerg suite: 819 passes, seven existing ignores; 32 recovery integration tests and strict lint pass. No destructive recovery was applied to the live project; recovered drafts are not certified."
+    purpose: "Let users return managed artifacts to structural validity without editing files."
+    expected_outcome: "Recovery regressions pass with plain and JSON CLI surfaces."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "artifact-recovery-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T13:39:11Z"
+      updated_at: "2026-10-29T14:23:17Z"
+      completed_at: "2026-10-29T14:23:17Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "artifact-recovery-security-audit"
+    title: "security_audit: independently observe recovery boundaries"
+    description: "Derive scoped implementation observations from source and tests without intent or prior records."
+    context: "Independent recovery-observer and supplemental recovery-scope-observer read only scoped source/test source, excluding intent and prior records. Their observations and limitations are retained in IMPL; this is not broad security certification."
+    purpose: "Keep source-derived evidence independent of implementation intent."
+    expected_outcome: "Persist an independent observation in IMPL."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "artifact-recovery-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T13:39:11Z"
+      updated_at: "2026-10-29T14:23:17Z"
+      completed_at: "2026-10-29T14:23:17Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "artifact-recovery-compliance-review"
+    title: "compliance_review: compare recovery intent and observations"
+    description: "Compare scoped intent with independent observations and attributed execution without implementation access."
+    context: "Independent source-blind recovery-comparator established no definite contradiction but retained unverified obligations for human arbitration. IMPL records the comparison and separately attributed execution without fabricating a receipt, acceptance or compliance certification."
+    purpose: "Expose any recovery guarantee unsupported by observations."
+    expected_outcome: "Persist a separate source-blind comparison."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "artifact-recovery-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+    timestamps:
+      created_at: "2026-10-29T13:39:11Z"
+      updated_at: "2026-10-29T14:23:17Z"
+      completed_at: "2026-10-29T14:23:17Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "model-startup-write-tests"
     title: "write_tests: reproduce capacity-gated and oversized task startup"
     description: "Pin optional bounded metadata, unknown-capacity inference, exact selected-task projection and startup diagnostics."
@@ -42,7 +113,7 @@ tasks:
     timestamps:
       created_at: "2026-10-29T12:19:47Z"
       updated_at: "2026-10-29T12:34:26Z"
-      completed_at: "2026-10-29T12:31:15Z"
+      completed_at: "2026-10-29T12:34:26Z"
     blocked_reason: null
     recovery_state: null
   - id: "model-startup-security-audit"

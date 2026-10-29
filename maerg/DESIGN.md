@@ -1119,27 +1119,64 @@ discovery error, and an `Action` line), the stable text report adds
 JSON report adds `root_artifacts`, `root_diagnostic`, and `guidance` fields.
 The action is derived from the inspection alone (`project_action_line`):
 `kvist init` for uninitialized, the missing artifacts for partial, `kvist
-repair` when a TODO queue's only defect is the sorted/unique set-list
-violation (detected from the parser's own message), and a manual-repair plus
-`kvist doctor` pointer otherwise. No new I/O and no new state.
+repair` for the sorted/unique set-list violation and proposed salvage/reset
+recovery otherwise. Unsupported versions offer explicit reset rather than
+migration. These status action lines do not mutate artifacts.
 
-`repair.rs` owns the single defined rewrite. For each queue enumerated by
-`project_state::todo_queue_paths` it first tries the strict
-`task_queue::parse`; a parseable queue is never written (it is reported
-`unchanged` or `non-canonical`). Only when strict parsing fails does it try
-`task_queue::parse_repairable` — the same pipeline with the one
-`validate_sorted_unique` check suppressed, so every other invariant is
-enforced identically. A repairable parse proves the sole defect is set-list
-ordering; `normalize_set_lists` then sorts and deduplicates each task's
-dependency and requirement lists (meaning-preserving: the schema already
-forces both to be sorted and duplicate-free), and the canonical
-`task_queue::serialize` output is written with `file_io::replace_file_
-atomically`. Fenced queues (any `recovery_state`) are reported with a pointer
-to `kvist task recover` and left untouched, keeping recovery authority
-exclusive to the task commands. The report re-inspects the project and lists
-whatever non-valid artifacts remain; the command exits nonzero while any
-remain, so `repair` doubles as a dry-run check (`--dry-run` previews with the
-same exit-code semantics).
+`repair.rs` orchestrates a separate recovery parser, storage and report.
+Configuration-independent traversal inventories component artifact names under
+the project, excludes VCS/build/dependency and recovery storage, and fails
+explicitly at bounds. Reuse discovery's ordered Git ignore-pattern matcher for
+project directory exclusions; bind the bounded, no-follow `.gitignore` snapshot
+as an approval input. Force configured/selected component roots even under
+excluded namespaces, track visited directories, merge ordinary inspection's
+known artifacts/components and normalize relative keys before planning.
+Native templates provide the last-resort reset; invalid
+configuration resets use component root `.` so discovered components are not
+silently lost, or an explicitly selected `--component-root` serialized as TOML.
+Template queues use sentinel revisions and stale evidence,
+never current-document hashes masquerading as human acceptance.
+
+The queue recovery module first tries strict parsing. For invalid version-one
+typed queues it normalizes set lists and uses stable topological ordering.
+Salvage additionally trims bounded text, reconciles existing valid timestamps
+forward with explicit old/new diagnostics, removes contradictory optional state
+only with approval, and supplies a truthful recovery blocker when the original
+reason is missing. It never guesses an absent completion instant. Independently
+unparseable/invalid tasks are quarantined; conflicting IDs, dangling edges,
+cycles and missing lifecycle predecessors remove offending tasks and their
+dependent closure. Strict validation gates every emitted candidate. Broken
+component metadata becomes explicitly stale, unaccepted metadata, not a forged
+revision receipt. With a parseable version-one header and standalone `tasks:`,
+malformed YAML may salvage independently parseable same-indent task fragments
+under an explicit approved segmentation assumption; active/fenced indications
+refuse this path. Unsupported versions and ambiguous fragments fall back to reset.
+
+Markdown salvage preserves prose while adding native markers/headings,
+canonicalizing and merging duplicate required sections, and moving required
+sections into native order. Missing/empty content receives recovery-draft
+placeholders, not fabricated intent/evidence. Known unsupported versions refuse
+salvage. Rewriting required sections containing fences refuses ambiguity;
+marker-only repairs may preserve fenced content without rewriting it. All
+candidates pass the same native validators. Retained artifact text is bounded
+to 1 MiB per artifact and 64 MiB total; clean slate skips text parsing but not
+filesystem snapshot/inventory bounds.
+
+A deterministic JSON projection binds all inspected objects, replacements and
+reasons to a SHA-256 approval. Proposals and dry runs do not create state.
+Application uses the same per-component operation locks used
+by tasks, rechecks captured inputs, prepares synchronized private backup storage and
+writes a progress manifest before mutations. Regular file originals are copied
+and verified before synchronized atomic replacement; wrong-type objects and
+explicitly selected workflow directories are moved intact to quarantine.
+Application is per-file, not falsely advertised as a multi-file transaction.
+Manifest progress is recorded after each operation and may lag actual mutation
+if interrupted or if manifest persistence fails; inspect files and digests too.
+Every partial failure names the retained bundle and manifest; no broad rollback
+guesses at concurrent effects. Ordinary mutations check both queue recovery
+state and authenticated attempt evidence. Clean slate archives that evidence
+only under explicit approval, keeps effects unknown, and creates empty queues.
+Stale/malformed operation locks are not silently deleted.
 
 ### Soft wrapping
 

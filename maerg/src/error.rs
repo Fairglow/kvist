@@ -11,6 +11,12 @@ use crate::{config::Role, context::PROJECT_MARKER};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum KvistError {
+    /// Artifact recovery could not safely plan or retain an operation.
+    #[error("artifact recovery failed: {reason}")]
+    RepairFailed {
+        /// Actionable explanation, including backup location on partial failure.
+        reason: String,
+    },
     /// The required external isolation boundary is absent or did not attest its capability.
     #[error(
         "sandbox runner `{runner}` is unavailable or cannot provide required isolation: {reason}"

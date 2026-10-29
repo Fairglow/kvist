@@ -158,7 +158,7 @@ fn project_action_line(inspection: &ProjectInspection) -> String {
         ProjectState::Uninitialized => {
             "Run 'kvist init' to create the Phase 1 root artifacts.".to_owned()
         }
-        ProjectState::Partial => "Create the missing root artifacts listed above, then re-run 'kvist doctor' to verify them.".to_owned(),
+        ProjectState::Partial => "Run 'kvist repair --dry-run'; use '--reset PATH' for missing artifacts or '--clean-slate' for fresh drafts. Destructive recovery requires the displayed approval token.".to_owned(),
         ProjectState::Invalid => {
             let repairable = inspection.artifacts.iter().any(|artifact| {
                 artifact.path.ends_with("TODOS.yaml")
@@ -169,11 +169,11 @@ fn project_action_line(inspection: &ProjectInspection) -> String {
             if repairable {
                 "Run 'kvist repair' to canonicalize the affected TODO queues (it sorts and deduplicates their set-like lists), then re-run 'kvist status'.".to_owned()
             } else {
-                "Repair the artifacts listed above; 'kvist doctor' shows the full inspection.".to_owned()
+                "Run 'kvist repair --salvage' to propose recovery; '--reset PATH' and '--clean-slate' offer backed-up draft resets. Review the proposal before supplying its '--approve' token.".to_owned()
             }
         }
         ProjectState::UnsupportedVersion => {
-            "Upgrade or migrate the artifacts listed above to the supported versions, then re-run 'kvist status'.".to_owned()
+            "Run 'kvist repair --reset PATH' to propose a backed-up supported draft, or use a binary supporting the artifact version. No automatic migration is performed.".to_owned()
         }
         ProjectState::Current => String::new(),
     }

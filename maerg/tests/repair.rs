@@ -115,7 +115,7 @@ fn repair_dry_run_reports_without_writing() {
     assert!(stderr.contains("dry-run: true"));
     assert!(stderr.contains("src/TODOS.yaml: would-repair"));
     assert!(stderr.contains("must be lexically sorted and duplicate-free"));
-    assert!(stderr.contains("still need manual repair"));
+    assert!(stderr.contains("still need recovery"));
     assert_eq!(fs::read(&queue_path).expect("re-read queue"), before);
 }
 

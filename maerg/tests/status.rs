@@ -789,7 +789,7 @@ fn status_reports_uninitialized_project_action() {
 }
 
 /// A non-queue invalid artifact is explained in the stable text and JSON
-/// reports with its exact reason and the generic repair action.
+/// reports with its exact reason and approval-gated recovery actions.
 #[test]
 fn status_text_and_json_report_root_artifact_diagnostics() {
     let project = TempDir::new().expect("project");
@@ -808,9 +808,7 @@ fn status_text_and_json_report_root_artifact_diagnostics() {
     assert!(stdout.contains(
         "root-artifact: VISION.md: invalid (line 1 must be `<!-- kvist-vision-version: <positive integer> -->`)"
     ));
-    assert!(stdout.contains(
-        "Next Step: Repair the artifacts listed above; 'kvist doctor' shows the full inspection."
-    ));
+    assert!(stdout.contains("Next Step: Run 'kvist repair --salvage' to propose recovery;"));
 
     let json = run_kvist(&[
         "status",

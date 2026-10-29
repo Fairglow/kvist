@@ -121,17 +121,33 @@ pub enum Command {
         #[arg(value_name = "PROJECT_DIR")]
         path: Option<PathBuf>,
     },
-    /// Repair a project with the only defined rewrite: canonical TODO queue
-    /// serialization (sorted, duplicate-free set-like lists). Fenced and
-    /// unparseable queues are reported, never guessed at.
+    /// Recover artifacts with backups and exact approval for destructive changes.
     Repair {
         /// Project directory; defaults to the nearest Kvist project at or
         /// above the current directory.
         #[arg(value_name = "PROJECT_DIR")]
         path: Option<PathBuf>,
-        /// Report the queues that would be rewritten without writing anything.
+        /// Preview without changing artifacts or creating backups.
         #[arg(long)]
         dry_run: bool,
+        /// Propose task reconciliation and prose-preserving Markdown salvage.
+        #[arg(long)]
+        salvage: bool,
+        /// Propose resetting this project-relative artifact to a native draft.
+        #[arg(long, value_name = "PATH")]
+        reset: Vec<PathBuf>,
+        /// Propose fresh drafts and archive workflow state; effects remain unknown.
+        #[arg(long)]
+        clean_slate: bool,
+        /// Apply the exact displayed proposal, bound to its inputs and changes.
+        #[arg(long, value_name = "SHA256")]
+        approve: Option<String>,
+        /// Alternate private backup storage when the default is unusable.
+        #[arg(long, value_name = "PATH")]
+        backup_dir: Option<PathBuf>,
+        /// Component tree for a reset configuration; defaults to ".".
+        #[arg(long, value_name = "PATH")]
+        component_root: Option<PathBuf>,
     },
     /// Reverse-discover and generate Kvist artifacts from an existing implementation.
     ReverseDiscover {
@@ -920,9 +936,13 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     "{{\"status\":\"success\",\"command\":\"doctor\",\"inspection\":{status_json}}}"
                 )))
             }
-            Command::Repair { path, dry_run } => {
+            Command::Repair { path, dry_run, salvage, reset, clean_slate, approve, backup_dir, component_root } => {
                 let project = context::ProjectContext::resolve(path.as_deref())?;
-                let report = repair::repair(&project.project_dir, dry_run)?;
+                let report = repair::repair_with_options(&project.project_dir, &repair::RepairOptions {
+                    dry_run, salvage, reset, clean_slate, approve, backup_dir, component_root,
+                }).map_err(|error| KvistError::JsonCommandFailure {
+                    output: serde_json::json!({"status":"error","command":"repair","error":error.to_string()}).to_string(),
+                })?;
                 let queues_json = report
                     .queues
                     .iter()
@@ -953,6 +973,9 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     "state_after": report.state_after.name(),
                     "queues": queues_json,
                     "remaining": remaining_json,
+                    "plan": report.plan,
+                    "approval": report.approval,
+                    "backup": report.backup,
                 })
                 .to_string();
                 if report.complete() {
@@ -1469,9 +1492,29 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 project_state::inspect(&project.project_dir)
                     .map(|inspection| CommandOutput::message(inspection.to_string()))
             }
-            Command::Repair { path, dry_run } => {
+            Command::Repair {
+                path,
+                dry_run,
+                salvage,
+                reset,
+                clean_slate,
+                approve,
+                backup_dir,
+                component_root,
+            } => {
                 let project = context::ProjectContext::resolve(path.as_deref())?;
-                let report = repair::repair(&project.project_dir, dry_run)?;
+                let report = repair::repair_with_options(
+                    &project.project_dir,
+                    &repair::RepairOptions {
+                        dry_run,
+                        salvage,
+                        reset,
+                        clean_slate,
+                        approve,
+                        backup_dir,
+                        component_root,
+                    },
+                )?;
                 if report.complete() {
                     Ok(CommandOutput::message(report.to_string()))
                 } else {

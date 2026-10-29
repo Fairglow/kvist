@@ -394,7 +394,7 @@ fn transition_error(task: &Task, target: TaskStatus, reason: &str) -> KvistError
     }
 }
 
-struct TaskLock {
+pub(crate) struct TaskLock {
     path: PathBuf,
     contents: String,
     snapshot: TaskLockSnapshot,
@@ -604,22 +604,28 @@ impl TaskLock {
     }
 
     fn task_lock_path(context: &TaskContext) -> Result<PathBuf> {
-        let project = context.project_dir.canonicalize().map_err(|source| {
-            KvistError::TaskQueueUnavailable {
-                path: context.project_dir.clone(),
-                reason: format!("canonicalize project for task lock: {source}"),
-            }
-        })?;
-        let component = context.component_dir.canonicalize().map_err(|source| {
-            KvistError::TaskQueueUnavailable {
-                path: context.component_dir.clone(),
-                reason: format!("canonicalize component for task lock: {source}"),
-            }
-        })?;
+        Self::path_for_directories(&context.project_dir, &context.component_dir)
+    }
+
+    fn path_for_directories(project_dir: &Path, component_dir: &Path) -> Result<PathBuf> {
+        let project =
+            project_dir
+                .canonicalize()
+                .map_err(|source| KvistError::TaskQueueUnavailable {
+                    path: project_dir.to_path_buf(),
+                    reason: format!("canonicalize project for task lock: {source}"),
+                })?;
+        let component =
+            component_dir
+                .canonicalize()
+                .map_err(|source| KvistError::TaskQueueUnavailable {
+                    path: component_dir.to_path_buf(),
+                    reason: format!("canonicalize component for task lock: {source}"),
+                })?;
         let state_base = user_state_base()
             .filter(|path| path.is_absolute())
             .ok_or_else(|| KvistError::TaskQueueUnavailable {
-                path: context.project_dir.clone(),
+                path: project_dir.to_path_buf(),
                 reason: "cannot determine an absolute user-owned task-lock state directory"
                     .to_owned(),
             })?;
@@ -675,6 +681,103 @@ impl TaskLock {
         .to_owned();
         Ok(directory.join(format!("{identity}.lock")))
     }
+}
+
+/// Uses the task operation lock without requiring valid intent or a valid queue.
+pub(crate) fn lock_for_repair(project: &Path, component: &Path) -> Result<TaskLock> {
+    let now = Timestamp::now().map_err(|error| KvistError::RepairFailed {
+        reason: format!("cannot timestamp recovery operation: {error}"),
+    })?;
+    TaskLock::create(
+        &TaskLock::path_for_directories(project, component)?,
+        "artifact-repair",
+        &now,
+    )
+}
+
+pub(crate) fn release_repair_lock(lock: TaskLock) -> Result<()> {
+    lock.release()
+}
+
+pub(crate) fn revalidate_repair_lock(lock: &TaskLock) -> Result<()> {
+    lock.revalidate()
+}
+
+pub(crate) fn guard_repair_evidence(component: &Path, contents: Option<&str>) -> Result<()> {
+    let path = component.join(".kvist-attempts");
+    let evidence_exists = match fs::symlink_metadata(&path) {
+        Ok(_) => true,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "inspect retained repair evidence",
+                path,
+                source,
+            });
+        }
+    };
+    let queue = contents.and_then(|contents| serde_yaml::from_str::<TaskQueue>(contents).ok());
+    if let Some(queue) = &queue
+        && queue
+            .tasks
+            .iter()
+            .any(|task| task.recovery_state.is_some() || task.status == TaskStatus::InProgress)
+    {
+        return Err(KvistError::RepairFailed {
+            reason: "active/fenced tasks require task recovery or approved --clean-slate; effects remain unknown".to_owned(),
+        });
+    }
+    if !evidence_exists {
+        return Ok(());
+    }
+    let Some(queue) = queue else {
+        return Err(KvistError::RepairFailed {
+            reason: "unreadable queue has retained execution evidence; use approved --clean-slate to archive it without asserting effects are absent".to_owned(),
+        });
+    };
+    if queue
+        .tasks
+        .iter()
+        .any(|task| !crate::task_queue::valid_task_id(&task.id))
+    {
+        return Err(KvistError::RepairFailed {
+            reason: "invalid task identities cannot be matched safely to retained evidence; use approved --clean-slate".to_owned(),
+        });
+    }
+    let metadata = fs::symlink_metadata(&path).map_err(|source| KvistError::Io {
+        operation: "inspect retained repair journals",
+        path: path.clone(),
+        source,
+    })?;
+    if !metadata.is_dir() || is_link_like(&metadata) {
+        return Err(KvistError::RepairFailed {
+            reason: "retained attempt storage is not a real directory; use approved --clean-slate to quarantine it".to_owned(),
+        });
+    }
+    let mut entries = 0_usize;
+    for entry in fs::read_dir(&path).map_err(|source| KvistError::Io {
+        operation: "inspect retained repair journals",
+        path: path.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| KvistError::Io {
+            operation: "inspect retained repair journal",
+            path: path.clone(),
+            source,
+        })?;
+        entries += 1;
+        if entries > 10000
+            || !queue
+                .tasks
+                .iter()
+                .any(|task| entry.file_name() == format!("{}.jsonl", task.id).as_str())
+        {
+            return Err(KvistError::RepairFailed {
+                reason: "unmatched or excessive retained attempt journals require approved --clean-slate; repair will not orphan unresolved evidence".to_owned(),
+            });
+        }
+    }
+    ensure_component_attempts_recovered_except(component, &queue, None)
 }
 
 impl Drop for TaskLock {

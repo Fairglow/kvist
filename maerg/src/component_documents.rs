@@ -202,7 +202,7 @@ impl DocumentKind {
         }
     }
 
-    const fn template(self) -> &'static str {
+    pub(crate) const fn template(self) -> &'static str {
         match self {
             Self::Requirements => COMPONENT_REQUIREMENTS_TEMPLATE,
             Self::Contract => COMPONENT_CONTRACT_TEMPLATE,
@@ -210,7 +210,7 @@ impl DocumentKind {
         }
     }
 
-    const fn required_sections(self) -> &'static [&'static str] {
+    pub(crate) const fn required_sections(self) -> &'static [&'static str] {
         match self {
             Self::Requirements => &[
                 "## Purpose and scope",
@@ -514,7 +514,7 @@ fn validate_template_version(
     Some(version)
 }
 
-fn section_has_content(lines: &[&str], heading_index: usize) -> bool {
+pub(crate) fn section_has_content(lines: &[&str], heading_index: usize) -> bool {
     lines
         .iter()
         .skip(heading_index + 1)

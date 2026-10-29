@@ -15,7 +15,14 @@ use crate::{config::DiscoveryLimits, filesystem::is_link_like};
 pub const MAX_COMPONENT_DEPTH: usize = 64;
 
 /// Directory names that are outside the component hierarchy.
-pub const IGNORED_DIRECTORY_NAMES: [&str; 5] = [".git", ".hg", ".jj", "node_modules", "target"];
+pub const IGNORED_DIRECTORY_NAMES: [&str; 6] = [
+    ".git",
+    ".hg",
+    ".jj",
+    "node_modules",
+    "target",
+    ".kvist-recovery",
+];
 
 /// The required adjacent artifacts for every component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -247,7 +254,7 @@ fn is_workspace_namespace_root(component_root: &Path) -> bool {
 }
 
 #[derive(Debug, Clone)]
-struct GitIgnoreRule {
+pub(crate) struct GitIgnoreRule {
     pattern: String,
     anchored: bool,
     dir_only: bool,
@@ -255,7 +262,7 @@ struct GitIgnoreRule {
 }
 
 impl GitIgnoreRule {
-    fn parse(line: &str) -> Option<Self> {
+    pub(crate) fn parse(line: &str) -> Option<Self> {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             return None;
@@ -379,14 +386,18 @@ struct ScanContext {
 
 impl ScanContext {
     fn is_ignored(&self, rel_path: &Path, is_dir: bool) -> bool {
-        let mut ignored = false;
-        for rule in &self.ignore_rules {
-            if rule.matches(rel_path, is_dir) {
-                ignored = !rule.negated;
-            }
-        }
-        ignored
+        ignored_by_rules(&self.ignore_rules, rel_path, is_dir)
     }
+}
+
+pub(crate) fn ignored_by_rules(rules: &[GitIgnoreRule], rel_path: &Path, is_dir: bool) -> bool {
+    let mut ignored = false;
+    for rule in rules {
+        if rule.matches(rel_path, is_dir) {
+            ignored = !rule.negated;
+        }
+    }
+    ignored
 }
 
 struct ScanPosition {
@@ -556,10 +567,12 @@ fn inspect_artifact(directory: &Path, artifact: ComponentArtifact) -> Result<Art
     }
 }
 
-fn is_ignored_directory(name: &std::ffi::OsStr) -> bool {
-    IGNORED_DIRECTORY_NAMES
-        .iter()
-        .any(|ignored_name| name == std::ffi::OsStr::new(ignored_name))
+pub(crate) fn is_ignored_directory(name: &std::ffi::OsStr) -> bool {
+    name.to_str()
+        .is_some_and(|name| name.starts_with(".kvist-recovery-"))
+        || IGNORED_DIRECTORY_NAMES
+            .iter()
+            .any(|ignored_name| name == std::ffi::OsStr::new(ignored_name))
 }
 
 fn is_artifact_name(name: &std::ffi::OsStr) -> bool {

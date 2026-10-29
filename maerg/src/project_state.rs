@@ -1086,6 +1086,34 @@ fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {
     vcs::inspect(project_dir, config.vcs, required_paths)
 }
 
+/// Reuses ordinary validators for an explicitly inventoried recovery artifact.
+pub(crate) fn inspect_recovery_artifact(project_dir: &Path, path: &str) -> Result<ArtifactStatus> {
+    let filename = Path::new(path).file_name().and_then(|name| name.to_str());
+    let kind = match filename {
+        Some("kvist.toml") => ArtifactKind::Configuration,
+        Some("VISION.md") => ArtifactKind::Vision,
+        Some("ARCHITECTURE.md") => ArtifactKind::Architecture,
+        Some("ROOT_CONTRACT.md") => ArtifactKind::RootContract,
+        Some("REQUIREMENTS.md") => ArtifactKind::ComponentDocument(DocumentKind::Requirements),
+        Some("CONTRACT.md") => ArtifactKind::ComponentDocument(DocumentKind::Contract),
+        Some("DESIGN.md") => ArtifactKind::ComponentDocument(DocumentKind::Design),
+        Some("TODOS.yaml") => ArtifactKind::TodoQueue,
+        Some("IMPL.md") => ArtifactKind::ImplementationRecord,
+        _ => {
+            return Err(KvistError::RepairFailed {
+                reason: format!("unknown recovery artifact `{path}`"),
+            });
+        }
+    };
+    inspect_artifact(
+        project_dir,
+        &Artifact {
+            path: path.to_owned(),
+            kind,
+        },
+    )
+}
+
 fn inspect_artifact(project_dir: &Path, artifact: &Artifact) -> Result<ArtifactStatus> {
     let path = project_dir.join(&artifact.path);
     if let Some(parent_problem) = parent_problem(project_dir, &artifact.path)? {

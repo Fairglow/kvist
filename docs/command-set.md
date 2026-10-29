@@ -188,7 +188,7 @@ script: no confirmation, no pager, no terminal.
 | `kvist status [PROJECT_DIR] [--format overview\|text\|json] [--only-documents] [--only-impls] [--unfinished]` | "where do I stand?" — overview by default; stable text/json for scripts                                            |
 | `kvist tree [PROJECT_DIR]`                                                                                    | browse the component hierarchy                                                                                     |
 | `kvist doctor [PROJECT_DIR]`                                                                                  | verify root artifacts, VCS, versions (read-only health check)                                                      |
-| `kvist repair [PROJECT_DIR] [--dry-run]`                                                                      | apply the only defined rewrite: canonical TODO-queue set lists; report everything it does not define a rewrite for |
+| `kvist repair [PROJECT_DIR] [--dry-run] [--salvage] [--reset PATH]... [--clean-slate] [--component-root PATH] [--backup-dir PATH] [--approve SHA256]` | backed-up normalization, proposed salvage, and exactly approved draft resets; see [recovery](recovery.md) |
 | `kvist init [PROJECT_DIR]`                                                                                    | start a new project here                                                                                           |
 | `kvist convert PROJECT_DIR`                                                                                   | onboard an existing Rust crate (drafts in `.kvist/`)                                                               |
 | `kvist reverse-discover PATH`                                                                                 | draft intent + queue from an existing codebase                                                                     |
@@ -328,7 +328,7 @@ all commands`. Failure (not in a project) → print the top-level help
 2. `kvist status` never shows a non-current project state bare: all three
    formats list every non-valid root artifact with its exact reason and a
    concrete action (`kvist init` for uninitialized projects, `kvist repair`
-   when the only defect is an unsorted or duplicated TODO-queue set list).
+   for normalization and proposed salvage/reset recovery).
    Per component, the overview and text forms show state, document validity
    summary, task progress, next ready task, and an **Action** line for every
    non-current state. Stale components additionally list

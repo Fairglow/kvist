@@ -132,7 +132,8 @@ The `kvist` executable provides (the authoritative design is
 - `import REPO_URL [--branch BRANCH] [--component PATH] [DEST_DIR]`
 - `reverse-discover PATH`
 - `doctor [PROJECT_DIR]`
-- `repair [PROJECT_DIR] [--dry-run]`
+- `repair [PROJECT_DIR] [--dry-run] [--salvage] [--reset PATH]...
+  [--clean-slate] [--component-root PATH] [--backup-dir PATH] [--approve SHA256]`
 - `status [PROJECT_DIR] [--format overview|text|json] [--only-documents]
 [--only-impls] [--unfinished]`; the default format is the human-friendly
   overview, and `text`/`json` are the stable report forms for scripts
@@ -268,9 +269,10 @@ concrete unblocking command. A non-current project state is never shown bare:
 `status` (all three formats) lists every non-valid root artifact with its
 exact reason, plus the project-root diagnostic and discovery error when
 present, and a concrete action per state — `kvist init` for uninitialized,
-the missing artifacts to create for partial, `kvist repair` when the only
-defect is an unsorted or duplicated TODO-queue set list, and manual repair
-with a `kvist doctor` pointer otherwise. `status` (overview and text)
+`repair --reset PATH` for partial artifacts, ordinary `repair` for set lists,
+and proposed `repair --salvage`, reset or clean slate for other invalidity.
+Unsupported versions offer a supporting binary or approved reset, not migration.
+`status` (overview and text)
 renders, per component, state, document validity, task progress, the next
 ready task, an Action line for every non-current state, and — for stale
 components — each changed document with its expected and observed revision
@@ -293,15 +295,57 @@ points at `task run`). Agent configuration commands operate on the project
 configuration inside a project and on the global user configuration outside one
 (as if `--global` were passed).
 
-`repair` applies the only artifact rewrite Kvist defines, and only to queues
-invalid because of it: it sorts and deduplicates each task's dependency and
-requirement lists and writes the canonical queue serialization atomically. It
-never touches a queue that parses (canonical or not), a fenced queue (the
-report names `kvist task recover`), an unparseable queue, or any non-queue
-artifact; all of those are reported with their reasons. `--dry-run` reports
-without writing. The command exits nonzero while any non-valid artifact
-remains, and its JSON response carries `state_before`, `state_after`, per
-queue outcomes, and the remaining artifacts.
+`repair` leaves valid queues exact and automatically normalizes invalid set
+lists and dependency declaration order when strict validation of the candidate
+succeeds. `--salvage` proposes additional queue reconciliation and removal of
+unrecoverable tasks and affected dependants. It preserves valid task identities,
+statuses and dependency edges rather than inventing successful verification.
+`--reset PATH` (repeatable, project-relative) proposes replacement of a named
+root/component artifact with its native draft template; `--clean-slate` proposes
+all root/component templates plus archiving project-owned `.kvist` and
+`.kvist-attempts` workflow directories. Source and VCS files are never reset.
+Unknown versions require explicit reset, not migration. Reset queue revisions
+are deliberately unaccepted. Existing execution effects remain unknown.
+
+For invalid Markdown, `--salvage` proposes native markers/headings and
+canonical required sections while preserving prose and unknown sections.
+Missing/empty sections receive explicit recovery-draft placeholders. Known
+unsupported versions are not relabeled; complex fenced section rewrites fall
+back to reset instead of guessing. Markdown candidates pass native validation.
+
+Salvage/reset/clean-slate are proposals until `--approve SHA256` matches the
+displayed plan token. The token binds the canonical project location, exact
+original object digests, proposed replacements, reasons and archive scope.
+No proposed operation is applied without approval; `--dry-run` never writes,
+even with approval. Rerun the same options with the token to apply. Input changes
+invalidate it. Resetting a queue with retained execution evidence requires
+clean slate, not an ordinary reset that would orphan that evidence.
+
+Every application creates a private `.kvist-recovery/` backup bundle containing
+original bytes/objects and a JSON manifest with before/after digests and progress.
+The backup path is reported, including on partial failure. Original permissions
+are retained in the backup; newly written artifacts are private. Backups are
+excluded from component discovery. Recovery does not require configuration or
+queue validity; traversal and resource failures are explicit. Live task locks
+block writes, and ordinary repair does not bypass unresolved attempts.
+The command exits nonzero while any structural artifact problem, discovery
+failure or unapplied proposal remains. JSON retains `state_before`, `state_after`,
+`queues`, `remaining` and adds `plan`, `approval`, and `backup`. Structural
+validity does not assert readiness, acceptance, environmental health or compliance.
+Inventory respects project `.gitignore` directory exclusions so ignored scratch
+worktrees are not implicitly repaired. The ignore policy also binds approval.
+Explicitly configured/selected component roots remain inspectable even beneath
+an ignored namespace.
+`--backup-dir PATH` selects alternative private storage when the default is
+unusable; it is included in the approval binding. Within the project, custom
+storage must be root-level `.kvist-recovery` or `.kvist-recovery-NAME` so backups
+cannot masquerade as components. Intact object quarantine requires same-filesystem
+storage; regular-file backups may use other filesystems.
+When resetting `kvist.toml` (explicitly or by clean slate), `--component-root PATH`
+chooses the replacement component tree without editing TOML. It is a bounded,
+non-traversing project-relative path, defaults to `.`, and cannot select VCS,
+build, attempt or recovery storage.
+External backup storage must be outside every object being quarantined.
 
 `vendor` is a host-authorized provisioning step (ADR-0011, ADR-0013): it
 detects the project's language strategy and performs that language's

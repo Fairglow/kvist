@@ -286,12 +286,16 @@ pub struct TaskTimestamps {
 pub struct Timestamp(String);
 
 impl Timestamp {
+    pub(crate) fn default_instant() -> Self {
+        Self("1970-01-01T00:00:00Z".to_owned())
+    }
+
     pub(crate) fn now() -> std::result::Result<Self, SystemTimeError> {
         let seconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         Ok(Self(unix_seconds_to_rfc3339(seconds)))
     }
 
-    fn validate(&self, field: &str) -> std::result::Result<(), TaskQueueError> {
+    pub(crate) fn validate(&self, field: &str) -> std::result::Result<(), TaskQueueError> {
         let value = self.0.as_bytes();
         if value.len() != 20
             || value[4] != b'-'
@@ -419,7 +423,7 @@ fn validate_with(
 }
 
 /// Sorts and deduplicates every task's dependency and requirement lists in
-/// place. This is the only content rewrite `kvist repair` defines: the schema
+/// place. This is a meaning-preserving repair rewrite: the schema
 /// already forces both lists to be lexically sorted and duplicate-free, so
 /// the rewrite is meaning-preserving.
 pub fn normalize_set_lists(queue: &mut TaskQueue) {
@@ -747,7 +751,9 @@ fn yaml_string(value: &str) -> String {
     escaped
 }
 
-fn validate_component(component: &ComponentState) -> std::result::Result<(), TaskQueueError> {
+pub(crate) fn validate_component(
+    component: &ComponentState,
+) -> std::result::Result<(), TaskQueueError> {
     validate_revision(
         &component.requirements_revision,
         "component.requirements_revision",
@@ -883,7 +889,10 @@ fn validate_tasks(
     Ok(())
 }
 
-fn validate_task(task: &Task, validate_set_order: bool) -> std::result::Result<(), TaskQueueError> {
+pub(crate) fn validate_task(
+    task: &Task,
+    validate_set_order: bool,
+) -> std::result::Result<(), TaskQueueError> {
     if !valid_task_id(&task.id) {
         return Err(TaskQueueError::invalid(format!(
             "task ID `{}` must be 1-{MAX_TASK_ID_CHARS} lowercase kebab-case characters",
@@ -1120,7 +1129,7 @@ fn validate_revision(value: &str, field: &str) -> std::result::Result<(), TaskQu
     Ok(())
 }
 
-fn valid_task_id(value: &str) -> bool {
+pub(crate) fn valid_task_id(value: &str) -> bool {
     !value.is_empty()
         && value.chars().count() <= MAX_TASK_ID_CHARS
         && !value.starts_with('-')

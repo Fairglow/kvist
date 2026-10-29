@@ -5,6 +5,91 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped artifact-recovery observations - 2026-10-29
+
+Independent `recovery-observer` read only recovery, CLI, queue, storage,
+discovery, task-lock/evidence and relevant test source. Independent
+`recovery-scope-observer` subsequently observed only the new Markdown,
+namespace inventory, selected-root, normalized-path, ignore-policy and CLI
+deltas and their test source. Both contexts excluded intent, queues, prior
+records/reviews, peers and chat/Git history; neither edited files or executed
+checks. Their source-derived observations are:
+
+- Plain/JSON repair share library options and reporting. Valid queues remain
+  exact. Invalid set lists and acyclic task declaration order can normalize
+  automatically; candidates pass ordinary strict validation. Reports succeed
+  only when their remaining-problem list is empty; JSON includes operations,
+  approval and backup location as well as existing state/queue fields.
+- Approved queue salvage reconciles existing timestamps under stated
+  assumptions, removes unknown fields, preserves independently valid tasks,
+  merges identical recovered duplicates, and removes conflicting/invalid tasks
+  and affected dependants. Missing completion evidence is not invented and
+  dependency edges are not weakened. Version-one fragment salvage explicitly
+  assumes same-indent segmentation; active/fenced indications refuse it.
+- Salvaged/reset queues carry synthetic stale/unaccepted metadata, not
+  observed revisions, acceptance or successful verification.
+- Markdown salvage preserves prose while reconstructing required sections and
+  labeled draft content; known unsupported versions and ambiguous fenced
+  section rewrites refuse salvage. Output remains bounded to 1 MiB.
+- Configuration-independent inventory and ordinary inspection supply known
+  components. Configured/selected namespace roots are seeded explicitly;
+  relative aliases and visited paths are deduplicated. `--component-root`
+  requires configuration reset or clean slate. Root `.gitignore` is an
+  approval input; its directory rules exclude ignored scratch worktrees.
+- Managed artifact resets use native drafts; clean slate archives workflow
+  objects without resetting source/VCS files. Component-bearing state
+  directories preserve source. Existing effects remain unknown; no task replay
+  or global-grant reset occurs.
+- Exact approval binds originals, object permissions, paths, replacements,
+  reasons and backup location. Dry runs and unapproved proposals write nothing.
+  Regular originals are privately backed up, synchronized and verified;
+  wrong-type objects are quarantined intact without following link targets.
+  Same-filesystem quarantine may require alternative in-project storage.
+- Shared task-operation locks block mutation. Inputs are rechecked under locks,
+  and non-clean-slate writes guard original queue/evidence, including
+  authenticated unresolved attempts.
+  Clean slate archives evidence only under approval, without clearing unknown
+  execution effects or taking over locks.
+- Replacement is atomic per file, not across the project. Progress records can
+  lag actual mutation after interruption/manifest failure; no automatic
+  rollback or replay is provided. Resource, permission and storage limits are
+  explicit blockers rather than permission to discard unbacked data.
+
+The supplemental observer noted that ignore matching is the existing bounded
+`*`/`?` subset, not full Git semantics; only root ignore rules are used for
+recovery traversal. Markdown version detection examines the first nonblank
+declaration, not an arbitrary embedded declaration. Structural validity is not
+component acceptance, readiness or compliance. Reset does not bypass filesystem
+inventory/snapshot bounds; stale/malformed locks can still require ordinary
+recovery or a separate newly initialized project.
+
+Execution attributed to the implementing context, not either observer:
+initial regressions failed before implementation; subsequent targeted recovery
+coverage passed 32 integration tests. The full Maerg suite passed 819 tests,
+with seven existing ignores. Strict all-target Clippy and formatting passed.
+An actual-project nonmutating dry run reports all root/discovered component
+artifacts structurally valid, including the corrected completion timestamp;
+ignored scratch worktrees are excluded. Destructive recovery was exercised
+only in temporary fixtures, never applied to the live project. No component
+acceptance or operational-task replay was performed.
+
+Independent source-blind `recovery-comparator` compared the scoped requirements,
+contract and design against these observations and attributed execution,
+without implementation/test-source access. It established no definite
+contradiction, but did not independently verify every obligation: non-queue
+evidence preservation, all nonzero/partial-failure reporting paths, all
+filesystem/aggregate bounds and detailed proposal display remained unverified
+in its permitted record. These are retained for human arbitration, not silently
+classified as compliance or approval.
+
+After that comparison, implementing-context regressions additionally verified
+that a Markdown reset cannot bypass an active component task and that exactly
+64 MiB of retained queue text is accepted while one additional queue is refused.
+Existing executed tests cover invalid UTF-8 resets for all nine native artifact
+paths, backup-failure immutability and alternative storage, and link/parent
+protection. These checks supplement, but do not replace or retrospectively
+broaden, the independent observations/comparison.
+
 ## Scoped transition-matrix verification - 2026-10-29
 
 Independent clean-slate `transition-observer` derived observations from
