@@ -4,6 +4,8 @@
 mod accepted_commit;
 #[path = "dogfood_boundary/cargo_acquisition.rs"]
 mod cargo_acquisition;
+#[path = "dogfood_boundary/fixtures.rs"]
+mod fixtures;
 #[path = "dogfood_boundary/layout.rs"]
 mod layout;
 #[path = "dogfood_boundary/protocol.rs"]

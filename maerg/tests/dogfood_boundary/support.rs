@@ -298,10 +298,6 @@ pub fn repository_root() -> PathBuf {
     }
 }
 
-fn maerg_authority_root() -> PathBuf {
-    repository_root().join("maerg")
-}
-
 pub fn temporary_directory(prefix: &str) -> TempDir {
     Builder::new()
         .prefix(prefix)
@@ -369,14 +365,21 @@ pub fn sha256_file(path: &Path) -> String {
     sha256_bytes(&fs::read(path).expect("read digest input"))
 }
 
-fn copy_authority(project: &Path, name: &str) {
-    fs::copy(repository_root().join(name), project.join(name))
-        .unwrap_or_else(|error| panic!("copy {name}: {error}"));
-}
-
-fn copy_maerg_artifact(maerg: &Path, name: &str) {
-    fs::copy(maerg_authority_root().join(name), maerg.join(name))
-        .unwrap_or_else(|error| panic!("copy maerg/{name}: {error}"));
+fn write_artifact_template(directory: &Path, template_path: &str) {
+    let template = kvist::artifacts::root_artifacts()
+        .iter()
+        .find(|artifact| artifact.relative_path == template_path)
+        .expect("native fixture artifact template");
+    let filename = Path::new(template_path)
+        .file_name()
+        .expect("template filename");
+    let mut contents = template.contents.to_owned();
+    if template_path == "src/REQUIREMENTS.md" {
+        contents.push_str(
+            "\n### REQ-SUPERVISED-EXECUTION\n\nExercise controlled task execution, retained evidence and explicit human disposition.\n",
+        );
+    }
+    fs::write(directory.join(filename), contents).expect("write fixture artifact template");
 }
 
 fn queue(maerg: &Path, status: &str, recovery_state: &str) -> String {
@@ -482,7 +485,7 @@ fn create_child(maerg: &Path, name: &str, package: &str) {
     let child = maerg.join(name);
     fs::create_dir_all(child.join("src")).expect("create child source directory");
     for artifact in ["REQUIREMENTS.md", "CONTRACT.md", "DESIGN.md", "IMPL.md"] {
-        copy_maerg_artifact(&child, artifact);
+        write_artifact_template(&child, &format!("src/{artifact}"));
     }
     let child_queue = format!(
         r#"schema_version: 1
@@ -517,9 +520,8 @@ tasks: []
 
 /// Write the controlled test sandbox runner script.
 ///
-/// This script handles the probe interface itself (returning a consistent mock
-/// identity) but delegates actual sandbox execution to the real galla-runner
-/// binary. It records the request for test assertions and creates a marker file.
+/// This script simulates probe and effect results for workflow assertions.
+/// Real sandbox enforcement is exercised separately by the protocol tests.
 fn write_controlled_runner(project: &Path, external_tools: &Path) -> PathBuf {
     let runner = external_tools.join("controlled-galla-runner");
     let request_log = external_tools.join("runner-request.json");
@@ -552,14 +554,14 @@ pub fn create_target_project(status: &str) -> TargetProject {
     let project = temporary_directory("project-");
     let external_tools = temporary_directory("dogfood-tools-");
     for artifact in ["VISION.md", "ARCHITECTURE.md", "ROOT_CONTRACT.md"] {
-        copy_authority(project.path(), artifact);
+        write_artifact_template(project.path(), artifact);
     }
     fs::create_dir(project.path().join("docs")).expect("create docs");
     fs::create_dir_all(project.path().join("maerg/src")).expect("create maerg source");
     fs::create_dir(project.path().join("maerg/tests")).expect("create maerg tests");
     let maerg = project.path().join("maerg");
     for artifact in ["REQUIREMENTS.md", "CONTRACT.md", "DESIGN.md", "IMPL.md"] {
-        copy_maerg_artifact(&maerg, artifact);
+        write_artifact_template(&maerg, &format!("src/{artifact}"));
     }
     fs::write(maerg.join("TODOS.yaml"), queue(&maerg, status, "null")).expect("write maerg queue");
     fs::write(

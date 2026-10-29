@@ -886,3 +886,8 @@ Contract behavior is verified by CLI, filesystem, schema, VCS, task lifecycle,
 process, and Linux sandbox integration tests. `IMPL.md` must be derived
 independently from observed code. Compliance requires a separate source-blind
 comparison with `REQUIREMENTS.md`, this contract, and `DESIGN.md`.
+
+Workflow/recovery integration fixtures use bounded native artifact templates,
+independent of repository-document growth. They retain the same context
+limits, execution approval and lifecycle checks; production behavior and
+real repository-layout/runner checks are unchanged.

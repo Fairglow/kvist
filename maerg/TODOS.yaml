@@ -10,6 +10,73 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "dogfood-fixture-write-tests"
+    title: "write_tests: reproduce growing workflow fixture context"
+    description: "Pin bounded native artifact content, unchanged profile limits and fixture creation without repository authority."
+    context: "Seven original failures were reproduced. Before changing the helper, both new regressions failed: 250439 bytes exceeded 16 KiB, and an empty manifest root prevented fixture creation. This test-only repair has an explicit advisory exception."
+    purpose: "Prevent documentation and evidence growth from changing workflow fixture inputs."
+    expected_outcome: "Regressions fail on repository-dependent and oversized fixture context."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-DOGFOOD-FIXTURES"
+    timestamps:
+      created_at: "2026-10-29T10:48:45Z"
+      updated_at: "2026-10-29T10:50:39Z"
+      completed_at: "2026-10-29T10:50:39Z"
+    blocked_reason: null
+  - id: "dogfood-fixture-implement-code"
+    title: "implement_code: isolate compact workflow artifact fixtures"
+    description: "Materialize native templates for workflow root and child documents while preserving real boundary checks."
+    context: "Native templates replace live authority copies; written-document and parent revisions remain bound. All 78 dogfood_boundary tests, strict all-target Clippy, formatting and structural validation pass before final records. Capacity/reserve remain 65536/1024; no production or lifecycle assertion changes. Final-state verification must follow all record updates."
+    purpose: "Remove the fixture's dependence on mutable repository documentation."
+    expected_outcome: "All affected workflow and recovery tests run within unchanged model limits."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "dogfood-fixture-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DOGFOOD-FIXTURES"
+    timestamps:
+      created_at: "2026-10-29T10:48:45Z"
+      updated_at: "2026-10-29T10:50:39Z"
+      completed_at: "2026-10-29T10:50:39Z"
+    blocked_reason: null
+  - id: "dogfood-fixture-security-audit"
+    title: "security_audit: independently observe fixture isolation"
+    description: "Observe scoped fixture and regression source without intent, queues, prior records or history."
+    context: "Independent clean-slate dogfood-fixture-observer inspected only permitted fixture/template/test source, excluding intent, queues, records, history and execution. IMPL persists observed construction, regression assertions, controlled-runner and unavailable-manifest limits. No executed-test, isolation or broad security certification."
+    purpose: "Retain independent observations of fixture construction and unchanged guards."
+    expected_outcome: "Persist a scoped source-derived observation with limits."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "dogfood-fixture-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DOGFOOD-FIXTURES"
+    timestamps:
+      created_at: "2026-10-29T10:48:45Z"
+      updated_at: "2026-10-29T10:50:39Z"
+      completed_at: "2026-10-29T10:50:39Z"
+    blocked_reason: null
+  - id: "dogfood-fixture-compliance-review"
+    title: "compliance_review: compare fixture intent and observations"
+    description: "Compare scoped intent with independent observations and attributed execution without implementation access."
+    context: "Independent source-blind dogfood-fixture-comparator found no demonstrated scoped contradiction and retained evidence limits. All 78 target tests and strict checks passed after the independent records; IMPL records the existing 200 ms startup-marker flake seen once and its isolated/full-target reruns. Post-record verification remains the final gate."
+    purpose: "Keep source observation and intent comparison independent."
+    expected_outcome: "Persist source-blind comparison and any remaining evidence gaps."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "dogfood-fixture-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DOGFOOD-FIXTURES"
+    timestamps:
+      created_at: "2026-10-29T10:48:45Z"
+      updated_at: "2026-10-29T10:55:31Z"
+      completed_at: "2026-10-29T10:55:31Z"
+    blocked_reason: null
   - id: "transition-matrix-write-tests"
     title: "write_tests: verify command-level transitions and recovery gates"
     description: "Exercise every state pair, reason, dependency and stale gate; reproduce paused-state and stale recovery defects."

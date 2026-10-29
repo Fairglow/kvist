@@ -771,3 +771,93 @@ Live diagnostics inherit Sav’s journal rotation and follower behavior. Final l
 **Maerg addendum — source-derived:** Approval remains bound to configuration-source identity/digest, serialized profile digests, and explicit timeout fields for all three roles. Approval loading authenticates the recorded material; execution compares it with current material. The timeout-change regression changes the developer timeout from five to six seconds and asserts rejection with the source-identity/digest diagnostic, unchanged queue contents, and no sandbox-request file. Effect dispatch passes exactly `Some(remaining_task_budget.min(Duration::from_secs(86_400)))` to the sandbox executor: at most 24 hours, further clipped to remaining task time, with no positive minimum. This observes the supplied timeout, not independently verified executor enforcement. The seven-day-configured fixture scripts 65 effect-producing generations followed by a final response and asserts 66 generations and success; it does not assert seven elapsed days or directly test timeout clipping.
 
 No commands, tests, or builds were executed; these are source observations and test-source assertions, not compliance certification.
+
+## Workflow fixture source observation (2026-10-29)
+
+**Evidence boundary:** A fresh `dogfood-fixture-observer` inspected only
+`tests/dogfood_boundary.rs`, its `support.rs` and `fixtures.rs` modules, and
+native template source. It excluded intent, queues, prior records/reviews,
+Git/chat history and execution logs, performed no edits or execution, and
+did not inspect real-runner protocol tests. The following is source-derived,
+not executed proof or compliance certification.
+
+- Fixture project authority and root/child component documents come from the
+  static `artifacts::root_artifacts()` registry. Requirements append a small
+  supervised-execution anchor; queues are constructed separately. Revision
+  fields hash the actual written documents. Child queues bind
+  `../CONTRACT.md` to the root component contract's digest.
+- Generated model configuration retains the native llama-server profile,
+  a 65,536-token context limit and a 1,024-token response reserve. A default
+  loopback mock supplies a write-file call then final text. The existing
+  optional model-URL selection uses substring matching rather than parsed
+  host validation; that behavior is not changed or certified here.
+- The controlled workflow runner consumes/records its request and writes
+  synthetic effects directly. Advertised capabilities and configuration
+  alone do not demonstrate sandbox enforcement; real-runner tests are
+  separate.
+- The bounded-context regression sums five local artifacts plus the root
+  contract and, for children, parent contract, asserting at most 16 KiB for
+  each of three components. It checks native template content, document and
+  parent bindings, and unchanged profile limits. Bytes are not token usage.
+- The unavailable-manifest regression reexecutes its test binary with an
+  empty manifest location and child marker, removing the optional model URL
+  only in that subprocess. It asserts fixture creation, validation and three
+  current components. Other environment and working-directory state remains
+  inherited. This setup is not filesystem isolation or proof that all
+  repository authority is globally unavailable.
+
+**Implementing-context execution, not observed by the independent reader:**
+the original target reproduced 69 passes and seven context-preflight failures.
+Before the helper change, both new regressions failed: selected fixture bytes
+were 250,439 against a 16 KiB bound, and creation could not locate authority
+under the empty manifest root. After the helper change, all 78 target tests
+passed; strict all-target Clippy, formatting, whitespace and structural
+validation passed. These executions preceded this record. The affected target
+must run again after the final intent, queue and evidence changes; neither
+this observation nor the separate comparison substitutes for that rerun.
+
+### Independent source-blind fixture comparison
+
+A separate `dogfood-fixture-comparator` received only the scoped new
+requirement, contract/design paragraphs, four task definitions, independent
+source observation and attributed execution. It used no tools, source,
+history or prior reports.
+
+It found no demonstrated scoped implementation contradiction: observed
+template construction, written-document/parent hashes, byte bound and
+profile values align with intent. The subprocess setup matches the documented
+unavailable-manifest strategy without claiming filesystem isolation.
+
+Its limits are explicit: the observer ran no tests, bytes are not tokens,
+and absence of authority at tested locations is not global unavailability.
+The controlled runner does not prove isolation. Unchanged production and
+original lifecycle/protocol assertions, and successful real-runner tests,
+remain attributed implementing-context evidence, not independently verified
+facts. The reported diff check found no changes in production source or
+original workflow, transition, layout and protocol test files.
+
+At comparison time the executions preceded final records. The comparator
+therefore left scoped completion pending the complete affected-target rerun
+after all intent, queue and evidence updates. This is not a formal receipt,
+intent acceptance or whole-component compliance/security certification.
+
+### Recorded fixture verification
+
+The implementing context reran the complete target after the independent
+records, using default test concurrency: **78 passed, zero failed or ignored**.
+Both new fixture regressions and all seven original failures passed.
+Strict all-target Clippy (`-D warnings`), formatting, whitespace and
+`component validate maerg` also passed.
+
+One earlier post-review run had 77 passes and a failure in the unchanged
+real-runner wall-time test: its process startup marker was absent with a
+configured 200 ms budget. That assertion alone does not establish why the
+marker was absent. The isolated test and the subsequent complete default-
+concurrency target passed. This is separate from the reproducible fixture
+context overflow; no runner timeout, assertion or enforcement was weakened
+to conceal it.
+
+These are attributed execution results, not independent certification. A
+final complete-target rerun follows this last evidence/queue update so the
+record itself cannot invalidate the checked fixture inputs. No intent was
+accepted, installed executable replaced or operational task replayed.

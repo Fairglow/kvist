@@ -218,6 +218,22 @@ without duplicating evidence, mutating completed state or replaying effects.
 This human-requested verification and repair has an explicit advisory exception
 while review receipts are unavailable; independent observation remains separate.
 
+### REQ-DOGFOOD-FIXTURES
+
+Workflow and recovery test fixtures MUST use compact versioned artifact
+templates rather than copying the repository's evolving authority documents
+or implementation records. Their complete selected context, including local
+artifacts, root contract and any parent contract, MUST remain within 16 KiB.
+The fixture's 65,536-token context limit and 1,024-token response reserve MUST
+remain unchanged; production context limits and lifecycle assertions MUST NOT
+be relaxed to repair fixture failures.
+
+Verification MUST establish fixture creation without repository authority
+files and rerun affected tests after final intent, queue and evidence updates.
+Repository-layout and real-runner tests MUST retain their actual repository
+and enforcement checks. This test-only repair has an explicit advisory
+exception while review receipts are unavailable.
+
 ### REQ-PROJECT-LAYOUT
 
 Kvist's target repository layout MUST place the root maerg artifacts, Cargo

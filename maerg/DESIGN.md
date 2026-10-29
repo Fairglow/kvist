@@ -1218,6 +1218,19 @@ output cannot authorize acceptance or mint canonical receipts.
 
 ## Verification strategy
 
+Build workflow/recovery project and child intent from `artifacts::root_artifacts`
+using exact native template paths, with a small fixture-specific supervised
+requirement anchor. Hash the materialized fixture documents for queue revisions
+and parent-contract binding. Do not copy repository authority or prior records.
+Assert the complete local/root/parent context is at most 16 KiB and profile
+limits stay 65,536/1,024 tokens. A subprocess with an empty manifest-root
+directory exercises creation without locatable repository authority,
+without mutating the parent test process environment. Source observation
+checks the absence of repository-copy paths; this is not filesystem isolation.
+Keep real layout and runner tests separate and unchanged. Run the affected
+suite again after the last intent, queue and implementation-record updates,
+not only before them.
+
 Pure parsing, validation, hashing, ordering, transitions, and serialization use
 unit tests. CLI grammar, filesystem layouts, initialization, conversion,
 import, status, VCS, queues, locking, evidence, policy approval, process
