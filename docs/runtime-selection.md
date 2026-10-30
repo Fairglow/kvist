@@ -117,8 +117,73 @@ reserve and remaining approved time. Estimates are not exact provider token coun
 Large intent documents or a slow/cold model can still exhaust five minutes.
 Choose a faster model or explicitly increase the architect role's
 `timeout_seconds` and, if needed, its shared profile's `deadline_secs` (maximum
-600 per request), then review and reapprove policy. No timeout or approval is
-silently increased, and this repair does not rerun or complete the blocked task.
+86400 per request), then review and reapprove policy. Existing explicit limits
+and approvals are not silently increased, and this repair does not rerun or
+complete the blocked task.
+
+### Response-byte limits and slow local models
+
+The reported 2026-10-29 23:31 attempt failed at the **65536-byte HTTP response
+limit**, after reaching inference, not at serving-capacity discovery or the
+8192-token generation reserve. A streamed response contains repeated JSON/SSE
+envelopes, tool fragments and possibly reasoning; short visible text does not
+mean a small wire response. Increasing `response_reserve` alone does not solve
+this failure and may increase response bytes further.
+
+New protected role defaults are **7200 seconds** per task and **16777216 bytes**
+(16 MiB) per model response. This is 24 times the old task time and 256 times
+the old response budget; the configurable output maximum rises from 1 to 16 MiB.
+The same byte setting bounds each sandbox effect's combined stdout/stderr and
+the retained redacted agent log, not the whole diagnostic journal. Independent
+HTTP-header, stream-record, tool-payload and journal-record bounds remain.
+Limits are still finite. Startup prints and records effective task, request
+and byte ceilings before inference.
+
+The separate shared native profile deadline defaults to 7200 seconds and now
+accepts 1–86400 instead of 1–600. Requests use the smaller of profile deadline,
+remaining task time and the transport ceiling. The task budget covers all turns,
+reads, effects and retries; a two-hour task does not grant two hours per turn
+indefinitely. Explicit older values, including generated `timeout_seconds = 300`
+and `max_output_bytes = 65536`, are preserved: defaults do not rewrite policy.
+
+For an existing architect role, edit the configuration source reported by
+`kvist agent list`, retaining its selected profile:
+
+```toml
+[agent.roles.architect]
+profile = "YOUR_EXISTING_PROFILE"
+timeout_seconds = 7200
+max_output_bytes = 16777216
+```
+
+In that profile's shared registry, preserve its endpoint/model and set
+`deadline_secs = 7200` if it currently has a shorter explicit deadline.
+Set `context_limit` only to the actual **per-request serving window**; do not
+guess it from the model's advertised maximum or treat it as a speed setting.
+Leave `response_reserve` unchanged unless generation is actually truncated.
+The cadence watchdog remains independent (default 30 seconds between meaningful
+generation progress); change it only with evidence of a cadence failure.
+
+Review the effective policy, then run `kvist task approve-policy`. Inspect
+`kvist task log maerg shared-runtime-compliance-review` and retained effects.
+If the attempt is resolved and the component is current, deliberately reopen
+and retry with `kvist task transition maerg shared-runtime-compliance-review pending`
+and `kvist task run maerg shared-runtime-compliance-review`.
+If intent is stale or evidence unresolved, use the recovery guidance below first;
+do not delete evidence, clear fences or claim no effects merely from a failed response.
+
+**Review correctness is separate from runtime capacity.** The model's statement
+that an earlier comparison exists is not evidence that a fresh independent
+review occurred. The current generic protected task path materializes local
+intent and `IMPL.md` and offers authoring tools; it does not orchestrate a
+source-only documenter followed by a separate source-blind comparator, nor
+materialize an arbitrary report just because its path appears in task context.
+Raising limits cannot establish that independence. Keep the existing review
+task's sign-off unresolved until those separate contexts produce current,
+durable observations/comparison for human arbitration. Do not repair this by
+granting agents writes to intent, queues, `IMPL.md` or canonical evidence.
+Prefer a focused review scope with exact evidence revisions over another
+full-document inference; selected intent is not silently truncated to save time.
 
 The transport's historical "slot allocation" error actually measured time until
 HTTP response headers, not provider slot ownership. The streaming header

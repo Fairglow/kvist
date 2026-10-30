@@ -986,7 +986,8 @@ command = "/usr/bin/echo 'mocking verify'"
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8(output.stderr.clone()).expect("diagnostic text");
-    assert_eq!(stderr.lines().count(), 4);
+    assert_eq!(stderr.lines().count(), 5);
+    assert_eq!(stderr.matches("Execution limits: ").count(), 1);
     assert_eq!(
         stderr.matches("Starting inference: approximately ").count(),
         2
@@ -1867,6 +1868,117 @@ fn shared_task_project(endpoint: &str) -> TempDir {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn task_run_runtime_budgets_allow_large_wire_responses_and_text_deltas() {
+    for streaming in [false, true] {
+        let generated = format!("fresh result{}", "\"\\\n\t\u{03bb}".repeat(16_000));
+        let expected = generated.clone();
+        let gateway = MockGateway::serve_raw(
+            move |request| {
+                let (content_type, body) = if request.starts_with(b"GET /props?") {
+                    (
+                        "application/json",
+                        r#"{"default_generation_settings":{"n_ctx":32768}}"#.to_owned(),
+                    )
+                } else if streaming {
+                    let comment = format!(": {}\n\n", "padding".repeat(512));
+                    let mut body = comment.repeat(640);
+                    body.push_str(&format!("data: {}\n\n", serde_json::json!({
+                        "choices":[{"index":0,"delta":{"content":generated},"finish_reason":null}]
+                    })));
+                    body.push_str("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n");
+                    body.push_str("data: [DONE]\n\n");
+                    assert!(body.len() > 2 * 1024 * 1024);
+                    ("text/event-stream", body)
+                } else {
+                    (
+                        "application/json",
+                        format!(
+                            "{}{}",
+                            " ".repeat(2 * 1024 * 1024),
+                            gateway_text_body(&generated)
+                        ),
+                    )
+                };
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+            },
+            std::time::Duration::ZERO,
+        );
+        let project = shared_task_project(&gateway.endpoint);
+        let mut arguments = vec!["task", "run", ".", "implement-code"];
+        if streaming {
+            arguments.push("--stream");
+        }
+        let output = run_kvist(&project, &arguments);
+        let diagnostic = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{diagnostic}");
+        assert!(diagnostic.contains("task timeout 7200s"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("response limit 16777216 bytes"),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("per-request deadline"), "{diagnostic}");
+        let path = fs::read_dir(project.path().join("src/.kvist/runs"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.to_string_lossy().ends_with(".events.jsonl"))
+            .unwrap();
+        let journal = fs::read_to_string(path).unwrap();
+        if streaming {
+            let observed: String = journal
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .filter(|event| event["event"]["type"] == "text")
+                .map(|event| event["event"]["data"].as_str().unwrap().to_owned())
+                .collect();
+            assert_eq!(observed, expected);
+            assert!(journal.lines().all(|line| line.len() < 65_536));
+        }
+        let limits = journal
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|event| event["event"]["type"] == "execution_limits")
+            .expect("execution limits recorded");
+        assert_eq!(limits["event"]["data"]["task_timeout_seconds"], 7200);
+        assert_eq!(
+            limits["event"]["data"]["max_response_bytes"],
+            16 * 1024 * 1024
+        );
+        let request_seconds = limits["event"]["data"]["request_deadline_seconds"]
+            .as_f64()
+            .unwrap();
+        assert!(request_seconds > 600.0 && request_seconds <= 7200.0);
+        assert!(String::from_utf8_lossy(&output.stdout).contains("not completed yet"));
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn task_run_runtime_budget_changes_require_policy_reapproval() {
+    let gateway = MockGateway::spawn(&gateway_text_body("unused"), std::time::Duration::ZERO);
+    let project = shared_task_project(&gateway.endpoint);
+    let path = project.path().join("kvist.toml");
+    let config = fs::read_to_string(&path).unwrap().replace(
+        "profile = \"fixture\"",
+        "profile = \"fixture\"\nmax_output_bytes = 8388608",
+    );
+    fs::write(path, config).unwrap();
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let before = fs::read(&queue_path).unwrap();
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("agent configuration source identity or digest has changed")
+    );
+    assert_eq!(fs::read(queue_path).unwrap(), before);
+    assert!(!project.path().join("src/.kvist/runs").exists());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn task_run_skips_unavailable_capacity_and_retries_inference_without_replaying_the_task() {
     use std::sync::{
         Arc,
@@ -2318,11 +2430,14 @@ command = "/usr/bin/echo verify"
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("output limit"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("response/capture byte limit"));
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
     assert!(queue_contents.contains("status: blocked"));
-    assert!(queue_contents.contains("combined output limit"));
+    assert!(queue_contents.contains("response/capture byte limit"));
+    assert!(queue_contents.contains("agent.roles.developer"));
+    assert!(queue_contents.contains("max_output_bytes = 64"));
+    assert!(queue_contents.contains("approve-policy"));
     assert!(!queue_contents.contains("secret-agent-output"));
     let logs = fs::read_dir(project.path().join("src/.kvist/logs"))
         .expect("read logs")
@@ -2339,7 +2454,7 @@ command = "/usr/bin/echo verify"
             .join("src/.kvist-attempts/implement-code.jsonl"),
     )
     .expect("read attempts");
-    assert!(attempts.contains("combined output limit"));
+    assert!(attempts.contains("response/capture byte limit"));
     assert!(!attempts.contains("secret-agent-output"));
 }
 

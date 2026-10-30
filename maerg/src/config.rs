@@ -210,7 +210,7 @@ pub struct RoleConfig {
     pub timeout_seconds: u64,
     /// Token budget limit for this role.
     pub token_limit: Option<usize>,
-    /// Combined stdout/stderr capture budget for one request in bytes.
+    /// Per-response HTTP, per-effect capture, and retained agent-log byte ceiling.
     pub max_output_bytes: usize,
     /// Literal values replaced before agent evidence reaches any sink.
     pub redaction_values: Vec<String>,
@@ -256,10 +256,10 @@ impl RoleConfig {
     }
 }
 
-pub const DEFAULT_AGENT_TIMEOUT_SECONDS: u64 = 300;
+pub const DEFAULT_AGENT_TIMEOUT_SECONDS: u64 = 2 * 60 * 60;
 pub const MAX_AGENT_TIMEOUT_SECONDS: u64 = 30 * 24 * 60 * 60;
-pub const DEFAULT_AGENT_MAX_OUTPUT_BYTES: usize = 65_536;
-pub const MAX_AGENT_OUTPUT_BYTES: usize = 1_048_576;
+pub const DEFAULT_AGENT_MAX_OUTPUT_BYTES: usize = MAX_AGENT_OUTPUT_BYTES;
+pub const MAX_AGENT_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 
 /// The resolved agent configuration input, retained for execution approval.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1258,18 +1258,18 @@ provider = "gemini"
 
 [agent.roles.architect]
 profile = "claude-default"
-timeout_seconds = 300
-max_output_bytes = 65536
+timeout_seconds = 7200
+max_output_bytes = 16777216
 
 [agent.roles.developer]
 profile = "gemini-default"
-timeout_seconds = 300
-max_output_bytes = 65536
+timeout_seconds = 7200
+max_output_bytes = 16777216
 
 [agent.roles.security-reviewer]
 profile = "claude-default"
-timeout_seconds = 300
-max_output_bytes = 65536
+timeout_seconds = 7200
+max_output_bytes = 16777216
 "#;
 
 fn toml_table_from_str(path: &Path, contents: &str) -> Result<toml::map::Map<String, toml::Value>> {
@@ -2380,6 +2380,49 @@ fn parse_test_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_budget_defaults_match_generated_configuration() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        std::fs::write(&path, DEFAULT_GLOBAL_CONFIG_TEMPLATE).unwrap();
+        let generated = load_agent_file(&path).unwrap();
+        for role in [Role::Architect, Role::Developer, Role::SecurityReviewer] {
+            for profile in [
+                RoleConfig::default_for_role(role),
+                generated.role(role).clone(),
+            ] {
+                assert_eq!(profile.timeout_seconds, 7200);
+                assert_eq!(profile.max_output_bytes, 16 * 1024 * 1024);
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_budget_output_boundary_and_explicit_small_caps_are_preserved() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        for bytes in [1, 65_536, 16 * 1024 * 1024] {
+            std::fs::write(
+                &path,
+                format!(
+                    "[agent.roles.architect]\ntimeout_seconds = 17\nmax_output_bytes = {bytes}\n"
+                ),
+            )
+            .unwrap();
+            let config = load_agent_file(&path).unwrap();
+            assert_eq!(config.architect.timeout_seconds, 17);
+            assert_eq!(config.architect.max_output_bytes, bytes);
+        }
+        for bytes in [0, 16 * 1024 * 1024 + 1] {
+            std::fs::write(
+                &path,
+                format!("[agent.roles.architect]\nmax_output_bytes = {bytes}\n"),
+            )
+            .unwrap();
+            assert!(load_agent_file(&path).is_err(), "{bytes}");
+        }
+    }
 
     /// Writes `contents` to `<root>/kvist.toml` and returns the project root.
     fn write_project_config(root: &Path, contents: &str) {

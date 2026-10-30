@@ -1,15 +1,86 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:6382dfb1a742ea1ad245edc462345d59a695b1d5e3cb003264b7811f2fc55133"
-  contract_revision: "sha256:12160de295a13ed382cf8153874777b099e594444d23a8195881c3d5fa2a5ccc"
-  design_revision: "sha256:bf6ce774760f0bf22770f9ec924d1b5515bc412707c6b2ac88a3959c374f55d1"
+  requirements_revision: "sha256:b701fc0047bb37c2427b685ecaf0f17fb3cbe9e480d104bd8f812d3fa001255c"
+  contract_revision: "sha256:093f70aff0bce3366a4fb4cacacd0fb6617b044de3218d397145109638cdfa9d"
+  design_revision: "sha256:17f02a4be8fa77b42befbff75c2841eb5b5e6c78914f4aaf39fe56c55ab32209"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-29T22:50:44Z"
+    checked_at: "2026-10-30T07:36:17Z"
     stale_since: null
     causes: []
 tasks:
+  - id: "native-budgets-write-tests"
+    title: "write_tests: pin slow native profile deadlines"
+    description: "Pin two-hour defaults, the 24-hour ceiling, invalid deadlines and host clipping."
+    context: "Observed the old 300-second default failing before production edits. Assertions cover new defaults, 1/601/7200/86400 boundaries, host clipping and invalid limits. Deliberate advisory exception while receipts are unavailable."
+    purpose: "Expose the independent ten-minute profile ceiling."
+    expected_outcome: "Deadline regressions fail before implementation."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-30T07:06:11Z"
+      updated_at: "2026-10-30T07:16:57Z"
+      completed_at: "2026-10-30T07:16:57Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-budgets-implement-code"
+    title: "implement_code: align profile and transport deadlines"
+    description: "Raise default and accepted native deadlines without altering explicit shorter host or profile caps."
+    context: "Native deadline default is two hours, accepted through 24 hours; explicit shorter profile/host caps and cadence/retry/byte authority remain unchanged. Registry binaries pass all 19 tests; full affected packages pass 1084 tests with seven existing ignores, strict lint/format, 57 consumer tests and release build."
+    purpose: "Support slow local inference within approved host budgets."
+    expected_outcome: "Boundary and clipping regressions pass."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "native-budgets-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-30T07:06:11Z"
+      updated_at: "2026-10-30T07:16:57Z"
+      completed_at: "2026-10-30T07:16:57Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-budgets-security-audit"
+    title: "security_audit: observe native deadline bounds independently"
+    description: "Derive scoped source-only observations without intent, queues, prior records or implementation history."
+    context: "Independent clean-slate sav-budget-observer read scoped source and test source only, excluding intent, queues, prior records/history, peers and execution logs. Observations are in IMPL.md; no checks, actual long inference or exhaustive certification were performed."
+    purpose: "Retain independent implementation evidence."
+    expected_outcome: "Scoped observations are durable in IMPL.md."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "native-budgets-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-30T07:06:11Z"
+      updated_at: "2026-10-30T07:16:57Z"
+      completed_at: "2026-10-30T07:16:57Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-budgets-compliance-review"
+    title: "compliance_review: compare native deadline evidence"
+    description: "Compare scoped intent with independent observations and attributed tests without source."
+    context: "Separate source-blind sav-budget-comparator compared scoped intent and independent observations with attributed execution, without source/tests, peers or history. IMPL.md retains no concrete contradiction and unobserved retry/real-inference limits. No profile approval, acceptance or certification."
+    purpose: "Prevent self-certification."
+    expected_outcome: "A separate scoped comparison is durable."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "native-budgets-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-10-30T07:06:11Z"
+      updated_at: "2026-10-30T07:16:57Z"
+      completed_at: "2026-10-30T07:16:57Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "response-deadline-write-tests"
     title: "write_tests: pin metadata and unary header budgets"
     description: "Reproduce the streaming header watchdog incorrectly clipping metadata and unary requests."

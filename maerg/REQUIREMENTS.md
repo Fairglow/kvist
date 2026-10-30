@@ -78,10 +78,24 @@ Protected authoring MUST NOT stop at an implicit generation-count ceiling.
 The approved positive role timeout MUST bound the whole task, MAY span up to
 30 days, and MUST remain unchanged by guidance. Individual sandbox effects
 MUST retain the runner's 24-hour ceiling, clipped to remaining task time.
-Default role timeouts remain unchanged; extending them requires the existing
-policy approval flow. Tests MUST exceed the former 64-generation ceiling.
+Changing role budgets requires the existing policy approval flow.
+Tests MUST exceed the former 64-generation ceiling.
 This human-requested repair has an explicit advisory exception while receipts
 are unavailable.
+
+Protected task defaults MUST allow two hours of whole-task execution and
+16 MiB per model HTTP response, including streaming protocol overhead and
+reasoning, rather than treating generated tokens as wire bytes. Explicit smaller
+limits MUST remain effective. Output configuration MUST accept up to 16 MiB,
+retain bounded evidence and runner capture, and reject larger values. Startup
+MUST expose effective task time, per-request time and response-byte limits;
+large streamed text deltas MUST be recorded losslessly as redacted UTF-8-safe
+chunks within the existing journal-record bound.
+Overflow diagnostics MUST identify response/capture bytes separately from
+generated tokens and explain configuration and policy reapproval. No repair
+MAY automatically replay tasks, enlarge explicit approved limits, or certify an
+independent compliance review. The requested budget repair has a deliberate
+advisory exception while review receipts remain unavailable.
 
 Maerg MUST consume shared provider/profile resolution and native runtime
 mechanisms without yielding task policy, context, authorization, acquisition,

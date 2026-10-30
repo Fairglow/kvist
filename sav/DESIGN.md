@@ -75,6 +75,11 @@ before returning them. No model-qualified GET or inference is used.
 
 ## Selected-model capacity and usage
 
+Native profile parsing and construction default request deadlines to 7200
+seconds and validate 1–86400 seconds, matching direct transport's 24-hour
+maximum. Preserve `min(profile_deadline, host_remaining)` construction and
+unchanged cadence, retry and byte bounds; perform validation before I/O.
+
 Direct transport reuses bounded loopback GET for llama-server model-qualified
 properties and Ollama loaded-model metadata. Encode the model query as percent
 escaped UTF-8, validate positive integer capacity within 1048576 tokens, and

@@ -1218,6 +1218,24 @@ fn execute_agent_inner(
             &live,
             &redactions,
         )?;
+        let remaining = budget.model_deadline(cancellation)?;
+        let request_deadline = choice.native.as_ref().map_or(remaining, |native| {
+            remaining.min(Duration::from_secs(native.deadline_secs))
+        });
+        live.record(
+            &serde_json::json!({"type":"execution_limits","data":{
+                "task_timeout_seconds":profile.timeout_seconds,
+                "request_deadline_seconds":request_deadline.as_secs_f64(),
+                "max_response_bytes":profile.max_output_bytes
+            }}),
+            true,
+        )?;
+        eprintln!(
+            "Execution limits: task timeout {}s; per-request deadline at most {:.1}s; response limit {} bytes (includes protocol overhead and reasoning, not just visible text).",
+            profile.timeout_seconds,
+            request_deadline.as_secs_f64(),
+            profile.max_output_bytes,
+        );
 
         let mut generations = 0u64;
         let mut model_attempts = 0;

@@ -61,7 +61,7 @@ Explicit command-endpoint profiles retain their existing 8192-token local contex
 and 1024-token output reserve without a metadata probe (`source: default`).
 
 Protected native authoring has no implicit 64-generation ceiling. Role
-`timeout_seconds` is a positive whole-task budget, defaults to 300 and accepts
+`timeout_seconds` is a positive whole-task budget, defaults to 7200 and accepts
 up to 2,592,000 seconds (30 days). Explicit `token_limit` remains cumulative.
 Each sandbox effect is clipped to remaining task time and at most 86,400
 seconds; this does not increase runner grants. Changing role budgets changes
@@ -70,6 +70,19 @@ these approved budgets.
 Delivered guidance renews model-generation attempts. Individual model requests
 retain the transport's independent 24-hour ceiling, including explicit endpoint
 profiles; shared profiles may impose shorter per-attempt deadlines.
+
+Role `max_output_bytes` defaults to 16,777,216 and accepts 1–16,777,216 bytes.
+It bounds each complete model HTTP response (including SSE/JSON overhead and
+reasoning), each sandbox effect's combined stdout/stderr capture, and the
+retained redacted agent log. These are byte ceilings, not token allowances.
+Explicit configured values are never raised automatically. Startup reports
+the role task timeout, effective per-request deadline (clipped to task time and
+the profile deadline), and response-byte ceiling on stderr and in a synchronized
+`execution_limits` diagnostic event. Output overflow names the byte budget and
+role configuration, requires policy reapproval after changes, and never retries
+the oversized response or replays the task.
+Large streamed text deltas are split into ordered, lossless redacted text
+records without increasing the journal's 64 KiB record bound.
 
 Explicit cancellation is carried into an executing sandbox effect and
 terminates/reaps its owned process group; steering alone never cancels that

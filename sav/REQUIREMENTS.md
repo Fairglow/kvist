@@ -199,6 +199,14 @@ be forwarded as setup presentation.
 
 ### AR-REQ-MODEL-TRANSPORT
 
+Shared native profiles MUST default to a two-hour request deadline and accept
+positive deadlines through 24 hours, matching the direct transport ceiling.
+Host task deadlines MUST still clip each request, explicit shorter profile
+deadlines MUST remain authoritative, and cadence/retry/response limits MUST
+remain independent. Invalid deadlines MUST fail before network I/O.
+This requested slow-local-model repair has a deliberate advisory exception
+while review receipts remain unavailable.
+
 Capacity metadata and unary generation MUST use their caller's complete
 request deadline for response headers, not the streaming 15-second header
 watchdog. A header timeout MUST describe the observed missing HTTP headers,

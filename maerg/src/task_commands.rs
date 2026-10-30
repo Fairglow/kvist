@@ -4968,7 +4968,9 @@ pub fn run_task_with_controls(
                 )
             } else if run_result.output_limit_exceeded {
                 format!(
-                    "agent execution exceeded the combined output limit while contacting the local model gateway. Bounded redacted logs are written to: {}",
+                    "agent execution exceeded a response/capture byte limit, not a generated-token limit. Role `agent.roles.{}` has max_output_bytes = {}; model HTTP responses include protocol overhead and reasoning. Review that setting (maximum 16777216) and the cause below; independent protocol-record bounds still apply. After changing limits, review and run `kvist task approve-policy` before a deliberate retry. Bounded redacted logs are written to: {}",
+                    role.as_str(),
+                    agent_profile.max_output_bytes,
                     run_result.log_path.display()
                 )
             } else {

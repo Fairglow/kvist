@@ -1,15 +1,86 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:1b032f0ca2319dc7aae9a23f7631909a45a33e1386234c4debaac903e8e3ce8b"
-  contract_revision: "sha256:9843739c5fe853c4d298e1bfad9c44fb5a1376c3f207d115f6d2ff7a2726961d"
-  design_revision: "sha256:1062f1a4a65b5918a46cb0f80cc0bca0bcf9f829a201d1c958c0a9ec1d53efec"
+  requirements_revision: "sha256:9da32f0bd7f2651c4c5123f320e1df7e0d9d333192f19feac788a5e9c25d02db"
+  contract_revision: "sha256:f086d75a9315aa97655408ef9c1d562712335ab48766637306c7406d1955756f"
+  design_revision: "sha256:dfd9902edd6ea593fb8dc278cd66a6201fe61c526770dc28be63ae4a0c67165a"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-29T22:50:18Z"
+    checked_at: "2026-10-30T07:36:21Z"
     stale_since: null
     causes: []
 tasks:
+  - id: "runtime-budgets-write-tests"
+    title: "write_tests: reproduce response-byte and slow-model limits"
+    description: "Pin large streamed wire responses, explicit caps, defaults, policy binding and effective-limit diagnostics."
+    context: "Observed red defaults, 16-MiB parsing, 65536-byte HTTP response and later journal-record regressions before their respective repairs. Deliberate advisory exception while receipts are unavailable."
+    purpose: "Prevent wire framing from exhausting a small token-sized byte budget."
+    expected_outcome: "Regressions fail before the budget repair."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-30T07:06:11Z"
+      updated_at: "2026-10-30T07:16:57Z"
+      completed_at: "2026-10-30T07:16:57Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runtime-budgets-implement-code"
+    title: "implement_code: align bounded execution defaults"
+    description: "Raise default task time and response bytes, retain explicit limits and report actionable effective budgets."
+    context: "Two-hour/16-MiB defaults, effective diagnostics and lossless bounded text records implemented. Affected packages: 1084 passed, seven existing ignores; strict lint, formatting, 57 Skott consumer tests, release build and document validation pass. Existing explicit policy, unrelated review and attempt evidence were not accepted or replayed."
+    purpose: "Make large local-model work practical without unbounded execution."
+    expected_outcome: "Default and explicit-limit regressions pass."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "runtime-budgets-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-30T07:06:11Z"
+      updated_at: "2026-10-30T07:16:57Z"
+      completed_at: "2026-10-30T07:16:57Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runtime-budgets-security-audit"
+    title: "security_audit: independently observe budget boundaries"
+    description: "Derive scoped source-only observations without intent, queues, prior records or implementation history."
+    context: "Clean-slate maerg-budget-observer derived scoped source/test-source observations, retained in IMPL.md. It excluded intent, queues, prior records/history, peers and execution logs and executed no checks. Retry internals and real inference remain unestablished; no exhaustive security or acceptance claim."
+    purpose: "Retain independent evidence of bounded execution."
+    expected_outcome: "Scoped observations are durable in IMPL.md."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "runtime-budgets-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-30T07:06:11Z"
+      updated_at: "2026-10-30T07:16:57Z"
+      completed_at: "2026-10-30T07:16:57Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runtime-budgets-compliance-review"
+    title: "compliance_review: compare budget intent and observations"
+    description: "Compare scoped intent with independent observations and test evidence without source access."
+    context: "Separate source-blind maerg-budget-comparator compared scoped intent and independent observations with attributed execution, without source/tests, peers or history. IMPL.md retains no concrete scoped discrepancy and unproven retry/enforcement/real-inference obligations. No acceptance or certification of the unrelated shared-runtime review."
+    purpose: "Retain discrepancies for human arbitration."
+    expected_outcome: "A separate scoped comparison is durable."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "runtime-budgets-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-10-30T07:06:11Z"
+      updated_at: "2026-10-30T07:16:57Z"
+      completed_at: "2026-10-30T07:16:57Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "timestamp-metadata-write-tests"
     title: "write_tests: specify lossless missing timestamp recovery"
     description: "Pin automatic metadata augmentation, retained task state and authority, native unknown completion, backups, dry runs and evidence guards."
@@ -929,7 +1000,7 @@ tasks:
       - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
     timestamps:
       created_at: "2026-10-23T22:00:00Z"
-      updated_at: "2026-10-29T23:16:07Z"
+      updated_at: "2026-10-29T23:44:06Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

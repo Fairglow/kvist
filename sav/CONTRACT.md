@@ -95,8 +95,8 @@ syntax. Native model IDs are nonblank, control-free ASCII strings of at most
 confer authority on them.
 
 Native optional fields are `context_limit` (2–1048576), `response_reserve`
-(1–1048576, less than configured context), `deadline_secs` (1–600, default
-300), `max_attempts` (1–32, default 3), `retry_base_delay_secs` (default 2),
+(1–1048576, less than configured context), `deadline_secs` (1–86400, default
+7200, clipped by the caller's remaining deadline), `max_attempts` (1–32, default 3), `retry_base_delay_secs` (default 2),
 `retry_max_delay_secs` (default 30, at most 3600 and at least the base delay),
 and `cadence_timeout_secs` (0–600, default 30; zero disables the watchdog).
 The endpoint defaults to numeric-loopback Ollama port 11434 or llama-server

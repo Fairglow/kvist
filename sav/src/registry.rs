@@ -55,7 +55,7 @@ pub struct NativeModel {
 }
 
 const fn deadline() -> u64 {
-    300
+    2 * 60 * 60
 }
 const fn attempts() -> u32 {
     3
@@ -93,13 +93,17 @@ impl NativeModel {
             self.base_url = self.provider.default_endpoint().to_owned();
         }
         crate::direct_transport::validate_model_selector(&self.model)?;
-        if !(1..=600).contains(&self.deadline_secs)
-            || self.cadence_timeout_secs > 600
+        if !(1..=86_400).contains(&self.deadline_secs) {
+            return Err(invalid(
+                "native deadline_secs must be between 1 and 86400 seconds",
+            ));
+        }
+        if self.cadence_timeout_secs > 600
             || !(1..=32).contains(&self.max_attempts)
             || self.retry_base_delay_secs > self.retry_max_delay_secs
             || self.retry_max_delay_secs > 3600
         {
-            return Err(invalid("invalid native deadline, cadence or retry bounds"));
+            return Err(invalid("invalid native cadence or retry bounds"));
         }
         if self
             .context_limit

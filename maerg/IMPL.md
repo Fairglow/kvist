@@ -5,6 +5,73 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped runtime-budget observations - 2026-10-30
+
+Independent clean-slate `maerg-budget-observer` read only scoped current
+`src/config.rs`, `src/agent.rs`, `src/agent/live.rs`, `src/task_commands.rs`
+and `tests/task_commands.rs`. It excluded intent, queues, prior records,
+reviews, configuration files, execution logs, peer implementations and
+chat/Git history, made no edits and executed no checks. Its observations:
+
+- Role defaults and the generated template specify 7200 seconds and
+  16777216 bytes (16 MiB). Configuration ceilings are 30 days and 16 MiB.
+  `token_limit` defaults to absent; configured values must be positive.
+- Configuration test assertions retain a 17-second timeout and byte caps of
+  1, 65536 and 16 MiB, and reject zero and above-maximum output caps.
+- Model requests and effects receive time from one elapsed-time budget, with
+  a separate 86400-second per-operation ceiling. Retry callers receive the
+  same budget; this does not establish a deadline for the entire CLI lifecycle.
+- After context startup, stderr and `execution_limits` report task timeout,
+  a remaining-time/native-policy request ceiling and response bytes. They
+  distinguish protocol overhead/reasoning bytes from generated tokens.
+- The byte limit is passed separately to transport and effect capture.
+  Retained output and logs are redacted before UTF-8-safe truncation. Live
+  text is recorded in UTF-8-aligned chunks of at most 8192 bytes after
+  redaction, leaving JSON-escaping headroom under the journal record bound.
+- Test source asserts responses exceeding 2 MiB, escaped/UTF-8 deltas,
+  exact streamed-text reconstruction, records below 65536 bytes, and split
+  secret redaction. The explicit 64-byte cap asserts blocked execution,
+  bounded logs and secret-free evidence.
+- The overflow branch blocks execution and requests reviewed limits, policy
+  reapproval and deliberate retry. Approval material binds budgets; the
+  changed-policy test asserts refusal before queue mutation or run creation.
+- These are source observations and unexecuted test assertions, not actual
+  model behavior, dependency-enforcement proof or independent compliance
+  orchestration. Retry internals were outside this observer's scope.
+
+Implementation-agent execution, separately attributed: the new budget tests
+failed against the old defaults/1-MiB maximum; the large-response integration
+reproduced the 65536-byte failure. Enlarged text then reproduced the separate
+65536-byte journal-record failure before chunking. After repair,
+`cargo test --offline --locked -p kvist -p sav --quiet` passed 1084 tests
+with seven existing ignores. Strict all-target Clippy for both packages,
+format checks, 57 Skott configuration/model-selection tests, the Kvist release
+build and both components' document validation passed. This is execution
+evidence, not independent review or acceptance. The reported shared-runtime
+compliance task, explicit user policy and retained attempt evidence were not
+replayed, accepted or certified.
+
+### Independent source-blind budget comparison - 2026-10-30
+
+Separate `maerg-budget-comparator` read only scoped local requirements,
+contract, design and the observation/execution supplement above, without
+source, tests, queues, prior records/reviews, peers or history. It executed
+no checks and made no edits:
+
+- Observed 7200-second defaults and 16-MiB byte defaults/maxima match scoped
+  intent; smaller explicit caps and approval binding have supporting
+  observations and test assertions.
+- Startup task/request/response diagnostics align with intent, but underlying
+  transport/profile enforcement is not independently established by this scope.
+- Overflow blocking, byte/token distinctions and reapproval guidance align.
+  Excluded retry internals leave automatic retry/replay prohibition unproven
+  by the scoped source-only observation.
+- Redacted UTF-8-safe 8192-byte chunks and reconstruction assertions support
+  lossless recording beneath the unchanged 64-KiB record bound.
+- No concrete scoped discrepancy was established. Executions remain
+  implementer-attributed; acceptance, compliance certification and independence
+  of the unrelated review task are not inferred.
+
 ## Scoped absent-timestamp recovery observations - 2026-10-29
 
 Independent `timestamp-metadata-observer` read only scoped current Maerg

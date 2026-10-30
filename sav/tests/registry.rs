@@ -55,6 +55,50 @@ fn native_model_selector_accepts_the_exact_transport_boundary() {
 }
 
 #[test]
+fn native_deadlines_support_slow_models_and_retain_host_clipping() {
+    use sav::{LocalModelProvider, ModelTransport, registry::NativeModel};
+    use std::time::Duration;
+
+    let registry = Registry::parse(Path::new("fixture"), &native("model")).unwrap();
+    assert_eq!(
+        registry
+            .resolve("coder")
+            .unwrap()
+            .native()
+            .unwrap()
+            .deadline_secs,
+        7200
+    );
+    let mut model = NativeModel::new(
+        LocalModelProvider::LlamaServer,
+        String::new(),
+        "model".into(),
+    );
+    assert_eq!(model.deadline_secs, 7200);
+    for seconds in [1, 601, 7200, 86_400] {
+        model.deadline_secs = seconds;
+        model.validate().unwrap();
+        let transport = model
+            .transport_bounded(Duration::from_secs(30), 16 * 1024 * 1024)
+            .unwrap();
+        assert_eq!(transport.deadline(), Duration::from_secs(seconds.min(30)));
+        assert_eq!(
+            model.transport().unwrap().deadline(),
+            Duration::from_secs(seconds)
+        );
+        let parsed = Registry::parse(
+            Path::new("fixture"),
+            &(native("model") + &format!("deadline_secs = {seconds}\n")),
+        );
+        assert!(parsed.is_ok(), "{seconds}: {parsed:?}");
+    }
+    for seconds in [0, 86_401, u64::MAX] {
+        model.deadline_secs = seconds;
+        assert!(model.transport().is_err(), "{seconds}");
+    }
+}
+
+#[test]
 fn rejects_unknown_fields_credentials_bounds_and_retired_command_schema() {
     for contents in [
         native("model") + "typo = true\n",

@@ -1,6 +1,60 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped native deadline observations - 2026-10-30
+
+Independent clean-slate `sav-budget-observer` read only scoped
+`src/registry.rs`, direct transport constants/constructors,
+`tests/registry.rs` and `tests/registry_cli_policy.rs`. It excluded intent,
+queues, prior records, reviews, configuration files, logs, peer implementations
+and chat/Git history, made no edits and executed no checks. Its observations:
+
+- `NativeModel::new` and omitted serialized deadlines default to 7200
+  seconds; cadence defaults to 30 seconds.
+- Native profiles accept integer deadlines 1–86400 inclusive. Direct
+  constructors accept one nanosecond through 24 hours inclusive for
+  request, response-header and TTFT deadlines.
+- `transport()` retains the profile deadline. `transport_bounded()` uses
+  the smaller of profile deadline and host remaining time, retaining
+  explicitly shorter limits on either side.
+- Native construction sets header/TTFT watchdogs to that effective deadline,
+  unlike the direct constructors' 15/45-second defaults. Cadence remains
+  independently configurable through 600 seconds, with zero disabling it.
+  Native default response capacity remains 8 MiB; constructors accept
+  1–16777216 bytes inclusive.
+- Native transport construction validates profile/model and transport
+  bounds and parses the endpoint without network I/O.
+- Registry test source asserts 7200-second defaults, deadlines 1, 601,
+  7200 and 86400, host clipping against 30 seconds, unchanged unbounded-host
+  profile deadlines, and rejection of 0, 86401 and `u64::MAX`.
+- CLI-policy test source asserts a 128-byte response bound and a one-second
+  CLI timeout against a five-second profile for unary/streamed calls, plus
+  pre-contact refusal of invalid bounds/unsupported watchdog overrides.
+
+No actual long-running inference or compliance determination is established.
+Separately attributed implementation-agent execution:
+`cargo test --offline --locked -p kvist -p sav --quiet` passed 1084 tests
+with seven existing ignores; both registry test binaries passed all 19 tests.
+Strict all-target Clippy for Sav/Maerg, formatting, 57 Skott consumer tests,
+the Kvist release build and component document validation passed. This
+execution evidence is not the observer's own verification or acceptance.
+
+### Independent source-blind deadline comparison - 2026-10-30
+
+Separate `sav-budget-comparator` read only scoped local requirements,
+contract, design and the current observation/execution supplement, without
+source, tests, queues, prior records/reviews, peers or history. It executed
+no checks and made no edits:
+
+- Reported constructor/omitted-field defaults of 7200 seconds, acceptance
+  of 1–86400 seconds and minimum-of-profile/host clipping align with intent.
+- Independent cadence/response bounds and validation before network I/O
+  align. Unchanged retry behavior lacks an explicit scoped source observation.
+- Boundary/clipping assertions were not executed by the observer.
+  Passing tests/builds/lints remain implementer-attributed.
+- No concrete contradiction was identified; actual long-running inference
+  remains unverified. This comparison provides no acceptance or certification.
+
 ## Scoped HTTP response deadline repair - 2026-10-28
 
 Independent clean-slate `transport-source-observer` read only current

@@ -53,6 +53,25 @@ impl LiveRun {
         Ok(())
     }
 
+    fn record_text(&self, text: &str) -> sav::Result<()> {
+        let text = redact(text, &self.redactions);
+        let mut remaining = text.as_str();
+        let mut journal = self.journal.lock().map_err(|_| sav::Error::Observation {
+            reason: "required live journal lock is poisoned".into(),
+        })?;
+        while !remaining.is_empty() {
+            // JSON can expand each byte to six bytes; keep envelope headroom.
+            let mut end = remaining.len().min(8192);
+            while !remaining.is_char_boundary(end) {
+                end -= 1;
+            }
+            let (chunk, rest) = remaining.split_at(end);
+            journal.record(&json!({"type":"text","data":chunk}))?;
+            remaining = rest;
+        }
+        Ok(())
+    }
+
     pub(super) fn finish(&self, disposition: &str) -> Result<()> {
         self.journal
             .lock()
@@ -145,7 +164,7 @@ impl<T: ModelTransport> ModelTransport for ObservedTransport<'_, T> {
             if let ModelStreamEvent::TextDelta(text) = &event {
                 let text = redactor.absorb(text);
                 if !text.is_empty()
-                    && let Err(error) = self.live.record(&json!({"type":"text","data":text}), false)
+                    && let Err(error) = self.live.record_text(&text)
                 {
                     record_error = Some(error);
                     return Err(sav::Error::ModelTransportCancelled);
@@ -159,8 +178,7 @@ impl<T: ModelTransport> ModelTransport for ObservedTransport<'_, T> {
         }
         let tail = redactor.finish();
         if !tail.is_empty() {
-            self.live
-                .record(&json!({"type":"text","data":tail}), false)?;
+            self.live.record_text(&tail)?;
         }
         self.result(&result)?;
         result
@@ -175,6 +193,29 @@ impl<T: ModelTransport> ModelTransport for ObservedTransport<'_, T> {
 mod tests {
     use super::*;
     use sav::observation::JournalFollower;
+
+    #[test]
+    fn large_text_records_preserve_redacted_utf8_and_json_escaping_bounds() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("run.events.jsonl");
+        let live = LiveRun::create(&path, "chunks", "task", "model", &["secret".into()]).unwrap();
+        let text = format!("{}secret{}", "a".repeat(8190), "\0\u{03bb}".repeat(40_000));
+        live.record_text(&text).unwrap();
+        live.finish("success").unwrap();
+        let serialized = std::fs::read_to_string(&path).unwrap();
+        assert!(serialized.lines().all(|line| line.len() < 65_536));
+        assert!(!serialized.contains("secret"));
+        let mut follower = JournalFollower::open(&path).unwrap();
+        let observed: String = follower
+            .poll()
+            .unwrap()
+            .iter()
+            .filter(|record| record.event["type"] == "text")
+            .map(|record| record.event["data"].as_str().unwrap())
+            .collect();
+        assert_eq!(observed, text.replace("secret", "[REDACTED]"));
+        assert!(follower.is_finished());
+    }
 
     #[test]
     fn all_diagnostic_values_are_redacted_without_corrupting_envelopes() {

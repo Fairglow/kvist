@@ -26,14 +26,28 @@ is inferred from context-window metadata.
 
 Long-running protected authoring removes only the hard-coded generation
 counter cutoff. `TurnBudget` and optional token accounting remain authoritative
-across guidance. Parse role wall budgets up to 30 days, retain the five-minute
-default, and clip each runner request to its separate 24-hour maximum.
+across guidance. Parse role wall budgets up to 30 days, default to two hours,
+and clip each runner request to its separate 24-hour maximum.
 No configuration or existing approval is silently broadened.
 Use Sav's session preflight to retain compacted conversation state rather than
 rebuilding every subsequent request from unbounded pre-compaction history.
 Report actual guidance delivery from the host adapter and renew model attempts
 only after that delivery. Clip `TurnBudget::model_deadline` to 24 hours before
 constructing either transport; the underlying task deadline stays unchanged.
+
+Default role output capture to 16 MiB, matching the public transport's maximum
+response size, and accept explicit values through that ceiling. Update generated
+configuration alongside in-memory defaults; do not rewrite existing user policy.
+Record effective wall/request/response limits before inference using a small
+synchronized diagnostic event, independent of streamed text. Explain that HTTP
+framing and reasoning count against bytes even when visible output is short.
+Keep journal record, tool payload and sandbox protocol bounds independent.
+After cross-delta redaction, split diagnostic text at UTF-8 boundaries into
+at most 8192-byte chunks after journal redaction and before serialization.
+Worst-case JSON escaping remains below the unchanged 64 KiB record bound.
+Oversized output remains terminal, with role-specific configuration/reapproval
+guidance in the persisted blocker. Generic protected authoring is not the
+clean-slate/source-blind compliance orchestration; do not claim otherwise.
 
 The agent configuration loader resolves the shared registry after parsing local
 role policy and retains immutable resolved profiles. Runtime callers select

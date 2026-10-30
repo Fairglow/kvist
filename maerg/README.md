@@ -130,8 +130,8 @@ path = "providers.toml"
 
 [agent.roles.developer]
 profile = "local-coder"
-timeout_seconds = 300
-max_output_bytes = 65536
+timeout_seconds = 7200
+max_output_bytes = 16777216
 ```
 
 Paths are relative to the containing configuration. An empty `[agent.registry]`
@@ -141,6 +141,17 @@ Disabled, unknown and malformed profiles fail closed. Registry reads never
 probe processes or endpoints. Selected typed backend data and source digests
 are pinned at load time; a loaded interactive model cannot change a task role.
 External coding agents cannot author protected tasks.
+
+Protected roles default to two hours per task and 16 MiB per HTTP response,
+sandbox-effect stdout/stderr capture, and retained agent log. HTTP response
+bytes include streaming JSON/SSE overhead and reasoning, not just visible text;
+`response_reserve` is a separate generated-token allowance. Explicit smaller
+limits remain effective. Shared native profiles default to a two-hour request
+deadline and accept `deadline_secs` through 86400; task time still clips requests.
+Changing role limits or registry settings requires policy review and
+`kvist task approve-policy` again. See
+[runtime limits and recovery](../docs/runtime-selection.md#response-byte-limits-and-slow-local-models)
+for existing configurations and failed attempts.
 
 Protected runs report a private `*.events.jsonl` path on stderr as execution
 starts. Inspect it independently with `skott --attach PATH`; detachment never
