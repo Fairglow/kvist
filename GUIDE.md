@@ -83,7 +83,7 @@ line-oriented REPL:
   theme, and other settings. Selecting a component from the menu is the same
   focus change as the `cd` builtin and pre-fills the component for subsequent
   commands.
-- **Run the Whole Component:** `task run-all` iterates the component's tasks in
+- **Run the Whole Component:** bare `task run COMPONENT` iterates the component's tasks in
   dependency order, running each ready task, and stops when the component is
   complete, when a task becomes blocked, or when a task reaches an
   awaiting-decision point. It never auto-resolves a decision or unblocks a
@@ -105,7 +105,7 @@ line-oriented REPL:
   (`.kvist/session.log`, inspect with `journal`) and persistent editor history
   (`.kvist/history`, inspect with `history`).
 - **Workflow Builtins:** `cd [COMPONENT]` sets the current component, `tasks`
-  lists task status, `run` executes the next ready task, `last` shows recent
+  lists task status, `run` executes ready work continuously, `last` shows recent
   agent runs, `locks [clean]` inspects or removes stale locks, and `help` lists
   everything.
 - **Cancellable Execution:** `Ctrl+C` during a running command cancels the
@@ -117,8 +117,7 @@ Typical session:
 ```text
 kvist (main) ❯ cd maerg          # remember the component
 kvist maerg/ (main) ❯ tasks      # status of maerg's tasks
-kvist maerg/ (main) ❯ run        # execute the next ready task
-kvist maerg/ (main) ❯ run-all    # run the whole component to completion/blocker
+kvist maerg/ (main) ❯ task run maerg # maerg is visibly prefilled; run to approval/blocker
 kvist maerg/ (main) ❯ last       # recent agent runs with log links
 ```
 
@@ -394,42 +393,58 @@ This cryptographically signs an approval record locking the test command, runner
 ### 5.2 Running a Task
 
 ```bash
-# Run the next ready task
+# Run all dependency-ready work, checkpointing complete items
 kvist task run .
 
 # Run a specific task with real-time output streaming
 kvist task run . implement-code --stream
 
-# Run every task of one TODO item (item prefix)
-kvist task run . sa-02
-
-# Run every uncompleted task of the component, sequentially,
-# stopping at the first failure
-kvist task run . all
 ```
 
-`TASK` selects what runs: an exact task ID, an item prefix selecting every
-task of that item (e.g. `sa-02`), or `all`. Omit it to be offered the next
-ready task (confirmed interactively; non-interactive contexts fail clearly).
+An exact `TASK` runs only that task if its prerequisites are fulfilled.
+Omit it for continuous execution without confirmation. There are no batch
+selectors or separate whole-component command.
 
 ### 5.3 Automated Unattended Task Loop
 
 The simple form runs the whole component's remaining work in one command:
 
 ```bash
-kvist task run . all
+kvist task run .
 kvist status .
 ```
 
-For explicit per-task control (e.g. to inspect between runs):
-
-```bash
-while task_id="$(kvist task next .)" && [ "$task_id" != "no ready task" ]; do
-  echo "Executing task: $task_id"
-  kvist task run . "$task_id" || exit $?
-done
-kvist status .
+```toml
+[task_run]
+commit = "item" # default; alternatives: "component" or "manual"
 ```
+
+Each default checkpoint waits for every queued stage of its item, including
+its tests, implementation and any reviews. Items use a shared task-ID prefix
+before the lifecycle suffix and must be contiguous in the queue. Automatic
+commits require an existing attached Git HEAD and clean overlapping paths;
+unrelated staged work is preserved and nothing is pushed. Commits are
+**unaccepted checkpoints**, not human approval.
+If Git signing is enabled, prepare the signing helper for unattended use.
+Git/signing commands honor cancellation and stop after five minutes instead of
+hanging indefinitely; signing policy is never bypassed.
+These raw-byte checkpoints disable Git hooks and clean filters; approved task
+verification runs separately.
+
+Work stops at a decision, blocker, cancellation, failed checkpoint, or final
+component approval. Fix a reported signing/Git failure and repeat the same bare
+run to retry the checkpoint without rerunning completed tasks. Failed or
+interrupted effects retain existing explicit recovery/disposition requirements.
+Changing commit policy requires `kvist task approve-policy`.
+The final pending-approval record and independent review reports are included
+in the last checkpoint. `component accept` still accepts intent only.
+There is not yet a dedicated component implementation-approval command.
+The component argument is required; shell focus inserts it visibly instead of
+silently supplying it when omitted. Independent reviews retain task logs and
+live diagnostics; their opt-in controls permit cancellation but reject guidance
+to preserve clean-slate review boundaries.
+After manual edits during a pause, inspect verification and review freshness:
+completed reviews are not automatically invalidated or rerun.
 
 ### 5.4 Replaying Execution Trajectories
 
@@ -480,7 +495,7 @@ Type these directly at the `kvist` prompt (no `kvist` prefix needed):
 | :------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------- |
 | `cd [COMPONENT]`                 | Set the current component: `run`, `tasks`, completion, and dispatched commands like `task next` / `component accept` all target it. |
 | `tasks [COMPONENT] [--status S]` | List tasks with status; filter by `pending`, `in-progress`, `blocked`, `awaiting-decision`, `completed`.                            |
-| `run [COMPONENT] [TASK]`         | Run a task (exact ID, item prefix, or `all`), or the next ready task when omitted.                                                  |
+| `run COMPONENT [TASK]`         | Run an exact task, or continuous component work when TASK is omitted. |
 | `last [COUNT]`                   | Show recent agent runs with tokens and log links.                                                                                   |
 | `history [COUNT]`                | Show recent editor history lines.                                                                                                   |
 | `journal`                        | Show the append-only session journal.                                                                                               |
@@ -522,7 +537,7 @@ current directory.
 | :--------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `kvist task next [DIR]`                                    | Print the next ready task ID.                                                                                                                                             |
 | `kvist task approve-policy [DIR]`                          | Cryptographically approve the sandbox test-execution policy.                                                                                                              |
-| `kvist task run [DIR] [TASK]`                              | Execute inside the Bubblewrap sandbox: one task (exact ID), a TODO item (prefix), or `all` uncompleted tasks sequentially (stops at the first failure).                   |
+| `kvist task run DIR [TASK]`                              | Run an exact task, or omit TASK for continuous dependency-ready work and complete-item checkpoint commits; stop for approval, decisions or blockers. |
 | `kvist task log <DIR> <TASK>`                              | Display the execution log of a completed or failed task.                                                                                                                  |
 | `kvist task replay <SESSION>`                              | Step through a structured execution trajectory journal.                                                                                                                   |
 | `kvist task unlock [DIR]`                                  | Release stale or orphaned component execution locks.                                                                                                                      |

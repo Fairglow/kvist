@@ -218,9 +218,14 @@ pub fn normalize_component_argument(
     } else {
         path
     };
+    let project_relative = if project_relative.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalize_component_path(project_relative)?
+    };
     let component_relative = project_relative
         .strip_prefix(component_root)
-        .unwrap_or(project_relative);
+        .unwrap_or(&project_relative);
     if component_relative.as_os_str().is_empty() {
         Ok(PathBuf::from("."))
     } else {
@@ -228,15 +233,19 @@ pub fn normalize_component_argument(
     }
 }
 
-/// Validates a component-root-relative path: it must be `.` or contain only
-/// normal path segments.
+/// Normalizes a component-relative path, allowing leading `./` but never
+/// resolving parent traversal or an absolute path.
 pub fn normalize_component_path(path: &Path) -> Result<PathBuf> {
     if path == Path::new(".") {
         return Ok(PathBuf::from("."));
     }
-    if path.as_os_str().is_empty()
+    let normalized = path
+        .components()
+        .filter(|component| *component != Component::CurDir)
+        .collect::<PathBuf>();
+    if normalized.as_os_str().is_empty()
         || path.is_absolute()
-        || !path
+        || !normalized
             .components()
             .all(|component| matches!(component, Component::Normal(_)))
     {
@@ -244,7 +253,7 @@ pub fn normalize_component_path(path: &Path) -> Result<PathBuf> {
             path: path.to_path_buf(),
         });
     }
-    Ok(path.to_path_buf())
+    Ok(normalized)
 }
 
 #[cfg(test)]
@@ -253,6 +262,43 @@ mod tests {
 
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn component_paths_normalize_prefill_spelling_without_resolving_parents() {
+        assert_eq!(
+            normalize_component_path(Path::new("./-component")).unwrap(),
+            PathBuf::from("-component")
+        );
+        for invalid in ["", "..", "./../outside", "component/../other"] {
+            assert!(
+                normalize_component_path(Path::new(invalid)).is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_component_arguments_share_absolute_and_prefixed_resolution() {
+        let project = tempdir().unwrap();
+        for path in [
+            PathBuf::from("./-component"),
+            PathBuf::from("./src/-component"),
+            project.path().join("src/-component"),
+        ] {
+            assert_eq!(
+                normalize_component_argument(&path, project.path(), Path::new("src"),).unwrap(),
+                PathBuf::from("-component")
+            );
+        }
+        assert!(
+            normalize_component_argument(
+                &project.path().join("../outside"),
+                project.path(),
+                Path::new("src"),
+            )
+            .is_err()
+        );
+    }
 
     fn project_at(dir: &Path) {
         fs::write(dir.join("kvist.toml"), "schema_version = 1\n").unwrap();

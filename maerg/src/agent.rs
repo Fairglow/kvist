@@ -15,8 +15,10 @@ use controls::RunControls;
 mod redaction;
 use redaction::StreamRedactor;
 mod accounting;
+mod cancellation;
 mod context;
 mod retry;
+pub(crate) mod review;
 mod startup;
 use accounting::TokenBudget;
 use retry::ModelRetry;
@@ -1106,6 +1108,7 @@ fn execute_agent_inner(
     cancellation: &CancellationToken,
     allow_control: bool,
 ) -> Result<AgentRunResult> {
+    let _signals = cancellation::SignalCancellation::start(cancellation)?;
     let choice = select_model_choice(profile, request.role, None)?;
     eprintln!(
         "{}",

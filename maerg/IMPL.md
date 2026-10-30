@@ -5,6 +5,77 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped continuous-execution observations - 2026-10-30
+
+The independent clean-slate source/test observation is retained in
+[`continuous-execution-observation.md`](../docs/reviews/continuous-execution-observation.md).
+For scheduling, checkpoints, review orchestration and shell prefill, this scoped
+record replaces older behavior descriptions below; it does not certify
+compliance or acceptance. Selected observations from that record:
+
+- `task run COMPONENT_DIR [TASK_ID]` requires the component argument; an exact
+  ID runs only that task, with no item-prefix or special `all` expansion.
+  Omitting the ID enters continuous execution.
+- Continuous execution holds one component operation lock, re-reads the queue,
+  and chooses the first declared pending task whose direct and transitive
+  dependencies are completed.
+- Successful implementation work undergoes sandboxed verification. Continuous
+  mode then marks execution completed without human finalization; an explicitly
+  selected implementation task instead remains pending human disposition.
+- Item commits follow completion of all inferred members; component policy
+  commits only at final completion; manual policy skips Git cleanliness
+  preflight and automatic commits, but still inventories owned files.
+- Owned paths are only component `src/**`, `tests/**`, `TODOS.yaml`, `IMPL.md`,
+  and `.kvist/continuous-reviews/**`; the ledger, attempt journals, live logs,
+  intent files, and unrelated staging are outside checkpoint ownership.
+- Security tasks receive a source/test audit frame. Compliance tasks first
+  request source-only observations, persist an attempt-specific observation,
+  replace `IMPL.md` with that observation record, then request comparison using
+  local intent, root/optional parent contract, the new record, and verification
+  evidence, not a raw source field.
+- Focus insertion edits the real Reedline buffer using shared component-slot
+  parsing; explicit/partial values win, deletion is remembered until the next
+  submission, quoting and dash-leading paths are handled.
+- Paused edits do not automatically invalidate completed reviews or rerun
+  verification. Source frames omit root build inputs; binary content is
+  digest-only. Model truth and every abrupt-crash interval remain unverified.
+
+The initial observation also identified diagnostic-escaping and unbounded
+checkpoint-process gaps. Corrections and their independent follow-up evidence
+are recorded separately; the initial findings are preserved rather than
+represented as a clean certification.
+
+The fresh source-only
+[`correction observation`](../docs/reviews/continuous-execution-corrections-observation.md)
+records bounded checkpoint supervision, decoded/escaped diagnostic redaction,
+capacity-aware review framing, terminal new-work baselines and explicit path
+dispatch. Its whitespace-only validation finding was subsequently reproduced;
+the separate fresh
+[`predicate observation`](../docs/reviews/continuous-redaction-predicate-observation.md)
+describes the corrected rejection while retaining nonblank literal bytes.
+Administrative path announcements, approximate token accounting, escaped
+descendants and non-exhaustive crash recovery remain disclosed limitations.
+
+Implementation-agent execution, separately attributed: the final Maerg package
+suite passed 914 tests with seven existing ignores and no failures.
+Workspace format checking and strict all-target Maerg Clippy passed. The release
+binary was rebuilt and `component validate maerg` passed. Real PTY assertions
+submitted both a visibly prefilled dash-leading child component and an explicit
+absolute child override, reaching the missing-policy-approval gate without task
+effects. Source observation and source-blind comparison remain separate from
+these execution results; no real provider task, acceptance, installed-binary
+replacement or publication is implied.
+
+The separate
+[`source-blind comparison`](../docs/reviews/continuous-execution-comparison.md)
+retains one concrete discrepancy for human arbitration: design wording promises
+group-wide reaping, while observations establish process-group termination and
+direct-child reaping only. It proves neither a surviving live helper nor a
+runtime hang. Coverage gaps, evidence freshness after paused edits and
+administrative-path redaction ambiguity remain explicit. The queued protected
+security/compliance tasks remain pending; these diagnostic records do not
+fabricate their execution, acceptance or receipts.
+
 ## Scoped runtime-budget observations - 2026-10-30
 
 Independent clean-slate `maerg-budget-observer` read only scoped current

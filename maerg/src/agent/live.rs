@@ -85,7 +85,7 @@ impl LiveRun {
     }
 }
 
-fn redact_values(value: &mut serde_json::Value, redactions: &[String]) {
+pub(super) fn redact_values(value: &mut serde_json::Value, redactions: &[String]) {
     match value {
         serde_json::Value::String(text) => *text = redact(text, redactions),
         serde_json::Value::Array(values) => {

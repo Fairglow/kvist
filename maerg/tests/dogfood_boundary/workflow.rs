@@ -29,21 +29,18 @@ fn assert_attempt_is_fenced_and_unfinalized(project: &std::path::Path) {
 }
 
 #[test]
-fn supervised_cli_never_auto_executes_a_suggested_task_and_exposes_recovery_and_finalization() {
+fn continuous_cli_requires_approved_execution_and_exposes_recovery_and_finalization() {
     let project = create_target_project("pending");
 
-    // A blank-task run must not auto-execute in a non-interactive context:
-    // it offers the next ready task, which requires an interactive terminal to
-    // confirm, so it fails and requests an explicit TASK_ID instead.
     let missing_task = run_kvist(project.path(), &["task", "run", "."]);
     assert!(
         !missing_task.status.success(),
-        "supervised execution must not automatically select a task"
+        "continuous execution must retain execution-policy approval"
     );
     assert!(
-        output_text(&missing_task).contains("TASK_ID")
-            || output_text(&missing_task).contains("task id"),
-        "missing-task diagnostic must request an explicit task ID: {}\ndoctor: {}",
+        output_text(&missing_task).contains("policy")
+            || output_text(&missing_task).contains("approval"),
+        "continuous execution must refuse unapproved policy, not ask to schedule a task: {}\ndoctor: {}",
         output_text(&missing_task),
         output_text(&run_kvist(project.path(), &["doctor"]))
     );
@@ -62,7 +59,7 @@ fn supervised_cli_never_auto_executes_a_suggested_task_and_exposes_recovery_and_
     let help = output_text(&run_help);
     assert!(
         help.contains("[TASK_ID]"),
-        "TASK_ID must be optional (a suggestion is offered when it is omitted): {}",
+        "TASK_ID must be optional for continuous execution: {}",
         help
     );
     assert!(

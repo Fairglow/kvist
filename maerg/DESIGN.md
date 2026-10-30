@@ -290,11 +290,11 @@ Terminal diagnostics retain phase, selected model/endpoint, actual attempts,
 elapsed time, last cause, and whether attempts, wall budget or a persistent error
 stopped retries. Generation retries never replay prior tool effects.
 
-The shell resolves/confirms an omitted task before opening its working stage.
+The shell passes omitted task selection through to continuous execution.
 Streaming commands use their own durable progress rather than a background
 spinner competing for the cursor. Result rows use the existing soft-wrapping
 box renderer, not truncation. Task selection checks unresolved attempt evidence
-before suggesting another task.
+before scheduling another task.
 
 When agent execution returns an error, append failed `agent-execution` evidence
 before transitioning to blocked. Only the lock-owning run may exclude its own
@@ -524,7 +524,8 @@ implementation until the decision is resolved. Only decisions that substantially
 alter the implementation and are not already covered by the component's
 REQUIREMENTS, CONTRACT, DESIGN, or TODOS are worthy of intervention; trivial
 issues do not block and are left for the post-hoc advisory comparison of IMPL.md
-with the existing intent. Human finalization gates completion and commit, but the
+with the existing intent. Human finalization gates explicit acceptance, not
+continuous execution completion or policy-controlled checkpoint commits, but the
 run itself proceeds unattended between turns; the awaiting-decision state is the
 sole in-run blocking mechanism for impactful, uncovered decisions. The running
 task holds this status while the component is paused; it is a task-level state
@@ -1068,7 +1069,7 @@ and the command surface, reachable by a shortcut and dismissible. The content
 is the same closed help topic set as `kvist help` and the shell's `help`
 builtin, so it cannot drift.
 
-**Run the whole component.** `task run-all [COMPONENT_DIR]` iterates the
+**Run the whole component.** Bare `task run COMPONENT_DIR` iterates the
 component's tasks in dependency order, running each ready task, and stops when
 the component is complete, when a task becomes blocked, or when a task reaches
 an awaiting-decision point. It reuses the existing `task run` selection and
@@ -1078,6 +1079,78 @@ task; it pauses and reports the exact state and the command that resolves it,
 leaving durable task state for explicit finalize or recovery. The loop is a
 pure function of the queue state and the per-task run result, so the stop
 conditions are unit-testable without a terminal.
+
+Continuous execution uses one component operation lock across scheduling,
+task execution and checkpoint recording. The task executor accepts this owned
+lock rather than reacquiring it. Explicit task execution remains single-task.
+Implementation verification records execution completion and moves continuous
+tasks to completed without creating human acceptance records.
+
+The continuous ledger captures a bounded, no-link inventory of approved
+`src/` and `tests/`, `TODOS.yaml`, `IMPL.md` and host review reports. Item IDs
+are derived from exact lifecycle suffixes; matching item prefixes are resolved
+longest-first and a task cannot belong ambiguously. A completed item's
+checkpoint is written before Git mutation. An isolated index starts at the
+recorded HEAD, stages only exact inventory differences, preserves modes and
+deletions, creates a commit honoring signing, then advances the attached branch
+with compare-and-swap. A prepared commit ID is retained before branch advance;
+recovery recognizes exactly that commit rather than creating a duplicate.
+Only committed paths are synchronized in the real index under its lock, so
+unrelated staging survives. Index/HEAD/worktree drift aborts explicitly.
+Policy changes require execution reapproval and cannot silently rewrite a
+retained run. Component/manual policies retain the same scheduling semantics.
+An authenticated awaiting-approval ledger with no pending checkpoint may be
+replaced only when the authored definition changes and unfinished work exists.
+Fresh-run cleanliness/HEAD checks run again before replacing it, permitting a
+new approved commit policy without losing a pending transaction or replaying
+completed tasks. Previous versioned checkpoints and per-attempt reports remain
+unaccepted evidence.
+Checkpoint filesystem/index inspection currently requires Linux/procfs and
+enforces bounded regular files, inventories and indexes; failures are explicit,
+not partially staged checkpoints.
+Checkpoint subprocesses own an isolated process group and a scoped watchdog;
+deadline/cancellation kills and reaps that owned group, unblocks transaction
+pipes, and retains exact prepared/ref/index recovery state. Each Git/signing
+command has a five-minute deadline; test hooks may shorten that deadline.
+Snapshots persist metadata/digests, not source bytes. The authenticated ledger
+has a separate 192 MiB bound to accommodate two snapshots and prepared Git path
+changes at the inventory's worst-case escaped-path bound; source-file and
+canonical attempt-journal bounds are unchanged.
+
+Review requests have no authoring tools. A security reviewer receives source
+and test evidence only. A documenter receives source/test evidence with no
+intent, previous IMPL, task definition or history; its observed record becomes
+IMPL. A fresh comparator receives local intent and observed/test evidence but
+no source. Bounded structured responses explicitly identify decision points;
+errors are recorded as blockers, not interpreted as successful reviews.
+The final ledger state is awaiting-approval, never accepted.
+Oversized review inputs are split at UTF-8 boundaries. Each request is fresh;
+frame sizes follow configured model context or a provisional 32,768-token
+capacity, with reserve/headroom and the existing 8 MiB evidence ceiling.
+source-only fragments never receive intent. Source-blind intent fragments keep
+the common observation/test frame. Bounded fragment reports are synthesized
+hierarchically with monotonic size reduction and OR-preserved decision flags.
+This is explicitly aggregate observation, not a completeness certification.
+Each review owns a standard bounded redacted task log and live journal.
+ObservedTransport records actual requests/results/retries; streaming uses the
+normal redactor. An explicitly enabled private socket permits cancellation but
+rejects guidance without retaining its text or changing model context.
+Parse the shared-registry role's `redaction_values` array through the existing
+bounded nonblank/unique policy validation; reject simultaneous policy forms.
+Review redaction patterns include literal and JSON-escaped values. Redact
+diagnostic values before serialization so escaping neither leaks secrets nor
+corrupts JSON, and use the same patterns for stream/journal redactors.
+A scoped 25 ms interrupt watcher bridges Ctrl-C into each attempt's token,
+including silent providers; it is stopped and joined on every return.
+The component loop checks interrupts before recovery and between tasks.
+Task run and the `run` builtin require the visible component argument, so
+deleting a prefill never silently restores focus/cwd execution.
+Shell task dispatch resolves explicit component arguments against the shell's
+project using the same resolver as headless CLI dispatch. Lexical leading `./`
+is normalized before component-root prefix handling; absolute in-project paths
+work, but parent traversal is never resolved or accepted.
+Editor suspension preserves the buffer and cursor but resets earlier undo
+history; per-submission tracking prevents reinsertion after deletion/undo.
 
 ### Guided help and actionable status guidance
 

@@ -526,13 +526,6 @@ pub enum KvistError {
         /// Blocking condition.
         reason: String,
     },
-    /// A task run without an explicit task ID suggests the next ready task,
-    /// which must be confirmed interactively before it runs; this context
-    /// cannot confirm, so nothing is executed.
-    #[error(
-        "task run without a TASK_ID suggests the next ready task, which requires an interactive terminal to confirm before it runs; pass an explicit TASK_ID to run without prompting"
-    )]
-    TaskRunSuggestionNotInteractive,
     /// No task in the selected component queue is ready to run.
     #[error(
         "no ready tasks in the queue for component `{component}`\n\n\

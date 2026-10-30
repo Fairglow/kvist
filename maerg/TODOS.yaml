@@ -4707,57 +4707,60 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "run-all-write-tests"
-    title: "write_tests: pin the whole-component run loop"
-    description: "Write failing tests that `task run-all [COMPONENT_DIR]` iterates the component's tasks in dependency order, running each ready task, and stops when the component is complete, when a task becomes blocked, or when a task reaches an awaiting-decision point; that it never auto-resolves a decision or unblocks a blocked task; and that it pauses and reports the exact state and the command that resolves it, leaving durable task state for explicit finalize or recovery."
-    context: "The existing `task run … all` runs every uncompleted task sequentially and stops at the first failure, but does not iterate in dependency order or stop at a blocker or decision. The new REQ-RUN-COMPONENT makes a whole-component run mandatory."
+  - id: "continuous-run-write-tests"
+    title: "write_tests: pin continuous runs, checkpoints and component prefill"
+    description: "Write failing tests for bare run scheduling across complete lifecycle items without confirmation; exact single-task selection; prerequisite, decision and blocker stops; item/component/manual checkpoint policy; unrelated staging preservation and interrupted checkpoint retry; fresh independent review contexts; and editable component prefill."
+    context: "Bare run replaces the obsolete separate whole-component command. Execution completion is not acceptance."
     purpose: "Establish executable evidence for the whole-component run loop and its stop conditions before implementation."
-    expected_outcome: "The new tests fail against the current `task run … all` behavior and pass after `task run-all` is implemented."
+    expected_outcome: "Regression tests define continuous execution, scoped checkpoint recovery and visible editable prefill."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
       - "REQUIREMENTS.md#REQ-RUN-COMPONENT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-28T08:23:13Z"
-      updated_at: "2026-10-28T08:23:13Z"
-      completed_at: null
+      updated_at: "2026-10-30T09:41:48Z"
+      completed_at: "2026-10-30T09:41:48Z"
     blocked_reason: null
     recovery_state: null
-  - id: "run-all-implement-code"
-    title: "implement_code: add the whole-component run command"
-    description: "Add `task run-all [COMPONENT_DIR]` that iterates the component's tasks in dependency order, running each ready task, and stops when the component is complete, when a task becomes blocked, or when a task reaches an awaiting-decision point. Reuse the existing `task run` selection and execution path for each task so the loop respects the same locking, policy-approval, and evidence guarantees. Never auto-resolve a decision or unblock a blocked task; pause and report the exact state and the command that resolves it, leaving durable task state for explicit finalize or recovery. The loop is a pure function of the queue state and the per-task run result."
-    context: "The failing tests from run-all-write-tests define the expected loop and stop conditions; the existing `task run` selection and execution path is reused."
+  - id: "continuous-run-implement-code"
+    title: "implement_code: continuous execution with item checkpoints"
+    description: "Implement bare run as an exclusive, dependency-aware continuous workflow with approval-bound item/component/manual commit frequency, durable pending checkpoint recovery, source-only observation and source-blind comparison, final awaiting-approval state and actual editable selected-component prefill."
+    context: "The preceding tests define workflow boundaries; human acceptance is never invoked automatically."
     purpose: "Deliver a whole-component run that iterates tasks to completion or an explicit blocker or decision."
-    expected_outcome: "All run-all-write-tests pass; `task run-all` iterates the component's tasks in dependency order and stops at completion, a blocker, or a decision."
+    expected_outcome: "Continuous runs checkpoint complete items separately and stop only at final approval or a genuine blocker/decision."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
-      - "run-all-write-tests"
+      - "continuous-run-write-tests"
     requirements:
       - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
       - "REQUIREMENTS.md#REQ-RUN-COMPONENT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-28T08:23:13Z"
-      updated_at: "2026-10-28T08:23:13Z"
-      completed_at: null
+      updated_at: "2026-10-30T09:41:48Z"
+      completed_at: "2026-10-30T09:41:48Z"
     blocked_reason: null
     recovery_state: null
-  - id: "run-all-security-audit"
-    title: "security_audit: inspect the whole-component run loop"
-    description: "Independently review the run-all loop for untrusted-input handling (queue-derived task selection without injection), locking and policy-approval preservation (the loop reuses the `task run` guarantees and never broadens a grant), and no auto-resolution (the loop never unblocks a blocked task or resolves a decision, leaving durable state for explicit finalize or recovery)."
+  - id: "continuous-run-security-audit"
+    title: "security_audit: inspect continuous execution and checkpoint authority"
+    description: "Independently inspect scope isolation, approval binding, no automatic acceptance, ledger input validation, exact Git path handling, concurrent-change refusal, index preservation, independent context boundaries and interrupted-run fencing."
     context: "The changed paths iterate the queue and run tasks; internal/implementer review — the independent gate is the compliance-review task."
     purpose: "Preserve independent confirmation that the whole-component run loop introduces no authority change or unsafe auto-resolution."
     expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
     kind: security-audit
     status: pending
     depends_on:
-      - "run-all-implement-code"
+      - "continuous-run-implement-code"
     requirements:
       - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
       - "REQUIREMENTS.md#REQ-RUN-COMPONENT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
@@ -4766,18 +4769,19 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "run-all-compliance-review"
-    title: "compliance_review: compare the whole-component run against intent"
-    description: "In a clean-slate, source-blind context, derive IMPL.md from the changed source and test evidence, then compare REQ-RUN-COMPONENT and the Provided-interfaces contract against IMPL.md and test evidence, reporting any discrepancy for explicit human arbitration."
+  - id: "continuous-run-compliance-review"
+    title: "compliance_review: compare continuous execution against intent"
+    description: "Derive IMPL.md from changed source and test evidence in a clean-slate source-only context. In a separate source-blind context, compare REQ-CONTINUOUS-EXECUTION, REQ-RUN-COMPONENT and the Provided-interfaces contract against that observation and test evidence, reporting discrepancies for explicit human arbitration."
     context: "The implementer must not certify its own work; this task is the independent gate for the whole-component run."
     purpose: "Independently verify that the implemented whole-component run satisfies the updated requirements and contract before acceptance."
     expected_outcome: "A compliance review record with the compared artifacts, observed evidence, and any discrepancies for arbitration."
     kind: compliance-review
     status: pending
     depends_on:
-      - "run-all-security-audit"
+      - "continuous-run-security-audit"
     requirements:
       - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
       - "REQUIREMENTS.md#REQ-RUN-COMPONENT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:

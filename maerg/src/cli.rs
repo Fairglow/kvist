@@ -466,22 +466,14 @@ pub enum TaskCommand {
     },
     /// Run an external AI agent to execute a task, tracking progress and token usage.
     ///
-    /// TASK_ID selects what runs: an exact task ID, an item prefix selecting
-    /// every task of that item (e.g. `sa-02`), or `all` for every uncompleted
-    /// task of the component, run sequentially and stopping at the first
-    /// failure. When omitted, the next ready task is suggested and run only
-    /// after an interactive confirmation (a non-interactive context fails
-    /// instead of auto-executing).
+    /// An exact TASK_ID runs only that task. Without it, execute ready tasks
+    /// continuously, checkpointing complete items until final approval,
+    /// a decision, or a blocker. No confirmation or `all` selector is needed.
     Run {
-        /// Component directory; defaults to the component containing the
-        /// current directory.
+        /// Explicit component directory; the interactive shell prefills its focus.
         #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: Option<PathBuf>,
-        /// Exact task ID, an item prefix selecting every task of that item,
-        /// or `all` (every uncompleted task, sequentially, stopping at the
-        /// first failure); when omitted, the next ready task is suggested and
-        /// run only after an interactive confirmation (a non-interactive
-        /// context fails instead of auto-executing).
+        component_dir: PathBuf,
+        /// Exact task ID; omit to run component work continuously.
         #[arg(value_name = "TASK_ID")]
         task_id: Option<String>,
         /// Optional flag to stream agent stdout and stderr directly to the console.
@@ -1062,7 +1054,7 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
-                let component = project.resolve_component(component_dir.as_deref())?;
+                let component = project.resolve_component(Some(&component_dir))?;
                 let message = task_commands::run_task_or_item_with_controls(
                     &project.project_dir,
                     &component,
@@ -1600,7 +1592,7 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
-                let component = project.resolve_component(component_dir.as_deref())?;
+                let component = project.resolve_component(Some(&component_dir))?;
                 task_commands::run_task_or_item_with_controls(
                     &project.project_dir,
                     &component,
@@ -2533,7 +2525,7 @@ mod tests {
             panic!("expected task run command");
         };
 
-        assert_eq!(component_dir, Some(PathBuf::from("src")));
+        assert_eq!(component_dir, PathBuf::from("src"));
         assert_eq!(task_id, Some("task-1".to_owned()));
         assert!(!stream);
     }
@@ -2556,7 +2548,7 @@ mod tests {
             panic!("expected task run command");
         };
 
-        assert_eq!(component_dir, Some(PathBuf::from("src")));
+        assert_eq!(component_dir, PathBuf::from("src"));
         assert_eq!(task_id, None);
         assert!(!stream);
     }
@@ -2579,9 +2571,14 @@ mod tests {
             panic!("expected task run command");
         };
 
-        assert_eq!(component_dir, Some(PathBuf::from("src")));
+        assert_eq!(component_dir, PathBuf::from("src"));
         assert_eq!(task_id, Some("task-1".to_owned()));
         assert!(stream);
+    }
+
+    #[test]
+    fn task_run_requires_an_explicit_component() {
+        assert!(Cli::try_parse_from(["kvist", "task", "run"]).is_err());
     }
 
     #[test]
@@ -2713,18 +2710,17 @@ mod tests {
     }
 
     #[test]
-    fn task_run_help_documents_the_multi_task_specifications() {
+    fn task_run_help_documents_continuous_and_exact_task_execution() {
         let error =
             Cli::try_parse_from(["kvist", "task", "run", "--help"]).expect_err("help exits");
         let help = error.to_string();
-        assert!(help.contains("item prefix"), "help missing item prefix");
-        assert!(help.contains("`all`"), "help missing `all`");
+        assert!(!help.contains("an item prefix"));
         assert!(
-            help.contains("stopping at the first failure"),
-            "help missing sequential-stop semantics"
+            help.contains("continuously"),
+            "help missing continuous execution semantics"
         );
         assert!(
-            help.contains("exact task ID"),
+            help.contains("Exact task ID"),
             "help missing exact task ID form"
         );
     }

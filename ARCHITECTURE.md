@@ -164,6 +164,14 @@ digest-bound acceptance set and maerg-written workflow evidence. It preserves
 unrelated worktree and index state, never pushes, and remains recoverable when
 commit creation fails.
 
+**Continuous component work:** bare `task run COMPONENT` schedules ready tasks
+iteratively without confirmation. Execution completion unlocks dependencies
+but does not record human acceptance. All queued stages of an item finish
+before its checkpoint; test, implementation and review stages are grouped
+when declared together. Local checkpoint commits are explicitly unaccepted work. The final
+component state awaits human approval. A durable, exclusive run ledger binds
+item baselines, effects and pending commits so interruption never implies replay.
+
 **Security and authority:** model tool intent and repository content are
 untrusted proposals. Kvist owns task policy, typed path and network grants,
 approved resource and credential references, execution-tier selection,
@@ -248,9 +256,9 @@ while the stable text and JSON report forms remain unchanged for scripts.
 The immediate prerequisite risks are repository-layout migration, explicit
 attempt recovery, the production Bubblewrap runner, typed sandbox grants,
 mediated dependency acquisition, offline vendored builds, supervised
-finalization, and exact accepted-change Git commits. Unattended execution remains disabled until
-private workspaces and conflict-checked promotion are complete and
-independently reviewed. Jujutsu commit automation, advisory-review and
+finalization, and exact accepted-change Git commits. Continuous supervised
+work is permitted inside existing approved scopes; autonomous acceptance and
+unattended promotion remain disabled. Jujutsu commit automation, advisory-review and
 project-level acceptance automation, remote model brokering, observed-intent
 proposal and comparison, contract-clause traceability, general cross-component
 contract graph resolution, schema-compatibility analysis, architecture-model

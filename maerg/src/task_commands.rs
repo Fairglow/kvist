@@ -4,7 +4,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::{self, BufRead, IsTerminal, Read, Write},
+    io::{self, BufRead, Read, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -27,6 +27,9 @@ use crate::{
     },
     vcs::VcsArtifactState,
 };
+
+mod checkpoint;
+mod continuous;
 
 /// Selects the first ready task in declared queue order, using the same
 /// definition as the overview, the shell, and the blank-task `task run`
@@ -4325,7 +4328,17 @@ fn read_bounded_scope_file(
     initial_metadata: &fs::Metadata,
     budget: &mut ScopeHashBudget,
 ) -> Result<Vec<u8>> {
-    if initial_metadata.len() > MAX_SCOPE_FILE_BYTES {
+    let bytes = read_bounded_regular_file(path, initial_metadata, MAX_SCOPE_FILE_BYTES)?;
+    budget.charge(path, bytes.len())?;
+    Ok(bytes)
+}
+
+fn read_bounded_regular_file(
+    path: &Path,
+    initial_metadata: &fs::Metadata,
+    max_bytes: u64,
+) -> Result<Vec<u8>> {
+    if initial_metadata.len() > max_bytes {
         return Err(scope_hash_error(
             path,
             "approved write scope file exceeds the per-file byte limit",
@@ -4350,7 +4363,7 @@ fn read_bounded_scope_file(
     })?;
     if !opened_metadata.file_type().is_file()
         || opened_metadata.len() != initial_metadata.len()
-        || opened_metadata.len() > MAX_SCOPE_FILE_BYTES
+        || opened_metadata.len() > max_bytes
     {
         return Err(scope_hash_error(
             path,
@@ -4359,7 +4372,7 @@ fn read_bounded_scope_file(
     }
     let mut bytes = Vec::with_capacity(opened_metadata.len() as usize);
     (&mut file)
-        .take(MAX_SCOPE_FILE_BYTES + 1)
+        .take(max_bytes + 1)
         .read_to_end(&mut bytes)
         .map_err(|source| KvistError::Io {
             operation: "read bounded approved write scope",
@@ -4371,7 +4384,7 @@ fn read_bounded_scope_file(
         path: path.to_path_buf(),
         source,
     })?;
-    if bytes.len() as u64 > MAX_SCOPE_FILE_BYTES
+    if bytes.len() as u64 > max_bytes
         || final_metadata.len() != opened_metadata.len()
         || final_metadata.len() != bytes.len() as u64
     {
@@ -4380,7 +4393,6 @@ fn read_bounded_scope_file(
             "approved write scope file grew or changed while it was read",
         ));
     }
-    budget.charge(path, bytes.len())?;
     Ok(bytes)
 }
 
@@ -4419,6 +4431,26 @@ pub fn run_task_with_controls(
     task_id: &str,
     stream: bool,
     allow_control: bool,
+) -> Result<String> {
+    run_task_under_lock(
+        project_dir,
+        component_path,
+        task_id,
+        stream,
+        allow_control,
+        false,
+        None,
+    )
+}
+
+fn run_task_under_lock(
+    project_dir: &Path,
+    component_path: &Path,
+    task_id: &str,
+    stream: bool,
+    allow_control: bool,
+    continuous: bool,
+    inherited_lock: Option<&TaskLock>,
 ) -> Result<String> {
     let context = validate_context(project_dir, component_path)?;
     let config = crate::config::load(project_dir)?;
@@ -4478,9 +4510,18 @@ pub fn run_task_with_controls(
     )?;
 
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-    // This single lock covers selection, execution, evidence, and the terminal
-    // transition. It prevents a second runner from selecting the same ready task.
-    let lock = TaskLock::for_context(&context, task_id, &started_at)?;
+    let owned_lock = if inherited_lock.is_none() {
+        Some(TaskLock::for_context(&context, task_id, &started_at)?)
+    } else {
+        None
+    };
+    let lock = inherited_lock.or(owned_lock.as_ref()).ok_or_else(|| {
+        journal_error(
+            &context.component_dir,
+            "task execution has no operation lock",
+        )
+    })?;
+    lock.revalidate()?;
     let mut active_attempt = None;
     let result = (|| {
         let context = validate_context(project_dir, component_path)?;
@@ -4501,6 +4542,15 @@ pub fn run_task_with_controls(
 
         let task = &queue.tasks[task_index];
 
+        if task.status != TaskStatus::InProgress {
+            validate_transition(task, &queue.tasks, TaskStatus::InProgress, None)?;
+        } else if !is_runnable_task(task, &queue.tasks) {
+            return Err(journal_error(
+                &context.component_dir.join("TODOS.yaml"),
+                &format!("task `{task_id}` is not ready for execution"),
+            ));
+        }
+
         // 2. Transition task status to InProgress atomically (if not already InProgress)
         let pre_status = task.status;
         if task.status != TaskStatus::InProgress {
@@ -4508,7 +4558,7 @@ pub fn run_task_with_controls(
                 Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
             let _ = transition_locked(
                 &context,
-                &lock,
+                lock,
                 task_id,
                 TaskStatus::InProgress,
                 None,
@@ -4618,25 +4668,44 @@ pub fn run_task_with_controls(
         // The approved runner identity and capability-confirmed probe are passed
         // so a successful non-loopback turn can be authorized and applied as a
         // bounded authoring sandbox request.
-        let run_result = match crate::agent::execute_agent_with_controls(
-            agent_profile,
-            sandbox_config,
-            Some(&approved_runner),
-            Some(&sandbox_probe),
-            crate::agent::AgentExecutionRequest {
-                project_root: project_dir,
-                vcs_selection: config.vcs,
-                prompt: &prompt,
-                context_paths: &context_files,
-                read_only_mounts: &read_only_mounts,
-                target_dir: &context.component_dir,
-                task_id,
-                stream_output: stream,
-                role,
-                policy_identity: &policy_identity,
-            },
-            allow_control,
+        let execution = if matches!(
+            task.kind,
+            TaskKind::SecurityAudit | TaskKind::ComplianceReview
         ) {
+            continuous::execute_review(
+                &context,
+                &config,
+                task,
+                agent_profile,
+                role,
+                continuous::ReviewOptions {
+                    attempt_id: &attempt_id,
+                    stream,
+                    allow_control,
+                },
+            )
+        } else {
+            crate::agent::execute_agent_with_controls(
+                agent_profile,
+                sandbox_config,
+                Some(&approved_runner),
+                Some(&sandbox_probe),
+                crate::agent::AgentExecutionRequest {
+                    project_root: project_dir,
+                    vcs_selection: config.vcs,
+                    prompt: &prompt,
+                    context_paths: &context_files,
+                    read_only_mounts: &read_only_mounts,
+                    target_dir: &context.component_dir,
+                    task_id,
+                    stream_output: stream,
+                    role,
+                    policy_identity: &policy_identity,
+                },
+                allow_control,
+            )
+        };
+        let run_result = match execution {
             Ok(result) => result,
             Err(error) => {
                 let reason = redact_bounded(
@@ -4681,7 +4750,7 @@ pub fn run_task_with_controls(
                 })?;
                 let _ = transition_locked(
                     &context,
-                    &lock,
+                    lock,
                     task_id,
                     TaskStatus::Blocked,
                     Some(&reason),
@@ -4733,11 +4802,18 @@ pub fn run_task_with_controls(
             // It is a controlled pause, not a failure: the task awaits a
             // decision and a subsequent re-review of the updated intent rather
             // than completing or being blocked.
-            let evidence_dir = context
-                .component_dir
-                .join(".kvist")
-                .join("authoring")
-                .join("proposals");
+            let evidence_dir = if matches!(
+                task.kind,
+                TaskKind::SecurityAudit | TaskKind::ComplianceReview
+            ) {
+                context.component_dir.join(".kvist/continuous-reviews")
+            } else {
+                context
+                    .component_dir
+                    .join(".kvist")
+                    .join("authoring")
+                    .join("proposals")
+            };
             let decision_reason = format!(
                 "one or more impactful, uncovered decisions surfaced and require a human decision before implementation continues. Proposal evidence is at {}.",
                 evidence_dir.display()
@@ -4751,7 +4827,7 @@ pub fn run_task_with_controls(
                 Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
             let _ = transition_locked(
                 &context,
-                &lock,
+                lock,
                 task_id,
                 TaskStatus::AwaitingDecision,
                 Some(&decision_reason),
@@ -4816,7 +4892,14 @@ pub fn run_task_with_controls(
                                 "attempt_id": attempt_id,
                                 "task_id": task_id,
                                 "phase": "verification-finished",
-                                "result": "success"
+                                "result": "success",
+                                "command": verify_res.command,
+                                "source_scopes": {
+                                    "src": digest_path_tree(&context.component_dir.join("src"))?,
+                                    "tests": digest_path_tree(&context.component_dir.join("tests"))?,
+                                },
+                                "stdout": redact_bounded(verify_res.stdout.clone(), &evidence_redactions(&config), 16384),
+                                "stderr": redact_bounded(verify_res.stderr.clone(), &evidence_redactions(&config), 16384)
                             });
                             let pend_disp = serde_json::json!({
                                 "schema_version": 1,
@@ -4824,12 +4907,34 @@ pub fn run_task_with_controls(
                                 "task_id": task_id,
                                 "phase": "pending-human-disposition"
                             });
-                            for event in [exec_fin, verif_fin, pend_disp] {
+                            let mut events = vec![exec_fin, verif_fin];
+                            if !continuous {
+                                events.push(pend_disp);
+                            }
+                            for event in events {
                                 append_json_attempt(
                                     &agent_attempt_path,
                                     &event,
                                     "append successful execution evidence",
                                 )?;
+                            }
+
+                            if continuous {
+                                let at = Timestamp::now()
+                                    .map_err(|source| KvistError::TaskClock { source })?;
+                                transition_locked(
+                                    &context,
+                                    lock,
+                                    task_id,
+                                    TaskStatus::Completed,
+                                    None,
+                                    &at,
+                                    Some(&attempt_id),
+                                )?;
+                                return Ok(format!(
+                                    "task `{task_id}` execution and verification completed; human acceptance remains pending.\nAttempt: {attempt_id}\nLogs written to: {}",
+                                    run_result.log_path.display()
+                                ));
                             }
 
                             let token_summary =
@@ -4870,7 +4975,7 @@ pub fn run_task_with_controls(
                                 .map_err(|source| KvistError::TaskClock { source })?;
                             let _ = transition_locked(
                                 &context,
-                                &lock,
+                                lock,
                                 task_id,
                                 TaskStatus::Blocked,
                                 Some(&blocker_reason),
@@ -4907,7 +5012,7 @@ pub fn run_task_with_controls(
                             Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
                         let _ = transition_locked(
                             &context,
-                            &lock,
+                            lock,
                             task_id,
                             TaskStatus::Blocked,
                             Some(&blocker_reason),
@@ -4937,7 +5042,7 @@ pub fn run_task_with_controls(
                     Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
                 let _ = transition_locked(
                     &context,
-                    &lock,
+                    lock,
                     task_id,
                     TaskStatus::Completed,
                     None,
@@ -4988,7 +5093,7 @@ pub fn run_task_with_controls(
                 Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
             let _ = transition_locked(
                 &context,
-                &lock,
+                lock,
                 task_id,
                 TaskStatus::Blocked,
                 Some(&blocker_reason),
@@ -5027,7 +5132,10 @@ pub fn run_task_with_controls(
         }
         (result, _) => result,
     };
-    let release = lock.release();
+    let release = match owned_lock {
+        Some(lock) => lock.release(),
+        None => Ok(()),
+    };
     match (result, release) {
         (Ok(output), Ok(())) => Ok(output),
         (Ok(_), Err(error)) => Err(error),
@@ -5081,45 +5189,7 @@ fn blocked_run_error(
     }
 }
 
-/// Confirms running a suggested (next-ready) task. A bare ENTER, `y`, or
-/// `yes` confirms; anything else refuses. When stdin is not an interactive
-/// terminal the suggestion cannot be confirmed, so this fails instead of
-/// auto-executing, preserving the invariant that supervised runs never
-/// auto-select a task.
-pub(crate) fn confirm_run_suggestion(task_id: &str) -> Result<bool> {
-    if !io::stdin().is_terminal() {
-        return Err(KvistError::TaskRunSuggestionNotInteractive);
-    }
-    eprint!("Run suggested next task `{task_id}`? [Y/n] ");
-    io::stderr().flush().map_err(|source| KvistError::Io {
-        operation: "flush stderr",
-        path: PathBuf::from("stderr"),
-        source,
-    })?;
-    let mut input = String::new();
-    let mut reader = crate::interruptible_stdin::interruptible_reader();
-    let read = reader
-        .read_line(&mut input)
-        .map_err(|source| KvistError::Io {
-            operation: "read confirmation input",
-            path: PathBuf::from("stdin"),
-            source,
-        })?;
-    if read == 0 {
-        // EOF or Ctrl-C: refuse, fail closed.
-        return Ok(false);
-    }
-    Ok(matches!(
-        input.trim().to_ascii_lowercase().as_str(),
-        "" | "y" | "yes"
-    ))
-}
-
-/// Runs a single task, all tasks for a TODO item (e.g. `sa-02`), or all uncompleted tasks for a component.
-///
-/// When `task_spec` is `None`, the next ready task is suggested and run only
-/// after an interactive confirmation; a non-interactive context fails instead
-/// of auto-executing.
+/// Runs exactly one selected task, or continuous component work when omitted.
 pub fn run_task_or_item(
     project_dir: &Path,
     component_path: &Path,
@@ -5137,132 +5207,20 @@ pub fn run_task_or_item_with_controls(
     stream: bool,
     allow_control: bool,
 ) -> Result<String> {
-    let context = validate_context(project_dir, component_path)?;
-    let queue = read_queue(&context.component_dir)?;
-
-    let task_spec = match task_spec {
-        None => {
-            ensure_component_attempts_recovered(&context.component_dir)?;
-            let task_id = next_ready_task_id(&queue.tasks).ok_or(KvistError::NoReadyTasks {
-                component: context.component_path.clone(),
-            })?;
-            if !confirm_run_suggestion(&task_id)? {
-                return Ok(format!(
-                    "Cancelled: did not run the suggested task `{task_id}`."
-                ));
+    match task_spec {
+        Some(task_id) => {
+            let context = validate_context(project_dir, component_path)?;
+            let queue = read_queue(&context.component_dir)?;
+            if task_by_id(&queue.tasks, task_id).is_none() {
+                return Err(KvistError::TaskNotFound {
+                    component: context.component_path,
+                    task_id: task_id.to_owned(),
+                });
             }
-            return run_task_with_controls(
-                project_dir,
-                component_path,
-                &task_id,
-                stream,
-                allow_control,
-            );
+            run_task_with_controls(project_dir, component_path, task_id, stream, allow_control)
         }
-        Some(spec) => spec,
-    };
-
-    let target_tasks: Vec<String> = if task_spec == "all" {
-        let uncompleted: Vec<String> = queue
-            .tasks
-            .iter()
-            .filter(|t| t.status != TaskStatus::Completed)
-            .map(|t| t.id.clone())
-            .collect();
-        if uncompleted.is_empty() {
-            return Ok(format!(
-                "all tasks in component `{}` are already completed",
-                component_path.display()
-            ));
-        }
-        uncompleted
-    } else if let Some(task) = queue.tasks.iter().find(|t| t.id == task_spec) {
-        // Exact single task match
-        vec![task.id.clone()]
-    } else {
-        // Check for item / prefix match (e.g. "sa-02" matching "sa-02-write-tests", etc.)
-        let prefix_matches: Vec<String> = queue
-            .tasks
-            .iter()
-            .filter(|t| {
-                (t.id.starts_with(&format!("{task_spec}-")) || t.id == task_spec)
-                    && t.status != TaskStatus::Completed
-            })
-            .map(|t| t.id.clone())
-            .collect();
-
-        if prefix_matches.is_empty() {
-            let all_matching: Vec<&Task> = queue
-                .tasks
-                .iter()
-                .filter(|t| t.id.starts_with(&format!("{task_spec}-")) || t.id == task_spec)
-                .collect();
-            if !all_matching.is_empty() {
-                return Ok(format!(
-                    "all tasks for `{task_spec}` in component `{}` are already completed",
-                    component_path.display()
-                ));
-            }
-            return Err(KvistError::TaskNotFound {
-                component: context.component_path.clone(),
-                task_id: task_spec.to_owned(),
-            });
-        }
-        prefix_matches
-    };
-
-    let total = target_tasks.len();
-    if total == 1 {
-        return run_task_with_controls(
-            project_dir,
-            component_path,
-            &target_tasks[0],
-            stream,
-            allow_control,
-        );
+        None => continuous::run(project_dir, component_path, stream, allow_control),
     }
-
-    let mut completed_count = 0;
-    for (idx, task_id) in target_tasks.iter().enumerate() {
-        let step = idx + 1;
-        println!(
-            "\n▶ [{step}/{total}] Running task `{task_id}` in `{}`...",
-            component_path.display()
-        );
-        match run_task_with_controls(project_dir, component_path, task_id, stream, allow_control) {
-            Ok(output) => {
-                let queue = read_queue(&context.component_dir)?;
-                let status = task_by_id(&queue.tasks, task_id)
-                    .ok_or_else(|| KvistError::TaskNotFound {
-                        component: component_path.to_path_buf(),
-                        task_id: task_id.clone(),
-                    })?
-                    .status;
-                if status != TaskStatus::Completed {
-                    return Ok(format!(
-                        "Batch stopped at task `{task_id}` in state {}; {completed_count}/{total} tasks completed in this selection.\n{output}",
-                        status_name(status),
-                    ));
-                }
-                println!("✓ [{step}/{total}] Task `{task_id}` completed successfully.");
-                completed_count += 1;
-                if !stream && !output.is_empty() {
-                    let first_line = output.lines().next().unwrap_or("");
-                    println!("  {first_line}");
-                }
-            }
-            Err(err) => {
-                eprintln!("✗ [{step}/{total}] Task `{task_id}` failed: {err}");
-                return Err(err);
-            }
-        }
-    }
-
-    Ok(format!(
-        "Successfully completed all {completed_count} tasks ({}) for `{task_spec}` in component `{}`.",
-        target_tasks.join(", "),
-        component_path.display()
-    ))
 }
 
 fn select_runnable_task(context: &TaskContext, requested: Option<&str>) -> Result<String> {
@@ -5473,7 +5431,13 @@ const MAX_VERIFICATION_EVIDENCE_BYTES: usize = 65_536;
 
 fn evidence_redactions(config: &crate::config::ProjectConfig) -> Vec<String> {
     let mut values = config.agent.architect.redaction_values.clone();
-    for value in &config.agent.developer.redaction_values {
+    for value in config
+        .agent
+        .developer
+        .redaction_values
+        .iter()
+        .chain(&config.agent.security_reviewer.redaction_values)
+    {
         if !values.contains(value) {
             values.push(value.clone());
         }
@@ -5510,6 +5474,7 @@ fn truncate_utf8(value: &mut String, limit: usize) {
 /// Versioned, non-secret execution inputs bound by an explicit approval.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ExecutionApprovalMaterial {
+    task_run: crate::config::TaskRunConfig,
     configuration_schema_version: u32,
     approval_schema_version: u32,
     sandbox_protocol_version: u32,
@@ -5622,6 +5587,7 @@ fn build_execution_approval_for_runner(
     let (canonical_project, canonical_worktree) =
         project_worktree_identity(project_dir, config.vcs)?;
     let material = ExecutionApprovalMaterial {
+        task_run: config.task_run.clone(),
         configuration_schema_version: crate::artifacts::CONFIGURATION_VERSION,
         approval_schema_version: EXECUTION_APPROVAL_VERSION,
         sandbox_protocol_version: crate::sandbox::PROTOCOL_VERSION,
@@ -6239,7 +6205,9 @@ fn execution_approval_difference(
     approved: &ExecutionApprovalMaterial,
     current: &ExecutionApprovalMaterial,
 ) -> String {
-    if approved.root_contract_digest != current.root_contract_digest {
+    if approved.task_run != current.task_run {
+        "continuous task commit policy has changed".to_owned()
+    } else if approved.root_contract_digest != current.root_contract_digest {
         "ROOT_CONTRACT.md has changed since execution policy approval".to_owned()
     } else if approved.agent_source != current.agent_source
         || approved.agent_source_digest != current.agent_source_digest

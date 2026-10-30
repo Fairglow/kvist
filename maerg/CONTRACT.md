@@ -104,6 +104,8 @@ Configured literal redactions apply to diagnostic metadata and observed text,
 including model names and tool identities. Journal run identities are derived
 digests, not raw task text; protocol event tags and private filesystem paths
 remain administrative identifiers.
+Shared-registry role `redaction_values` applies to review sinks, including
+JSON-escaped model report strings; redaction precedes diagnostic serialization.
 
 `cancel` requests cooperative termination and retains observed/unknown effects.
 `guide` queues bounded supplemental human guidance for the next safe boundary;
@@ -112,6 +114,10 @@ accept controls. Guidance is recorded before it reaches model context, all
 pending assistant calls receive results, and the original wall/token/turn
 accounting is retained. Completion closes the control capability. There is no
 automatic replay/resume. An observer never needs control access.
+Tool-free independent reviews expose the same live journals, standard task
+logs, streaming and opt-in cancellation. They explicitly reject `guide` without
+injecting or recording its text, because guidance would violate their
+clean-slate context boundaries. Ctrl-C cooperatively cancels quiet inference.
 
 The native request materializes only selected local artifacts and exact
 root/parent contract mounts. `TODOS.yaml` is strictly validated in full, then
@@ -158,17 +164,10 @@ The `kvist` executable provides (the authoritative design is
 - `component commit ACCEPTANCE_ID`
 - `task next [COMPONENT_DIR]`
 - `task transition [COMPONENT_DIR] TASK_ID STATUS [--reason TEXT]`
-- `task run [COMPONENT_DIR] [TASK_ID] [--stream] [--allow-control]`, where TASK_ID is an exact
-  task ID, an item prefix selecting every task of that item, or `all` (every
-  uncompleted task of the component, run sequentially, stopping at the first
-  failure)
-- `task run-all [COMPONENT_DIR]` — run the whole component: iterate the
-  component's tasks in dependency order, running each ready task, and stop when
-  the component is complete, when a task becomes blocked, or when a task
-  reaches an awaiting-decision point. It never auto-resolves a decision or
-  unblocks a blocked task; it pauses and reports the exact state and the
-  command that resolves it, leaving durable task state for explicit finalize
-  or recovery
+- `task run COMPONENT_DIR [TASK_ID] [--stream] [--allow-control]`: an exact
+  TASK_ID runs only that task. Without it, execute ready tasks continuously in
+  queue order, without confirmation. There is no `all`, prefix selector, or
+  separate whole-component command.
 - `task log [COMPONENT_DIR] TASK_ID`
 - `task replay SESSION_JSONL [--max-turns N]`
 - `task approve-policy [PROJECT_DIR]`
@@ -199,16 +198,58 @@ commands take an optional `COMPONENT_DIR`: when omitted, the nearest
 discovered component containing the current working directory is selected; when
 given, it is interpreted relative to the project's component root, and absolute
 paths outside the project are rejected. `component new` keeps its required
-directory. Failing outside a project names the missing marker and suggests
+directory, as does `task run`; its editable shell prefill never replaces that
+required argument with an implicit focus/cwd fallback. Failing outside a project names the missing marker and suggests
 `kvist init` or an explicit directory.
 
-`task run` without TASK_ID suggests the first ready task of the component and
-executes it only after an explicit interactive confirmation (a bare ENTER
-accepts; a refusal changes no state). When no task is ready, or when standard
-input is not an interactive terminal, it fails with an actionable diagnostic
-and changes no durable state. The shell obtains this confirmation before its
-working stage; streamed task commands do not run a competing terminal spinner.
+`task run` without TASK_ID repeatedly reloads the queue and executes the first
+dependency-ready task. It works without terminal input. Successful continuous
+implementation execution plus verification completes execution, not acceptance,
+and does not require `task finalize` between tasks. Decisions, blocked work,
+unresolved effects and failed checkpoints stop the run; nothing is automatically
+unblocked or accepted. An all-completed queue durably awaits component approval.
+Explicit single-task implementation runs retain their finalization surface.
+Newly authored unfinished work after an awaiting-approval run starts a fresh
+run from the current clean checkpoint baseline under current approved policy;
+previous work is neither replayed nor implicitly accepted. A retained
+nonterminal run cannot change commit policy.
+Streamed task commands do not run a competing terminal spinner.
 Long result lines wrap without discarding error details or command arguments.
+
+`[task_run] commit = "item"` in `kvist.toml` is the approval-bound default;
+`"component"` checkpoints once after all work, and `"manual"` never commits.
+Checkpoint Git/signing subprocesses have a five-minute per-command deadline
+and honor cancellation; stalled signing stops clearly without replaying tasks
+or bypassing signing policy.
+An item is the common task-ID prefix before a lifecycle suffix (`write-tests`,
+`implement-code`, `security-audit`, `compliance-review`); the bare four suffixes
+form one item. Nested implementation prefixes belong to their enclosing test
+item. An implementation task whose ID equals the item prefix also belongs.
+Completed historical work is not regrouped or recommitted. Items may contain
+a full lifecycle, test/implementation tasks, or follow-up reviews; component-wide
+lifecycle ordering still applies. Automatic item commits wait for every task
+of that item, and implementation verification must pass before execution completion.
+Ambiguous/non-lifecycle IDs require correction or a non-item commit policy.
+Checkpoints are local, unaccepted work, never pushes or intent acceptance.
+The host retains a bounded run ledger under component `.kvist/continuous.json`
+with baseline files, pending checkpoint and final awaiting-approval state.
+Only changed approved source/test paths and host-owned workflow evidence enter
+a checkpoint. Overlapping dirty/staged files are refused before execution;
+unrelated work and staged changes are preserved. Commit failure retains the
+pending checkpoint; repeating bare run retries it without rerunning tasks.
+
+Security review tasks use fresh source-only context. Compliance tasks use
+separate source-only observation and source-blind comparison requests, without
+authoring tools. Host-written `IMPL.md` and item reports are observations, not
+certification. Reported decisions pause for human arbitration.
+Review frames use configured context capacity, or a conservative provisional
+32768-token working budget. Oversized source evidence is reviewed in complete
+UTF-8-safe fragments and synthesized without mixing phases or dropping decision
+flags. Comparison fragments retain the shared observed/test evidence.
+All requests consume the same role task budget; configured limits are not raised.
+Clean-slate review uses host review instructions, not configurable authoring
+prompts or prior conversation. The selected model, reasoning policy and
+approved resource/redaction limits still apply.
 
 Protected inference calls use automatic transient retries:
 the selected native profile's `max_attempts` (1-32, default 3), exponential
@@ -229,7 +270,7 @@ task and report the attempt, log and explicit retry command. A failure to
 persist that disposition instead reports the unresolved attempt and retains
 its fence. Separate attempts retain distinct evidence even when started within
 one clock second. `task next` and automatic selection refuse unresolved attempts.
-Multi-task selections stop at pending finalization or decisions, rather than
+Continuous runs stop at decisions or unresolved evidence, rather than
 calling an unfinished task completed. Diagnostic EOF or a different next-ready
 task is never evidence of completion.
 
@@ -437,8 +478,7 @@ it is absent or has drifted from the recorded manifest.
 
 Commands are non-interactive unless their contract explicitly obtains terminal
 input; `prompt` (with a terminal), `shell`, the agent setup/configuration flows,
-and `task run` without TASK_ID (which confirms the suggested task) are the
-interactive exceptions. `prompt` obtains a terminal to open the standalone
+are the interactive exceptions. `prompt` obtains a terminal to open the standalone
 `skott` shell; with no interactive terminal it runs the same shell
 headless (`skott --headless --json`), which is sandbox-only and rejects
 `--allow-host-execution`.
@@ -518,7 +558,7 @@ closed value sets for `help [TOPIC]`) and dynamic completion covers component
 paths, task IDs, attempt IDs, model profile names, and the active VCS branch; dynamic sets are refreshed after
 every executed command and each source degrades independently without aborting
 the session. The shell builtins are `cd [COMPONENT_DIR]`,
-`tasks [COMPONENT_DIR] [--status STATUS]`, `run [COMPONENT_DIR] [TASK_ID]`,
+`tasks [COMPONENT_DIR] [--status STATUS]`, `run COMPONENT_DIR [TASK_ID]`,
 `help [TOPIC]`, `last [COUNT]`, `history [COUNT]`, `journal`, `locks
 [clean]`, `theme [set <NAME|PATH>]`, and `exit`/`quit`. `help` with no topic lists the builtins and the
 available help topics; with a topic it renders that topic, exactly as
@@ -528,9 +568,8 @@ command (the same run/transition logic as the status report), so no non-current
 task is shown without the step that resolves it. `cd` remembers a default component for the builtins and for
 completion ordering; when `tasks` or `run` names a component different from the
 current focus, the shell prints a hint to switch and leaves the focus
-unchanged. `run` without a task ID suggests the first ready task of the
-selected component and runs it only after an explicit confirmation (a bare
-ENTER accepts; a refusal changes no state). `prompt TASK_ID` opens the external
+unchanged. `run` without a task ID starts continuous component work without
+confirmation. `prompt TASK_ID` opens the external
 editor seeded with
 the task context and submits only after explicit confirmation. `theme`
 previews every available theme (the current one first, then built-ins and
@@ -634,7 +673,7 @@ host it, and the plain-text degradation contract of `REQ-INTERACTIVE-SHELL`
 still applies. The stable `status --format text` and `--format json` report
 forms are unchanged for non-interactive consumers.
 
-`task run-all [COMPONENT_DIR]` runs the whole selected component: it iterates
+Bare `task run COMPONENT_DIR` runs the whole selected component: it iterates
 the component's tasks in dependency order, running each ready task, and stops
 when the component is complete, when a task becomes blocked, or when a task
 reaches an awaiting-decision point. It never auto-resolves a decision or
@@ -818,11 +857,12 @@ manifest no longer matches the on-disk toolchain. Rust authoring uses the
 System/Toolchain grant variant described below, not the closed Cargo cache
 or dependency-acquisition topology.
 
-The target supervised tier requires one explicit task and produces a pending
-human disposition after agent and verification results are recorded. A
-separate finalization action binds acceptance or blocking to the exact attempt
-and scoped changes. Automatic selection, retry, and completion are not part of
-that tier.
+Explicit single-task implementation execution produces a pending human
+disposition after agent and verification results are recorded. A separate
+finalization action binds acceptance or blocking to the exact attempt and
+scoped changes. Bare component runs instead complete verified execution and
+create policy-controlled unaccepted checkpoints; final component approval is
+still separate. Transport retries never replay prior tool effects.
 
 An acceptance with `--commit` creates one local commit from a canonical set of
 accepted paths and maerg-written state. It leaves unrelated staged, unstaged,

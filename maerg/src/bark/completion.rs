@@ -199,9 +199,11 @@ impl Completer for KvistCompleter {
 /// A `--` token ends flag parsing: everything after it is a positional value.
 fn walk<'a>(root: &'a CommandNode, resolved: &[Token], scope: &mut Scope) -> Cursor<'a> {
     let mut node: &'a CommandNode = root;
+    let mut command_path = Vec::new();
     let mut positionals_consumed = 0usize;
     let mut pending_value: Option<String> = None;
     let mut no_flags = false;
+    let mut valid = true;
 
     for token in resolved {
         let text = &token.text;
@@ -209,7 +211,13 @@ fn walk<'a>(root: &'a CommandNode, resolved: &[Token], scope: &mut Scope) -> Cur
             if let Some(positional) = node.positionals.get(positionals_consumed) {
                 positionals_consumed += 1;
                 apply_positional_value(positional, text, scope);
+            } else {
+                valid = false;
             }
+            continue;
+        }
+        if let Some(long) = pending_value.take() {
+            apply_option_value(node, &long, text, scope);
             continue;
         }
         if text == "--" {
@@ -218,6 +226,7 @@ fn walk<'a>(root: &'a CommandNode, resolved: &[Token], scope: &mut Scope) -> Cur
         }
         if let Some(sub) = node.find_subcommand(text) {
             node = sub;
+            command_path.push(sub.name.clone());
             positionals_consumed = 0;
             *scope = Scope::default();
             scope.command = Some(sub.name.clone());
@@ -234,15 +243,11 @@ fn walk<'a>(root: &'a CommandNode, resolved: &[Token], scope: &mut Scope) -> Cur
             continue;
         }
 
-        // A bare value: either the value of a pending option or the next
-        // positional.
-        if let Some(long) = pending_value.take() {
-            apply_option_value(node, &long, text, scope);
-            continue;
-        }
         if let Some(positional) = node.positionals.get(positionals_consumed) {
             positionals_consumed += 1;
             apply_positional_value(positional, text, scope);
+        } else {
+            valid = false;
         }
     }
 
@@ -251,6 +256,8 @@ fn walk<'a>(root: &'a CommandNode, resolved: &[Token], scope: &mut Scope) -> Cur
         positionals_consumed,
         pending_value,
         no_flags,
+        command_path,
+        valid,
     }
 }
 
@@ -260,6 +267,8 @@ struct Cursor<'a> {
     positionals_consumed: usize,
     pending_value: Option<String>,
     no_flags: bool,
+    command_path: Vec<String>,
+    valid: bool,
 }
 
 impl<'a> Cursor<'a> {
@@ -272,6 +281,53 @@ impl<'a> Cursor<'a> {
             .and_then(|long| self.node.find_flag_by_long(long))
             .map(|idx| &self.node.flags[idx])
     }
+}
+
+/// Component-slot facts shared by completion and actual editor prefill.
+pub(super) struct ComponentPosition {
+    pub(super) command: Vec<String>,
+    pub(super) supplied: bool,
+    pub(super) vacant: bool,
+}
+
+/// Resolves the component slot without a second command grammar. A value
+/// anywhere in the buffer, including after the cursor, remains explicit.
+pub(super) fn component_position(
+    root: &CommandNode,
+    line: &str,
+    pos: usize,
+) -> Option<ComponentPosition> {
+    let prefix = line.get(..pos)?;
+    if line.contains(['\n', '\r']) || sav::split_raw_command(line).is_err() {
+        return None;
+    }
+    let mut scope = Scope::default();
+    let full = walk(root, &tokenize(line), &mut scope);
+    if !full.valid
+        || !full.node.positionals.iter().any(|positional| {
+            positional_domain(positional.value_name.as_deref().unwrap_or(""))
+                == Some(ValueDomain::Component)
+        })
+    {
+        return None;
+    }
+    let before = walk(root, &tokenize(prefix), &mut Scope::default());
+    let vacant = before.valid
+        && before.command_path == full.command_path
+        && before.pending_value.is_none()
+        && before
+            .node
+            .positionals
+            .get(before.positionals_consumed)
+            .and_then(|positional| {
+                positional_domain(positional.value_name.as_deref().unwrap_or(""))
+            })
+            == Some(ValueDomain::Component);
+    Some(ComponentPosition {
+        command: full.command_path,
+        supplied: scope.component.is_some(),
+        vacant,
+    })
 }
 
 /// Completes flag names when the token under the cursor starts with `-`.
@@ -648,7 +704,7 @@ fn apply_option_value(node: &CommandNode, long: &str, value: &str, scope: &mut S
         return;
     };
     match domain {
-        ValueDomain::Component => scope.component = Some(value.to_owned()),
+        ValueDomain::Component => scope.component = Some(component_scope_key(value)),
         ValueDomain::Task => scope.task = Some(value.to_owned()),
         _ => {}
     }
@@ -662,11 +718,25 @@ fn apply_positional_value(positional: &PositionalSpec, value: &str, scope: &mut 
     };
     match domain {
         ValueDomain::Component => {
-            scope.component = Some(value.to_owned());
+            scope.component = Some(component_scope_key(value));
             scope.task = None;
         }
         ValueDomain::Task => scope.task = Some(value.to_owned()),
         _ => {}
+    }
+}
+
+/// Normalizes current-directory markers and separators for snapshot lookup,
+/// without resolving parent traversal or changing the actual command buffer.
+fn component_scope_key(value: &str) -> String {
+    let path: std::path::PathBuf = std::path::Path::new(value)
+        .components()
+        .filter(|component| *component != std::path::Component::CurDir)
+        .collect();
+    if path.as_os_str().is_empty() {
+        ".".to_owned()
+    } else {
+        path.to_string_lossy().into_owned()
     }
 }
 
@@ -729,7 +799,8 @@ fn tokenize(region: &str) -> Vec<Token> {
     let mut current = String::new();
     let mut quote: Option<char> = None;
 
-    for (i, c) in region.char_indices() {
+    let mut characters = region.char_indices().peekable();
+    while let Some((i, c)) = characters.next() {
         match (quote, c) {
             (None, q @ ('\'' | '"')) => {
                 start.get_or_insert(i);
@@ -737,6 +808,16 @@ fn tokenize(region: &str) -> Vec<Token> {
             }
             (Some(q), c) if c == q => {
                 quote = None;
+            }
+            (Some(q), '\\') => {
+                if let Some((_, next)) = characters.peek().copied()
+                    && (next == q || next == '\\')
+                {
+                    current.push(next);
+                    characters.next();
+                } else {
+                    current.push('\\');
+                }
             }
             (Some(_), c) => {
                 current.push(c);
@@ -1134,6 +1215,112 @@ mod tests {
         assert_eq!(
             positional_values(&complete(&c, "task run ")),
             vec![".", "maerg"]
+        );
+    }
+
+    #[test]
+    fn selected_component_prefill_moves_tab_to_that_components_task_ids() {
+        let prefill = super::super::prefill::ComponentPrefill::new(
+            build_root(),
+            Arc::new(Mutex::new(Some("maerg".into()))),
+        );
+        let mut editor = reedline::Reedline::create();
+        editor.run_edit_commands(&[reedline::EditCommand::InsertString("task run ".into())]);
+        prefill.apply(&mut editor);
+        let c = completer_with_state(fixture_state());
+        let candidates = complete(&c, editor.current_buffer_contents());
+        assert_eq!(positional_values(&candidates), vec!["build-tree"]);
+        assert!(
+            candidates
+                .iter()
+                .filter(|candidate| !candidate.value.starts_with('-'))
+                .all(|candidate| candidate.span == (15, 15))
+        );
+    }
+
+    #[test]
+    fn option_values_equal_to_subcommands_do_not_change_command_context() {
+        let mut root = build_root();
+        root.flags.push(FlagSpec {
+            long: Some("test-value".into()),
+            short: None,
+            takes_value: true,
+            value_name: None,
+            possible_values: Vec::new(),
+            help: None,
+            global: false,
+        });
+        let position = component_position(&root, "--test-value task task run ", 27).unwrap();
+        assert!(position.vacant);
+        assert!(!position.supplied);
+        assert_eq!(position.command, vec!["task", "run"]);
+    }
+
+    #[test]
+    fn quoted_component_prefill_keeps_escaped_quotes_in_completion_scope() {
+        let focus = "a folder/\"child\"";
+        let prefill = super::super::prefill::ComponentPrefill::new(
+            build_root(),
+            Arc::new(Mutex::new(Some(focus.into()))),
+        );
+        let mut editor = reedline::Reedline::create();
+        editor.run_edit_commands(&[reedline::EditCommand::InsertString("task run ".into())]);
+        prefill.apply(&mut editor);
+        let mut state = fixture_state();
+        state.scopes.insert(
+            focus.into(),
+            ComponentScope {
+                tasks: vec![task("quoted-component-task")],
+                attempts: BTreeMap::new(),
+            },
+        );
+        assert_eq!(
+            positional_values(&complete(
+                &completer_with_state(state),
+                editor.current_buffer_contents()
+            )),
+            vec!["quoted-component-task"]
+        );
+    }
+
+    #[test]
+    fn dash_leading_component_prefill_scopes_tasks_and_attempts() {
+        let focus = "-child";
+        let prefill = super::super::prefill::ComponentPrefill::new(
+            build_root(),
+            Arc::new(Mutex::new(Some(focus.into()))),
+        );
+        let mut editor = reedline::Reedline::create();
+        editor.run_edit_commands(&[reedline::EditCommand::InsertString("task run ".into())]);
+        prefill.apply(&mut editor);
+        let mut state = fixture_state();
+        state.scopes.insert(
+            focus.into(),
+            ComponentScope {
+                tasks: vec![task("dash-task")],
+                attempts: BTreeMap::from([("dash-task".into(), vec!["dash-attempt".into()])]),
+            },
+        );
+        let c = completer_with_state_and_focus(state, Some(focus));
+        assert_eq!(
+            positional_values(&complete(&c, editor.current_buffer_contents())),
+            vec!["dash-task"]
+        );
+        for component in ["./-child", "././-child", ".//-child", "-child/./"] {
+            assert_eq!(
+                positional_values(&complete(&c, &format!("task run {component} "))),
+                vec!["dash-task"],
+                "{component}"
+            );
+        }
+        assert!(positional_values(&complete(&c, "task run ./../-child ")).is_empty());
+        assert_eq!(
+            positional_values(&complete(&c, "task finalize ./-child dash-task ")),
+            vec!["dash-attempt"]
+        );
+        assert_eq!(
+            positional_values(&complete(&c, "task run ./maerg ")),
+            vec!["build-tree"]
         );
     }
 

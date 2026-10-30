@@ -70,7 +70,7 @@ Core concepts (kvist help concepts):
   tasks      durable queue entries in TODOS.yaml with status and dependencies
 
 Component lifecycle (kvist help lifecycle):
-  component new -> component validate -> component accept -> task run -> task finalize
+  component new -> component validate -> component accept -> task run DIR -> human review
   intent changed after accept = STALE -> review the diff -> component accept
 
 Topics:
@@ -102,10 +102,11 @@ Kvist core concepts
                security-audit, compliance-review), status, depends_on, and
                requirement references. A task is ready when pending with every
                (transitive) dependency completed: `kvist task next [DIR]`.
-  supervision  `kvist task run [DIR] [TASK]` executes a task with a supervised
-               agent under the sandbox and approved test policy; results are
-               verified and human finalization records the disposition
-               (`kvist task finalize [DIR] TASK ATTEMPT accept|block`).
+  supervision  `kvist task run DIR` executes ready work continuously under
+               approved sandbox/test policy, checkpointing complete items.
+               Execution and checkpoint commits are not human acceptance.
+               An exact TASK runs only that task; explicit implementation
+               attempts retain `task finalize DIR TASK ATTEMPT accept|block`.
 
 More: GUIDE.md · docs/command-set.md §2 · a component's CONTRACT.md
 "
@@ -119,8 +120,13 @@ Kvist component lifecycle
   1. kvist component new [DIR]    scaffold REQUIREMENTS/CONTRACT/DESIGN
   2. kvist component validate     structural check of the three intent docs
   3. kvist component accept [DIR] record accepted revisions (the baseline)
-  4. kvist task run [DIR] [TASK]  work the queue (see `kvist help task-states`)
-  5. kvist task finalize [DIR] TASK ATTEMPT accept|block   human disposition
+  4. kvist task run DIR           execute ready work with complete-item checkpoints
+  5. Review the component's .kvist/continuous-reviews/component.json and findings.
+
+  Work stops for decisions, blockers, cancellation or pending human approval.
+  Component implementation approval has no dedicated command yet.
+  An exact `task run DIR TASK` stops after one task; explicit implementation
+  attempts retain `task finalize DIR TASK ATTEMPT accept|block`.
 
   Intent changed after accept -> the component is STALE:
   review the diff (git diff HEAD -- <DOC>), then `kvist component accept [DIR]`.
@@ -145,7 +151,7 @@ Kvist task states (TODOS.yaml `status`)
   in-progress        one authorized attempt active
   blocked            cannot progress until its recorded blocked_reason is resolved
   awaiting-decision  controlled pause pending a human decision (not a failure)
-  completed          outcome achieved; terminal
+  completed          execution completed; terminal, not implementation approval
 
 Legal transitions
   pending            -> in-progress | blocked
@@ -155,9 +161,9 @@ Legal transitions
   completed          -> (none; terminal)
 
 How to achieve them
-  pending -> in-progress      kvist task run [DIR] [TASK]  (ready: deps completed)
-  in-progress -> completed    kvist task finalize [DIR] TASK ATTEMPT accept
-                              (verification success alone never completes a task)
+  pending -> in-progress      kvist task run DIR [TASK]  (ready: deps completed)
+  in-progress -> completed    continuous verified execution, or an independent review
+                              explicit implementation: kvist task finalize DIR TASK ATTEMPT accept
   in-progress -> blocked      automatic when verification fails, or
                               kvist task transition [DIR] TASK blocked --reason \"...\"
   in-progress -> awaiting-decision

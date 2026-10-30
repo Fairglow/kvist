@@ -109,6 +109,12 @@ recording failure MUST prevent later effects. Read-only observers MUST not own
 execution. Optional controls MUST be explicitly authorized, record guidance,
 preserve approved context/grants and accounting, and never promise rollback or
 resume of unknown effects. Diagnostics remain distinct from canonical evidence.
+Independent tool-free reviews MUST retain these diagnostics and cancellation,
+but MUST explicitly refuse supplemental guidance to preserve clean-slate
+source-only and source-blind boundaries.
+Shared-registry role `redaction_values` MUST be applied, not silently ignored.
+Review diagnostics MUST redact decoded values before JSON encoding and cover
+JSON-escaped model report text across streamed chunks.
 
 ### REQ-ARTIFACT-MODEL
 
@@ -253,7 +259,7 @@ compliance review.
 
 ### REQ-TASK-LIFECYCLE
 
-Suggested-task confirmation MUST finish before execution progress starts.
+Task execution MUST NOT request scheduling confirmation.
 Progress MUST NOT overwrite terminal input, retry notices, or streamed output.
 Result presentation MUST retain complete diagnostics and actionable commands.
 
@@ -564,19 +570,71 @@ Non-ignored tests MUST build a real multi-crate workspace with inherited
 package/dependency fields, verify immutable provider source/metadata and
 unchanged host locks, and cover invalid dependency paths.
 
+### REQ-CONTINUOUS-EXECUTION
+
+Bare `task run COMPONENT` MUST execute dependency-ready tasks iteratively,
+without confirmation or a task-count ceiling, until all execution is complete,
+a decision/blocker occurs, or cancellation is requested. An explicit task ID
+MUST execute only that task and retain prerequisite checks. `all`, item-prefix
+execution and `run-all` MUST NOT be alternate batch interfaces.
+The component argument MUST remain required, including after an editable
+shell prefill has been deleted; neither focus nor cwd may supply it implicitly.
+Successful execution MUST be distinct from human acceptance; default runs MUST
+not invoke human acceptance automatically. Completed component execution MUST
+durably await final human approval.
+Explicitly scheduling new work after that terminal execution state MUST permit
+a fresh approved run/baseline without replaying or accepting previous work.
+
+The existing lifecycle ID convention defines items: the common prefix before
+`write-tests`, `implement-code`, `security-audit`, or `compliance-review`.
+Nested implementation prefixes belong to the enclosing test lifecycle.
+Completed historical tasks MUST NOT block new work merely because their names
+predate that convention. Items MAY be test/implementation, review-only or a full
+lifecycle; component-wide lifecycle ordering and implementation verification
+still apply, and final review remains separate from checkpoint commits.
+All active tasks sharing that prefix belong to the item; unrecognized IDs MUST fail
+explicitly before automatic item commits rather than guess ownership. Item
+checkpoints MUST wait for all defined item tasks, including every test,
+implementation and review task belonging to that item. Configurable local commit frequency MUST default to per-item, permit
+per-component or manual commits, and be approval-bound. Checkpoint commits
+MUST NOT imply acceptance, include unrelated changes, push, amend, or bypass
+signing policy. Dirty overlapping paths, concurrent changes and failed commits
+MUST stop clearly; retained pending commits MUST be resumable without rerunning
+successful tasks. Crash recovery MUST NOT infer that unknown effects are safe.
+Checkpoint Git/signing commands MUST have bounded capture and deadlines and
+honor cancellation, rather than hanging unattended runs on an interactive or
+stalled helper. A stopped checkpoint MUST retain recoverable known state.
+
+Security task observations MUST use a fresh source-only context. Compliance task work
+MUST derive source-only observations in one fresh request and compare them
+against intent in a separate source-blind request, without authoring tools.
+Host-written observations/reports MUST be durable; decisions MUST pause work,
+and report existence MUST NOT itself be treated as acceptance.
+Large review evidence MUST be processed in bounded fresh-context fragments,
+with complete fragment coverage, phase-preserving synthesis and shared task
+wall/token accounting, rather than overflowing a single model context.
+Fragment sizing MUST use configured model capacity when available, retaining
+a conservative provisional capacity otherwise.
+
+The requested workflow change has an explicit advisory exception while review
+receipts are unavailable. Independent post-code observation/comparison remain
+required.
+
 ### REQ-SUPERVISED-EXECUTION
 
 The initial production-runner tier MUST be supervised. It MUST require an
-explicit task ID, disable automatic retry, record a unique reviewable attempt,
-and require a separate human finalization action before completion. Process
-success or verification success alone MUST NOT complete the task. Timeout,
+unique reviewable attempt and preserve bounded transport retries without
+automatically replaying effects. Continuous execution completion MUST remain
+distinct from final human acceptance. Explicit single-task execution retains
+its separate finalization surface. Timeout,
 output breach, runner failure, and ambiguous interruption MUST fence or block
 the attempt with bounded evidence.
 
 Unattended _work_ — a task run proceeding across many turns without per-turn
 human intervention — is the intended operating mode and does not require the
-private bounded workspaces above; only final completion and VCS commit remain
-human-gated. A mid-run decision that warrants human input does not complete the
+private bounded workspaces above; final implementation acceptance remains
+human-gated, while policy-controlled unaccepted checkpoints follow
+REQ-CONTINUOUS-EXECUTION. A mid-run decision that warrants human input does not complete the
 task: it places the component in an awaiting-decision state for further
 implementation until resolved, as defined by `REQ-DECISION-SURFACING`.
 
@@ -681,12 +739,9 @@ as the CLI and MUST derive static completion from that surface so completions
 cannot drift from parseable commands. Dynamic completion MUST cover component
 paths, task IDs, attempt IDs, model profile names, and the active VCS branch,
 MUST refresh after every executed command, and MUST degrade per source without
-aborting the session. `task run` without a task ID MUST NOT auto-execute a
-task: it MUST suggest the first ready task of the selected component and run it
-only after an explicit interactive confirmation (a bare ENTER accepts; a
-refusal MUST change no state). When no task is ready, or when standard input is
-not an interactive terminal, it MUST fail with an actionable diagnostic and
-MUST change no durable state.
+aborting the session. `task run` without a task ID MUST start continuous
+component execution without another confirmation, including headless use.
+No-ready work MUST distinguish completed execution from blocked dependencies.
 
 The shell MUST persist an append-only JSONL session journal of final command
 inputs and result summaries at `.kvist/session.log` and a line-based editor
@@ -732,9 +787,10 @@ command footer. The status heading MUST show the active component together with
 its state and task progress, plus the VCS branch, sandbox backend, default
 model, and live/stale lock counts. When no component is selected the heading
 MUST show the whole project and the shell MUST operate on the project; when a
-component is selected it MUST be auto-selected as the default for every command
-that expects a component, so the operator is never asked for it and it is
-pre-filled. The command footer MUST expose the same command surface as the CLI
+component is selected it MUST be inserted visibly into the editable command buffer as soon as the next
+argument expects a component. This is actual prefill, not an omitted-argument
+fallback or a completion suggestion. Manual deletion MUST remain effective
+and permit another component; ordinary task arguments MUST retain their order. The command footer MUST expose the same command surface as the CLI
 with full tab-completion (static from the clap surface, dynamic from the
 project state) and MUST provide keyboard-shortcut help rendered the same way
 `skott` does it. The TUI MUST degrade to the plain-text line-oriented shell
@@ -762,7 +818,7 @@ selections MUST persist the preference and apply immediately to the session.
 
 ### REQ-RUN-COMPONENT
 
-The shell MUST provide a command that runs the whole selected component: it
+Bare `task run COMPONENT` MUST run the whole selected component: it
 MUST iterate over the component's tasks in dependency order, running each ready
 task, and MUST stop when the component is complete, when a task becomes
 blocked, or when a task reaches an awaiting-decision point. It MUST NOT
@@ -907,8 +963,8 @@ documentation (`GUIDE.md`, `docs/command-set.md`, or a component's
 
 An invalid task transition MUST report the legal transitions from the current
 state together with a pointer to the task-states help topic. The `task run`
-help MUST document the multi-task task specifications (exact task ID, item
-prefix, `all`).
+help MUST distinguish exact single-task execution from omitted-task continuous
+execution and document checkpoint/decision/final-approval boundaries.
 
 ### REQ-SOFT-WRAP
 

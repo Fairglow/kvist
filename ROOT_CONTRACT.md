@@ -86,6 +86,11 @@ constraint set injected into component work.
 - Do not treat external process success as human acceptance. Supervised
   execution records a reviewable attempt, and ambiguous interrupted attempts
   remain fenced until explicit recovery and disposition.
+- A component run may execute dependency-ready tasks without per-task human
+  scheduling. Successful execution is not human acceptance. Policy-controlled
+  local item checkpoint commits may precede final component approval; they
+  must preserve unrelated changes, never push, retain exact evidence and stop
+  on decisions, ambiguous effects or commit failures.
 - Keep acceptance distinct from VCS publication. An explicit commit option may
   create a local commit containing only the exact accepted paths and
   maerg-written evidence. It must preserve unrelated worktree and index state,

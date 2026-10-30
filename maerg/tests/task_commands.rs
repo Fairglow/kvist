@@ -1866,6 +1866,810 @@ fn shared_task_project(endpoint: &str) -> TempDir {
     project
 }
 
+#[cfg(target_os = "linux")]
+fn continuous_project(endpoint: &str, frequency: &str) -> TempDir {
+    use kvist::task_queue::{TaskKind, TaskStatus};
+    let project = shared_task_project(endpoint);
+    let path = project.path().join("src/TODOS.yaml");
+    let mut tasks = kvist::task_queue::parse(&queue()).unwrap();
+    let template = tasks.tasks[0].clone();
+    tasks.tasks.clear();
+    let mut previous = None;
+    for item in ["one", "two"] {
+        for (suffix, kind) in [
+            ("write-tests", TaskKind::Test),
+            ("implement-code", TaskKind::Implementation),
+            ("security-audit", TaskKind::SecurityAudit),
+            ("compliance-review", TaskKind::ComplianceReview),
+        ] {
+            let mut task = template.clone();
+            task.id = format!("{item}-{suffix}");
+            task.kind = kind;
+            task.status = TaskStatus::Pending;
+            task.timestamps.completed_at = None;
+            task.depends_on = previous.iter().cloned().collect();
+            previous = Some(task.id.clone());
+            tasks.tasks.push(task);
+        }
+    }
+    fs::write(path, kvist::task_queue::serialize(&tasks).unwrap()).unwrap();
+    let config_path = project.path().join("kvist.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    let task_run = if frequency == "default" {
+        String::new()
+    } else {
+        format!("\n[task_run]\ncommit = \"{frequency}\"\n")
+    };
+    fs::write(
+        config_path,
+        format!("{config}\n[agent.roles.architect]\nprofile = \"fixture\"\n[agent.roles.security_reviewer]\nprofile = \"fixture\"\n{task_run}"),
+    ).unwrap();
+    fs::create_dir(project.path().join("src/src")).unwrap();
+    fs::write(
+        project.path().join("src/src/lib.rs"),
+        "pub fn observed_marker() {}\n",
+    )
+    .unwrap();
+    let approval = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(
+        approval.status.success(),
+        "{}",
+        String::from_utf8_lossy(&approval.stderr)
+    );
+    for args in [
+        vec!["config", "user.name", "Fixture"],
+        vec!["config", "user.email", "fixture@example.invalid"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["add", "-A"],
+        vec!["commit", "--quiet", "-m", "baseline"],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(project.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    project
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn continuous_run_completes_two_items_with_separate_unaccepted_checkpoints() {
+    let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = requests.clone();
+    let gateway = MockGateway::serve(
+        move |body| {
+            if !body.is_empty() {
+                observed
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8(body.to_vec()).unwrap());
+            }
+            gateway_text_body(
+                r#"{"report":"Independent observed evidence; no discrepancies found.","decision_required":false}"#,
+            )
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "default");
+    fs::write(
+        project.path().join("unrelated.txt"),
+        "preserve staged work\n",
+    )
+    .unwrap();
+    assert!(
+        Command::new("git")
+            .args(["add", "unrelated.txt"])
+            .current_dir(project.path())
+            .status()
+            .unwrap()
+            .success()
+    );
+    let output = run_kvist(&project, &["task", "run", "."]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("awaiting") && stdout.contains("approval"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("Run suggested"));
+    let tasks = kvist::task_queue::parse(
+        &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        tasks
+            .tasks
+            .iter()
+            .all(|task| task.status == kvist::task_queue::TaskStatus::Completed)
+    );
+    assert!(tasks.tasks.iter().all(|task| task.acceptance_id.is_none()));
+    let log = Command::new("git")
+        .args(["log", "--format=%s"])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    let log = String::from_utf8(log.stdout).unwrap();
+    assert_eq!(log.lines().count(), 3, "{log}");
+    assert!(log.contains("one") && log.contains("two"), "{log}");
+    let final_state = Command::new("git")
+        .args(["show", "HEAD:src/.kvist/continuous-reviews/component.json"])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    assert!(final_state.status.success());
+    let final_state: serde_json::Value = serde_json::from_slice(&final_state.stdout).unwrap();
+    assert_eq!(final_state["state"], "awaiting-approval");
+    assert_eq!(final_state["human_acceptance"], false);
+    let staged = Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    assert_eq!(staged.stdout, b"unrelated.txt\n");
+    let review_log = run_kvist(&project, &["task", "log", ".", "one-security-audit"]);
+    assert!(review_log.status.success());
+    assert!(String::from_utf8_lossy(&review_log.stdout).contains("Independent observed evidence"));
+    let requests = requests.lock().unwrap();
+    let source_only = requests
+        .iter()
+        .filter(|request| request.contains("source-only-observation"))
+        .collect::<Vec<_>>();
+    assert_eq!(source_only.len(), 2);
+    for request in source_only {
+        assert!(request.contains("observed_marker"));
+        assert!(!request.contains("Define the task-command contract"));
+        assert!(!request.contains("requirements_revision"));
+        assert!(!request.contains("ROOT_CONTRACT.md"));
+    }
+    let comparisons = requests
+        .iter()
+        .filter(|request| request.contains("independent-comparison"))
+        .collect::<Vec<_>>();
+    assert_eq!(comparisons.len(), 2);
+    assert!(
+        comparisons
+            .iter()
+            .all(|request| !request.contains("pub fn observed_marker"))
+    );
+    let head = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(project.path())
+        .output()
+        .unwrap()
+        .stdout;
+    let again = run_kvist(&project, &["task", "run", "."]);
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(
+        Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(project.path())
+            .output()
+            .unwrap()
+            .stdout,
+        head
+    );
+    assert_eq!(requests.len(), 10);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn continuous_run_new_work_uses_a_fresh_baseline_and_approved_commit_policy() {
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
+    let gateway = MockGateway::serve(
+        move |_| {
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            gateway_text_body(
+                r#"{"report":"Independent observed evidence.","decision_required":false}"#,
+            )
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "item");
+    let first = run_kvist(&project, &["task", "run", "."]);
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let before = calls.load(std::sync::atomic::Ordering::SeqCst);
+    let path = project.path().join("src/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut previous = queue.tasks.last().unwrap().id.clone();
+    let template_tasks = queue.tasks[..4].to_vec();
+    for mut task in template_tasks {
+        task.id = task.id.replacen("one-", "three-", 1);
+        task.status = kvist::task_queue::TaskStatus::Pending;
+        task.timestamps.completed_at = None;
+        task.depends_on = vec![previous];
+        previous = task.id.clone();
+        queue.tasks.push(task);
+    }
+    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let config = project.path().join("kvist.toml");
+    fs::write(
+        &config,
+        fs::read_to_string(&config)
+            .unwrap()
+            .replace("commit = \"item\"", "commit = \"component\""),
+    )
+    .unwrap();
+    let approved = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(
+        approved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&approved.stderr)
+    );
+    for args in [
+        vec!["add", "src/TODOS.yaml", "kvist.toml"],
+        vec!["commit", "--quiet", "-m", "schedule next item"],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(project.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let next = run_kvist(&project, &["task", "run", "."]);
+    assert!(
+        next.status.success(),
+        "{}",
+        String::from_utf8_lossy(&next.stderr)
+    );
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst) - before, 7);
+    let queue = kvist::task_queue::parse(&fs::read_to_string(path).unwrap()).unwrap();
+    assert!(
+        queue
+            .tasks
+            .iter()
+            .all(|task| task.status == kvist::task_queue::TaskStatus::Completed)
+    );
+    assert!(queue.tasks.iter().all(|task| task.acceptance_id.is_none()));
+    let ledger: serde_json::Value = serde_json::from_slice(
+        &fs::read(project.path().join("src/.kvist/continuous.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(ledger["policy"]["commit"], "component");
+    let log = Command::new("git")
+        .args(["log", "--format=%s"])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(log.stdout).unwrap().lines().count(), 5);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn continuous_run_commit_policy_and_overlap_refusal() {
+    let gateway = MockGateway::spawn(
+        &gateway_text_body(r#"{"report":"Observed evidence.","decision_required":false}"#),
+        std::time::Duration::ZERO,
+    );
+    for (policy, expected_commits) in [("component", 2), ("manual", 1)] {
+        let project = continuous_project(&gateway.endpoint, policy);
+        let output = run_kvist(&project, &["task", "run", "."]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let log = Command::new("git")
+            .args(["log", "--format=%s"])
+            .current_dir(project.path())
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(log.stdout).unwrap().lines().count(),
+            expected_commits
+        );
+    }
+    let project = continuous_project(&gateway.endpoint, "item");
+    let path = project.path().join("src/src/lib.rs");
+    fs::write(&path, "user's uncommitted source\n").unwrap();
+    let before = fs::read(project.path().join("src/TODOS.yaml")).unwrap();
+    let output = run_kvist(&project, &["task", "run", "."]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("dirty"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read(project.path().join("src/TODOS.yaml")).unwrap(),
+        before
+    );
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        "user's uncommitted source\n"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn continuous_run_pauses_on_review_decision_without_running_later_items() {
+    let gateway = MockGateway::serve(
+        move |body| {
+            let comparison = String::from_utf8_lossy(body).contains("independent-comparison");
+            gateway_text_body(&format!(
+                r#"{{"report":"Human arbitration required.","decision_required":{comparison}}}"#
+            ))
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "item");
+    let output = run_kvist(&project, &["task", "run", "."]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let tasks = kvist::task_queue::parse(
+        &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        tasks.tasks[3].status,
+        kvist::task_queue::TaskStatus::AwaitingDecision
+    );
+    assert!(
+        tasks.tasks[4..]
+            .iter()
+            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn continuous_run_retries_failed_checkpoint_without_replaying_completed_tasks() {
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
+    let gateway = MockGateway::serve(
+        move |_| {
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            gateway_text_body(r#"{"report":"Independent evidence.","decision_required":false}"#)
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "item");
+    for args in [
+        ["config", "commit.gpgsign", "true"],
+        [
+            "config",
+            "gpg.program",
+            "/nonexistent-kvist-signing-fixture",
+        ],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(project.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let failed = run_kvist(&project, &["task", "run", "."]);
+    assert!(!failed.status.success());
+    let tasks = kvist::task_queue::parse(
+        &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        tasks.tasks[..4]
+            .iter()
+            .all(|task| task.status == kvist::task_queue::TaskStatus::Completed)
+    );
+    assert!(
+        tasks.tasks[4..]
+            .iter()
+            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+    );
+    let before = calls.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(before >= 5);
+    assert!(
+        Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(project.path())
+            .status()
+            .unwrap()
+            .success()
+    );
+    let retry = run_kvist(&project, &["task", "run", "."]);
+    assert!(
+        retry.status.success(),
+        "{}",
+        String::from_utf8_lossy(&retry.stderr)
+    );
+    let after = calls.load(std::sync::atomic::Ordering::SeqCst);
+    // Two authoring metadata requests plus five generations per item; only item two remains.
+    assert_eq!(after - before, 7);
+    let log = Command::new("git")
+        .args(["log", "--format=%s"])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(log.stdout).unwrap().lines().count(), 3);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn continuous_run_explicit_selection_is_single_and_prerequisite_checked() {
+    let gateway = MockGateway::spawn(&gateway_text_body("done"), std::time::Duration::ZERO);
+    let project = continuous_project(&gateway.endpoint, "item");
+    let output = run_kvist(&project, &["task", "run", ".", "one-write-tests"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let path = project.path().join("src/TODOS.yaml");
+    let before = fs::read(&path).unwrap();
+    let tasks = kvist::task_queue::parse(std::str::from_utf8(&before).unwrap()).unwrap();
+    assert_eq!(
+        tasks.tasks[0].status,
+        kvist::task_queue::TaskStatus::Completed
+    );
+    assert!(
+        tasks.tasks[1..]
+            .iter()
+            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+    );
+    let denied = run_kvist(&project, &["task", "run", ".", "one-security-audit"]);
+    assert!(!denied.status.success());
+    assert!(String::from_utf8_lossy(&denied.stderr).contains("not ready"));
+    assert_eq!(fs::read(path).unwrap(), before);
+    assert!(!project.path().join("src/.kvist/continuous.json").exists());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn continuous_run_batches_large_independent_review_inputs_without_dropping_evidence() {
+    let review_sizes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = review_sizes.clone();
+    let gateway = MockGateway::serve(
+        move |body| {
+            if let Ok(request) = serde_json::from_slice::<serde_json::Value>(body)
+                && let Some(messages) = request["messages"].as_array()
+                && messages.iter().any(|message| {
+                    message["content"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("fresh independent reviewer"))
+                })
+            {
+                observed.lock().unwrap().push(
+                    messages
+                        .iter()
+                        .filter_map(|message| message["content"].as_str())
+                        .map(str::len)
+                        .sum::<usize>(),
+                );
+            }
+            gateway_text_body(
+                r#"{"report":"Fragment evidence observed.","decision_required":false}"#,
+            )
+        },
+        std::time::Duration::ZERO,
+    );
+    for context in [32768, 131072] {
+        review_sizes.lock().unwrap().clear();
+        let project = continuous_project(&gateway.endpoint, "manual");
+        let source = "pub fn observed_marker() {}\n".repeat(9000);
+        fs::write(project.path().join("src/src/lib.rs"), source).unwrap();
+        let registry = project.path().join("providers.toml");
+        let content = fs::read_to_string(&registry).unwrap();
+        fs::write(registry, format!("{content}\ncontext_limit = {context}\n")).unwrap();
+        let approval = run_kvist(&project, &["task", "approve-policy"]);
+        assert!(
+            approval.status.success(),
+            "{}",
+            String::from_utf8_lossy(&approval.stderr)
+        );
+        let output = run_kvist(&project, &["task", "run", "."]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let sizes = review_sizes.lock().unwrap();
+        if context == 32768 {
+            assert!(
+                sizes.len() > 6,
+                "small contexts must receive all bounded fragments"
+            );
+            assert!(sizes.iter().all(|size| *size < 70_000), "{sizes:?}");
+        } else {
+            assert_eq!(
+                sizes.len(),
+                6,
+                "larger contexts avoid unnecessary review fragments"
+            );
+            assert!(sizes.iter().any(|size| *size > 240_000), "{sizes:?}");
+            assert!(sizes.iter().all(|size| *size < 400_000), "{sizes:?}");
+        }
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn continuous_run_rejects_malformed_reviews_and_forged_ledger_state() {
+    let gateway = MockGateway::spawn(
+        &gateway_text_body("not structured review evidence"),
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "manual");
+    let output = run_kvist(&project, &["task", "run", "."]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid report JSON"));
+    let path = project.path().join("src/TODOS.yaml");
+    let tasks = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        tasks.tasks[2].status,
+        kvist::task_queue::TaskStatus::Blocked
+    );
+    assert!(
+        tasks.tasks[3..]
+            .iter()
+            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+    );
+    let transitioned = run_kvist(
+        &project,
+        &["task", "transition", ".", "one-security-audit", "pending"],
+    );
+    assert!(
+        transitioned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&transitioned.stderr)
+    );
+    let ledger_path = project.path().join("src/.kvist/continuous.json");
+    let mut ledger: serde_json::Value =
+        serde_json::from_slice(&fs::read(&ledger_path).unwrap()).unwrap();
+    ledger["phase"] = serde_json::json!("awaiting-approval");
+    fs::write(ledger_path, serde_json::to_vec(&ledger).unwrap()).unwrap();
+    let before = fs::read(&path).unwrap();
+    let forged = run_kvist(&project, &["task", "run", "."]);
+    assert!(!forged.status.success());
+    assert!(String::from_utf8_lossy(&forged.stderr).contains("authentication failed"));
+    assert_eq!(fs::read(path).unwrap(), before);
+}
+
+#[cfg(target_os = "linux")]
+fn wait_cancelled_task(child: &mut std::process::Child) -> std::process::ExitStatus {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("task did not stop within two seconds of cancellation");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn independent_review_redacts_escaped_secrets_from_stream_logs_and_reports() {
+    let secret = "private \"key\"\nsecond line";
+    let response = serde_json::json!({
+        "report":format!("Observed {secret}"),"decision_required":false,
+    })
+    .to_string();
+    let mut body = String::new();
+    for fragment in response.as_bytes().chunks(7) {
+        body.push_str(&format!("data: {}\n\n", serde_json::json!({
+            "choices":[{"index":0,"delta":{"content":std::str::from_utf8(fragment).unwrap()},"finish_reason":null}]
+        })));
+    }
+    body.push_str(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    );
+    body.push_str("data: [DONE]\n\n");
+    let gateway = MockGateway::serve_raw(
+        move |_| {
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len(),
+            )
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "manual");
+    let path = project.path().join("src/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    for task in &mut queue.tasks[..2] {
+        task.status = kvist::task_queue::TaskStatus::Completed;
+        task.timestamps.completed_at = Some(task.timestamps.updated_at.clone());
+    }
+    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let config = project.path().join("kvist.toml");
+    let configured = fs::read_to_string(&config).unwrap().replace(
+        "[agent.roles.security_reviewer]\nprofile = \"fixture\"",
+        &format!(
+            "[agent.roles.security_reviewer]\nprofile = \"fixture\"\nredaction_values = [{}]",
+            serde_json::to_string(secret).unwrap(),
+        ),
+    );
+    fs::write(config, configured).unwrap();
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+    let output = run_kvist(
+        &project,
+        &["task", "run", ".", "one-security-audit", "--stream"],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let escaped = serde_json::to_string(secret).unwrap();
+    let escaped = &escaped[1..escaped.len() - 1];
+    let mut sinks = vec![output.stdout, output.stderr];
+    for directory in ["logs", "runs", "continuous-reviews"] {
+        for entry in fs::read_dir(project.path().join("src/.kvist").join(directory)).unwrap() {
+            sinks.push(fs::read(entry.unwrap().path()).unwrap());
+        }
+    }
+    assert!(
+        sinks
+            .iter()
+            .any(|sink| String::from_utf8_lossy(sink).contains("[REDACTED]"))
+    );
+    for sink in sinks {
+        let text = String::from_utf8(sink).unwrap();
+        assert!(!text.contains(secret) && !text.contains(escaped), "{text}");
+        assert!(!text.contains("private"), "{text}");
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn independent_review_controls_reject_guidance_and_cancel_quiet_inference() {
+    use sav::observation::{ControlRequest, send_control};
+    use std::io::{BufRead, BufReader, Read};
+    let (started, receiving) = std::sync::mpsc::channel();
+    let gateway = MockGateway::serve(
+        move |body| {
+            if !body.is_empty() {
+                started.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+            gateway_text_body(r#"{"report":"Unused cancelled result.","decision_required":false}"#)
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "manual");
+    let path = project.path().join("src/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    for task in &mut queue.tasks[..2] {
+        task.status = kvist::task_queue::TaskStatus::Completed;
+        task.timestamps.completed_at = Some(task.timestamps.updated_at.clone());
+    }
+    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["task", "run", ".", "one-security-audit", "--allow-control"])
+        .current_dir(project.path())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut socket = None;
+    for line in stderr.by_ref().lines() {
+        let line = line.unwrap();
+        if let Some(path) = line.strip_prefix("private run control: ") {
+            socket = Some(std::path::PathBuf::from(path));
+            break;
+        }
+    }
+    let socket = socket.expect("independent review exposes explicitly authorized controls");
+    receiving
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    let rejected = send_control(
+        &socket,
+        &ControlRequest::guide(1, "DO_NOT_INJECT_REVIEW_GUIDANCE"),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+    assert_eq!(rejected.status, "rejected");
+    assert!(rejected.message.unwrap().contains("clean-slate"));
+    let cancelled = send_control(
+        &socket,
+        &ControlRequest::cancel(2),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+    assert_eq!(cancelled.status, "cancellation_requested");
+    assert!(!wait_cancelled_task(&mut child).success());
+    assert!(!socket.exists());
+    let log = run_kvist(&project, &["task", "log", ".", "one-security-audit"]);
+    assert!(log.status.success());
+    let diagnostic = String::from_utf8_lossy(&log.stdout);
+    assert!(diagnostic.contains("failed"), "{diagnostic}");
+    let journals = fs::read_dir(project.path().join("src/.kvist/runs"))
+        .unwrap()
+        .map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect::<String>();
+    assert!(journals.contains("review_control"));
+    assert!(!journals.contains("DO_NOT_INJECT_REVIEW_GUIDANCE"));
+    let queue = kvist::task_queue::parse(&fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(
+        queue.tasks[2].status,
+        kvist::task_queue::TaskStatus::Blocked
+    );
+    assert!(
+        queue.tasks[3..]
+            .iter()
+            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn continuous_run_interrupt_cancels_quiet_inference_without_scheduling_later_tasks() {
+    let (started, receiving) = std::sync::mpsc::channel();
+    let gateway = MockGateway::serve(
+        move |body| {
+            if !body.is_empty() {
+                started.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+            gateway_text_body("Unused cancelled result.")
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "manual");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["task", "run", "."])
+        .current_dir(project.path())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    receiving
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap()),
+        nix::sys::signal::Signal::SIGINT,
+    )
+    .unwrap();
+    assert!(!wait_cancelled_task(&mut child).success());
+    let queue = kvist::task_queue::parse(
+        &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        queue.tasks[0].status,
+        kvist::task_queue::TaskStatus::Blocked
+    );
+    assert!(
+        queue.tasks[1..]
+            .iter()
+            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+    );
+}
+
 #[test]
 #[cfg(target_os = "linux")]
 fn task_run_runtime_budgets_allow_large_wire_responses_and_text_deltas() {
@@ -2341,7 +3145,7 @@ fn a_durably_blocked_attempt_can_be_deliberately_returned_to_pending_and_retried
 
 #[test]
 #[cfg(target_os = "linux")]
-fn batch_stops_at_pending_finalization_without_claiming_completion() {
+fn explicit_task_stops_for_finalization_without_running_followups() {
     let gateway = MockGateway::serve_with_status(
         |request| {
             if request.starts_with(b"GET /props?") {
@@ -2362,7 +3166,7 @@ fn batch_stops_at_pending_finalization_without_claiming_completion() {
     followup.id = "followup".into();
     tasks.tasks.push(followup);
     fs::write(path, kvist::task_queue::serialize(&tasks).unwrap()).unwrap();
-    let output = run_kvist(&project, &["task", "run", ".", "all"]);
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
     assert!(
         output.status.success(),
         "{}",
@@ -2370,10 +3174,9 @@ fn batch_stops_at_pending_finalization_without_claiming_completion() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Batch stopped at task `implement-code` in state in-progress"),
+        stdout.contains("it is not completed yet. Awaiting human finalization"),
         "{stdout}"
     );
-    assert!(stdout.contains("0/2 tasks completed"), "{stdout}");
     assert!(stdout.contains("kvist task finalize . implement-code attempt-0001 accept"));
     assert!(!stdout.contains("completed successfully"));
     let tasks = kvist::task_queue::parse(
@@ -3503,7 +4306,7 @@ fn task_replay_json_mode() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn task_run_batch_item_prefix_or_all() {
+fn task_run_rejects_retired_prefix_and_all_selectors_without_effects() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
@@ -3537,16 +4340,14 @@ command = "/usr/bin/echo 'mocking verify'"
             .success()
     );
 
-    // Run using prefix "implement"
-    let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
-        .args(["task", "run", ".", "implement"])
-        .current_dir(project.path())
-        .output()
-        .expect("run task batch");
-    assert!(output.status.success());
-    let stdout_str = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout_str.contains("executed and verified successfully")
-            || stdout_str.contains("completed")
-    );
+    let before = fs::read(project.path().join("src/TODOS.yaml")).unwrap();
+    for spec in ["implement", "all"] {
+        let output = run_kvist(&project, &["task", "run", ".", spec]);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("does not exist"));
+        assert_eq!(
+            fs::read(project.path().join("src/TODOS.yaml")).unwrap(),
+            before
+        );
+    }
 }

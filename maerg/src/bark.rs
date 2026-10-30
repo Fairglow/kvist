@@ -43,6 +43,7 @@ mod completion;
 mod journal;
 mod locks;
 mod pager;
+mod prefill;
 mod prompt_editor;
 mod runs;
 mod scroll_pager;
@@ -75,6 +76,7 @@ use sav::split_raw_command;
 use completion::KvistCompleter;
 pub use journal::{JournalEntry, SESSION_JOURNAL, SessionJournal, display_session_status};
 pub use pager::display_output;
+use prefill::ComponentPrefill;
 pub use prompt_editor::{
     build_prompt_seed, edit_prompt_with_seed, print_prompt_block, prompt_editor_command,
 };
@@ -620,10 +622,7 @@ impl Shell {
         LoopAction::Continue
     }
 
-    /// `run [COMPONENT_DIR] [TASK_ID]`: run a task, or — when the task is
-    /// omitted — suggest the next ready task. An omitted task is never
-    /// auto-executed: the next ready task runs only after an explicit
-    /// confirmation (bare ENTER accepts).
+    /// `run COMPONENT_DIR [TASK_ID]`: one task or continuous component work.
     fn handle_run(&mut self, args: &[String], line: &str) -> LoopAction {
         let (requested_component, task) = match parse_run_args(args) {
             Ok(parsed) => parsed,
@@ -634,67 +633,18 @@ impl Shell {
                 return LoopAction::Continue;
             }
         };
-        let hint = requested_component.as_deref().and_then(|requested| {
-            component_focus_hint(self.current_component().as_deref(), requested)
-        });
-        let component = requested_component
-            .or_else(|| self.current_component())
-            .unwrap_or_else(|| ".".to_owned());
+        let hint = component_focus_hint(self.current_component().as_deref(), &requested_component);
+        let component = requested_component;
         if let Some(hint) = hint {
             println!("{}", self.theme.dim(&hint));
         }
-        let suggested = task.is_none();
-        let task = match task {
-            Some(task) => task,
-            None => match task_commands::next(&self.project_dir, Path::new(&component)) {
-                Ok(task_id) if task_id != "no ready task" => task_id,
-                Ok(_) => {
-                    report_error(
-                        self.theme,
-                        &format!(
-                            "no ready tasks in `{component}`; pass a TASK_ID or inspect `tasks`"
-                        ),
-                    );
-                    self.journal.append(journal_entry(line, "no ready task"));
-                    self.note(true);
-                    return LoopAction::Continue;
-                }
-                Err(error) => {
-                    let _ = error.print();
-                    self.journal.append(journal_entry(line, &error.to_string()));
-                    self.note(true);
-                    return LoopAction::Continue;
-                }
-            },
+        let component = format!("'{}'", component.replace('\'', "'\\''"));
+        let command = match task {
+            Some(task) => format!("task run {component} '{}'", task.replace('\'', "'\\''")),
+            None => format!("task run {component}"),
         };
-        if suggested && !self.confirm_suggested_run(&task, line) {
-            return LoopAction::Continue;
-        }
-        self.dispatch_labeled(&format!("task run {component} {task}"), line);
+        self.dispatch_labeled(&command, line);
         LoopAction::Continue
-    }
-
-    /// Asks the user to confirm a suggested (next-ready) run. A refusal, or a
-    /// confirmation that cannot be obtained in a non-interactive context, aborts
-    /// the run without changing durable state.
-    fn confirm_suggested_run(&mut self, task_id: &str, line: &str) -> bool {
-        match task_commands::confirm_run_suggestion(task_id) {
-            Ok(confirmed) => {
-                if !confirmed {
-                    println!("Cancelled: did not run the suggested task `{task_id}`.");
-                    self.journal.append(journal_entry(line, "run cancelled"));
-                    self.note(false);
-                }
-                confirmed
-            }
-            Err(error) => {
-                let _ = error.print();
-                self.journal
-                    .append(journal_entry(line, "confirmation unavailable"));
-                self.note(true);
-                false
-            }
-        }
     }
 
     /// `last [COUNT]`: recent agent runs with tokens and log links.
@@ -879,43 +829,6 @@ impl Shell {
         // as `cd maerg && kvist task next` does in the regular CLI.
         inject_command_focus(&mut cmd, self.current_component().as_deref());
 
-        if let cli::Command::Task {
-            command:
-                cli::TaskCommand::Run {
-                    component_dir,
-                    task_id,
-                    ..
-                },
-        } = &mut cmd
-            && task_id.is_none()
-        {
-            let component = component_dir.as_deref().unwrap_or(Path::new("."));
-            let selected = match task_commands::next(&self.project_dir, component) {
-                Ok(selected) if selected != "no ready task" => selected,
-                Ok(_) => {
-                    report_error(
-                        self.theme,
-                        "No ready task; inspect `tasks` or `kvist status`.",
-                    );
-                    self.journal
-                        .append(journal_entry(journal_line, "no ready task"));
-                    self.note(true);
-                    return;
-                }
-                Err(error) => {
-                    let _ = error.print();
-                    self.journal
-                        .append(journal_entry(journal_line, &error.to_string()));
-                    self.note(true);
-                    return;
-                }
-            };
-            if !self.confirm_suggested_run(&selected, journal_line) {
-                return;
-            }
-            *task_id = Some(selected);
-        }
-
         // Destructive operations require an explicit in-shell confirmation.
         if let Some(gate) = destructive_gate(&cmd)
             && !confirm(&format!("confirm {gate}? [y/N] "))
@@ -957,7 +870,30 @@ impl Shell {
         } else {
             Some(self.stream_manager.start_spinner(&program))
         };
-        let result = cli::execute(Some(cmd), false);
+        let result = match cmd {
+            cli::Command::Task {
+                command:
+                    cli::TaskCommand::Run {
+                        component_dir,
+                        task_id,
+                        stream,
+                        allow_control,
+                    },
+            } => crate::context::ProjectContext::resolve(Some(&self.project_dir)).and_then(
+                |project| {
+                    let component = project.resolve_component(Some(&component_dir))?;
+                    task_commands::run_task_or_item_with_controls(
+                        &project.project_dir,
+                        &component,
+                        task_id.as_deref(),
+                        stream,
+                        allow_control,
+                    )
+                    .map(cli::CommandOutput::message)
+                },
+            ),
+            cmd => cli::execute(Some(cmd), false),
+        };
         if let Some(spinner) = spinner {
             spinner.stop();
         }
@@ -987,7 +923,7 @@ impl Shell {
 
         let summary = match &result {
             Ok(out) => truncate(&out.to_string(), 100),
-            Err(err) => truncate(&err.to_string(), 100),
+            Err(err) => err.to_string(),
         };
         self.journal.append(journal_entry(journal_line, &summary));
         // A cooperative cancellation is not a failure for the prompt state.
@@ -1191,15 +1127,16 @@ fn parse_tasks_args(args: &[String]) -> std::result::Result<TasksArgs, String> {
     Ok(TasksArgs { component, status })
 }
 
-/// Parsed `run` builtin arguments: the optional component and task.
-type RunArgs = (Option<String>, Option<String>);
+/// Parsed `run` builtin arguments: the required component and optional task.
+type RunArgs = (String, Option<String>);
 
-/// Parses `run [COMPONENT_DIR] [TASK_ID]` (pure).
+/// Parses `run COMPONENT_DIR [TASK_ID]` (pure).
 fn parse_run_args(args: &[String]) -> std::result::Result<RunArgs, String> {
-    if args.len() > 2 {
-        return Err("usage: run [COMPONENT_DIR] [TASK_ID]".to_owned());
+    match args {
+        [component] => Ok((component.clone(), None)),
+        [component, task] => Ok((component.clone(), Some(task.clone()))),
+        _ => Err("usage: run COMPONENT_DIR [TASK_ID]".to_owned()),
     }
-    Ok((args.first().cloned(), args.get(1).cloned()))
 }
 
 /// Resolves the next ready task (the first pending task whose recorded
@@ -1411,7 +1348,7 @@ fn render_help(theme: Theme) -> String {
         "  tasks [COMPONENT] [--status S] list tasks; S: pending, in-progress, blocked, awaiting-decision, completed\n",
     );
     text.push_str(
-        "  run [COMPONENT] [TASK]         run a task; omit TASK to confirm the next ready one\n",
+        "  run COMPONENT [TASK]           run an exact task; omit TASK for continuous work\n",
     );
     text.push_str("  last [COUNT]                   recent agent runs with tokens and log links\n");
     text.push_str("  history [COUNT]                recent editor history lines\n");
@@ -1439,9 +1376,7 @@ fn render_help(theme: Theme) -> String {
     );
     text.push_str("\nWorkflow commands (after `cd COMPONENT`, omit the component argument):\n");
     text.push_str("  task next                show the next ready task\n");
-    text.push_str(
-        "  task run [TASK]          run a task; omit TASK to confirm the next ready one\n",
-    );
+    text.push_str("  task run COMPONENT [TASK] run an exact task; omit TASK for continuous work\n");
     text.push_str("  task log TASK            inspect an execution log\n");
     text.push_str("  task transition TASK STATUS  record a status transition\n");
     text.push_str("  component validate       validate component intent documents\n");
@@ -1469,7 +1404,6 @@ fn inject_command_focus(command: &mut cli::Command, focus: Option<&str>) {
             command:
                 cli::TaskCommand::Next { component_dir, .. }
                 | cli::TaskCommand::Transition { component_dir, .. }
-                | cli::TaskCommand::Run { component_dir, .. }
                 | cli::TaskCommand::Log { component_dir, .. }
                 | cli::TaskCommand::Unlock { component_dir, .. }
                 | cli::TaskCommand::Recover { component_dir, .. }
@@ -1530,8 +1464,6 @@ fn is_interactive_command(command: &cli::Command) -> bool {
         command,
         cli::Command::Agent {
             command: cli::AgentCommand::Setup { .. }
-        } | cli::Command::Task {
-            command: cli::TaskCommand::Run { task_id: None, .. }
         }
     )
 }
@@ -1551,6 +1483,7 @@ fn is_streaming_command(command: &cli::Command) -> bool {
 /// IDE completion menu, and file-backed history at `.kvist/history`.
 fn build_editor(
     completer: Box<KvistCompleter>,
+    prefill: ComponentPrefill,
     project_dir: &Path,
     theme: Theme,
     badge_width: Arc<Mutex<usize>>,
@@ -1657,6 +1590,9 @@ fn build_editor(
 
     let editor = Reedline::create()
         .with_completer(completer)
+        .with_break_signal(prefill.break_signal())
+        .with_abbreviations(prefill.abbreviations())
+        .with_highlighter(Box::new(prefill))
         .with_history(history)
         .with_hinter(Box::new(KvistHinter {
             theme,
@@ -1696,6 +1632,7 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
     let state = Arc::new(Mutex::new(DynamicState::load(project_dir)));
     let focus = Arc::new(Mutex::new(None));
     let mut shell = Shell::new(project_dir, focus.clone(), theme);
+    let prefill = ComponentPrefill::new(root.clone(), focus.clone());
     let completer = Box::new(KvistCompleter::new(root, state.clone(), focus));
     let status = StatusContext::load(project_dir);
 
@@ -1704,7 +1641,13 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
     // hint line would overlap it).
     let badge_width = Arc::new(Mutex::new(0));
 
-    let mut editor = build_editor(completer, project_dir, theme, badge_width.clone())?;
+    let mut editor = build_editor(
+        completer,
+        prefill.clone(),
+        project_dir,
+        theme,
+        badge_width.clone(),
+    )?;
 
     let initial_branch = state
         .lock()
@@ -1718,6 +1661,7 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
     );
 
     let mut consecutive_read_failures = 0_u32;
+    let mut reset_prefill = true;
     loop {
         // Keep dynamic completions in step with the durable project state.
         if let Ok(mut guard) = state.lock() {
@@ -1741,9 +1685,21 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
             status_label,
         };
 
-        let signal = match editor.read_line(&prompt) {
+        if reset_prefill {
+            prefill.begin_submission();
+            editor = editor.with_abbreviations(prefill.abbreviations());
+            reset_prefill = false;
+        }
+        let read_result = loop {
+            match editor.read_line(&prompt) {
+                Ok(Signal::ExternalBreak(_)) => prefill.apply(&mut editor),
+                result => break result,
+            }
+        };
+        let signal = match read_result {
             Ok(signal) => {
                 consecutive_read_failures = 0;
+                reset_prefill = true;
                 signal
             }
             Err(error) => {
@@ -1852,7 +1808,7 @@ mod tests {
     fn is_streaming_command_classifies_correctly() {
         let task_run = cli::Command::Task {
             command: cli::TaskCommand::Run {
-                component_dir: Some(".".into()),
+                component_dir: ".".into(),
                 task_id: Some("t1".to_owned()),
                 stream: true,
                 allow_control: false,
@@ -1879,16 +1835,16 @@ mod tests {
     }
 
     #[test]
-    fn suggested_task_is_interactive_but_an_explicit_task_is_not() {
+    fn task_runs_never_require_interactive_confirmation() {
         let mut command = cli::Command::Task {
             command: cli::TaskCommand::Run {
-                component_dir: None,
+                component_dir: ".".into(),
                 task_id: None,
                 stream: false,
                 allow_control: false,
             },
         };
-        assert!(is_interactive_command(&command));
+        assert!(!is_interactive_command(&command));
         if let cli::Command::Task {
             command: cli::TaskCommand::Run { task_id, .. },
         } = &mut command
@@ -1923,7 +1879,7 @@ mod tests {
         // Explicit arguments always win over the focus.
         let mut run = cli::Command::Task {
             command: cli::TaskCommand::Run {
-                component_dir: Some(".".into()),
+                component_dir: ".".into(),
                 task_id: None,
                 stream: false,
                 allow_control: false,
@@ -1933,7 +1889,7 @@ mod tests {
         match run {
             cli::Command::Task {
                 command: cli::TaskCommand::Run { component_dir, .. },
-            } => assert_eq!(component_dir.as_deref(), Some(std::path::Path::new("."))),
+            } => assert_eq!(component_dir, PathBuf::from(".")),
             _ => panic!("expected task run"),
         }
 
@@ -2137,15 +2093,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_run_args_accepts_optional_component_and_task() {
-        assert_eq!(parse_run_args(&[]).expect("valid"), (None, None));
+    fn parse_run_args_requires_component_and_accepts_optional_task() {
+        assert!(parse_run_args(&[]).is_err());
         assert_eq!(
             parse_run_args(&["maerg".to_owned()]).expect("valid"),
-            (Some("maerg".to_owned()), None)
+            ("maerg".to_owned(), None)
         );
         assert_eq!(
             parse_run_args(&["maerg".to_owned(), "t-1".to_owned()]).expect("valid"),
-            (Some("maerg".to_owned()), Some("t-1".to_owned()))
+            ("maerg".to_owned(), Some("t-1".to_owned()))
         );
         assert!(parse_run_args(&["a".to_owned(), "b".to_owned(), "c".to_owned()]).is_err());
     }
@@ -2296,10 +2252,10 @@ mod tests {
     fn run_builtin_on_uninitialized_project_reports_actionable_state_and_continues() {
         let dir = tempdir().unwrap();
         let (mut shell, history) = test_shell(dir.path());
-        assert_eq!(shell.handle_line("run", &history), LoopAction::Continue);
+        assert_eq!(shell.handle_line("run .", &history), LoopAction::Continue);
         let result = &shell.journal.entries()[0].result;
-        assert!(result.contains("not current (state: uninitialized)"));
-        assert!(result.contains("kvist doctor"));
+        assert!(result.contains("kvist.toml"));
+        assert!(result.contains("kvist init"));
     }
 
     #[test]
@@ -2494,7 +2450,7 @@ mod tests {
         assert!(destructive_gate(&commit_accepted).is_some());
         let plain_run = cli::Command::Task {
             command: cli::TaskCommand::Run {
-                component_dir: Some(".".into()),
+                component_dir: ".".into(),
                 task_id: Some("t1".to_owned()),
                 stream: false,
                 allow_control: false,

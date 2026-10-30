@@ -210,8 +210,7 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
 | Command               | Form                                                                                           | Purpose                                                                                                                                                                                                                                                                                                  |
 | --------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `task next`           | `kvist task next [COMPONENT_DIR]`                                                              | print the first ready task (no state change)                                                                                                                                                                                                                                                             |
-| `task run`            | `kvist task run [COMPONENT_DIR] [TASK_ID] [--stream]`                                          | execute with the supervised agent; TASK_ID = exact task ID, an item prefix selecting every task of that item, or `all` (every uncompleted task, sequentially, stopping at the first failure); omitted task = suggest the next ready one (confirmed interactively; non-interactive contexts fail clearly) |
-| `task run-all`        | `kvist task run-all [COMPONENT_DIR]`                                                           | run the whole component: iterate the component's tasks in dependency order, running each ready task, and stop when the component is complete, when a task becomes blocked, or when a task reaches an awaiting-decision point; it never auto-resolves a decision or unblocks a blocked task, pausing with the exact state and the command that resolves it |
+| `task run`            | `kvist task run COMPONENT_DIR [TASK_ID] [--stream]` | omit TASK_ID for continuous dependency-ready work with per-item local checkpoint commits; an exact TASK_ID runs only that task; stop for final approval, decisions, or blockers, without per-task confirmation |
 | `task log`            | `kvist task log [COMPONENT_DIR] TASK_ID`                                                       | print the most recent bounded, redacted execution log                                                                                                                                                                                                                                                    |
 | `task replay`         | `kvist task replay SESSION_JSONL [--max-turns N]`                                              | replay a recorded trajectory                                                                                                                                                                                                                                                                             |
 | `task transition`     | `kvist task transition [COMPONENT_DIR] TASK_ID STATUS [--reason R]`                            | one audited manual status transition                                                                                                                                                                                                                                                                     |
@@ -274,12 +273,30 @@ selection, theme, and other settings. Selecting a component from the menu is
 the same focus change as the `cd` builtin and pre-fills the component for
 subsequent commands.
 
-**Run the whole component.** `task run-all [COMPONENT_DIR]` iterates the
+**Run the whole component.** Bare `task run COMPONENT_DIR` iterates the
 component's tasks in dependency order, running each ready task, and stops when
 the component is complete, when a task becomes blocked, or when a task reaches
 an awaiting-decision point. It never auto-resolves a decision or unblocks a
 blocked task; it pauses and reports the exact state and the command that
 resolves it, leaving durable task state for explicit finalize or recovery.
+
+The default `[task_run] commit = "item"` checkpoints each complete TODO
+item, waiting for all its queued test, implementation and review stages. Item IDs use
+the shared prefix before those lifecycle suffixes, and item tasks must be
+contiguous. `"component"` checkpoints once at the end; `"manual"` leaves commits
+to the operator. Policy changes require `kvist task approve-policy`.
+Automatic commits require an attached Git branch, existing HEAD, configured
+identity/signing and clean overlapping paths. Unrelated staged/unstaged changes
+are preserved. Commits are local unaccepted checkpoints, never pushes.
+On a checkpoint failure, fix the reported Git/signing problem and repeat bare
+run; retained completed tasks are not executed again. Decisions/failed or
+interrupted effects retain existing explicit resolution/recovery requirements.
+Final execution awaits human approval; `component accept` still accepts intent,
+not implementation results.
+
+With shell component focus active, component arguments are visibly prefilled
+in the editable buffer when their position is reached. Delete the inserted
+argument to choose another component; task-ID completion then follows it.
 
 ## 5. Context resolution rules (normative)
 

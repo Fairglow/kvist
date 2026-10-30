@@ -508,6 +508,29 @@ pub struct ProjectConfig {
     pub test_policy: Option<TestPolicy>,
     /// Required project-local isolation boundary for task execution.
     pub sandbox: Option<SandboxConfig>,
+    /// Local checkpoint frequency for continuous component execution.
+    pub task_run: TaskRunConfig,
+}
+
+/// Approval-bound continuous execution policy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct TaskRunConfig {
+    /// Checkpoint complete items by default, never human acceptance.
+    pub commit: CommitFrequency,
+}
+
+/// When continuous work creates local unaccepted checkpoint commits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum CommitFrequency {
+    /// Commit after all lifecycle tasks for each item complete.
+    #[default]
+    Item,
+    /// Commit after all component tasks complete.
+    Component,
+    /// Leave changes for an explicit human commit.
+    Manual,
 }
 
 /// Project-selected version-1 external sandbox runner contract.
@@ -719,6 +742,15 @@ fn parse(config_path: &Path, project_root: &Path, contents: &str) -> Result<Proj
         agent: load_agent_config(project_root, config_path, contents, table)?,
         test_policy: parse_test_policy(config_path, table)?,
         sandbox: parse_sandbox_config(config_path, table)?,
+        task_run: table
+            .get("task_run")
+            .map(|value| {
+                value.clone().try_into().map_err(|error| {
+                    invalid_configuration(config_path, &format!("invalid task_run policy: {error}"))
+                })
+            })
+            .transpose()?
+            .unwrap_or_default(),
     })
 }
 
@@ -1989,39 +2021,52 @@ fn parse_agent_resource_policy(
             })?;
         profile.token_limit = Some(limit);
     }
-    let Some(redaction) = table.get("redaction") else {
-        return Ok(());
-    };
-    let redaction = redaction.as_table().ok_or_else(|| {
-        invalid_configuration(
-            config_path,
-            "`agent profile redaction` must be a TOML table",
-        )
-    })?;
-    let values = redaction
-        .get("values")
-        .and_then(toml::Value::as_array)
-        .ok_or_else(|| {
+    let (values, field) = if let Some(values) = table.get("redaction_values") {
+        if table.contains_key("redaction") {
+            return Err(invalid_configuration(
+                config_path,
+                "configure only one role redaction form",
+            ));
+        }
+        (values, "redaction_values")
+    } else if let Some(redaction) = table.get("redaction") {
+        let redaction = redaction.as_table().ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`agent profile redaction` must be a TOML table",
+            )
+        })?;
+        let values = redaction.get("values").ok_or_else(|| {
             invalid_configuration(
                 config_path,
                 "`agent profile redaction.values` must be an array of nonblank strings",
             )
         })?;
+        (values, "redaction.values")
+    } else {
+        return Ok(());
+    };
+    let values = values.as_array().ok_or_else(|| {
+        invalid_configuration(
+            config_path,
+            &format!("`agent profile {field}` must be an array of nonblank strings"),
+        )
+    })?;
     let mut parsed = Vec::with_capacity(values.len());
     for value in values {
         let value = value
             .as_str()
-            .filter(|value| !value.is_empty() && value.len() <= 4_096)
+            .filter(|value| !value.trim().is_empty() && value.len() <= 4_096)
             .ok_or_else(|| {
                 invalid_configuration(
                     config_path,
-                    "`agent profile redaction.values` must contain nonblank strings no longer than 4096 bytes",
+                    &format!("`agent profile {field}` must contain nonblank strings no longer than 4096 bytes"),
                 )
             })?;
         if parsed.iter().any(|existing| existing == value) {
             return Err(invalid_configuration(
                 config_path,
-                "`agent profile redaction.values` must not contain duplicates",
+                &format!("`agent profile {field}` must not contain duplicates"),
             ));
         }
 
@@ -2030,7 +2075,7 @@ fn parse_agent_resource_policy(
     if parsed.is_empty() {
         return Err(invalid_configuration(
             config_path,
-            "`agent profile redaction.values` must not be empty",
+            &format!("`agent profile {field}` must not be empty"),
         ));
     }
     profile.redaction_values = parsed;
@@ -2380,6 +2425,30 @@ fn parse_test_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_role_redaction_values_are_applied_and_validated() {
+        let table: toml::Table =
+            toml::from_str("redaction_values = [\"first\", \"second\"]").unwrap();
+        let mut profile = RoleConfig::default_for_role(Role::Developer);
+        parse_agent_resource_policy(Path::new("kvist.toml"), &table, &mut profile).unwrap();
+        assert_eq!(profile.redaction_values, ["first", "second"]);
+        for invalid in [
+            "redaction_values = []",
+            "redaction_values = [true]",
+            "redaction_values = [\"\"]",
+            "redaction_values = [\" \"]",
+            "redaction_values = [\"\\t\\n\"]",
+            "[redaction]\nvalues = [\" \"]",
+            "redaction_values = [\"same\", \"same\"]",
+            "redaction_values = [\"one\"]\n[redaction]\nvalues = [\"two\"]",
+        ] {
+            let table: toml::Table = toml::from_str(invalid).unwrap();
+            assert!(
+                parse_agent_resource_policy(Path::new("kvist.toml"), &table, &mut profile).is_err()
+            );
+        }
+    }
 
     #[test]
     fn runtime_budget_defaults_match_generated_configuration() {
