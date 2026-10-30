@@ -294,6 +294,16 @@ interrupted effects retain existing explicit resolution/recovery requirements.
 Final execution awaits human approval; `component accept` still accepts intent,
 not implementation results.
 
+Task decisions and blockers name a human-readable Markdown brief under the
+component's `.kvist/attention/`. It retains agent explanations when available
+and host instructions for choosing, clarifying, rejecting and safely resuming.
+Review JSON has a same-stem `.md` companion; `component.md` indexes final reports.
+Open the printed file manually until transcript rendering is complete.
+There is no new decision-response/approval command: record accepted changes
+in component intent and the queue, accept changed intent after review, and
+explicitly rerun the resolved awaiting-decision task. A blocked task must first
+be transitioned to pending; unresolved attempts keep their recovery fences.
+
 With shell component focus active, component arguments are visibly prefilled
 in the editable buffer when their position is reached. Delete the inserted
 argument to choose another component; task-ID completion then follows it.

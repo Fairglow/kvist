@@ -446,6 +446,26 @@ to preserve clean-slate review boundaries.
 After manual edits during a pause, inspect verification and review freshness:
 completed reviews are not automatically invalidated or rerun.
 
+### Decisions and blockers
+
+When work needs your attention, Kvist prints a specific `.md` brief under the
+component's `.kvist/attention/`. Open it manually until transcript rendering is
+fully integrated. Agent explanations describe the situation, design impact,
+alternatives and tradeoffs, recommendation and uncertainty. Host-written
+instructions explain how to choose/approve, request clarification, reject with
+replacement instructions, and resume with the existing task commands.
+
+Review JSON remains available with a same-stem Markdown companion under
+`.kvist/continuous-reviews/`; `component.md` indexes final review evidence.
+Operational briefs are outside automatic checkpoint ownership so a failed
+checkpoint can be explained without making its retry dirty. Immutable,
+content-addressed brief history remains beside each latest task/run alias.
+If inference fails, Kvist writes an explicitly labelled diagnostic rather than
+calling the failing model again. No summary chooses an approach or accepts work.
+Record accepted decisions in the affected intent and queue; a chat answer or
+editing a summary alone does not update approved intent. Keep the task paused
+while asking your development assistant for clarification.
+
 ### 5.4 Replaying Execution Trajectories
 
 Every execution turn, tool call, and token metric is journaled into `.kvist/runs/`. You can replay historical trajectories offline:

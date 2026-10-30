@@ -1152,6 +1152,35 @@ work, but parent traversal is never resolved or accepted.
 Editor suspension preserves the buffer and cursor but resets earlier undo
 history; per-submission tracking prevents reinsertion after deletion/undo.
 
+### Human decision and blocker presentation
+
+Keep JSON evidence for machines and persist same-stem Markdown review companions
+from the model's existing report. Review instructions and `propose_decision`'s
+`why` field request a human brief: situation, design implications, alternatives
+with consequences, recommendation and rationale, missing evidence. Do not mix
+authoring intent into source-only review or request an extra model generation
+just to explain a failed model call. Host-authored resolution steps use only
+existing commands, never invented approval or response APIs.
+Authoring proposal filenames bind the unique run-log session, turn and proposal
+ordinal plus call ID; no-clobber publication prevents reused model call IDs from
+overwriting older JSON/Markdown evidence.
+
+A shared presentation module writes redacted bounded briefs to
+`.kvist/attention/`, with latest per-task/run aliases and no-clobber
+content-addressed history. This directory is operational evidence outside
+checkpoint inventory/effect hashes: explaining a failed cleanliness check or
+checkpoint cannot itself make its retry dirty or invalidate the pending tree.
+Decision briefs precede disposition under the existing operation lock; error
+wrappers write operational diagnostics without claiming task ownership.
+Summaries contain the agent's
+proposal/report verbatim as advisory text and host lifecycle instructions;
+fallback errors are explicitly host diagnostics, not invented model advice.
+The host always retains raw evidence references and labels historical state.
+Writing a brief changes neither queue state nor approval/recovery evidence.
+If persistence fails, return both the original cause and summary failure.
+Continuous and exact-task entry points wrap errors consistently, including
+preflight failures; unsafe/unavailable state directories fail visibly.
+
 ### Guided help and actionable status guidance
 
 `help.rs` is a pure, I/O-free module: `HelpTopic` is a closed

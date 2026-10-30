@@ -5,6 +5,52 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped human attention observations - 2026-10-30
+
+The separate clean-slate source/test observations are retained in
+[`attention-brief-observation.md`](../docs/reviews/attention-brief-observation.md)
+and the later narrow
+[`retention observation`](../docs/reviews/attention-retention-observation.md).
+They did not read intent or execute checks. Selected source-derived observations:
+
+- Proposals and reviews request agent-written Markdown explanations; section
+  presence and factual quality are not mechanically established.
+- Review JSON has attempt/task Markdown companions. Decisions name an
+  operational attention brief with the agent explanation and host-written
+  choose/clarify/reject/resume instructions. Error wrappers explain task and
+  continuous-run failures without another model call.
+- Briefs use redaction, a 256 KiB bound, content-addressed history and replaceable
+  task/run aliases. Invalid configuration, unsafe paths and persistence errors
+  can prevent a brief, with explicit diagnostics. Summaries do not grant approval
+  or clear recovery fences.
+- The initial observer identified reused call IDs overwriting raw proposals.
+  The later observer describes session/turn/ordinal-bound names and no-clobber
+  JSON/Markdown publication. Publication is not pair-transactional: partial
+  evidence can remain on failure, and replaying the same identity is refused.
+- Output-limited explanations are disclosed; raw companions preserve proposal
+  data subject to upstream bounds. Source observations do not establish model
+  recommendation quality, actual rendered UX, freshness or concurrent path safety.
+
+Implementation-agent execution, separately attributed: the missing decision
+Markdown and reused-call-ID overwrite were reproduced before their repairs.
+The final Maerg suite passed 920 tests with seven existing ignores; format
+checking, strict all-target Clippy, release build and document validation passed.
+One unchanged checkpoint timing assertion failed in an earlier full run, then
+passed in isolation and in the final unchanged full run. Attempt-specific and
+latest Markdown summaries for Galla's retained attempt-0002 were generated from existing report
+and intent, without source validation or changing its paused task/ledger.
+No protected review execution, receipt, human acceptance or installed-binary
+replacement is implied.
+
+The separate
+[`source-blind diagnostic comparison`](../docs/reviews/attention-brief-comparison.md)
+found no established current blocking contradiction in the supplied evidence.
+It retains partial multi-file publication, prompt quality, bounded excerpts and
+unsafe/unavailable publication paths as limitations or arbitration points.
+The comparator disclosed exposure to unrelated IMPL snippets during its initial
+search; this is not claimed as a strictly exclusive-read review or a protected
+gate. The queued security/compliance tasks remain pending.
+
 ## Scoped continuous-execution observations - 2026-10-30
 
 The independent clean-slate source/test observation is retained in

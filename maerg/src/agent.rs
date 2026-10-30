@@ -1360,8 +1360,14 @@ fn execute_agent_inner(
             //     dropped intents for the evidence trail.
             if !plan.decisions.is_empty() {
                 let mut recorded = Vec::with_capacity(plan.decisions.len());
-                for decision in &plan.decisions {
-                    let path = record_decision_evidence(request.target_dir, decision, &redactions)?;
+                for (index, decision) in plan.decisions.iter().enumerate() {
+                    let identity = format!("{session_id}:{turn_index}:{index}");
+                    let path = record_decision_evidence(
+                        request.target_dir,
+                        decision,
+                        &redactions,
+                        &identity,
+                    )?;
                     tracing::info!(
                         task_id = %request.task_id,
                         path = %path.display(),
@@ -1657,14 +1663,15 @@ fn record_turn_outcome(
         && all_effects.iter().all(|record| record.applied)
         && !surfaced_decision;
 
-    let stdout = redact_bounded(
-        last_turn
-            .as_ref()
-            .map(|turn| turn.text.as_str())
-            .unwrap_or_default(),
-        redactions,
-        profile.max_output_bytes,
-    );
+    let mut explanation = last_turn
+        .as_ref()
+        .map(|turn| turn.text.as_str())
+        .unwrap_or_default()
+        .to_owned();
+    for decision in &all_decisions {
+        explanation.push_str(&format!("\n\n{}", decision_markdown(decision)));
+    }
+    let stdout = redact_bounded(&explanation, redactions, profile.max_output_bytes);
     let stderr = redact_bounded(
         failure
             .map(|failure| failure.reason.as_str())
@@ -1969,6 +1976,7 @@ fn record_decision_evidence(
     target_dir: &Path,
     decision: &ProposedDecision,
     redactions: &[String],
+    identity: &str,
 ) -> Result<PathBuf> {
     let proposals_dir = ensure_authoring_evidence_dir(target_dir, "proposals")?;
     let redacted = ProposedDecision {
@@ -1986,9 +1994,66 @@ fn record_decision_evidence(
             reason: format!("cannot serialize the surfaced proposal: {source}"),
         }
     })?;
-    let path = proposals_dir.join(evidence_filename(&decision.call_id));
-    write_atomic(&path, payload)?;
+    let path = proposals_dir.join(evidence_filename(&format!(
+        "{identity}:{}",
+        decision.call_id
+    )));
+    crate::file_io::write_new_file_atomically(&path, &payload)?;
+    crate::file_io::write_new_file_atomically(
+        &path.with_extension("md"),
+        &decision_markdown(&redacted),
+    )?;
+    crate::file_io::sync_directory(&proposals_dir)?;
     Ok(path)
+}
+
+fn decision_markdown(decision: &ProposedDecision) -> String {
+    let patch = decision.patch.as_ref().map_or_else(String::new, |patch| {
+        format!(
+            "\n\n## Proposed draft (not applied)\n\n{}\n",
+            patch
+                .lines()
+                .map(|line| format!("    {line}\n"))
+                .collect::<String>()
+        )
+    });
+    format!(
+        "# Decision proposal\n\n{}\n\n{}\n\nThis agent-written proposal is advisory, \
+         not human acceptance. No proposed intent change was applied.{patch}",
+        decision.summary, decision.why
+    )
+}
+
+#[cfg(test)]
+#[test]
+fn decisions_reusing_call_ids_retain_separate_evidence() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut decision = ProposedDecision {
+        call_id: "call_1".into(),
+        summary: "First choice".into(),
+        why: "First rationale".into(),
+        patch: None,
+    };
+    let first = record_decision_evidence(directory.path(), &decision, &[], "run-one:0:0").unwrap();
+    let first_bytes = fs::read(&first).unwrap();
+    decision.summary = "Second choice".into();
+    let second = record_decision_evidence(directory.path(), &decision, &[], "run-two:0:0").unwrap();
+    assert_ne!(first, second);
+    assert_eq!(fs::read(&first).unwrap(), first_bytes);
+    assert!(
+        fs::read_to_string(first.with_extension("md"))
+            .unwrap()
+            .contains("First choice")
+    );
+    assert!(
+        fs::read_to_string(second.with_extension("md"))
+            .unwrap()
+            .contains("Second choice")
+    );
+    let original = fs::read(&second).unwrap();
+    decision.summary = "Must not replace".into();
+    assert!(record_decision_evidence(directory.path(), &decision, &[], "run-two:0:0").is_err());
+    assert_eq!(fs::read(second).unwrap(), original);
 }
 
 /// Records an accepted, in-policy dependency request as durable, redacted

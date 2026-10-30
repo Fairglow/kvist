@@ -697,7 +697,7 @@ pub fn authoring_tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "why": {
                         "type": "string",
-                        "description": "Why the issue is decision-worthy rather than a trivial, review-only matter"
+                        "description": "Human-readable Markdown brief (at most 8192 bytes): situation and why human input is necessary, design implications, alternatives with tradeoffs, recommended approach and rationale, and missing evidence/questions. Recommendations are advisory, not approval; distinguish assumptions from facts."
                     },
                     "patch": {
                         "type": "string",

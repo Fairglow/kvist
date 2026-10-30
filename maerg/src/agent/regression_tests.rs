@@ -517,7 +517,8 @@ fn provider_call_ids_cannot_select_evidence_filenames_or_escape_their_directory(
             origin: "https://example.invalid".into(),
             reason: None,
         };
-        let proposal = record_decision_evidence(&root, &decision, &[]).expect("safe proposal");
+        let proposal =
+            record_decision_evidence(&root, &decision, &[], "fixture:0:0").expect("safe proposal");
         let request = record_dependency_evidence(&root, &dependency, &[]).expect("safe dependency");
         assert_eq!(
             proposal.parent(),

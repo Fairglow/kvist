@@ -1598,6 +1598,15 @@ fn task_run_refuses_missing_sandbox_before_transition() {
         before
     );
     assert!(!project.path().join("src/.kvist-task.lock").exists());
+    let brief = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist/attention/implement-code.md"),
+    )
+    .expect("preflight diagnostic Markdown");
+    assert!(brief.contains("sandbox configuration is absent"));
+    assert!(brief.contains("Host diagnostic"));
+    assert!(brief.contains("No extra inference"));
 }
 
 #[test]
@@ -2028,6 +2037,9 @@ fn continuous_run_completes_two_items_with_separate_unaccepted_checkpoints() {
         assert!(!request.contains("Define the task-command contract"));
         assert!(!request.contains("requirements_revision"));
         assert!(!request.contains("ROOT_CONTRACT.md"));
+        assert!(request.contains("human-readable Markdown"));
+        assert!(request.contains("alternatives and their tradeoffs"));
+        assert!(request.contains("advisory recommendation"));
     }
     let comparisons = requests
         .iter()
@@ -2231,6 +2243,162 @@ fn continuous_run_pauses_on_review_decision_without_running_later_items() {
             .iter()
             .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
     );
+    let brief = project
+        .path()
+        .join("src/.kvist/attention/one-compliance-review.md");
+    let markdown = fs::read_to_string(&brief).expect("human-readable decision brief");
+    for text in [
+        "# Decision required",
+        "Human arbitration required.",
+        "attempt-0001",
+        "## Choose or approve",
+        "## Ask for clarification",
+        "## Reject or redirect",
+        "kvist task run '.' 'one-compliance-review'",
+        "not human acceptance",
+    ] {
+        assert!(markdown.contains(text), "{text}: {markdown}");
+    }
+    assert!(String::from_utf8_lossy(&output.stdout).contains(brief.to_str().unwrap()));
+    assert!(
+        fs::read_to_string(
+            project
+                .path()
+                .join("src/.kvist/continuous-reviews/one-compliance-review.attempt-0001.md")
+        )
+        .unwrap()
+        .contains("Human arbitration required.")
+    );
+    let before = fs::read(project.path().join("src/TODOS.yaml")).unwrap();
+    let paused = run_kvist(&project, &["task", "run", "."]);
+    assert!(!paused.status.success());
+    let run_brief = fs::read_to_string(project.path().join("src/.kvist/attention/run.md")).unwrap();
+    assert!(run_brief.contains("one-compliance-review"));
+    assert!(run_brief.contains("awaiting-decision"));
+    assert_eq!(
+        fs::read(project.path().join("src/TODOS.yaml")).unwrap(),
+        before
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn tool_only_authoring_decision_has_agent_markdown_and_response_steps() {
+    let response = serde_json::json!({
+        "model":"kvist-test-mock",
+        "choices":[{"finish_reason":"tool_calls","index":0,"message":{
+            "role":"assistant","content":"","tool_calls":[{
+                "id":"choose-approach","type":"function","function":{
+                    "name":"propose_decision",
+                    "arguments":serde_json::json!({
+                        "summary":"Choose the supported approach",
+                        "why":"## Situation\nA design choice is uncovered.\n\n## Design implications\nPublic behavior changes.\n\n## Alternatives\nA preserves the contract; B changes it.\n\n## Recommendation\nA, because it preserves guarantees.\n\n## Missing evidence\nConfirm consumer expectations."
+                    }).to_string()
+                }
+            }]
+        }}]
+    }).to_string();
+    let gateway = MockGateway::spawn(&response, std::time::Duration::ZERO);
+    let project = continuous_project(&gateway.endpoint, "manual");
+    let output = run_kvist(&project, &["task", "run", ".", "one-write-tests"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let markdown = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist/attention/one-write-tests.md"),
+    )
+    .unwrap();
+    for text in [
+        "Choose the supported approach",
+        "## Alternatives",
+        "## Recommendation",
+        "## Ask for clarification",
+    ] {
+        assert!(markdown.contains(text), "{text}: {markdown}");
+    }
+    let proposals = project.path().join("src/.kvist/authoring/proposals");
+    let files = fs::read_dir(proposals)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert!(
+        files
+            .iter()
+            .any(|path| path.extension().is_some_and(|extension| extension == "md"))
+    );
+    assert!(files.iter().any(|path| {
+        path.extension()
+            .is_some_and(|extension| extension == "json")
+    }));
+    let queue = kvist::task_queue::parse(
+        &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        queue.tasks[0].status,
+        kvist::task_queue::TaskStatus::AwaitingDecision
+    );
+    assert!(!project.path().join("sandbox-request.json").exists());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn decision_brief_write_failure_retains_the_original_stop_and_unresolved_attempt() {
+    use std::os::unix::fs::symlink;
+    use std::path::PathBuf;
+    let paths = std::sync::Arc::new(std::sync::Mutex::new(None::<(PathBuf, PathBuf)>));
+    let target = paths.clone();
+    let gateway = MockGateway::serve(
+        move |_| {
+            let paths = target.lock().unwrap();
+            let (outside, attention) = paths.as_ref().unwrap();
+            symlink(outside, attention).unwrap();
+            gateway_text_body(
+                r#"{"report":"Investigate before approving.","decision_required":true}"#,
+            )
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "manual");
+    for task in ["one-write-tests", "one-implement-code"] {
+        let output = run_kvist(&project, &["task", "transition", ".", task, "in-progress"]);
+        assert!(output.status.success());
+        let output = run_kvist(&project, &["task", "transition", ".", task, "completed"]);
+        assert!(output.status.success());
+    }
+    let outside = project.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::create_dir_all(project.path().join("src/.kvist")).unwrap();
+    let attention = project.path().join("src/.kvist/attention");
+    *paths.lock().unwrap() = Some((outside.clone(), attention.clone()));
+    let output = run_kvist(&project, &["task", "run", ".", "one-security-audit"]);
+    assert!(!output.status.success());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        diagnostic.contains("could not persist its complete outcome"),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("Markdown brief persistence also failed"),
+        "{diagnostic}"
+    );
+    assert!(fs::read_dir(&outside).unwrap().next().is_none());
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let before = fs::read(&queue_path).unwrap();
+    fs::remove_file(attention).unwrap();
+    let again = run_kvist(&project, &["task", "run", ".", "one-security-audit"]);
+    assert!(!again.status.success());
+    assert_eq!(fs::read(queue_path).unwrap(), before);
+    assert!(
+        project
+            .path()
+            .join("src/.kvist/continuous-reviews/one-security-audit.attempt-0001.md")
+            .exists()
+    );
 }
 
 #[test]
@@ -2265,6 +2433,11 @@ fn continuous_run_retries_failed_checkpoint_without_replaying_completed_tasks() 
     }
     let failed = run_kvist(&project, &["task", "run", "."]);
     assert!(!failed.status.success());
+    let brief = fs::read_to_string(project.path().join("src/.kvist/attention/run.md"))
+        .expect("checkpoint blocker brief");
+    assert!(brief.contains("Host diagnostic"));
+    assert!(brief.contains("signing"));
+    assert!(brief.contains("without rerunning completed tasks"));
     let tasks = kvist::task_queue::parse(
         &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
     )
@@ -2415,6 +2588,15 @@ fn continuous_run_rejects_malformed_reviews_and_forged_ledger_state() {
     let output = run_kvist(&project, &["task", "run", "."]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid report JSON"));
+    let brief = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist/attention/one-security-audit.md"),
+    )
+    .expect("malformed-response blocker brief");
+    assert!(brief.contains("Host diagnostic"));
+    assert!(brief.contains("invalid report JSON"));
+    assert!(brief.contains("task transition '.' 'one-security-audit' pending"));
     let path = project.path().join("src/TODOS.yaml");
     let tasks = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(

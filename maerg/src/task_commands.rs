@@ -28,6 +28,7 @@ use crate::{
     vcs::VcsArtifactState,
 };
 
+mod attention;
 mod checkpoint;
 mod continuous;
 
@@ -4452,6 +4453,48 @@ fn run_task_under_lock(
     continuous: bool,
     inherited_lock: Option<&TaskLock>,
 ) -> Result<String> {
+    let mut explanation = None;
+    execute_task_under_lock(
+        project_dir,
+        component_path,
+        task_id,
+        RunControls {
+            stream,
+            allow_control,
+        },
+        continuous,
+        inherited_lock,
+        &mut explanation,
+    )
+    .map_err(|error| {
+        attention::failure(
+            project_dir,
+            component_path,
+            Some(task_id),
+            error,
+            explanation.as_deref(),
+        )
+    })
+}
+
+struct RunControls {
+    stream: bool,
+    allow_control: bool,
+}
+
+fn execute_task_under_lock(
+    project_dir: &Path,
+    component_path: &Path,
+    task_id: &str,
+    controls: RunControls,
+    continuous: bool,
+    inherited_lock: Option<&TaskLock>,
+    explanation: &mut Option<String>,
+) -> Result<String> {
+    let RunControls {
+        stream,
+        allow_control,
+    } = controls;
     let context = validate_context(project_dir, component_path)?;
     let config = crate::config::load(project_dir)?;
     if config.sandbox.is_none() {
@@ -4769,6 +4812,7 @@ fn run_task_under_lock(
                 ));
             }
         };
+        *explanation = Some(run_result.stdout.clone());
         let agent_timestamp =
             Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
         append_agent_execution(
@@ -4814,8 +4858,17 @@ fn run_task_under_lock(
                     .join("authoring")
                     .join("proposals")
             };
+            let summary = attention::decision(
+                &context,
+                task_id,
+                &attempt_id,
+                &run_result.stdout,
+                &evidence_dir,
+                &evidence_redactions(&config),
+            )?;
             let decision_reason = format!(
-                "one or more impactful, uncovered decisions surfaced and require a human decision before implementation continues. Proposal evidence is at {}.",
+                "one or more impactful, uncovered decisions surfaced and require a human decision before implementation continues. Human-readable summary: {}. Raw proposal evidence: {}.",
+                summary.display(),
                 evidence_dir.display()
             );
             tracing::info!(
@@ -4835,7 +4888,8 @@ fn run_task_under_lock(
                 Some(&attempt_id),
             )?;
             Ok(format!(
-                "task `{task_id}` paused and transitioned to awaiting-decision. A decision is required before implementation continues. Proposal evidence is at {}.\nLogs written to: {}\nNext Step: review the proposal, decide, then re-review and accept the updated intent; the run resumes from the awaiting-decision state.",
+                "# Decision required\n\ntask `{task_id}` paused and transitioned to awaiting-decision. A decision is required before implementation continues.\n\nHuman-readable summary: {}\n\nOpen this Markdown file for alternatives, recommendations and response instructions.\nRaw proposal evidence: {}.\nLogs written to: {}\nNext Step: review the proposal, decide, then re-review and accept changed intent before explicitly rerunning the paused task.",
+                summary.display(),
                 evidence_dir.display(),
                 run_result.log_path.display()
             ))

@@ -4790,3 +4790,74 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "attention-brief-write-tests"
+    title: "write_tests: human decision and blocker briefs"
+    description: "Pin Markdown review companions, model brief instructions, exact decision/blocker summary paths, safe persistence, redaction, actionable response steps and unchanged pause/recovery behavior."
+    context: "Human-requested presentation change; explicit advisory exception while receipts are unavailable."
+    purpose: "Reproduce JSON-only decision evidence and missing blocker summaries before implementation."
+    expected_outcome: "Failing regressions specify human-readable attention evidence."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-SURFACING"
+    timestamps:
+      created_at: "2026-10-30T13:00:00Z"
+      updated_at: "2026-10-30T13:19:30Z"
+      completed_at: "2026-10-30T13:19:30Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "attention-brief-implement-code"
+    title: "implement_code: persist actionable Markdown attention briefs"
+    description: "Request agent explanations within existing review/proposal responses, write Markdown companions and host resolution steps, and surface bounded diagnostic briefs for task and continuous-run blockers without another model call."
+    context: "Preserve raw JSON, human authority, clean-slate boundaries and recovery fences."
+    purpose: "Make every task stop understandable without decoding machine evidence."
+    expected_outcome: "Decisions and blockers point to specific durable Markdown briefs."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "attention-brief-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-SURFACING"
+    timestamps:
+      created_at: "2026-10-30T13:00:00Z"
+      updated_at: "2026-10-30T13:19:30Z"
+      completed_at: "2026-10-30T13:19:30Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "attention-brief-security-audit"
+    title: "security_audit: inspect attention evidence boundaries"
+    description: "Inspect bounded redacted summaries, path/link refusal, no new model effects and preserved task/recovery authority."
+    context: "Internal implementation review; independent source observation and comparison remain separate."
+    purpose: "Retain presentation trust-boundary findings without claiming certification."
+    expected_outcome: "Observed controls and limitations are durable."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "attention-brief-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-SURFACING"
+    timestamps:
+      created_at: "2026-10-30T13:00:00Z"
+      updated_at: "2026-10-30T13:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "attention-brief-compliance-review"
+    title: "compliance_review: compare attention briefs with intent"
+    description: "Derive source-only observations in a fresh context, then separately compare intent with observed behavior and execution evidence without source access."
+    context: "No self-certification, protected receipt or automatic acceptance."
+    purpose: "Retain discrepancies for human arbitration."
+    expected_outcome: "An independent diagnostic comparison records coverage and limits."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "attention-brief-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-SURFACING"
+    timestamps:
+      created_at: "2026-10-30T13:00:00Z"
+      updated_at: "2026-10-30T13:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

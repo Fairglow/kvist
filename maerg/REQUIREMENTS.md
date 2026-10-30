@@ -900,6 +900,28 @@ distinct. Any contract it generates is a non-normative draft.
 
 ### REQ-DECISION-SURFACING
 
+Every task decision or execution blocker MUST have a bounded, redacted Markdown
+brief, not merely a pointer to a JSON directory. Available agents MUST author
+the explanation in their existing proposal/review response: situation,
+design implications, alternatives and tradeoffs, recommendation with rationale,
+and missing evidence. The host MUST add exact task/attempt and evidence
+references plus instructions for choosing/approving an approach, requesting
+clarification, rejecting with replacement instructions, and resuming safely.
+Recommendations MUST remain advisory; suspected findings MUST NOT be presented
+as established facts or approvals.
+
+When inference or verification fails, the host MUST retain a clearly labelled
+diagnostic brief from observed errors instead of requiring another model call
+or inventing design alternatives. Continuous-run scheduling/checkpoint blockers
+MUST receive the same Markdown presentation. Summary persistence failure MUST be
+explicit and MUST NOT erase the original cause, effects or recovery fences.
+Existing JSON evidence MUST remain available. Summary generation MUST NOT
+accept intent, choose an approach, clear a blocker or replay work.
+Until full transcript rendering exists, output MUST name the specific Markdown
+file. Historical briefs MUST remain distinguishable from the current state.
+The requested presentation change has an explicit advisory exception while
+review receipts are unavailable; independent observation/comparison is separate.
+
 An agent MUST distinguish issues worthy of human intervention from those that are
 not. A decision is worthy of intervention only when it substantially alters the
 implementation, is not already covered by the component's `REQUIREMENTS.md`,

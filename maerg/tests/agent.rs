@@ -344,12 +344,24 @@ fn execute_agent_surfaces_a_proposed_decision_and_pauses() {
         .expect("read proposals")
         .map(|entry| entry.expect("entry").path())
         .collect();
-    assert_eq!(entries.len(), 1, "exactly one proposal should be recorded");
-    let evidence = fs::read_to_string(&entries[0]).expect("read proposal evidence");
-    assert!(
-        evidence.contains("use a different crate"),
-        "evidence was: {evidence}"
+    assert_eq!(
+        entries.len(),
+        2,
+        "one JSON proposal and one Markdown companion"
     );
+    let json = entries
+        .iter()
+        .find(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .expect("machine proposal");
+    let markdown = json.with_extension("md");
+    for path in [json, &markdown] {
+        let evidence = fs::read_to_string(path).expect("read proposal evidence");
+        assert!(
+            evidence.contains("use a different crate"),
+            "evidence was: {evidence}"
+        );
+    }
+    assert!(result.stdout.contains("use a different crate"));
 
     // The run log summarizes the surfaced decision for inspection.
     let log_contents = fs::read_to_string(&result.log_path).expect("read log contents");

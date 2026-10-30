@@ -47,6 +47,16 @@ pub(super) fn run(
     stream: bool,
     allow_control: bool,
 ) -> Result<String> {
+    run_inner(project_dir, component_path, stream, allow_control)
+        .map_err(|error| attention::failure(project_dir, component_path, None, error, None))
+}
+
+fn run_inner(
+    project_dir: &Path,
+    component_path: &Path,
+    stream: bool,
+    allow_control: bool,
+) -> Result<String> {
     sav::install_handler();
     let context = validate_context(project_dir, component_path)?;
     let config = crate::config::load(project_dir)?;
@@ -212,7 +222,7 @@ fn run_locked(
                     .iter()
                     .all(|task| task.status == TaskStatus::Completed)
                 {
-                    record_final_state(context, &queue)?;
+                    record_final_state(context, &queue, config)?;
                     ledger.expected_effects = effect_digest(context)?;
                     save(context, &mut ledger, secret)?;
                 }
@@ -226,7 +236,7 @@ fn run_locked(
             .all(|task| task.status == TaskStatus::Completed)
         {
             if ledger.phase != Phase::AwaitingApproval {
-                record_final_state(context, &queue)?;
+                record_final_state(context, &queue, config)?;
                 if ledger.policy.commit == CommitFrequency::Component {
                     create_checkpoint(context, &mut ledger, secret, lock, "component")?;
                 }
@@ -235,9 +245,13 @@ fn run_locked(
                 save(context, &mut ledger, secret)?;
             }
             return Ok(format!(
-                "Component `{}` execution is complete and awaiting human approval; no work was accepted automatically.\nReview IMPL.md, independent reports in {}, and the resulting changes. `component accept` accepts intent only, not implementation.\nRun ledger: {}",
+                "Component `{}` execution is complete and awaiting human approval; no work was accepted automatically.\nReview IMPL.md, the Markdown review index at {}, and the resulting changes. `component accept` accepts intent only, not implementation.\nRun ledger: {}",
                 context.component_path.display(),
-                context.component_dir.join(REVIEW_PATH).display(),
+                context
+                    .component_dir
+                    .join(REVIEW_PATH)
+                    .join("component.md")
+                    .display(),
                 context.component_dir.join(LEDGER_PATH).display(),
             ));
         }
@@ -583,7 +597,7 @@ fn save(context: &TaskContext, ledger: &mut Ledger, secret: &[u8]) -> Result<()>
     sync_directory(&context.component_dir.join(".kvist"))
 }
 
-fn checked_directory(path: &Path) -> Result<()> {
+pub(super) fn checked_directory(path: &Path) -> Result<()> {
     match fs::create_dir(path) {
         Ok(()) => sync_directory(
             path.parent()
@@ -616,7 +630,11 @@ fn error(context: &TaskContext, reason: &str) -> KvistError {
     journal_error(&context.component_dir.join(LEDGER_PATH), reason)
 }
 
-fn record_final_state(context: &TaskContext, queue: &TaskQueue) -> Result<()> {
+fn record_final_state(
+    context: &TaskContext,
+    queue: &TaskQueue,
+    config: &crate::config::ProjectConfig,
+) -> Result<()> {
     checked_directory(&context.component_dir.join(".kvist"))?;
     checked_directory(&context.component_dir.join(REVIEW_PATH))?;
     let reports = queue
@@ -646,6 +664,14 @@ fn record_final_state(context: &TaskContext, queue: &TaskQueue) -> Result<()> {
             .join(REVIEW_PATH)
             .join("component.json"),
         &text,
+    )?;
+    let markdown = attention::redact(
+        &attention::review_index(context, &reports)?,
+        &evidence_redactions(config),
+    )?;
+    replace_file_atomically(
+        &context.component_dir.join(REVIEW_PATH).join("component.md"),
+        &markdown,
     )?;
     sync_directory(&context.component_dir.join(REVIEW_PATH))
 }
@@ -794,8 +820,37 @@ pub(super) fn execute_review(
             &encoded,
         )?;
         replace_file_atomically(&log_path, &encoded)?;
+        let markdown = attention::redact(
+            &attention::review(
+                context,
+                &task.id,
+                attempt_id,
+                &source_digest,
+                observed.as_ref(),
+                &report,
+            ),
+            &evidence_redactions(config),
+        )?;
+        write_new_file_atomically(
+            &context
+                .component_dir
+                .join(REVIEW_PATH)
+                .join(format!("{}.{attempt_id}.md", task.id)),
+            &markdown,
+        )?;
+        replace_file_atomically(&log_path.with_extension("md"), &markdown)?;
         sync_directory(&context.component_dir.join(REVIEW_PATH))?;
-        let redacted = redact_bounded(report.report, &evidence_redactions(config), 32768);
+        let redacted = redact_bounded(
+            format!(
+                "{}\n\n{}",
+                observed
+                    .as_ref()
+                    .map_or("", |report| report.report.as_str()),
+                report.report
+            ),
+            &evidence_redactions(config),
+            65536,
+        );
         let decision_required = report.decision_required
             || observed
                 .as_ref()

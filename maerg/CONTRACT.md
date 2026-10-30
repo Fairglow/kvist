@@ -251,6 +251,30 @@ Clean-slate review uses host review instructions, not configurable authoring
 prompts or prior conversation. The selected model, reasoning policy and
 approved resource/redaction limits still apply.
 
+**Human attention briefs.** Review JSON has a same-stem `.md` companion containing
+the agent-written report. Task decisions and blockers additionally name a
+specific Markdown brief under `.kvist/attention/`, with task/attempt identity,
+evidence references and actionable response instructions. Latest aliases are
+replaced atomically; content-addressed historical briefs are not overwritten.
+These are advisory presentation records, not approvals or new task authority.
+They are operational evidence outside automatic checkpoint ownership, like logs;
+review companions remain inside existing review checkpoint ownership.
+Agent explanations cover the issue, design impact, alternatives/tradeoffs,
+recommendation/rationale and uncertainty. If a failed provider cannot explain,
+the host labels its observed-error summary rather than calling that provider
+again or fabricating an agent recommendation.
+
+To choose or reject an approach, record the choice/rationale or replacement
+instructions in the affected component intent and queue, review the changes,
+and use `component accept COMPONENT` if intent changed. To request clarification,
+keep the task paused and ask the development assistant to explain the cited
+evidence; do not mark it completed. After resolution, explicitly rerun the
+awaiting-decision task, or transition a blocked task to pending before rerunning.
+Bare continuous run does not select awaiting-decision tasks. Unresolved attempts
+still require their existing explicit recovery/disposition; summary text cannot
+override a fence. There is no new interactive approval/clarification command.
+Until transcript rendering is integrated, open the printed `.md` file manually.
+
 Protected inference calls use automatic transient retries:
 the selected native profile's `max_attempts` (1-32, default 3), exponential
 backoff capped by `retry_max_delay_secs`, and jitter between half and all of
