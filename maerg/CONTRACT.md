@@ -264,16 +264,98 @@ recommendation/rationale and uncertainty. If a failed provider cannot explain,
 the host labels its observed-error summary rather than calling that provider
 again or fabricating an agent recommendation.
 
-To choose or reject an approach, record the choice/rationale or replacement
-instructions in the affected component intent and queue, review the changes,
-and use `component accept COMPONENT` if intent changed. To request clarification,
-keep the task paused and ask the development assistant to explain the cited
-evidence; do not mark it completed. After resolution, explicitly rerun the
-awaiting-decision task, or transition a blocked task to pending before rerunning.
-Bare continuous run does not select awaiting-decision tasks. Unresolved attempts
-still require their existing explicit recovery/disposition; summary text cannot
-override a fence. There is no new interactive approval/clarification command.
-Until transcript rendering is integrated, open the printed `.md` file manually.
+### Deterministic decisions
+
+`decision COMPONENT_DIR` lists paused decision/blocker tasks or shows the sole
+open one. The explicit component remains visibly prefilled in the shell.
+Command-named components use an explicit relative path (for example `./plan`);
+prefill and printed instructions disambiguate it. Task-option completion uses
+the explicit component, not a different selected shell component.
+Subcommands follow the component:
+
+- `show [TASK_ID]`: inspect retained evidence, available options and discussion.
+- `options [--task TASK_ID]`: ask a tool-free architect to propose 1-32
+  stable named options, separating substantive choices from interaction actions.
+- `discuss MESSAGE [--task TASK_ID]`: append a bounded decision-scoped question
+  and agent answer without changing intent, grants, approval or task state.
+- `plan [--task TASK_ID] [--option OPTION_ID] [--guidance TEXT]
+  [--import PATH] [--review-exception TEXT]`: prepare an agent-assisted or manual
+  typed plan, validate it and display the complete changes plus approval token.
+- `apply PLAN_ID --approve SHA256 [--continue]`: apply the frozen, authenticated
+  plan without inference, acknowledge its review or explicit exception, record
+  accepted intent revisions and decision disposition, then optionally resume
+  normal component execution.
+
+Inspection/manual plans require no model. Agent operations use local intent,
+selected task and bounded queue graph, retained decision evidence/discussion,
+root constraints and immediate parent contract; never peer implementations or
+independent review conversation. Inputs/options/plans/reports live under
+`.kvist/decisions/` as versioned JSON plus Markdown. No choice is scraped from
+Markdown. Choosing prepares work; only exact plan approval authorizes changes.
+Fresh planner output contains complete changed local intent documents and typed
+task additions/updates/retirements, never queue lifecycle/acceptance metadata.
+Manual input uses the same schema and validator, not a whole replacement queue.
+No source or arbitrary filesystem writes are allowed by decision application.
+
+Plans have per-file 1 MiB and aggregate 8 MiB bounds. Discussion and model frames
+are additionally bounded by configured context/output budgets, with no silent
+history truncation. A discussion has at most 32 exchanges and 256 KiB; a model
+support report has at most 65,536 bytes, including after redaction. Input, source, approval or evidence drift refuses application.
+Configured serving context limits are enforced. Without one, complete decision
+input is bounded locally to 8 MiB with an explicit unknown-capacity notice, not
+rejected using an invented 32K server limit; the provider can still refuse it.
+Pending checkpoints and unresolved attempts remain protected. A persisted
+decision transaction fences all ordinary task/acceptance/repair writers until
+the identical approved apply finishes. Partial writes retain before/after bytes
+and progress; reapplying the exact plan recognizes its own writes, never calls
+the model again, and never overwrites external edits.
+The accepted change-set is distinct from final implementation acceptance and
+from a Git commit. No push or automatic Git publication occurs.
+
+Resolve plans reopen only the selected known paused task and wire newly added
+prerequisites ahead of it. Rejection/new direction is custom guidance, not fake
+completion. Withdraw plans explicitly retire the selected uncompleted tasks and
+every affected uncompleted dependant into the decision record with rationale;
+completed/live/fenced tasks and their evidence cannot be withdrawn. Discarding
+existing source or removing a guarantee requires a separately approved change.
+Manual edits remain possible, but invalidate staged approval and require
+regeneration/import. Repair remains recovery, not a product-change back door.
+Until transcript rendering is integrated, printed Markdown files remain usable.
+
+The manual/model draft is native strict JSON version 1, defined by `Draft`,
+`DocumentEdit`, `TaskDefinition`, `TaskEdit`, and `Disposition` in
+`src/task_commands/decisions/types.rs` (Rust/Serde parser authority, not a claimed
+external JSON Schema dialect). A minimal unchanged-intent retry is:
+
+```json
+{
+  "schema_version": 1,
+  "rationale": "The human repaired the environment; retry with guarantees unchanged.",
+  "documents": {},
+  "tasks": [],
+  "disposition": "resolve"
+}
+```
+
+`documents` maps only `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md` to complete
+changed text; omit unchanged entries. Optional `document_edits` is an ordered
+array of `{ "path": "DESIGN.md", "before": "unique exact excerpt", "after":
+"replacement" }`, with at most 128 edits. Each nonempty anchor must match
+exactly once; no fuzzy matching, regex or shell is used. The same path cannot
+also appear in `documents`. These bounded edits keep large unchanged files out
+of model output; the host materializes, validates and previews complete files.
+`tasks` contains tagged `action` edits:
+`add`/`update` have a complete `task` object with `id`, `title`, `description`,
+`context`, `purpose`, `expected_outcome`, native `kind`, `depends_on`, and
+`requirements`; `retire` has `id` and `reason`. Unknown fields, whole queues,
+timestamps, statuses and acceptance IDs are rejected. `disposition` is
+`resolve` or `withdraw`. Host-authored lifecycle/revision metadata and retained
+retirement records are visible in the frozen plan preview before approval.
+`--continue` is a separate opt-in to ordinary execution after application,
+requiring its independent existing execution approval; it never broadens the
+intent plan's filesystem authority.
+Nonstreamed execution progress is diagnostic stderr; final results remain stdout,
+so `--json decision ... apply ... --continue` retains one valid JSON result.
 
 Protected inference calls use automatic transient retries:
 the selected native profile's `max_attempts` (1-32, default 3), exponential

@@ -89,7 +89,8 @@ design lives in [`docs/command-set.md`](../docs/command-set.md).
 | `kvist component commit <ACCEPTANCE_ID>`                     | (Re)perform the isolated index commit for a pending acceptance.                                                                                                                                                         |
 | `kvist task next [COMPONENT_DIR]`                            | Select the first ready task without changing durable state.                                                                                                                                                             |
 | `kvist task transition [COMPONENT_DIR] TASK_ID STATUS`       | Persist one legal task-state transition with append-only attempt evidence.                                                                                                                                              |
-| `kvist task run [COMPONENT_DIR] [TASK_ID]`                   | Run the configured external agent for one ready task; see the execution boundary below.                                                                                                                                 |
+| `kvist task run COMPONENT_DIR [TASK_ID]`                     | Run one exact task, or omit TASK_ID for continuous dependency-ready work; stop for decisions, blockers or final review. |
+| `kvist decision COMPONENT_DIR [show\|options\|discuss\|plan\|apply]` | Inspect/discuss a pause, stage agent/manual typed changes, then apply one exact approved plan without editing queue YAML. |
 | `kvist task log [COMPONENT_DIR] TASK_ID`                     | Print the most recent bounded, redacted agent log for a task.                                                                                                                                                           |
 | `kvist task approve-policy [PROJECT_DIR]`                    | Record approval of the complete effective execution policy.                                                                                                                                                             |
 | `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a prompt in the interactive skott shell (sandboxed and multi-turn by default); without a terminal it runs the same shell headless (`--headless --json`), sandbox-only.                                       |
@@ -107,6 +108,20 @@ scope, context, and acceptance criteria are maintained in
 queue, status, task-transition, skott, and test-verification mechanics
 are implemented. `task run` requires an approved external sandbox runner and
 enforces the documented timeout, output, redaction, and lifecycle-lock bounds.
+
+Decision support separates deliberation from authority:
+`decision DIR options` creates stable advisory options; `discuss MESSAGE`
+persists follow-up conversation; `plan --option ID` or `plan --guidance TEXT`
+stages all intent/scheduling effects. A separate bounded intent review is
+recorded unless the human supplies `--review-exception REASON`.
+Inspect the complete Markdown preview, then use its
+`decision DIR apply PLAN_ID --approve SHA256 [--continue]` command.
+Apply performs no inference and no Git publication; changed inputs refuse it.
+The manual route is `plan --import draft.json --review-exception REASON`,
+using the same strict draft schema in [CONTRACT.md](CONTRACT.md).
+See [GUIDE.md](../GUIDE.md#decisions-and-blockers) for examples and withdrawal
+semantics. Existing attempt fences remain binding; never delete evidence to
+make a plan eligible.
 
 ## Configuration and platform policy
 

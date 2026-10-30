@@ -140,9 +140,9 @@ reviewer compares the fresh record and test evidence with `REQUIREMENTS.md`,
 `IMPL.md` is not user documentation; public integration material belongs under
 `docs/`.
 
-The CLI currently enforces queue ordering and durable transitions, but it does
-not yet automate architect/designer agents, the interview, clean-slate
-documentation, source-blind comparison, arbitration, editor integration,
+The CLI currently enforces queue ordering, continuous execution and staged deterministic human
+decision application. General architect/designer generation, the interview,
+editor integration,
 daemon, LSP, or web UI flows. Those are planned capabilities, not current
 commands. See
 [`GUIDE.md`](GUIDE.md) for the accurate manual workflow and

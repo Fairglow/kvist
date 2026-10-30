@@ -48,7 +48,7 @@ pub(super) fn run(
     allow_control: bool,
 ) -> Result<String> {
     run_inner(project_dir, component_path, stream, allow_control)
-        .map_err(|error| attention::failure(project_dir, component_path, None, error, None))
+        .map_err(|error| attention::failure(project_dir, component_path, None, error, None, None))
 }
 
 fn run_inner(
@@ -122,6 +122,18 @@ fn run_locked(
                     ));
                 }
                 ledger.definition_digest = definition;
+                ledger.active_item = None;
+                ledger.completed_items.retain(|item| {
+                    groups
+                        .as_ref()
+                        .and_then(|groups| groups.get(item))
+                        .is_some_and(|ids| {
+                            ids.iter().all(|id| {
+                                task_by_id(&queue.tasks, id)
+                                    .is_some_and(|task| task.status == TaskStatus::Completed)
+                            })
+                        })
+                });
             }
             if ledger.policy_identity != approval.approval_digest {
                 if ledger.pending.is_some() {
@@ -304,7 +316,7 @@ fn run_locked(
         ledger.phase = Phase::Running;
         ledger.expected_effects = effect_digest(context)?;
         save(context, &mut ledger, secret)?;
-        println!(
+        eprintln!(
             "Running `{}` in `{}`...",
             task.id,
             context.component_path.display()
@@ -330,7 +342,7 @@ fn run_locked(
         };
         save(context, &mut ledger, secret)?;
         let output = outcome?;
-        println!("{output}");
+        eprintln!("{output}");
         if status != TaskStatus::Completed {
             return Ok(format!(
                 "Continuous run paused at `{}` ({}) for human attention; later tasks were not started.\n{output}",
@@ -402,7 +414,7 @@ fn finish_checkpoint(
         .as_ref()
         .ok_or_else(|| error(context, "no prepared checkpoint"))?;
     let commit = checkpoint::finish(context, prepared)?;
-    println!("Local unaccepted checkpoint: {commit}");
+    eprintln!("Local unaccepted checkpoint: {commit}");
     ledger.expected_head = Some(commit);
     ledger.baseline = checkpoint::capture(context)?;
     let head = checkpoint::ensure_clean(context, &ledger.baseline)?;
@@ -415,6 +427,19 @@ fn finish_checkpoint(
     ledger.expected_effects = effect_digest(context)?;
     ledger.pending = None;
     save(context, ledger, secret)
+}
+
+pub(super) fn decision_preflight(context: &TaskContext, secret: &[u8]) -> Result<()> {
+    if let Some(ledger) = load(context, secret)?
+        && (ledger.pending.is_some()
+            || !matches!(ledger.phase, Phase::Paused | Phase::AwaitingApproval))
+    {
+        return Err(error(
+            context,
+            "decision changes require a paused continuous run with no pending checkpoint; finish or inspect retained work first",
+        ));
+    }
+    Ok(())
 }
 
 fn item_groups(tasks: &[Task]) -> Result<BTreeMap<String, Vec<String>>> {

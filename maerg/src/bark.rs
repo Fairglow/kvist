@@ -871,6 +871,16 @@ impl Shell {
             Some(self.stream_manager.start_spinner(&program))
         };
         let result = match cmd {
+            cli::Command::Decision {
+                component_dir,
+                command,
+            } => crate::context::ProjectContext::resolve(Some(&self.project_dir)).and_then(
+                |project| {
+                    let component = project.resolve_component(Some(&component_dir))?;
+                    task_commands::decisions::execute(&project.project_dir, &component, command)
+                        .map(|output| cli::CommandOutput::message(output.message))
+                },
+            ),
             cli::Command::Task {
                 command:
                     cli::TaskCommand::Run {
@@ -1377,6 +1387,9 @@ fn render_help(theme: Theme) -> String {
     text.push_str("\nWorkflow commands (after `cd COMPONENT`, omit the component argument):\n");
     text.push_str("  task next                show the next ready task\n");
     text.push_str("  task run COMPONENT [TASK] run an exact task; omit TASK for continuous work\n");
+    text.push_str(
+        "  decision COMPONENT       inspect paused decisions; discuss/plan/apply exact effects\n",
+    );
     text.push_str("  task log TASK            inspect an execution log\n");
     text.push_str("  task transition TASK STATUS  record a status transition\n");
     text.push_str("  component validate       validate component intent documents\n");

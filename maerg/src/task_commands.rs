@@ -31,6 +31,7 @@ use crate::{
 mod attention;
 mod checkpoint;
 mod continuous;
+pub mod decisions;
 
 /// Selects the first ready task in declared queue order, using the same
 /// definition as the overview, the shell, and the blank-task `task run`
@@ -696,6 +697,7 @@ impl TaskLock {
 
 /// Uses the task operation lock without requiring valid intent or a valid queue.
 pub(crate) fn lock_for_repair(project: &Path, component: &Path) -> Result<TaskLock> {
+    decisions::ensure_no_pending(component)?;
     let now = Timestamp::now().map_err(|error| KvistError::RepairFailed {
         reason: format!("cannot timestamp recovery operation: {error}"),
     })?;
@@ -715,6 +717,7 @@ pub(crate) fn revalidate_repair_lock(lock: &TaskLock) -> Result<()> {
 }
 
 pub(crate) fn guard_repair_evidence(component: &Path, contents: Option<&str>) -> Result<()> {
+    decisions::ensure_no_pending(component)?;
     let path = component.join(".kvist-attempts");
     let evidence_exists = match fs::symlink_metadata(&path) {
         Ok(_) => true,
@@ -778,10 +781,11 @@ pub(crate) fn guard_repair_evidence(component: &Path, contents: Option<&str>) ->
         })?;
         entries += 1;
         if entries > 10000
-            || !queue
+            || (!queue
                 .tasks
                 .iter()
                 .any(|task| entry.file_name() == format!("{}.jsonl", task.id).as_str())
+                && !decisions::recognizes_retired_journal(component, &entry.path())?)
         {
             return Err(KvistError::RepairFailed {
                 reason: "unmatched or excessive retained attempt journals require approved --clean-slate; repair will not orphan unresolved evidence".to_owned(),
@@ -1402,6 +1406,7 @@ fn valid_attempt_id(value: &str) -> bool {
 }
 
 fn ensure_component_attempts_recovered(component_dir: &Path) -> Result<()> {
+    decisions::ensure_no_pending(component_dir)?;
     let queue = read_queue(component_dir)?;
     ensure_component_attempts_recovered_except(component_dir, &queue, None)
 }
@@ -1420,6 +1425,7 @@ fn ensure_component_attempts_recovered_except(
     queue: &TaskQueue,
     recovery_in_progress: Option<(&str, &str)>,
 ) -> Result<()> {
+    decisions::ensure_no_pending(component_dir)?;
     for task in &queue.tasks {
         let permitted_attempt = recovery_in_progress.and_then(|(recovery_task, attempt_id)| {
             (task.id == recovery_task).then_some(attempt_id)
@@ -1442,6 +1448,7 @@ fn ensure_other_task_attempts_recovered(
     queue: &TaskQueue,
     task_id: &str,
 ) -> Result<()> {
+    decisions::ensure_no_pending(component_dir)?;
     for other in queue.tasks.iter().filter(|task| task.id != task_id) {
         if other.recovery_state.is_some() {
             return Err(unresolved_attempt_error(&existing_attempt_path(
@@ -4473,6 +4480,7 @@ fn run_task_under_lock(
             Some(task_id),
             error,
             explanation.as_deref(),
+            inherited_lock,
         )
     })
 }
@@ -4702,7 +4710,7 @@ fn execute_task_under_lock(
             sandbox_backend = %sandbox_probe.backend.kind,
             "running task model turn on host (effect sandbox reserved)"
         );
-        println!(
+        eprintln!(
             "Running protected task `{task_id}` (attempt `{attempt_id}`, role `{}`)...",
             role.as_str()
         );
@@ -4865,6 +4873,7 @@ fn execute_task_under_lock(
                 &run_result.stdout,
                 &evidence_dir,
                 &evidence_redactions(&config),
+                lock,
             )?;
             let decision_reason = format!(
                 "one or more impactful, uncovered decisions surfaced and require a human decision before implementation continues. Human-readable summary: {}. Raw proposal evidence: {}.",
@@ -4887,11 +4896,12 @@ fn execute_task_under_lock(
                 &transition_at,
                 Some(&attempt_id),
             )?;
+            let component = decisions::component_argument(&context.component_path);
             Ok(format!(
-                "# Decision required\n\ntask `{task_id}` paused and transitioned to awaiting-decision. A decision is required before implementation continues.\n\nHuman-readable summary: {}\n\nOpen this Markdown file for alternatives, recommendations and response instructions.\nRaw proposal evidence: {}.\nLogs written to: {}\nNext Step: review the proposal, decide, then re-review and accept changed intent before explicitly rerunning the paused task.",
+                "# Decision required\n\ntask `{task_id}` paused and transitioned to awaiting-decision. A decision is required before implementation continues.\n\nHuman-readable summary: {}\n\nOpen this Markdown file for alternatives, recommendations and response instructions.\nRaw proposal evidence: {}.\nLogs written to: {}\nNext Step: use `kvist decision {component} show {task_id}` to discuss and stage the complete resolution; inspect its exact approval command before applying.",
                 summary.display(),
                 evidence_dir.display(),
-                run_result.log_path.display()
+                run_result.log_path.display(),
             ))
         } else if run_result.success {
             if task.kind == TaskKind::Implementation {
@@ -4899,7 +4909,7 @@ fn execute_task_under_lock(
                     task_id = %task_id,
                     "running test-command verification"
                 );
-                println!("Running test-command verification...");
+                eprintln!("Running test-command verification...");
                 match verify_task(
                     component_path,
                     task_id,

@@ -10,6 +10,77 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "decision-automation-write-tests"
+    title: "write_tests: deterministic decision transactions"
+    description: "Pin staged agent/manual planning, arbitrary options and discussion, exact approval, queue metadata/dependencies, retirement closure, stale/tampered inputs and interrupted transaction fencing/recovery before implementation."
+    context: "User-approved decision automation; explicit advisory exception while general intent review receipts are unavailable."
+    purpose: "Define safe human-directed application without hand-editing queues."
+    expected_outcome: "Regressions establish inspect/discuss/plan/apply authority boundaries."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
+    timestamps:
+      created_at: "2026-10-30T22:20:00Z"
+      updated_at: "2026-10-30T23:31:30Z"
+      completed_at: "2026-10-30T23:31:30Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "decision-automation-implement-code"
+    title: "implement_code: staged deterministic decision support"
+    description: "Implement structured options, durable discussion, agent/manual drafts, host queue edits, authenticated exact approval and recoverable multi-file application with optional continuation."
+    context: "Agents propose; the host validates and applies; final implementation acceptance remains independent."
+    purpose: "Remove manual artifact and command coordination from human decisions."
+    expected_outcome: "One approved frozen plan applies all declared intent and scheduling effects."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "decision-automation-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
+    timestamps:
+      created_at: "2026-10-30T22:20:00Z"
+      updated_at: "2026-10-30T23:31:30Z"
+      completed_at: "2026-10-30T23:31:30Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "decision-automation-security-audit"
+    title: "security_audit: inspect decision authorization and recovery"
+    description: "Inspect bounded model data, proposal authentication, path and input guards, approval scope, retirement records and recovery fencing without self-certification."
+    context: "Independent source observation and source-blind comparison remain separate."
+    purpose: "Retain authority and recovery findings."
+    expected_outcome: "Observed controls and remaining limitations are durable."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "decision-automation-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
+    timestamps:
+      created_at: "2026-10-30T22:20:00Z"
+      updated_at: "2026-10-30T22:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "decision-automation-compliance-review"
+    title: "compliance_review: compare deterministic decisions with intent"
+    description: "Derive a clean-slate source/test observation, then compare requirements, contract and design with it in a separate source-blind context; retain discrepancies for human arbitration."
+    context: "No protected receipt or human approval is inferred from diagnostic records."
+    purpose: "Independently assess the implemented decision workflow."
+    expected_outcome: "Scoped observation/comparison and actual execution evidence remain attributed."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "decision-automation-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
+    timestamps:
+      created_at: "2026-10-30T22:20:00Z"
+      updated_at: "2026-10-30T22:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "runtime-budgets-write-tests"
     title: "write_tests: reproduce response-byte and slow-model limits"
     description: "Pin large streamed wire responses, explicit caps, defaults, policy binding and effective-limit diagnostics."

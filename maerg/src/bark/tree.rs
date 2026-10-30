@@ -186,14 +186,14 @@ pub fn inject_shell_builtins(root: &mut CommandNode) {
         },
         CommandNode {
             name: "run".to_owned(),
-            help: Some("Run a task, or the next ready task when omitted".to_owned()),
+            help: Some("Run continuously, or stop after an explicit task".to_owned()),
             subcommands: Vec::new(),
             flags: Vec::new(),
             positionals: vec![
                 positional("COMPONENT_DIR", &component_help),
                 positional(
                     "TASK_ID",
-                    "Task ID or TODO item; defaults to the next ready task.",
+                    "Task ID; omit for continuous component execution.",
                 ),
             ],
         },
@@ -450,6 +450,27 @@ fn possible_values_of(arg: &clap::Arg) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn builtin_run_help_explains_continuous_default_and_explicit_stop() {
+        let root = super::build_root();
+        let run = root.find_subcommand("run").unwrap();
+        assert!(run.help.as_deref().unwrap().contains("Run continuously"));
+        assert!(
+            run.help
+                .as_deref()
+                .unwrap()
+                .contains("stop after an explicit task")
+        );
+        assert!(!run.help.as_deref().unwrap().contains("TODO item"));
+        assert!(
+            run.positionals[1]
+                .help
+                .as_deref()
+                .unwrap()
+                .contains("omit for continuous")
+        );
+    }
+
     use super::*;
 
     fn root() -> CommandNode {
@@ -481,6 +502,7 @@ mod tests {
             "prompt",
             "status",
             "task",
+            "decision",
             "component",
             "agent",
             "completions",
@@ -489,7 +511,7 @@ mod tests {
         ] {
             assert!(root.find_subcommand(name).is_some(), "missing {name}");
         }
-        assert_eq!(root.subcommands.len(), 16 + 11);
+        assert_eq!(root.subcommands.len(), 17 + 11);
     }
 
     #[test]

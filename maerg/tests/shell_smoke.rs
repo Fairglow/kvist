@@ -605,6 +605,25 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
                     std::fs::read_to_string(&queues.root_path).unwrap(),
                     queues.root_before
                 );
+                Some(b"decision ")
+            }
+            26 if fresh.contains("decision . ") => Some(b"\r"),
+            27 if commands.contains(&"decision .") && fresh.contains("0 paused task(s)") => {
+                assert!(!fresh.contains("Select component"), "{fresh}");
+                Some(b"cd \"-component\"\r")
+            }
+            28 if commands
+                .iter()
+                .filter(|command| **command == "cd \"-component\"")
+                .count()
+                == 2 =>
+            {
+                Some(b"decision ")
+            }
+            29 if fresh.contains("decision ./-component ") => Some(b"\r"),
+            30 if commands.contains(&"decision ./-component")
+                && fresh.contains("0 paused task(s)") =>
+            {
                 Some(b"exit\r")
             }
             _ => None,
@@ -618,7 +637,7 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
     }
 
     assert!(
-        phase == 26,
+        phase == 31,
         "all editor phases must complete (stopped at {phase}); output so far:\n{}",
         utf8_prefix(&bytes)
     );

@@ -138,9 +138,9 @@ impl KvistCompleter {
             }
         } else if let Some(flag) = cursor.pending_value_flag() {
             // The previous token was a value-taking option; complete its value.
-            complete_option_value(flag, &active_prefix, state, current_component, span)
+            complete_option_value(flag, &scope, &active_prefix, state, current_component, span)
         } else if active_prefix.starts_with('-') {
-            complete_flag(node, &active_prefix, state, current_component, span)
+            complete_flag(node, &scope, &active_prefix, state, current_component, span)
         } else {
             let mut candidates =
                 if let Some(positional) = node.positionals.get(cursor.positionals_consumed()) {
@@ -156,7 +156,14 @@ impl KvistCompleter {
                     complete_subcommands(node, &active_prefix, span)
                 };
             if active_prefix.is_empty() && node.name != root.name {
-                candidates.extend(complete_flag(node, "", state, current_component, span));
+                candidates.extend(complete_flag(
+                    node,
+                    &scope,
+                    "",
+                    state,
+                    current_component,
+                    span,
+                ));
             }
             candidates
         }
@@ -228,7 +235,11 @@ fn walk<'a>(root: &'a CommandNode, resolved: &[Token], scope: &mut Scope) -> Cur
             node = sub;
             command_path.push(sub.name.clone());
             positionals_consumed = 0;
-            *scope = Scope::default();
+            let component = scope.component.take();
+            *scope = Scope {
+                component,
+                ..Scope::default()
+            };
             scope.command = Some(sub.name.clone());
             pending_value = None;
             continue;
@@ -333,6 +344,7 @@ pub(super) fn component_position(
 /// Completes flag names when the token under the cursor starts with `-`.
 fn complete_flag(
     node: &CommandNode,
+    scope: &Scope,
     prefix: &str,
     state: &DynamicState,
     current_component: Option<&str>,
@@ -343,10 +355,11 @@ fn complete_flag(
         if let Some(flag) = node.find_flag_by_long(long) {
             return complete_option_value(
                 &node.flags[flag],
+                scope,
                 value_prefix,
                 state,
                 current_component,
-                span,
+                (span.0 + prefix.len() - value_prefix.len(), span.1),
             );
         }
         return Vec::new();
@@ -419,6 +432,7 @@ fn task_description(
 /// Completes the value of a value-taking option.
 fn complete_option_value(
     flag: &FlagSpec,
+    scope: &Scope,
     prefix: &str,
     state: &DynamicState,
     current_component: Option<&str>,
@@ -435,10 +449,9 @@ fn complete_option_value(
             });
         }
     }
-    let empty_scope = Scope::default();
     if let Some(domain) = option_domain(flag.long.as_deref().unwrap_or("")) {
         let desc = domain_description(domain);
-        for candidate in dynamic_values(domain, &empty_scope, prefix, state, current_component) {
+        for candidate in dynamic_values(domain, scope, prefix, state, current_component) {
             candidates.push(Candidate {
                 description: candidate.description.or_else(|| Some(desc.to_owned())),
                 value: candidate.value,
@@ -514,6 +527,7 @@ fn option_domain(long: &str) -> Option<ValueDomain> {
     match long {
         "model" => Some(ValueDomain::Model),
         "branch" => Some(ValueDomain::Branch),
+        "task" => Some(ValueDomain::Task),
         _ => None,
     }
 }
@@ -877,6 +891,25 @@ mod tests {
     use crate::bark::tree::build_root;
     use std::sync::{Arc, Mutex};
 
+    #[test]
+    fn decision_component_is_prefilled_before_subcommand_and_survives_traversal() {
+        let root = build_root();
+        let position = component_position(&root, "decision ", "decision ".len())
+            .expect("visible component slot");
+        assert!(position.vacant);
+        assert!(!position.supplied);
+        let mut scope = Scope::default();
+        let cursor = walk(
+            &root,
+            &tokenize("decision maerg plan --task audit"),
+            &mut scope,
+        );
+        assert!(cursor.valid);
+        assert_eq!(scope.component.as_deref(), Some("maerg"));
+        assert_eq!(scope.task.as_deref(), Some("audit"));
+        assert_eq!(scope.command.as_deref(), Some("plan"));
+    }
+
     fn completer() -> KvistCompleter {
         KvistCompleter::new(
             build_root(),
@@ -919,6 +952,7 @@ mod tests {
             "prompt",
             "status",
             "task",
+            "decision",
             "component",
             "agent",
             "completions",
@@ -938,7 +972,7 @@ mod tests {
         ] {
             assert!(got.contains(&name), "missing {name} in {got:?}");
         }
-        assert_eq!(got.len(), 16 + 11);
+        assert_eq!(got.len(), 17 + 11);
     }
 
     #[test]
@@ -1236,6 +1270,26 @@ mod tests {
                 .filter(|candidate| !candidate.value.starts_with('-'))
                 .all(|candidate| candidate.span == (15, 15))
         );
+    }
+
+    #[test]
+    fn decision_task_options_complete_the_explicit_component_not_shell_focus() {
+        for focus in [None, Some(".")] {
+            let c = completer_with_state_and_focus(fixture_state(), focus);
+            for line in [
+                "decision maerg plan --task ",
+                "decision maerg plan --task=bui",
+                "decision maerg discuss 'What now?' --task ",
+            ] {
+                assert_eq!(values(&complete(&c, line)), vec!["build-tree"], "{line}");
+                if line.contains("--task=") {
+                    let candidate = complete(&c, line).remove(0);
+                    let mut completed = line.to_string();
+                    completed.replace_range(candidate.span.0..candidate.span.1, &candidate.value);
+                    assert_eq!(completed, "decision maerg plan --task=build-tree");
+                }
+            }
+        }
     }
 
     #[test]

@@ -1181,6 +1181,69 @@ If persistence fails, return both the original cause and summary failure.
 Continuous and exact-task entry points wrap errors consistently, including
 preflight failures; unsafe/unavailable state directories fail visibly.
 
+### Deterministic decision workspace
+
+Separate `decisions` presentation/model orchestration from a deterministic
+`decisions::engine`. The engine freezes a validated component capture, proposed
+changed documents and host-derived queue. It owns serialization, timestamps,
+accepted local/parent revisions, dependency checks, retirement records and
+human approval. Agents never receive queue mutation, approval or filesystem tools.
+
+The manual/model draft is strict JSON:
+`schema_version: 1`, `rationale: string`, `documents: {PATH: complete_text}`,
+`tasks: [typed_edits]`, `disposition: "resolve" | "withdraw"`.
+Document keys are only `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`.
+Optional `document_edits` entries contain `path`, `before`, and `after`.
+They avoid requiring a model to regenerate large unchanged files: each nonempty
+`before` excerpt must occur exactly once in the captured document. Apply edits
+sequentially to host-held bytes, reject full-replacement/edited-path overlap,
+then validate and freeze the complete before/after file in the plan. These are
+literal typed replacements, not fuzzy patches, shell commands or regexes.
+Edits are tagged with `action`: `add`/`update` contain `task` with authored
+`id`, `title`, `description`, `context`, `purpose`, `expected_outcome`, `kind`,
+`depends_on`, `requirements`; `retire` contains `id` and `reason`.
+Adds precede the decision task; the resumed task depends on all added tasks.
+Updates cannot change completed/live/fenced history or unrelated paused work.
+Withdraw explicitly retires the selected task and all dependent tasks; unknown
+IDs and incomplete closure fail. Full withdrawn task records remain in the plan
+and applied decision receipt, outside the active queue, without completion claims.
+
+Frozen plans are content-addressed and HMAC authenticated with the existing
+user-owned approval secret. Their approval tokens cover the exact selection,
+guidance, before/after bytes, rationale and intent review/exception. Captures
+bind config/root/parent inputs, local queue/intent, source/test digests and retained
+attempt/decision evidence. Stale inputs require a new plan; never transform a
+previously approved proposal silently. The engine strictly validates resulting
+queue and Markdown and rejects recovery placeholders.
+Attention publication inherits or acquires the same component lock. Pending
+decision failures return the original cause and retained recovery instructions
+without writing a new brief into frozen evidence. This also closes the race
+between checking a pending marker and publishing operational attention files.
+
+Apply obtains the ordinary component lock. Before any controlled write, persist
+an authenticated pending journal containing the frozen plan and originals. Check
+all expected bytes before starting and before each file replacement. Recovery
+permits each file to match only its exact before or after contents; arbitrary
+intermediate edits fail without clobbering. Persist progress, then write an
+applied receipt before removing the pending marker. Failure after receipt but
+before marker cleanup is idempotently recoverable. Ordinary mutation guards
+refuse that marker; the engine's exact recovery path alone may finish it.
+Source effects, pending checkpoint trees and unknown attempts are never modified.
+Decision artifacts are outside automatic checkpoint ownership. Follow-up reviews
+are scheduled; prior source-derived IMPL/reports remain historical observations.
+
+Model discussions have durable bounded question/answer history per captured
+decision revision. Option catalogs are versioned, with stable IDs and arbitrary
+bounded option counts. Planning uses the current catalog selection or human
+custom guidance and returns strict draft JSON. A separate tool-free advisory
+intent review sees proposed intent, not source; an explicit per-plan exception
+permits local/manual operation. Approval acknowledges review opportunity, not
+agreement with findings. Model calls reuse native transport, redaction, budgets,
+diagnostics and cancellation but never reuse independent compliance contexts.
+Reject/new direction changes planning guidance; it does not dispose task history.
+Optional continuation happens only after successful apply and lock release, by
+the existing continuous scheduler under its existing execution policy.
+
 ### Guided help and actionable status guidance
 
 `help.rs` is a pure, I/O-free module: `HelpTopic` is a closed

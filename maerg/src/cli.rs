@@ -221,6 +221,14 @@ pub enum Command {
         #[command(subcommand)]
         command: TaskCommand,
     },
+    /// Inspect, discuss, stage and deterministically apply human decisions.
+    Decision {
+        /// Explicit component, editable when prefilled by the shell.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+        #[command(subcommand)]
+        command: Option<task_commands::decisions::Action>,
+    },
     /// Create, validate, or accept component intent documents.
     Component {
         /// Component-document operation to execute.
@@ -898,6 +906,18 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                         .replace('"', "\\\"")
                 )))
             }
+            Command::Decision { component_dir, command } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(Some(&component_dir))?;
+                let result = task_commands::decisions::execute(
+                    &project.project_dir, &component, command,
+                ).map_err(|error| KvistError::JsonCommandFailure {
+                    output: serde_json::json!({"status":"error","command":"decision","error":error.to_string()}).to_string(),
+                })?;
+                Ok(CommandOutput::message(serde_json::json!({
+                    "status":"success","command":"decision","result":result,
+                }).to_string()))
+            }
             Command::Tree { path } => {
                 let project = context::ProjectContext::resolve(path.as_deref())?;
                 let configuration = config::load(&project.project_dir)?;
@@ -1307,6 +1327,15 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
         }
     } else {
         match command {
+            Command::Decision {
+                component_dir,
+                command,
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(Some(&component_dir))?;
+                task_commands::decisions::execute(&project.project_dir, &component, command)
+                    .map(|output| CommandOutput::message(output.message))
+            }
             Command::Convert { project_dir } => convert::convert(&project_dir)
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
             Command::Vendor {
@@ -2255,6 +2284,54 @@ fn validate_component_documents(
 mod tests {
     use super::*;
     use clap::error::ErrorKind;
+
+    #[test]
+    fn decisions_require_visible_component_and_exact_application_approval() {
+        assert!(Cli::try_parse_from(["kvist", "decision"]).is_err());
+        assert!(Cli::try_parse_from(["kvist", "decision", "maerg"]).is_ok());
+        assert!(Cli::try_parse_from(["kvist", "decision", "maerg", "show", "audit"]).is_ok());
+        assert!(Cli::try_parse_from(["kvist", "decision", "maerg", "apply", "plan"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "kvist",
+                "decision",
+                "maerg",
+                "apply",
+                "plan",
+                "--approve",
+                "sha256:abc",
+                "--continue",
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "kvist",
+                "decision",
+                "maerg",
+                "plan",
+                "--task",
+                "audit",
+                "--import",
+                "draft.json",
+                "--review-exception",
+                "Human-reviewed offline draft",
+            ])
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn decision_command_words_can_be_explicit_component_paths() {
+        for name in ["show", "options", "discuss", "plan", "apply"] {
+            let component = format!("./{name}");
+            let parsed = Cli::try_parse_from(["kvist", "decision", &component]).unwrap();
+            assert!(
+                matches!(parsed.command, Some(Command::Decision { component_dir, command: None })
+                if component_dir.as_path() == std::path::Path::new(&component))
+            );
+        }
+    }
 
     /// Parses and completes the positional normalization a dispatched command
     /// goes through.

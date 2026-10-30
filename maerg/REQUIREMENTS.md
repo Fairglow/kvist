@@ -944,23 +944,68 @@ implementation work until the decision is resolved.
 
 Accepting a proposal MUST propagate the decision to the durable intent before
 work resumes. `TODOS.yaml` MUST gain every task required to implement the
-accepted change, and `IMPL.md` MUST become stale because the implementation no
-longer matches the intent. The component stays in the awaiting-decision state
-until the intent is updated, an updated advisory review is performed, and the
-human accepts the updated intent; only then is `IMPL.md` rederived from the code
-and the component becomes valid again. Accepting a proposal MUST NOT skip the
-review gate, and `IMPL.md` revision is a staleness cause so changing it marks the
-component stale.
+accepted change. Prior implementation/review records MUST be identified as
+historical evidence requiring fresh observation after follow-up, not rewritten
+from the new intent. Human approval of a reviewed plan (or deliberate advisory
+exception) permits its scheduled follow-up work; it does not claim the old
+implementation satisfies the new intent. Independent source observation and
+source-blind comparison follow implementation, before final human approval.
+Accepting a proposal MUST NOT skip that final review gate. Evidence freshness
+MUST NOT make the implementation work needed to restore freshness impossible.
 
-Current implementation status (phase 4): the `AwaitingDecision` task state exists
-and the broker accepts the `propose_decision` tool; a surfaced decision ends the
-run and the run harness transitions the task to awaiting-decision (never running
-verification or jumping to completed), recording the proposal as a redacted patch
-under the component state directory. Accepting a proposal still must propagate the
-decision to `TODOS.yaml`, invalidate `IMPL.md`, and require an updated advisory
-review before the component becomes valid again; the harness pauses the task and
-defers that finalization to the human. The existing `propose intent`/`derive
-draft` path provides the no-clobber draft mechanism this extends.
+### REQ-DECISION-AUTOMATION
+
+Users MUST be able to inspect open decisions, discuss them with an optional
+tool-free agent, select any stable option or custom guidance, prepare an
+agent-assisted or manually supplied typed plan, and approve/apply the exact
+plan without editing queue YAML or separately accepting each changed file.
+The agent MUST be able to propose bounded literal excerpt edits rather than
+regenerate large unchanged documents. The host MUST require a nonempty unique
+exact anchor, reject ambiguous matches/path overlap, materialize and validate
+the complete candidate, and freeze its complete before/after bytes for approval.
+Discussion and preparation MUST NOT change controlled intent or task state.
+Options and conversations MUST be durable, bounded, explicitly advisory and
+separate from independent compliance contexts. Missing agents MUST fail clearly;
+inspection and manual plans MUST remain local.
+Unknown serving metadata MUST NOT impose a fictitious small server context
+limit on decision planning. Keep complete input within explicit local bounds,
+report the unconfigured capacity, and respect a configured actual capacity or
+the provider's explicit refusal; never silently truncate planning input.
+
+Prepared plans MUST freeze exact before/after artifacts, decision/task identity,
+evidence and source/context revisions, selected option/guidance, rationale,
+intent-review feedback or an explicit exception, and continuation semantics.
+The host MUST validate typed task edits, allocate lifecycle timestamps and
+revision metadata, preserve completed work and attempt history, reject cycles,
+unknown paths/fields, unsafe paths, ambiguous effects and pending checkpoints,
+and refuse stale or tampered plans. Application MUST invoke no model.
+One content-bound human approval MUST cover the whole displayed change-set
+and review acknowledgement/exception. Changed inputs invalidate that approval.
+Recommendations or discussions MUST NOT constitute human acceptance.
+
+Application MUST use an exclusive component lock, same-directory atomic file
+replacement, durable progress and retained original bytes, with idempotent exact
+recovery after interruption. Multi-file replacement MUST NOT pretend to be a
+single filesystem atomic operation. Every ordinary task/intent writer MUST
+refuse a pending decision transaction. Optional continuation MUST use ordinary
+approved execution, never replay an uncertain attempt, and schedule inserted
+prerequisites before the resumed decision task. Resolving a decision MAY reopen
+its known paused task to pending without claiming successful execution.
+Completed source-derived evidence MUST NOT be rewritten from intent; the
+decision record MUST identify evidence requiring fresh review after follow-up.
+
+Rejecting a suggestion MUST be distinct from withdrawing work. A withdrawal
+plan MAY archive only explicitly identified pending/blocked/awaiting-decision
+tasks and their full affected dependency closure, never completed or live/fenced
+work. It MUST preserve full task records and rationale in durable versioned
+decision evidence, not mark withdrawn work completed. Source removal and changed
+consumer guarantees require separately planned implementation/intent changes.
+This conservative retirement record avoids adding success-shaped cancellation
+to the existing five-state execution queue.
+
+The human-requested change has an explicit advisory exception while general
+intent-review receipts are unavailable. Per-plan review feedback or a deliberate
+exception is required; independent observation/comparison remains separate.
 
 ### REQ-HELP-GUIDANCE
 

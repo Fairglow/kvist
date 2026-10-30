@@ -6,13 +6,7 @@ const DIRECTORY: &str = ".kvist/attention";
 const MAX_BRIEF_BYTES: usize = 256 * 1024;
 
 pub(super) fn resolution(component: &Path, task: Option<&str>, decision: bool) -> String {
-    let component = component.to_string_lossy();
-    let component = if component.starts_with('-') {
-        format!("./{component}")
-    } else {
-        component.into_owned()
-    };
-    let component = argument(&component);
+    let component = decisions::component_argument(component);
     let resume = task.map_or_else(
         || format!("kvist task run {component}"),
         |task| format!("kvist task run {component} {}", argument(task)),
@@ -23,32 +17,41 @@ pub(super) fn resolution(component: &Path, task: Option<&str>, decision: bool) -
             argument(task)
         )
     });
+    let selection = task.map_or_else(String::new, |task| format!(" --task {}", argument(task)));
     format!(
         "## Choose or approve\n\n\
-         Record the selected approach and rationale in the affected component's \
-         DESIGN.md and any changed REQUIREMENTS.md, CONTRACT.md or TODOS.yaml. \
-         Review the changes, including required follow-up tasks. If intent changed, \
-         review and accept it with:\n\n    kvist component accept {component}\n\n\
-         This accepts intent only, not implementation or a reviewer's claims. \
-         A recommendation is not human acceptance.\n\n\
+         Get structured advisory alternatives:\n\n\
+             kvist decision {component} options{selection}\n\n\
+         Stage your chosen option and any further guidance:\n\n\
+             kvist decision {component} plan{selection} --option OPTION_ID --guidance 'Additional direction'\n\n\
+         Inspect the generated Markdown for all intent and task effects and its exact \
+         `apply PLAN_ID --approve SHA256 [--continue]` command. Choosing prepares a \
+         proposal; only exact approval applies it. A recommendation is not human acceptance. \
+         Intent approval never approves implementation or a reviewer's claims.\n\n\
          ## Ask for clarification\n\n\
-         Keep work paused. Ask your development assistant: \
-         \"Explain the cited evidence, separate confirmed facts from assumptions, \
-         and compare the consequences of each alternative before changing anything.\" \
-         Kvist has no dedicated decision-response command yet; a chat answer alone \
-         does not update approved intent.\n\n\
+         Keep work paused and discuss the evidence without edits:\n\n\
+             kvist decision {component} discuss 'Explain the evidence and alternatives'{selection}\n\n\
+         Follow-up questions share durable advisory discussion. Answers do not \
+         change approved intent and are not compliance evidence.\n\n\
          ## Reject or redirect\n\n\
-         Keep work paused and record why the proposal is rejected and the replacement \
-         instructions in the affected intent/task definition. Ask the assistant to \
-         propose a revised plan, not to mark the task completed or weaken obligations \
-         merely to close a finding.\n\n\
+         Stage a new direction, or explicitly request withdrawal with reasons:\n\n\
+             kvist decision {component} plan{selection} --guidance 'Reject the proposal; instead ...'\n\n\
+         Withdrawal must include the entire dependent closure; completed/live/fenced \
+         work cannot be withdrawn. It preserves records, not a fictitious completion.\n\n\
+         ## Manual or offline planning\n\n\
+             kvist decision {component} plan{selection} --import draft.json --review-exception 'Explicit review exception'\n\n\
+         Run `kvist decision {component} plan --help` for the typed draft format; no hand-edited queue or \
+         agent-minted lifecycle metadata is needed. Apply the resulting exact approved \
+         plan by the same command as an agent-prepared plan.\n\n\
          ## Resume after resolution\n\n\
          Run these commands from the project root only after reviewing retained \
          effects and resolving the issue. Unresolved attempts/fences still require \
          explicit recovery/disposition; do not delete evidence or replay unknown effects.\
          {unblock}\n\
-         Explicitly retry the paused task (bare continuous run does not select \
-         awaiting-decision tasks), or retry a run/checkpoint without rerunning completed tasks:\n\n\
+         An applied resolution makes approved follow-up work schedulable. Prefer \
+         `apply ... --continue`, or `kvist task run {component}`. \
+         For a manually resolved pause, explicitly retry the task or checkpoint \
+         without rerunning completed tasks:\n\n\
              {resume}\n\n\
          Changed execution policy requires `kvist task approve-policy` first. \
          This brief changes no task state, approval or recovery fence.\n"
@@ -66,6 +69,7 @@ pub(super) fn decision(
     explanation: &str,
     evidence: &Path,
     redactions: &[String],
+    lock: &TaskLock,
 ) -> Result<PathBuf> {
     persist(
         context,
@@ -83,6 +87,7 @@ pub(super) fn decision(
             resolution(&context.component_path, Some(task), true)
         ),
         redactions,
+        Some(lock),
     )
 }
 
@@ -92,6 +97,7 @@ pub(super) fn failure(
     task: Option<&str>,
     error: KvistError,
     explanation: Option<&str>,
+    inherited_lock: Option<&TaskLock>,
 ) -> KvistError {
     // No queue/ledger mutation or model call: even preflight failures can be explained.
     let (component, config) = match context::normalize_component_path(component_path).and_then(
@@ -119,6 +125,14 @@ pub(super) fn failure(
     let mut cause = error.to_string();
     for value in redactions.iter().filter(|value| !value.is_empty()) {
         cause = cause.replace(value, "[REDACTED]");
+    }
+    if let Err(pending) = decisions::ensure_no_pending(&context.component_dir) {
+        return KvistError::TaskRunFailed {
+            task_id: task.unwrap_or("continuous-run").to_owned(),
+            reason: format!(
+                "{cause}\n\n{pending}\nNo attention evidence was rewritten. Finish the identical approved decision apply; task state and retained effects were not cleared."
+            ),
+        };
     }
     if cause.len() > MAX_BRIEF_BYTES / 2 {
         truncate_utf8(&mut cause, MAX_BRIEF_BYTES / 2);
@@ -176,7 +190,7 @@ pub(super) fn failure(
         task.unwrap_or("continuous component run"),
         resolution(&context.component_path, task, false)
     );
-    let reason = match persist(&context, task, &text, &redactions) {
+    let reason = match persist(&context, task, &text, &redactions, inherited_lock) {
         Ok(path) => format!(
             "{cause}\n\n## Human attention\n\nHuman-readable summary: {}\nOpen this Markdown file for the explanation and resolution steps.",
             path.display()
@@ -197,10 +211,25 @@ fn persist(
     task: Option<&str>,
     text: &str,
     redactions: &[String],
+    inherited_lock: Option<&TaskLock>,
 ) -> Result<PathBuf> {
     let text = redact(text, redactions)?;
     // Check every ancestor, not just the leaf, before creating any evidence.
     require_real_directory_chain(&context.project_dir, &context.component_dir)?;
+    let at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    let acquired = if inherited_lock.is_none() {
+        Some(TaskLock::for_context(context, "attention-evidence", &at)?)
+    } else {
+        None
+    };
+    let lock = inherited_lock.or(acquired.as_ref()).ok_or_else(|| {
+        journal_error(
+            &context.component_dir,
+            "attention publication requires a component lock",
+        )
+    })?;
+    lock.revalidate()?;
+    decisions::ensure_no_pending(&context.component_dir)?;
     continuous::checked_directory(&context.component_dir.join(".kvist"))?;
     let directory = context
         .component_dir
@@ -265,6 +294,9 @@ fn persist(
         }
     }
     replace_file_atomically(&latest, &text)?;
+    if let Some(lock) = acquired {
+        lock.release()?;
+    }
     Ok(latest)
 }
 
@@ -404,6 +436,7 @@ mod tests {
             Some("task"),
             "# First\nprivate-value",
             &redactions,
+            None,
         )
         .unwrap();
         assert_eq!(fs::read_to_string(&first).unwrap(), "# First\n[REDACTED]");
@@ -412,10 +445,11 @@ mod tests {
             Some("task"),
             "# First\nprivate-value",
             &redactions,
+            None,
         )
         .unwrap();
         assert_eq!(fs::read_dir(first.parent().unwrap()).unwrap().count(), 2);
-        persist(&context, Some("task"), "# Second", &redactions).unwrap();
+        persist(&context, Some("task"), "# Second", &redactions, None).unwrap();
         assert_eq!(fs::read_dir(first.parent().unwrap()).unwrap().count(), 3);
         assert_eq!(fs::read_to_string(&first).unwrap(), "# Second");
         assert!(
@@ -423,7 +457,8 @@ mod tests {
                 &context,
                 Some("task"),
                 &"x".repeat(MAX_BRIEF_BYTES + 1),
-                &[]
+                &[],
+                None,
             )
             .is_err()
         );
@@ -431,9 +466,17 @@ mod tests {
     }
 
     #[test]
+    fn resolution_disambiguates_command_named_components() {
+        for name in ["show", "plan", "apply", "help"] {
+            let instructions = resolution(Path::new(name), None, true);
+            assert!(instructions.contains(&format!("kvist decision './{name}' options")));
+        }
+    }
+
+    #[test]
     fn unsafe_task_names_cannot_escape_and_commands_quote_component_names() {
         let (_directory, mut context) = fixture();
-        let path = persist(&context, Some("../escape"), "# Stop", &[]).unwrap();
+        let path = persist(&context, Some("../escape"), "# Stop", &[], None).unwrap();
         assert_eq!(
             path.parent().unwrap(),
             context.component_dir.join(DIRECTORY)
@@ -453,7 +496,7 @@ mod tests {
         fs::create_dir(&outside).unwrap();
         fs::create_dir(context.component_dir.join(".kvist")).unwrap();
         symlink(&outside, context.component_dir.join(DIRECTORY)).unwrap();
-        assert!(persist(&context, Some("task"), "# Stop", &[]).is_err());
+        assert!(persist(&context, Some("task"), "# Stop", &[], None).is_err());
         assert!(fs::read_dir(&outside).unwrap().next().is_none());
         fs::remove_file(context.component_dir.join(DIRECTORY)).unwrap();
         fs::create_dir(context.component_dir.join(DIRECTORY)).unwrap();
@@ -464,7 +507,7 @@ mod tests {
             context.component_dir.join(DIRECTORY).join("task.md"),
         )
         .unwrap();
-        assert!(persist(&context, Some("task"), "# Stop", &[]).is_err());
+        assert!(persist(&context, Some("task"), "# Stop", &[], None).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "preserve");
         let linked = TaskContext {
             project_dir: directory.path().to_path_buf(),
@@ -472,7 +515,7 @@ mod tests {
             component_path: PathBuf::from("alias"),
         };
         symlink(&outside, &linked.component_dir).unwrap();
-        assert!(persist(&linked, Some("task"), "# Stop", &[]).is_err());
+        assert!(persist(&linked, Some("task"), "# Stop", &[], None).is_err());
         assert!(!outside.join(".kvist").exists());
     }
 }

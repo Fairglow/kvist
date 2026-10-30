@@ -452,8 +452,8 @@ When work needs your attention, Kvist prints a specific `.md` brief under the
 component's `.kvist/attention/`. Open it manually until transcript rendering is
 fully integrated. Agent explanations describe the situation, design impact,
 alternatives and tradeoffs, recommendation and uncertainty. Host-written
-instructions explain how to choose/approve, request clarification, reject with
-replacement instructions, and resume with the existing task commands.
+instructions explain how to discuss, stage a complete decision change-set, and
+apply exact approval without editing queue YAML.
 
 Review JSON remains available with a same-stem Markdown companion under
 `.kvist/continuous-reviews/`; `component.md` indexes final review evidence.
@@ -462,9 +462,58 @@ checkpoint can be explained without making its retry dirty. Immutable,
 content-addressed brief history remains beside each latest task/run alias.
 If inference fails, Kvist writes an explicitly labelled diagnostic rather than
 calling the failing model again. No summary chooses an approach or accepts work.
-Record accepted decisions in the affected intent and queue; a chat answer or
-editing a summary alone does not update approved intent. Keep the task paused
-while asking your development assistant for clarification.
+Use the required visible component argument (the shell prefills it):
+
+```bash
+kvist decision galla
+kvist decision galla discuss "What is established, and what needs investigation?"
+kvist decision galla options
+kvist decision galla plan --option investigate --guidance "Preserve all current guarantees"
+# Read the generated Markdown; use the actual PLAN_ID and SHA256 it prints:
+kvist decision galla apply PLAN_ID --approve SHA256 --continue
+```
+
+Option IDs come from the generated catalog, not numbered Markdown paragraphs;
+there may be 1-32 substantive choices. With multiple pauses, specify
+`--task TASK_ID` (`show TASK_ID` for inspection). Follow-up discussion is
+durable and advisory. Choosing stages a proposal; it does not change controlled
+files. The planner returns typed intent/task effects, including prerequisites
+before a resumed audit. A separate bounded intent review is recorded, or you
+must supply an explicit `--review-exception REASON`.
+
+The Markdown preview shows all effects and one content-bound approval command.
+Apply invokes no model, accepts only those exact intent/scheduling changes and
+does not approve implementation, certify findings, commit or push. `--continue`
+uses the existing independently approved execution policy. Changed inputs
+require a new plan; an interrupted application fences ordinary writers until
+the identical approved command finishes without overwriting external edits.
+
+Reject/redirect with `plan --guidance "Reject those suggestions; instead ..."`.
+To discard work, explicitly request withdrawal with reasons and the entire
+affected uncompleted dependency closure; records remain durable and are never
+marked completed. Completed/live/fenced tasks cannot be withdrawn. Existing
+source removal requires separately scheduled implementation.
+
+Manual/offline plans use the same strict native JSON version-1 draft format as
+agent plans, documented in [maerg/CONTRACT.md](maerg/CONTRACT.md):
+
+```json
+{"schema_version":1,"rationale":"The environment is repaired; retry with guarantees unchanged.","documents":{},"tasks":[],"disposition":"resolve"}
+```
+
+```bash
+kvist decision galla plan --import draft.json --review-exception "I reviewed this unchanged-intent retry"
+```
+
+Then inspect and apply the printed exact approval command. Raw queues, statuses,
+timestamps and acceptance IDs are not draft fields. `repair` remains artifact
+recovery, not a means to bypass reviewed product changes. `.kvist/decisions/`
+retains Markdown/JSON options, discussion, immutable plans and application
+receipts. Historical attention briefs and audit reports are not rewritten.
+For large intent documents, prefer `document_edits` with exact unique
+`path`/`before`/`after` excerpts instead of regenerating full files. The host
+materializes and validates complete files for the same exact approval preview;
+ambiguous or missing anchors fail rather than guessing.
 
 ### 5.4 Replaying Execution Trajectories
 

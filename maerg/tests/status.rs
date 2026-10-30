@@ -631,9 +631,7 @@ fn status_blocked_details_list_reasons_and_exact_next_commands() {
     ));
     assert!(stdout.contains("decision: paused"));
     assert!(stdout.contains("reason: Awaiting decision on product direction."));
-    assert!(
-        stdout.contains("next: human decision needed; 'kvist help task-states' explains resuming")
-    );
+    assert!(stdout.contains("next: human decision needed; kvist decision '.' show 'paused'"));
 
     let overview = run_kvist(&[
         "status",
@@ -658,10 +656,7 @@ fn status_blocked_details_list_reasons_and_exact_next_commands() {
         "next:   kvist task transition . blocked-waiting pending (1 dependency task incomplete)"
     ));
     assert!(stdout.contains("Decisions: paused"));
-    assert!(
-        stdout
-            .contains("next:   human decision needed; 'kvist help task-states' explains resuming")
-    );
+    assert!(stdout.contains("next:   human decision needed; kvist decision '.' show 'paused'"));
 }
 
 /// The stable text report names a next step for unsupported-version components.

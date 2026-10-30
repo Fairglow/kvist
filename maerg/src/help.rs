@@ -124,6 +124,12 @@ Kvist component lifecycle
   5. Review the component's .kvist/continuous-reviews/component.json and findings.
 
   Work stops for decisions, blockers, cancellation or pending human approval.
+  Decision support: `kvist decision DIR` inspects pauses; `discuss MESSAGE`
+  asks/clarifies, `options` lists stable advisory choices, and
+  `plan --option ID` or `plan --guidance TEXT` stages the complete effects.
+  Inspect its Markdown, then `apply PLAN_ID --approve SHA256 [--continue]`.
+  Manual: `plan --import draft.json --review-exception REASON`.
+  Choosing only prepares; exact application calls no model or Git commit.
   Component implementation approval has no dedicated command yet.
   An exact `task run DIR TASK` stops after one task; explicit implementation
   attempts retain `task finalize DIR TASK ATTEMPT accept|block`.
@@ -174,8 +180,9 @@ How to achieve them
                               kvist task transition [DIR] TASK pending
   blocked -> in-progress      kvist task transition [DIR] TASK in-progress
                               (dependency chain completed; then explicitly run TASK)
-  awaiting-decision -> ...    decide, update intent, re-accept, then
-                              kvist task transition [DIR] TASK in-progress
+  awaiting-decision -> ...    kvist decision DIR plan --task TASK --guidance \"...\"
+                              inspect the exact plan; apply its printed approval
+                              (reopens pending; schedules prerequisites first)
   in-progress -> pending      kvist task transition [DIR] TASK pending  (reset)
 
 More: GUIDE.md §7 · docs/command-set.md §4.2

@@ -5,6 +5,31 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped deterministic decision observations - 2026-10-30
+
+The fresh
+[`source-only decision observation`](../docs/reviews/decision-automation-final-observation.md)
+describes the actual structured alternatives, bounded discussion, agent/manual
+planning, authenticated exact application, queue edits and recoverable
+continuation. Its evidence boundary excludes intent, prior implementation
+records, review history and Git history; it is a scoped diagnostic supplement,
+not protected execution, independent compliance certification or human approval.
+The earlier
+[`provisional observation`](../docs/reviews/decision-automation-observation.md)
+records the pre-hardening state rather than subsequent behavior.
+
+Implementation-agent execution, separately attributed: the final Maerg suite
+passed 973 tests with seven existing ignores. Formatting, strict all-target
+Clippy, release build and component validation passed; the test-only lint
+correction was also covered by a 39-test component-focused rerun.
+The separate
+[`source-blind diagnostic comparison`](../docs/reviews/decision-automation-comparison.md)
+established no concrete unmet decision-workflow requirement in its permitted
+evidence and retained semantic, bounded-capture and platform proof limitations.
+No live Galla decision, protected security/compliance task execution, native
+review receipt, intent acceptance or separate installed-binary replacement
+was performed.
+
 ## Scoped human attention observations - 2026-10-30
 
 The separate clean-slate source/test observations are retained in

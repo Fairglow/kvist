@@ -59,8 +59,8 @@ impl ComponentPrefill {
         if focus.is_empty() || focus.chars().any(char::is_control) {
             return None;
         }
-        // Quoting alone does not stop clap from treating a path as an option.
-        let focus = if focus.starts_with('-') {
+        // Quoting does not disambiguate options or command-named components.
+        let focus = if focus.starts_with('-') || self.words.contains(&focus) {
             format!("./{focus}")
         } else {
             focus
@@ -200,6 +200,30 @@ mod tests {
         prefill.apply(&mut editor);
         assert_eq!(editor.current_buffer_contents(), "task run maerg ");
         assert_eq!(editor.current_insertion_point(), "task run maerg ".len());
+    }
+
+    #[test]
+    fn prefill_command_named_components_remain_real_component_arguments() {
+        use clap::Parser;
+        for focus in ["show", "options", "discuss", "plan", "apply", "help"] {
+            let prefill = prefill(Some(focus));
+            let mut editor = editor("decision ");
+            prefill.apply(&mut editor);
+            let (head, arguments) =
+                sav::split_raw_command(editor.current_buffer_contents()).unwrap();
+            let parsed = crate::cli::Cli::try_parse_from(
+                ["kvist", &head]
+                    .into_iter()
+                    .chain(arguments.iter().map(String::as_str)),
+            );
+            assert!(
+                matches!(parsed, Ok(crate::cli::Cli {
+                command: Some(crate::cli::Command::Decision { component_dir, command: None }), ..
+            }) if component_dir.as_path() == std::path::Path::new(&format!("./{focus}"))),
+                "{focus}: {}",
+                editor.current_buffer_contents()
+            );
+        }
     }
 
     #[test]

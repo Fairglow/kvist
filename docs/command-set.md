@@ -299,10 +299,21 @@ component's `.kvist/attention/`. It retains agent explanations when available
 and host instructions for choosing, clarifying, rejecting and safely resuming.
 Review JSON has a same-stem `.md` companion; `component.md` indexes final reports.
 Open the printed file manually until transcript rendering is complete.
-There is no new decision-response/approval command: record accepted changes
-in component intent and the queue, accept changed intent after review, and
-explicitly rerun the resolved awaiting-decision task. A blocked task must first
-be transitioned to pending; unresolved attempts keep their recovery fences.
+`kvist decision COMPONENT_DIR` inspects open pauses. `options [--task TASK_ID]`
+creates stable advisory choices; `discuss MESSAGE [--task TASK_ID]` retains
+follow-up questions without controlled edits. `plan --option OPTION_ID` or
+`plan --guidance TEXT` stages the entire typed intent/task change-set.
+`plan --import PATH --review-exception REASON` provides the same manual/local
+route. A separate intent review or explicit exception accompanies each plan.
+Inspect its complete Markdown preview, then use the printed
+`apply PLAN_ID --approve SHA256 [--continue]` command. Apply calls no model and
+creates no Git commit. It validates frozen inputs, owns queue metadata and
+reopens only the selected resolved pause with approved prerequisites wired first.
+Changed inputs invalidate staged approval; interrupted application fences ordinary
+writers until the exact command completes. Withdrawal archives the full explicitly
+selected uncompleted dependant closure with reasons, never fake completion.
+Unknown attempts still require recovery. See GUIDE.md's decisions and blockers
+section and maerg/CONTRACT.md for the strict native JSON version-1 draft.
 
 With shell component focus active, component arguments are visibly prefilled
 in the editable buffer when their position is reached. Delete the inserted

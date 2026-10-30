@@ -262,7 +262,13 @@ fn guidance_entries(
         decisions.push(GuidanceEntry {
             id: task.id.clone(),
             reason: first_line(task.blocked_reason.as_deref().unwrap_or("")),
-            next: "human decision needed; 'kvist help task-states' explains resuming".to_owned(),
+            next: format!(
+                "human decision needed; kvist decision {} show '{}' (see 'kvist help task-states')",
+                crate::task_commands::decisions::component_argument(std::path::Path::new(
+                    component_path
+                )),
+                task.id.replace('\'', "'\\''"),
+            ),
         });
     }
     (blocked, decisions)

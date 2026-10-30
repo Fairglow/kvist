@@ -986,7 +986,14 @@ command = "/usr/bin/echo 'mocking verify'"
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8(output.stderr.clone()).expect("diagnostic text");
-    assert_eq!(stderr.lines().count(), 5);
+    assert_eq!(stderr.lines().count(), 7);
+    assert_eq!(stderr.matches("Running protected task ").count(), 1);
+    assert_eq!(
+        stderr
+            .matches("Running test-command verification...")
+            .count(),
+        1
+    );
     assert_eq!(stderr.matches("Execution limits: ").count(), 1);
     assert_eq!(
         stderr.matches("Starting inference: approximately ").count(),
@@ -1946,6 +1953,389 @@ fn continuous_project(endpoint: &str, frequency: &str) -> TempDir {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn decision_agent_options_discussion_and_plan_never_apply_unseen_effects() {
+    let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = requests.clone();
+    let gateway = MockGateway::serve(
+        move |body| {
+            let text = String::from_utf8_lossy(body);
+            if !body.is_empty() {
+                observed.lock().unwrap().push(text.to_string());
+            }
+            let report = if text.contains("Phase `decision-options`") {
+                serde_json::json!({
+                    "summary":"Investigate, preserve or withdraw this work.",
+                    "options":(0..5).map(|i| serde_json::json!({
+                        "id":format!("option-{i}"),"title":format!("Approach {i}"),
+                        "consequences":"Preserves existing guarantees and schedules verification.",
+                        "recommendation":"Investigate before changing guarantees.",
+                    })).collect::<Vec<_>>(),
+                })
+                .to_string()
+            } else if text.contains("Phase `decision-plan`") {
+                serde_json::json!({
+                "schema_version":1,"rationale":"Human selected option-4 with further direction.",
+                "documents":{},"tasks":[],"disposition":"resolve",
+            }).to_string()
+            } else {
+                "Advisory answer: preserve guarantees; confirm assumptions before applying."
+                    .to_owned()
+            };
+            gateway_text_body(
+                &serde_json::json!({"report":report,"decision_required":false}).to_string(),
+            )
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "manual");
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = kvist::task_queue::TaskStatus::AwaitingDecision;
+    queue.tasks[0].blocked_reason = Some("Choose whether investigation is needed.".into());
+    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let before = fs::read(&queue_path).unwrap();
+    for args in [
+        vec!["decision", ".", "options"],
+        vec!["decision", ".", "discuss", "Explain option-4"],
+        vec!["decision", ".", "discuss", "Why preserve the guarantee?"],
+    ] {
+        let output = run_kvist(&project, &args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read(&queue_path).unwrap(), before);
+    }
+    let output = run_kvist(
+        &project,
+        &[
+            "--json",
+            "decision",
+            ".",
+            "plan",
+            "--option",
+            "option-4",
+            "--guidance",
+            "Keep the guarantee",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read(&queue_path).unwrap(), before);
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = result["result"]["plan_id"].as_str().unwrap();
+    let approval = result["result"]["approval"].as_str().unwrap();
+    let count = requests.lock().unwrap().len();
+    let applied = run_kvist(
+        &project,
+        &["decision", ".", "apply", id, "--approve", approval],
+    );
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        count,
+        "application must invoke no model"
+    );
+    let queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    assert_eq!(
+        queue.tasks[0].status,
+        kvist::task_queue::TaskStatus::Pending
+    );
+    let requests = requests.lock().unwrap();
+    let discussion = requests
+        .iter()
+        .filter(|request| request.contains("Phase `decision-discussion`"))
+        .collect::<Vec<_>>();
+    assert_eq!(discussion.len(), 2);
+    assert!(
+        discussion[1].contains("Explain option-4"),
+        "history must reach follow-up"
+    );
+    assert!(discussion[1].contains("Advisory answer"));
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.contains("Phase `decision-intent-review`"))
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|request| !request.contains("pub fn observed_marker")),
+        "support is source-blind"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn decision_unknown_capacity_keeps_large_intent_instead_of_asserting_32k_limit() {
+    let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = requests.clone();
+    let gateway = MockGateway::serve(
+        move |body| {
+            if !body.is_empty() {
+                observed
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(body).to_string());
+            }
+            let options = serde_json::json!({"summary":"Investigate conservatively.","options":[{
+            "id":"investigate","title":"Investigation","consequences":"Preserves the guarantees.",
+            "recommendation":"Gather evidence before changing the design."
+        }]}).to_string();
+            gateway_text_body(
+                &serde_json::json!({"report":options,"decision_required":false}).to_string(),
+            )
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "manual");
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = kvist::task_queue::TaskStatus::AwaitingDecision;
+    queue.tasks[0].blocked_reason = Some("Discuss the large local intent.".into());
+    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let before = fs::read(&queue_path).unwrap();
+    let design_path = project.path().join("src/DESIGN.md");
+    let design = format!(
+        "{}\nlarge-intent-start\n{}\nlarge-intent-end\n",
+        fs::read_to_string(&design_path).unwrap(),
+        "bounded-context-evidence\n".repeat(8000)
+    );
+    fs::write(&design_path, &design).unwrap();
+    let output = run_kvist(&project, &["decision", ".", "options"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("capacity is unconfigured"));
+    let request_store = requests.clone();
+    let requests = requests.lock().unwrap();
+    let request = requests
+        .iter()
+        .find(|request| request.contains("Phase `decision-options`"))
+        .unwrap();
+    assert!(request.len() > 180_000);
+    assert!(request.contains("large-intent-start") && request.contains("large-intent-end"));
+    assert!(!request.contains("source-only-observation"));
+    assert_eq!(fs::read(&queue_path).unwrap(), before);
+    assert_eq!(fs::read_to_string(&design_path).unwrap(), design);
+    let request_count = requests.len();
+    drop(requests);
+    let registry = project.path().join("providers.toml");
+    let content = fs::read_to_string(&registry).unwrap();
+    fs::write(&registry, format!("{content}\ncontext_limit = 32768\n")).unwrap();
+    let output = run_kvist(&project, &["decision", ".", "options"]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("selected model capacity"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(request_store.lock().unwrap().len(), request_count);
+    assert_eq!(fs::read(&queue_path).unwrap(), before);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn manual_decision_plan_and_inspection_need_no_model_and_bind_exact_approval() {
+    let project = continuous_project("http://127.0.0.1:1", "manual");
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = kvist::task_queue::TaskStatus::Blocked;
+    queue.tasks[0].blocked_reason = Some("Environment repaired; authorize retry.".into());
+    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let inspected = run_kvist(&project, &["decision", "."]);
+    assert!(
+        inspected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspected.stderr)
+    );
+    assert!(String::from_utf8_lossy(&inspected.stdout).contains("Manual/offline"));
+    let draft = project.path().join("draft.json");
+    fs::write(&draft, r#"{"schema_version":1,"rationale":"The human repaired the environment; retry with guarantees unchanged.","documents":{},"tasks":[],"disposition":"resolve"}"#).unwrap();
+    let output = run_kvist(
+        &project,
+        &[
+            "--json",
+            "decision",
+            ".",
+            "plan",
+            "--import",
+            draft.to_str().unwrap(),
+            "--review-exception",
+            "Human reviewed the unchanged intent offline.",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = result["result"]["plan_id"].as_str().unwrap();
+    let before = fs::read(&queue_path).unwrap();
+    let wrong = run_kvist(
+        &project,
+        &["decision", ".", "apply", id, "--approve", "sha256:wrong"],
+    );
+    assert!(!wrong.status.success());
+    assert_eq!(fs::read(&queue_path).unwrap(), before);
+    let approval = result["result"]["approval"].as_str().unwrap();
+    let output = run_kvist(
+        &project,
+        &[
+            "--json",
+            "decision",
+            ".",
+            "apply",
+            id,
+            "--approve",
+            approval,
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(serde_json::from_slice::<serde_json::Value>(&output.stdout).is_ok());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn applied_decision_continues_prerequisites_before_retrying_a_real_paused_review() {
+    use kvist::task_queue::{TaskKind, TaskStatus};
+    let pause = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let state = pause.clone();
+    let gateway = MockGateway::serve(
+        move |body| {
+            let comparison = String::from_utf8_lossy(body).contains("independent-comparison");
+            let decision = comparison && !state.swap(true, std::sync::atomic::Ordering::SeqCst);
+            gateway_text_body(
+                &serde_json::json!({
+                    "report":"Observed evidence; bounded investigation requested.",
+                    "decision_required":decision,
+                })
+                .to_string(),
+            )
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "manual");
+    let paused = run_kvist(&project, &["task", "run", "."]);
+    assert!(
+        paused.status.success(),
+        "{}",
+        String::from_utf8_lossy(&paused.stderr)
+    );
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    assert_eq!(queue.tasks[3].status, TaskStatus::AwaitingDecision);
+    let mut edits = Vec::new();
+    let mut previous = None;
+    for (suffix, kind) in [
+        ("write-tests", TaskKind::Test),
+        ("implement-code", TaskKind::Implementation),
+        ("security-audit", TaskKind::SecurityAudit),
+        ("compliance-review", TaskKind::ComplianceReview),
+    ] {
+        let task = &queue.tasks[3];
+        let id = format!("investigate-{suffix}");
+        edits.push(serde_json::json!({"action":"add","task":{
+            "id":id,"title":format!("{suffix}: bounded investigation"),
+            "description":task.description,"context":task.context,"purpose":task.purpose,
+            "expected_outcome":task.expected_outcome,"kind":kind,
+            "depends_on":previous.iter().collect::<Vec<_>>(),"requirements":task.requirements,
+        }}));
+        previous = Some(id);
+    }
+    let draft = project.path().join("investigation.json");
+    fs::write(&draft, serde_json::json!({
+        "schema_version":1,"rationale":"Investigate without weakening the guarantees, then retry the paused comparison.",
+        "documents":{},"tasks":edits,"disposition":"resolve",
+    }).to_string()).unwrap();
+    let prepared = run_kvist(
+        &project,
+        &[
+            "--json",
+            "decision",
+            ".",
+            "plan",
+            "--import",
+            draft.to_str().unwrap(),
+            "--review-exception",
+            "Human approved this bounded investigation plan.",
+        ],
+    );
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let id = result["result"]["plan_id"].as_str().unwrap();
+    let approval = result["result"]["approval"].as_str().unwrap();
+    let applied = run_kvist(
+        &project,
+        &[
+            "--json",
+            "decision",
+            ".",
+            "apply",
+            id,
+            "--approve",
+            approval,
+            "--continue",
+        ],
+    );
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&applied.stdout).is_ok(),
+        "{}",
+        String::from_utf8_lossy(&applied.stdout)
+    );
+    let queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    assert_eq!(queue.tasks.len(), 12);
+    assert!(
+        queue
+            .tasks
+            .iter()
+            .all(|task| task.status == TaskStatus::Completed)
+    );
+    let progress = String::from_utf8_lossy(&applied.stderr);
+    assert!(
+        progress
+            .find("Running `investigate-compliance-review`")
+            .unwrap()
+            < progress.find("Running `one-compliance-review`").unwrap()
+    );
+    let evidence = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist-attempts/one-compliance-review.jsonl"),
+    )
+    .unwrap();
+    assert!(
+        evidence.contains("attempt-0002"),
+        "the paused audit must be retried, not falsely completed"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn continuous_run_completes_two_items_with_separate_unaccepted_checkpoints() {
     let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed = requests.clone();
@@ -2254,6 +2644,8 @@ fn continuous_run_pauses_on_review_decision_without_running_later_items() {
         "## Choose or approve",
         "## Ask for clarification",
         "## Reject or redirect",
+        "kvist decision '.' options --task 'one-compliance-review'",
+        "apply PLAN_ID --approve SHA256",
         "kvist task run '.' 'one-compliance-review'",
         "not human acceptance",
     ] {
