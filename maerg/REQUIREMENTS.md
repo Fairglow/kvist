@@ -955,6 +955,22 @@ MUST NOT make the implementation work needed to restore freshness impossible.
 
 ### REQ-DECISION-AUTOMATION
 
+Users MUST be able to invoke displayed decision responses by a short,
+component-scoped number instead of copying plan IDs, approval hashes or full
+commands. The host MUST bind each number to one exact typed command and show
+its full expansion and effect before invocation. Options, apply-only and
+apply-and-continue MUST remain distinct actions. Number invocation is the
+explicit choice/approval; no further confirmation or model selection is needed.
+Numbers MUST NOT be reassigned to new actions within retained shortcut state.
+Tab completion and a local response list MUST expose numbers with descriptions.
+Unknown, tampered, cross-component or stale responses MUST fail explicitly,
+without falling back to a newer choice or widening execution. Existing exact
+approval commands MUST remain available. Shortcuts MUST use native dispatch,
+never shell execution or commands scraped from model Markdown. Authenticated
+existing plans MUST be discoverable without generating another model response.
+The human-requested shortcut change has an explicit advisory exception while
+general intent-review receipts remain unavailable.
+
 Users MUST be able to inspect open decisions, discuss them with an optional
 tool-free agent, select any stable option or custom guidance, prepare an
 agent-assisted or manually supplied typed plan, and approve/apply the exact

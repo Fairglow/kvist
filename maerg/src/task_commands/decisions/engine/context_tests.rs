@@ -120,3 +120,30 @@ fn fenced_bare_task_run_preserves_attention_and_exact_decision_recovery() {
 fn fenced_exact_task_run_preserves_attention_and_exact_decision_recovery() {
     pending_task_run_preserves_attention(true);
 }
+
+#[test]
+fn numbered_approval_recovers_identical_interrupted_apply_without_replanning() {
+    let fixture = Fixture::new();
+    let plan = fixture.plan();
+    let context = context_for(fixture.project.path(), Path::new(".")).unwrap();
+    let responses = super::super::shortcuts::plan(&context, &plan).unwrap();
+    assert_eq!(responses[0].number, 1);
+    assert!(
+        transaction::apply(
+            fixture.project.path(),
+            Path::new("."),
+            &plan.id,
+            &plan.approval,
+            Some(1)
+        )
+        .is_err()
+    );
+    let output = super::super::super::execute(
+        fixture.project.path(),
+        Path::new("."),
+        Some(Action::Do { number: 1 }),
+    )
+    .unwrap();
+    assert_eq!(output.plan_id, Some(plan.id));
+    ensure_no_pending(&fixture.component()).unwrap();
+}

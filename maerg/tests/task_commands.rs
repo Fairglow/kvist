@@ -2212,6 +2212,285 @@ fn manual_decision_plan_and_inspection_need_no_model_and_bind_exact_approval() {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn numbered_decision_responses_keep_exact_plans_without_hash_copying() {
+    let project = continuous_project("http://127.0.0.1:1", "manual");
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = kvist::task_queue::TaskStatus::Blocked;
+    queue.tasks[0].blocked_reason = Some("Authorize an unchanged retry.".into());
+    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let before = fs::read(&queue_path).unwrap();
+    let draft = project.path().join("draft.json");
+    let mut plans = Vec::new();
+    for rationale in ["First reviewed decision.", "Second reviewed decision."] {
+        fs::write(
+            &draft,
+            serde_json::json!({
+                "schema_version":1, "rationale":rationale, "documents":{},
+                "tasks":[], "disposition":"resolve",
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let output = run_kvist(
+            &project,
+            &[
+                "--json",
+                "decision",
+                ".",
+                "plan",
+                "--import",
+                draft.to_str().unwrap(),
+                "--review-exception",
+                "Human reviewed the unchanged intent.",
+            ],
+        );
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        plans.push(serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap());
+    }
+    assert_eq!(fs::read(&queue_path).unwrap(), before);
+    let first = &plans[0]["result"];
+    let actions = first["actions"].as_array().unwrap();
+    assert_eq!(actions.len(), 2);
+    assert_eq!(actions[0]["number"], 1);
+    assert_eq!(actions[1]["number"], 2);
+    assert!(
+        actions[0]["command"]
+            .as_str()
+            .unwrap()
+            .contains(first["plan_id"].as_str().unwrap())
+    );
+    assert!(
+        actions[0]["command"]
+            .as_str()
+            .unwrap()
+            .contains(first["approval"].as_str().unwrap())
+    );
+    assert!(
+        !actions[0]["command"]
+            .as_str()
+            .unwrap()
+            .contains("--continue")
+    );
+    assert!(
+        actions[1]["command"]
+            .as_str()
+            .unwrap()
+            .ends_with("--continue")
+    );
+    assert_eq!(plans[1]["result"]["actions"][0]["number"], 3);
+    let listed = run_kvist(&project, &["decision", ".", "actions"]);
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert!(String::from_utf8_lossy(&listed.stdout).contains("do 1"));
+    let unknown = run_kvist(&project, &["decision", ".", "do", "99"]);
+    assert!(!unknown.status.success());
+    assert_eq!(fs::read(&queue_path).unwrap(), before);
+    let applied = run_kvist(&project, &["--json", "decision", ".", "do", "1"]);
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&applied.stdout).unwrap();
+    assert_eq!(
+        result["result"]["plan_id"], first["plan_id"],
+        "never pick the latest plan"
+    );
+    assert!(String::from_utf8_lossy(&applied.stderr).contains(first["approval"].as_str().unwrap()));
+    assert!(
+        run_kvist(&project, &["decision", ".", "do", "1"])
+            .status
+            .success()
+    );
+    let stale = run_kvist(&project, &["decision", ".", "do", "3"]);
+    assert!(
+        !stale.status.success(),
+        "a later plan cannot inherit approval for changed inputs"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn numbered_options_refuse_retargeting_and_prepare_the_exact_selected_choice() {
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let requests = seen.clone();
+    let count = calls.clone();
+    let gateway = MockGateway::serve(
+        move |body| {
+            let text = String::from_utf8_lossy(body);
+            requests.lock().unwrap().push(text.to_string());
+            let report = if text.contains("Phase `decision-options`") {
+                let revision = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                serde_json::json!({"summary":"Choose a direction.","options":[{
+                    "id":"investigate","title":format!("Investigation revision {revision}"),
+                    "consequences":"Preserve all existing guarantees.",
+                    "recommendation":"Investigate before altering intent."
+                }]})
+                .to_string()
+            } else if text.contains("Phase `decision-plan`") {
+                serde_json::json!({"schema_version":1,"rationale":"Prepare the explicitly selected investigation.",
+                "documents":{},"tasks":[],"disposition":"resolve"}).to_string()
+            } else {
+                "Advisory review: preserve guarantees.".into()
+            };
+            gateway_text_body(
+                &serde_json::json!({"report":report,"decision_required":false}).to_string(),
+            )
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "manual");
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = kvist::task_queue::TaskStatus::AwaitingDecision;
+    queue.tasks[0].blocked_reason = Some("Choose an investigated direction.".into());
+    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let before = fs::read(&queue_path).unwrap();
+    let mut first_command = String::new();
+    for number in [1, 2] {
+        let output = run_kvist(&project, &["--json", "decision", ".", "options"]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["result"]["actions"][0]["number"], number);
+        if number == 1 {
+            first_command = result["result"]["actions"][0]["command"]
+                .as_str()
+                .unwrap()
+                .to_string();
+        }
+    }
+    let count = seen.lock().unwrap().len();
+    let stale = run_kvist(&project, &["decision", ".", "do", "1"]);
+    assert!(!stale.status.success());
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("stale"));
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        count,
+        "stale choices must fail before inference"
+    );
+    let (executable, arguments) = sav::split_raw_command(&first_command).unwrap();
+    assert_eq!(executable, "kvist");
+    let expanded = run_kvist(
+        &project,
+        &arguments.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    assert!(
+        !expanded.status.success(),
+        "the displayed exact command must reject the same replacement catalog as its number"
+    );
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        count,
+        "expanded pinned commands must fail before inference too"
+    );
+    let discussion = run_kvist(
+        &project,
+        &["decision", ".", "discuss", "Explain the current choice"],
+    );
+    assert!(
+        discussion.status.success(),
+        "{}",
+        String::from_utf8_lossy(&discussion.stderr)
+    );
+    let prepared = run_kvist(&project, &["--json", "decision", ".", "do", "2"]);
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    assert_eq!(result["result"]["actions"][0]["number"], 3);
+    assert_eq!(
+        fs::read(&queue_path).unwrap(),
+        before,
+        "choosing never applies unseen effects"
+    );
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .any(|text| text.contains("Phase `decision-plan`")
+                && text.contains("Investigation revision 1"))
+    );
+    let registry = project.path().join("src/.kvist/decisions/shortcuts.json");
+    let original = fs::read_to_string(&registry).unwrap();
+    let mut changed: serde_json::Value = serde_json::from_str(&original).unwrap();
+    changed["actions"]["3"]["continue_run"] = serde_json::Value::Bool(true);
+    fs::write(&registry, changed.to_string()).unwrap();
+    let tampered = run_kvist(&project, &["decision", ".", "do", "3"]);
+    assert!(!tampered.status.success());
+    assert_eq!(fs::read(&queue_path).unwrap(), before);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn actions_discovers_preexisting_authenticated_plans_without_inference() {
+    let project = continuous_project("http://127.0.0.1:1", "manual");
+    let queue_path = project.path().join("src/TODOS.yaml");
+    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = kvist::task_queue::TaskStatus::Blocked;
+    queue.tasks[0].blocked_reason = Some("Authorize a retry.".into());
+    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    let draft = project.path().join("draft.json");
+    fs::write(&draft, r#"{"schema_version":1,"rationale":"Human reviewed retry.","documents":{},"tasks":[],"disposition":"resolve"}"#).unwrap();
+    let prepared = run_kvist(
+        &project,
+        &[
+            "--json",
+            "decision",
+            ".",
+            "plan",
+            "--import",
+            draft.to_str().unwrap(),
+            "--review-exception",
+            "Reviewed locally.",
+        ],
+    );
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    // Simulate a plan written by the earlier binary, before shortcut indexing existed.
+    fs::remove_file(project.path().join("src/.kvist/decisions/shortcuts.json")).unwrap();
+    let actions = run_kvist(&project, &["--json", "decision", ".", "actions"]);
+    assert!(
+        actions.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actions.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&actions.stdout).unwrap();
+    assert_eq!(result["result"]["actions"].as_array().unwrap().len(), 2);
+    assert!(
+        result["result"]["actions"][0]["command"]
+            .as_str()
+            .unwrap()
+            .contains(plan["result"]["plan_id"].as_str().unwrap())
+    );
+    let applied = run_kvist(&project, &["decision", ".", "do", "1"]);
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn applied_decision_continues_prerequisites_before_retrying_a_real_paused_review() {
     use kvist::task_queue::{TaskKind, TaskStatus};
     let pause = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -2282,21 +2561,11 @@ fn applied_decision_continues_prerequisites_before_retrying_a_real_paused_review
         String::from_utf8_lossy(&prepared.stderr)
     );
     let result: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
-    let id = result["result"]["plan_id"].as_str().unwrap();
-    let approval = result["result"]["approval"].as_str().unwrap();
-    let applied = run_kvist(
-        &project,
-        &[
-            "--json",
-            "decision",
-            ".",
-            "apply",
-            id,
-            "--approve",
-            approval,
-            "--continue",
-        ],
-    );
+    let number = result["result"]["actions"][1]["number"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let applied = run_kvist(&project, &["--json", "decision", ".", "do", &number]);
     assert!(
         applied.status.success(),
         "{}",

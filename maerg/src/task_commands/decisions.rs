@@ -4,8 +4,9 @@ use super::*;
 
 mod engine;
 mod types;
+pub use engine::shortcuts::ResponseAction;
+pub use types::{Action, Disposition, DocumentEdit, Draft, TaskDefinition, TaskEdit};
 use types::{Capture, IntentReview, Plan, Selection};
-pub use types::{Disposition, DocumentEdit, Draft, TaskDefinition, TaskEdit};
 #[cfg(test)]
 mod tests;
 
@@ -22,51 +23,6 @@ pub(super) fn recognizes_retired_journal(component_dir: &Path, journal: &Path) -
     engine::recognizes_retired_journal(component_dir, journal)
 }
 
-/// Required-component command surface for discussion and exact application.
-#[derive(Debug, Clone, clap::Subcommand)]
-pub enum Action {
-    /// Inspect the pause, retained evidence, and response instructions.
-    Show {
-        #[arg(value_name = "TASK_ID")]
-        task_id: Option<String>,
-    },
-    /// Ask a bounded agent to prepare structured advisory alternatives.
-    Options {
-        #[arg(long, value_name = "TASK_ID")]
-        task: Option<String>,
-    },
-    /// Discuss a decision without changing controlled artifacts.
-    Discuss {
-        message: String,
-        #[arg(long, value_name = "TASK_ID")]
-        task: Option<String>,
-    },
-    /// Stage all proposed intent/task effects, without applying them.
-    #[command(
-        long_about = "Stage a complete proposal without applying it. Manual/model draft is strict native JSON version 1:\n{\"schema_version\":1,\"rationale\":\"Your chosen direction and reasons\",\"documents\":{},\"tasks\":[],\"disposition\":\"resolve\"}\nDocument keys: REQUIREMENTS.md, CONTRACT.md, DESIGN.md (complete changed text only).\nOptional document_edits: [{\"path\":\"DESIGN.md\",\"before\":\"unique exact excerpt\",\"after\":\"replacement\"}]. Prefer these for large unchanged files; no fuzzy matching or overlap with full replacements.\nTask edits: {\"action\":\"add\"|\"update\",\"task\":{id,title,description,context,purpose,expected_outcome,kind,depends_on,requirements}}, or {\"action\":\"retire\",\"id\":\"...\",\"reason\":\"...\"}.\nNo status, timestamp, acceptance, recovery or whole-queue fields. Withdrawal must explicitly retire the entire affected uncompleted dependant closure. Inspect the generated Markdown before exact approval. No implementation approval or Git publication is implied."
-    )]
-    Plan {
-        #[arg(long, value_name = "TASK_ID")]
-        task: Option<String>,
-        #[arg(long, conflicts_with = "import")]
-        option: Option<String>,
-        #[arg(long)]
-        guidance: Option<String>,
-        #[arg(long, value_name = "PATH")]
-        import: Option<PathBuf>,
-        #[arg(long, value_name = "REASON")]
-        review_exception: Option<String>,
-    },
-    /// Apply one authenticated plan; approval must match its exact SHA-256.
-    Apply {
-        plan_id: String,
-        #[arg(long, value_name = "SHA256")]
-        approve: String,
-        #[arg(long = "continue")]
-        continue_run: bool,
-    },
-}
-
 /// Both JSON and human command dispatch share this result.
 #[derive(Debug, Serialize)]
 pub struct Output {
@@ -74,6 +30,7 @@ pub struct Output {
     pub markdown_path: Option<PathBuf>,
     pub plan_id: Option<String>,
     pub approval: Option<String>,
+    pub actions: Vec<ResponseAction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,7 +98,45 @@ pub fn execute(project_dir: &Path, component: &Path, action: Option<Action>) -> 
             }
         }
     }
-    match action.unwrap_or(Action::Show { task_id: None }) {
+    let action = match action.unwrap_or(Action::Show { task_id: None }) {
+        Action::Do { number } => {
+            let (command, response) = engine::shortcuts::resolve(&context, number)?;
+            eprintln!("Response {number}: {}", response.command);
+            match command {
+                engine::shortcuts::Command::OptionPlan {
+                    task,
+                    catalog_digest,
+                    option,
+                    ..
+                } => Action::Plan {
+                    task: Some(task),
+                    option: Some(option),
+                    catalog: Some(catalog_digest),
+                    guidance: None,
+                    import: None,
+                    review_exception: None,
+                },
+                engine::shortcuts::Command::ApplyPlan {
+                    plan_id,
+                    approval,
+                    continue_run,
+                    ..
+                } => Action::Apply {
+                    plan_id,
+                    approve: approval,
+                    continue_run,
+                },
+            }
+        }
+        action => action,
+    };
+    match action {
+        Action::Actions => {
+            let actions = engine::shortcuts::discover(&context)?;
+            let mut output = response(engine::shortcuts::markdown(component, &actions), None);
+            output.actions = actions;
+            Ok(output)
+        }
         Action::Show { task_id } => show(project_dir, component, task_id.as_deref()),
         Action::Options { task } => options(project_dir, component, task.as_deref()),
         Action::Discuss { message, task } => {
@@ -150,6 +145,7 @@ pub fn execute(project_dir: &Path, component: &Path, action: Option<Action>) -> 
         Action::Plan {
             task,
             option,
+            catalog,
             guidance,
             import,
             review_exception,
@@ -157,10 +153,13 @@ pub fn execute(project_dir: &Path, component: &Path, action: Option<Action>) -> 
             project_dir,
             component,
             task.as_deref(),
-            option,
-            guidance.unwrap_or_default(),
+            Selection {
+                option,
+                guidance: guidance.unwrap_or_default(),
+            },
             import.as_deref(),
             review_exception,
+            catalog,
         ),
         Action::Apply {
             plan_id,
@@ -187,8 +186,10 @@ pub fn execute(project_dir: &Path, component: &Path, action: Option<Action>) -> 
                 markdown_path: Some(plan_markdown(project_dir, component, &plan.id)?),
                 plan_id: Some(plan.id),
                 approval: Some(plan.approval),
+                actions: Vec::new(),
             })
         }
+        Action::Do { .. } => Err(decision_error("unresolved numbered response")),
     }
 }
 
@@ -198,7 +199,13 @@ fn response(message: String, path: Option<PathBuf>) -> Output {
         markdown_path: path,
         plan_id: None,
         approval: None,
+        actions: Vec::new(),
     }
+}
+
+/// Loads authenticated response numbers for completion without writes or inference.
+pub fn response_actions(project: &Path, component: &Path) -> Result<Vec<ResponseAction>> {
+    engine::shortcuts::list(&engine::context_for(project, component)?)
 }
 
 fn show(project_dir: &Path, component: &Path, task_id: Option<&str>) -> Result<Output> {
@@ -275,7 +282,11 @@ fn show(project_dir: &Path, component: &Path, task_id: Option<&str>) -> Result<O
         }
     };
     message.push_str(&support_index(&context, &task.id)?);
-    Ok(response(message, evidence))
+    let actions = engine::shortcuts::list(&context)?;
+    message.push_str(&engine::shortcuts::markdown(component, &actions));
+    let mut output = response(message, evidence);
+    output.actions = actions;
+    Ok(output)
 }
 
 fn support_index(context: &TaskContext, task: &str) -> Result<String> {
@@ -410,10 +421,17 @@ fn options(project: &Path, component: &Path, task: Option<&str>) -> Result<Outpu
     }
     markdown.push_str(&instructions(component, &input.task.id));
     let path = save_support(&context, &name, &catalog, &markdown, previous.as_deref())?;
-    Ok(response(
-        format!("{markdown}\n\nMarkdown: `{}`", path.display()),
+    let actions = engine::shortcuts::options(&context, &catalog, &encode(&catalog)?)?;
+    let mut output = response(
+        format!(
+            "{markdown}\n\nMarkdown: `{}`{}",
+            path.display(),
+            engine::shortcuts::markdown(component, &actions)
+        ),
         Some(path),
-    ))
+    );
+    output.actions = actions;
+    Ok(output)
 }
 
 fn discuss(project: &Path, component: &Path, task: Option<&str>, message: &str) -> Result<Output> {
@@ -501,28 +519,38 @@ fn prepare(
     project: &Path,
     component: &Path,
     task: Option<&str>,
-    option: Option<String>,
-    guidance: String,
+    mut selection: Selection,
     import: Option<&Path>,
     review_exception: Option<String>,
+    catalog_pin: Option<String>,
 ) -> Result<Output> {
+    if catalog_pin.is_some() && selection.option.is_none() {
+        return Err(decision_error("a catalog pin requires an explicit option"));
+    }
     let input = engine::capture(project, component, task)?;
     let context = engine::context_for(project, component)?;
-    meaningful(&guidance, "guidance", 16 * 1024).or_else(|error| {
-        if guidance.is_empty() {
+    meaningful(&selection.guidance, "guidance", 16 * 1024).or_else(|error| {
+        if selection.guidance.is_empty() {
             Ok(())
         } else {
             Err(error)
         }
     })?;
-    let mut selection = Selection { option, guidance };
     let mut evidence = intent_evidence(&context, &input)?;
     if let Some(id) = &selection.option {
         let path = context
             .component_dir
             .join(DIRECTORY)
             .join(format!("{}.options.json", capture_id(&input)?));
-        let catalog = read_support::<Catalog>(&path)?.ok_or_else(|| decision_error("no current option catalog; run decision COMPONENT options first, or supply custom --guidance"))?;
+        let text = read_optional_file(&path)?.ok_or_else(|| decision_error("no current option catalog; run decision COMPONENT options first, or supply custom --guidance"))?;
+        if let Some(expected) = &catalog_pin
+            && expected != &digest(text.as_bytes())
+        {
+            return Err(decision_error(
+                "pinned option response is stale; request current options; its number was not reassigned",
+            ));
+        }
+        let catalog: Catalog = strict_parse(&text)?;
         if catalog.schema_version != 1
             || catalog.capture != capture_id(&input)?
             || catalog.task_id != input.task.id
@@ -594,18 +622,18 @@ fn prepare(
     };
     let plan = engine::prepare(project, input, draft, selection, review)?;
     let path = plan_markdown(project, component, &plan.id)?;
+    let actions = engine::shortcuts::plan(&context, &plan).map_err(|error| decision_error(
+        &format!("Plan retained at `{}` but numbered response publication failed: {error}. Use the exact command: kvist decision {} apply {} --approve {}",
+            path.display(), component_argument(component), quote(&plan.id), quote(&plan.approval))))?;
     Ok(Output {
         message: format!(
-            "Staged decision plan `{}`; no controlled files changed.\nRead: `{}`\nApprove its complete effects with:\n    kvist decision {} apply {} --approve {} [--continue]\nApproval acknowledges the recorded intent-review findings/exception, not implementation compliance.",
-            plan.id,
+            "Staged a decision plan; no controlled files changed.\nRead the complete changes: `{}`\nUse a numbered approval response below; no hash copying is needed. Approval acknowledges the recorded intent-review findings/exception, not implementation compliance.",
             path.display(),
-            component_argument(component),
-            quote(&plan.id),
-            quote(&plan.approval),
-        ),
+        ) + &engine::shortcuts::markdown(component, &actions),
         markdown_path: Some(path),
         plan_id: Some(plan.id),
         approval: Some(plan.approval),
+        actions,
     })
 }
 

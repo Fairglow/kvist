@@ -10,6 +10,70 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "decision-shortcuts-write-tests"
+    title: "write_tests: numbered exact decision responses"
+    description: "Pin numbered option/approval commands, exact continuation mode, stale/tampered/unknown rejection, retained numbering, old-plan discovery and scoped tab completion before implementation."
+    context: "Human-requested usability change with explicit advisory exception while general review receipts are unavailable."
+    purpose: "Remove copy/paste without weakening exact approval."
+    expected_outcome: "Failure-first tests define short response semantics."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-DECISION-AUTOMATION"]
+    timestamps:
+      created_at: "2026-10-31T12:05:00Z"
+      updated_at: "2026-10-31T12:33:00Z"
+      completed_at: "2026-10-31T12:33:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "decision-shortcuts-implement-code"
+    title: "implement_code: authenticated numbered responses"
+    description: "Implement typed immutable shortcut registration, discoverability, exact native dispatch and shell completion."
+    context: "Host-created responses retain canonical plan authorization and existing recovery boundaries."
+    purpose: "Make decisions short and discoverable."
+    expected_outcome: "One numbered response invokes one displayed command."
+    kind: implementation
+    status: completed
+    depends_on: ["decision-shortcuts-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-DECISION-AUTOMATION"]
+    timestamps:
+      created_at: "2026-10-31T12:05:00Z"
+      updated_at: "2026-10-31T12:33:00Z"
+      completed_at: "2026-10-31T12:33:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "decision-shortcuts-security-audit"
+    title: "security_audit: inspect shortcut authority"
+    description: "Independently inspect registry authenticity, exact action scope, path guards and stale response refusal."
+    context: "No self-certification or native review receipts are inferred."
+    purpose: "Retain independent authority findings."
+    expected_outcome: "Shortcut controls and limitations remain inspectable."
+    kind: security-audit
+    status: pending
+    depends_on: ["decision-shortcuts-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-DECISION-AUTOMATION"]
+    timestamps:
+      created_at: "2026-10-31T12:05:00Z"
+      updated_at: "2026-10-31T12:05:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "decision-shortcuts-compliance-review"
+    title: "compliance_review: compare shortcut evidence"
+    description: "Derive a clean-slate source record and separate source-blind intent comparison with actual test evidence."
+    context: "Diagnostic records do not certify protected task execution or final acceptance."
+    purpose: "Keep intent and observed behavior separate."
+    expected_outcome: "Discrepancies and proof limitations remain durable."
+    kind: compliance-review
+    status: pending
+    depends_on: ["decision-shortcuts-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-DECISION-AUTOMATION"]
+    timestamps:
+      created_at: "2026-10-31T12:05:00Z"
+      updated_at: "2026-10-31T12:05:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "decision-automation-write-tests"
     title: "write_tests: deterministic decision transactions"
     description: "Pin staged agent/manual planning, arbitrary options and discussion, exact approval, queue metadata/dependencies, retirement closure, stale/tampered inputs and interrupted transaction fencing/recovery before implementation."

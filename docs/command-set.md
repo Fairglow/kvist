@@ -305,8 +305,13 @@ follow-up questions without controlled edits. `plan --option OPTION_ID` or
 `plan --guidance TEXT` stages the entire typed intent/task change-set.
 `plan --import PATH --review-exception REASON` provides the same manual/local
 route. A separate intent review or explicit exception accompanies each plan.
-Inspect its complete Markdown preview, then use the printed
-`apply PLAN_ID --approve SHA256 [--continue]` command. Apply calls no model and
+Inspect its complete Markdown preview, then invoke the displayed short
+`do NUMBER` response. Options, apply-only, and apply-and-continue have distinct
+component-scoped numbers and full command expansions; Tab offers their
+descriptions. `actions` lists them and discovers existing authenticated plans
+without inference. Numbers are retained, not recycled; stale or tampered
+commands are refused, never redirected. The advanced
+`apply PLAN_ID --approve SHA256 [--continue]` remains available. Apply calls no model and
 creates no Git commit. It validates frozen inputs, owns queue metadata and
 reopens only the selected resolved pause with approved prerequisites wired first.
 Changed inputs invalidate staged approval; interrupted application fences ordinary

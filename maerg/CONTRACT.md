@@ -273,6 +273,31 @@ prefill and printed instructions disambiguate it. Task-option completion uses
 the explicit component, not a different selected shell component.
 Subcommands follow the component:
 
+- `actions`: list numbered, host-authenticated response commands, including
+  existing retained plans, without inference.
+- `do NUMBER`: invoke exactly that displayed response without copying hashes.
+  A choice prepares a plan, while apply-only and apply-and-continue have separate
+  numbers and explicitly acknowledge the frozen review/exception. The full
+  expansion is printed before execution on stderr. There is no extra prompt.
+  Numbers are component-scoped, monotonically allocated and never reassigned
+  within retained state. Unknown/tampered/stale actions fail without guessing.
+  Tab completion shows numbers with descriptions for the explicit component.
+  Full option expansions include `plan --catalog SHA256` (requires `--option`)
+  to pin the catalog's exact bytes; invoking the expansion and its number
+  enforce identical choice freshness. Numbers do not change this command's
+  arguments or supply undisclosed authorizing state.
+  State is an authenticated version-1 native JSON registry at
+  `.kvist/decisions/shortcuts.json`; its Rust/Serde authority is
+  `src/task_commands/decisions/engine/shortcuts.rs`. This is a convenience
+  reference to canonical evidence, not a new approval or shell-execution grant.
+  Retain the registry: deleting/restoring shortcut state is not supported as a
+  way to keep old numeric references valid. Listings contain historical actions;
+  freshness is checked on invocation. Repeating a continuing response is an
+  explicit ordinary-run request, not an exactly-once continuation promise.
+  The registry retains at most 2,048 actions and 1 MiB of JSON; there is no
+  pruning command. Limit failures leave existing numbers intact and name the
+  full-command fallback.
+
 - `show [TASK_ID]`: inspect retained evidence, available options and discussion.
 - `options [--task TASK_ID]`: ask a tool-free architect to propose 1-32
   stable named options, separating substantive choices from interaction actions.

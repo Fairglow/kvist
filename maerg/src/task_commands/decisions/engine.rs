@@ -4,6 +4,7 @@ use super::*;
 
 mod capture;
 mod documents;
+pub(super) mod shortcuts;
 mod storage;
 mod tasks;
 mod transaction;

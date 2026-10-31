@@ -468,12 +468,27 @@ Use the required visible component argument (the shell prefills it):
 kvist decision galla
 kvist decision galla discuss "What is established, and what needs investigation?"
 kvist decision galla options
-kvist decision galla plan --option investigate --guidance "Preserve all current guarantees"
-# Read the generated Markdown; use the actual PLAN_ID and SHA256 it prints:
-kvist decision galla apply PLAN_ID --approve SHA256 --continue
+# Choose the displayed option response number (example only):
+kvist decision galla do 3
+# Read the generated plan, then choose its "approve and continue" response:
+kvist decision galla do 5
 ```
 
-Option IDs come from the generated catalog, not numbered Markdown paragraphs;
+Numbers above are examples: use the responses actually displayed for your
+component. `decision galla actions` lists them again and also indexes plans
+prepared before numbered support existed. Tab after `decision galla do `
+offers numbers with descriptions and full command expansions. A number stays
+bound to its original command; changed catalogs or stale plans are refused,
+never redirected to the latest choice. Apply-only and apply-and-continue have
+separate numbers. Invocation is explicit choice/approval, not an extra prompt.
+No model Markdown is executed as shell code. Hashes remain in canonical
+evidence and the advanced `apply PLAN_ID --approve SHA256` interface.
+Expanded option commands include `--catalog SHA256` to pin their exact catalog;
+running that full command and its response number enforces the same freshness.
+For added guidance, `plan --option investigate --guidance "Preserve all current guarantees"`
+still stages a plan and returns short approval responses.
+
+Stable option IDs come from the generated catalog, not Markdown paragraph positions;
 there may be 1-32 substantive choices. With multiple pauses, specify
 `--task TASK_ID` (`show TASK_ID` for inspection). Follow-up discussion is
 durable and advisory. Choosing stages a proposal; it does not change controlled
@@ -509,7 +524,12 @@ Then inspect and apply the printed exact approval command. Raw queues, statuses,
 timestamps and acceptance IDs are not draft fields. `repair` remains artifact
 recovery, not a means to bypass reviewed product changes. `.kvist/decisions/`
 retains Markdown/JSON options, discussion, immutable plans and application
-receipts. Historical attention briefs and audit reports are not rewritten.
+receipts and the authenticated numbered-response registry. Do not delete that
+registry to renumber responses; retain historical numbers. Historical attention
+briefs and audit reports are not rewritten.
+Historical and stale responses remain listed; freshness is checked when used.
+At the bounded registry limit (2,048 actions or 1 MiB), use the reported full
+command rather than deleting state to recycle numbers.
 For large intent documents, prefer `document_edits` with exact unique
 `path`/`before`/`after` excerpts instead of regenerating full files. The host
 materializes and validates complete files for the same exact approval preview;

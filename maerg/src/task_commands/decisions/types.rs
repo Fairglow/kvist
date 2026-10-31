@@ -1,5 +1,60 @@
 use super::*;
 
+/// Required-component command surface for discussion and exact application.
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum Action {
+    /// List short response numbers and their exact command expansions.
+    Actions,
+    /// Invoke a displayed response exactly; its number authorizes its labelled effect.
+    Do {
+        #[arg(value_name = "RESPONSE_NUMBER", value_parser = clap::value_parser!(u32).range(1..))]
+        number: u32,
+    },
+    /// Inspect the pause, retained evidence, and response instructions.
+    Show {
+        #[arg(value_name = "TASK_ID")]
+        task_id: Option<String>,
+    },
+    /// Ask a bounded agent to prepare structured advisory alternatives.
+    Options {
+        #[arg(long, value_name = "TASK_ID")]
+        task: Option<String>,
+    },
+    /// Discuss a decision without changing controlled artifacts.
+    Discuss {
+        message: String,
+        #[arg(long, value_name = "TASK_ID")]
+        task: Option<String>,
+    },
+    /// Stage all proposed intent/task effects, without applying them.
+    #[command(
+        long_about = "Stage a complete proposal without applying it. Manual/model draft is strict native JSON version 1:\n{\"schema_version\":1,\"rationale\":\"Your chosen direction and reasons\",\"documents\":{},\"tasks\":[],\"disposition\":\"resolve\"}\nDocument keys: REQUIREMENTS.md, CONTRACT.md, DESIGN.md (complete changed text only).\nOptional document_edits: [{\"path\":\"DESIGN.md\",\"before\":\"unique exact excerpt\",\"after\":\"replacement\"}]. Prefer these for large unchanged files; no fuzzy matching or overlap with full replacements.\nTask edits: {\"action\":\"add\"|\"update\",\"task\":{id,title,description,context,purpose,expected_outcome,kind,depends_on,requirements}}, or {\"action\":\"retire\",\"id\":\"...\",\"reason\":\"...\"}.\nNo status, timestamp, acceptance, recovery or whole-queue fields. Withdrawal must explicitly retire the entire affected uncompleted dependant closure. Inspect the generated Markdown before exact approval. No implementation approval or Git publication is implied."
+    )]
+    Plan {
+        #[arg(long, value_name = "TASK_ID")]
+        task: Option<String>,
+        #[arg(long, conflicts_with = "import")]
+        option: Option<String>,
+        /// Require these exact catalog bytes rather than selecting a changed option.
+        #[arg(long, value_name = "SHA256", requires = "option")]
+        catalog: Option<String>,
+        #[arg(long)]
+        guidance: Option<String>,
+        #[arg(long, value_name = "PATH")]
+        import: Option<PathBuf>,
+        #[arg(long, value_name = "REASON")]
+        review_exception: Option<String>,
+    },
+    /// Apply one authenticated plan; approval must match its exact SHA-256.
+    Apply {
+        plan_id: String,
+        #[arg(long, value_name = "SHA256")]
+        approve: String,
+        #[arg(long = "continue")]
+        continue_run: bool,
+    },
+}
+
 /// The authored fields of one task; the host owns lifecycle and acceptance fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

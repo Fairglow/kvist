@@ -23,6 +23,8 @@ use crate::{project_state, task_queue};
 /// A dynamic value domain the completion engine can resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueDomain {
+    /// Authenticated decision response numbers for the explicit component.
+    DecisionResponse,
     /// A component path relative to the component root; `.` is the root.
     Component,
     /// A queue-local task ID within one component.
@@ -51,6 +53,8 @@ pub struct ComponentScope {
 /// A best-effort snapshot of the dynamic value sets offered by completion.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DynamicState {
+    pub(crate) decision_actions:
+        BTreeMap<String, Vec<crate::task_commands::decisions::ResponseAction>>,
     /// Component paths relative to the component root; `.` is the root.
     components: Vec<String>,
     /// Task and attempt scopes keyed by component path.
@@ -79,6 +83,7 @@ impl DynamicState {
             scopes,
             models,
             branch,
+            decision_actions: BTreeMap::new(),
         }
     }
 
@@ -212,6 +217,23 @@ impl DynamicState {
             let scope = read_component_scope(&component_dir);
             self.components.push(key.clone());
             self.scopes.insert(key, scope);
+            match fs::symlink_metadata(component_dir.join(".kvist/decisions/shortcuts.json")) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    tracing::warn!(component = %component.path.display(), %error,
+                        "decision shortcut completion state cannot be inspected");
+                    continue;
+                }
+                Ok(_) => {}
+            }
+            match crate::task_commands::decisions::response_actions(project_dir, &component.path) {
+                Ok(actions) => {
+                    self.decision_actions
+                        .insert(component_key(&component.path), actions);
+                }
+                Err(error) => tracing::warn!(component = %component.path.display(), %error,
+                    "decision shortcuts unavailable for completion; invocation will report the cause"),
+            }
         }
     }
 

@@ -2289,6 +2289,32 @@ mod tests {
     fn decisions_require_visible_component_and_exact_application_approval() {
         assert!(Cli::try_parse_from(["kvist", "decision"]).is_err());
         assert!(Cli::try_parse_from(["kvist", "decision", "maerg"]).is_ok());
+        assert!(Cli::try_parse_from(["kvist", "decision", "maerg", "do", "7"]).is_ok());
+        assert!(Cli::try_parse_from(["kvist", "decision", "maerg", "do", "0"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "kvist",
+                "decision",
+                "maerg",
+                "plan",
+                "--catalog",
+                "sha256:pin"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "kvist",
+                "decision",
+                "maerg",
+                "plan",
+                "--option",
+                "investigate",
+                "--catalog",
+                "sha256:pin"
+            ])
+            .is_ok()
+        );
         assert!(Cli::try_parse_from(["kvist", "decision", "maerg", "show", "audit"]).is_ok());
         assert!(Cli::try_parse_from(["kvist", "decision", "maerg", "apply", "plan"]).is_err());
         assert!(

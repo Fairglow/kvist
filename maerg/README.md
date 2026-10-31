@@ -90,7 +90,7 @@ design lives in [`docs/command-set.md`](../docs/command-set.md).
 | `kvist task next [COMPONENT_DIR]`                            | Select the first ready task without changing durable state.                                                                                                                                                             |
 | `kvist task transition [COMPONENT_DIR] TASK_ID STATUS`       | Persist one legal task-state transition with append-only attempt evidence.                                                                                                                                              |
 | `kvist task run COMPONENT_DIR [TASK_ID]`                     | Run one exact task, or omit TASK_ID for continuous dependency-ready work; stop for decisions, blockers or final review. |
-| `kvist decision COMPONENT_DIR [show\|options\|discuss\|plan\|apply]` | Inspect/discuss a pause, stage agent/manual typed changes, then apply one exact approved plan without editing queue YAML. |
+| `kvist decision COMPONENT_DIR [show\|options\|discuss\|plan\|apply\|actions\|do]` | Inspect/discuss a pause, stage changes, then use tab-completable numbered responses for exact choice/approval without copying hashes. |
 | `kvist task log [COMPONENT_DIR] TASK_ID`                     | Print the most recent bounded, redacted agent log for a task.                                                                                                                                                           |
 | `kvist task approve-policy [PROJECT_DIR]`                    | Record approval of the complete effective execution policy.                                                                                                                                                             |
 | `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a prompt in the interactive skott shell (sandboxed and multi-turn by default); without a terminal it runs the same shell headless (`--headless --json`), sandbox-only.                                       |
@@ -114,8 +114,14 @@ Decision support separates deliberation from authority:
 persists follow-up conversation; `plan --option ID` or `plan --guidance TEXT`
 stages all intent/scheduling effects. A separate bounded intent review is
 recorded unless the human supplies `--review-exception REASON`.
-Inspect the complete Markdown preview, then use its
-`decision DIR apply PLAN_ID --approve SHA256 [--continue]` command.
+Inspect the complete Markdown preview, then use its short
+`decision DIR do NUMBER` response; apply-only and apply-and-continue have separate
+numbers. `actions` lists response descriptions and exact command expansions,
+including existing authenticated plans; Tab offers component-scoped numbers.
+Choices prepare only; numbered approval invokes the exact frozen command.
+Numbers are not reassigned, and changed inputs still refuse execution.
+The advanced `decision DIR apply PLAN_ID --approve SHA256 [--continue]`
+interface remains available.
 Apply performs no inference and no Git publication; changed inputs refuse it.
 The manual route is `plan --import draft.json --review-exception REASON`,
 using the same strict draft schema in [CONTRACT.md](CONTRACT.md).

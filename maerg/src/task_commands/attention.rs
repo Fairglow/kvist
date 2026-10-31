@@ -20,6 +20,9 @@ pub(super) fn resolution(component: &Path, task: Option<&str>, decision: bool) -
     let selection = task.map_or_else(String::new, |task| format!(" --task {}", argument(task)));
     format!(
         "## Choose or approve\n\n\
+         List existing numbered responses with `kvist decision {component} actions`; \
+         use `kvist decision {component} do NUMBER` to invoke the displayed exact command. \
+         Tab shows response descriptions; no approval hash copying is needed.\n\n\
          Get structured advisory alternatives:\n\n\
              kvist decision {component} options{selection}\n\n\
          Stage your chosen option and any further guidance:\n\n\

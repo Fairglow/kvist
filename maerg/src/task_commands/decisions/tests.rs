@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn printed_decision_component_words_are_unambiguous_paths() {
     for name in [
-        "show", "options", "discuss", "plan", "apply", "help", "-child",
+        "show", "options", "discuss", "plan", "apply", "actions", "do", "help", "-child",
     ] {
         let (value, rest) = sav::split_raw_command(&component_argument(Path::new(name))).unwrap();
         assert_eq!(value, format!("./{name}"));

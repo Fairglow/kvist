@@ -1183,6 +1183,26 @@ preflight failures; unsafe/unavailable state directories fail visibly.
 
 ### Deterministic decision workspace
 
+Numbered responses live in a bounded authenticated registry bound to absolute
+project/component identities. Append host-built typed option-plan or exact
+apply actions under the ordinary component lock. Retain every allocated number;
+deduplicate identical actions instead of renumbering sorted lists or recycling
+slots. Registry writes use the engine's safe atomic I/O and approval secret,
+not model output. The display renders the exact native command, with distinct
+apply-only and apply-and-continue entries. `do` validates authentication and
+scope, then dispatches the stored arguments through the same decision entry
+point. Option responses pin catalog bytes and capture identity at planning;
+the catalog's embedded capture ID is validated against the current capture.
+Expose the digest as the native `plan --catalog` argument and include it in
+the expansion so full-command replay has the same guard as numbered dispatch;
+apply responses retain full plan ID, approval and continuation mode and use
+existing stale/tamper/recovery guards. Shortcut state is excluded from source
+capture so publishing choices cannot invalidate their plans. Ordinary pending
+transaction fences also protect shortcut publication. Read-only completion
+snapshots validated entries outside the per-keystroke path; invalid state is
+logged and omitted from suggestions, never accepted as executable authority.
+`actions` can index authenticated pre-existing plans without model calls.
+
 Separate `decisions` presentation/model orchestration from a deterministic
 `decisions::engine`. The engine freezes a validated component capture, proposed
 changed documents and host-derived queue. It owns serialization, timestamps,

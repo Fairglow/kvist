@@ -1388,7 +1388,7 @@ fn render_help(theme: Theme) -> String {
     text.push_str("  task next                show the next ready task\n");
     text.push_str("  task run COMPONENT [TASK] run an exact task; omit TASK for continuous work\n");
     text.push_str(
-        "  decision COMPONENT       inspect paused decisions; discuss/plan/apply exact effects\n",
+        "  decision COMPONENT       inspect/discuss/plan; actions lists exact responses, do NUMBER invokes one\n",
     );
     text.push_str("  task log TASK            inspect an execution log\n");
     text.push_str("  task transition TASK STATUS  record a status transition\n");

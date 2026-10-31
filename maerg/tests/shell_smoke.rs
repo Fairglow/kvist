@@ -381,6 +381,41 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
     let config_home = homes.path().join("config");
     std::fs::create_dir_all(&state_home).expect("create state home");
     std::fs::create_dir_all(&config_home).expect("create config home");
+    let state_home = state_home.canonicalize().unwrap();
+    let config_home = config_home.canonicalize().unwrap();
+    let mut paused = kvist::task_queue::parse(&queues.child_before).unwrap();
+    paused.tasks[0].status = kvist::task_queue::TaskStatus::Blocked;
+    paused.tasks[0].blocked_reason = Some("Review this fixture retry.".into());
+    std::fs::write(
+        &queues.child_path,
+        kvist::task_queue::serialize(&paused).unwrap(),
+    )
+    .unwrap();
+    let draft = dir.path().join("fixture-decision.json");
+    std::fs::write(&draft, r#"{"schema_version":1,"rationale":"Fixture retry.","documents":{},"tasks":[],"disposition":"resolve"}"#).unwrap();
+    let prepared = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args([
+            "decision",
+            "./-component",
+            "plan",
+            "--import",
+            draft.to_str().unwrap(),
+            "--review-exception",
+            "Fixture reviewed offline.",
+        ])
+        .current_dir(dir.path())
+        .env("XDG_STATE_HOME", &state_home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env_remove("KVIST_CONFIG_PATH")
+        .output()
+        .unwrap();
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    // Retain a real authenticated response, but stale its queue so selecting it cannot apply.
+    std::fs::write(&queues.child_path, &queues.child_before).unwrap();
     let absolute_component = dir.path().join("src/-component").canonicalize().unwrap();
     let absolute_command = format!(
         "task run \"{}\" dash-prefill-test",
@@ -624,6 +659,20 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
             30 if commands.contains(&"decision ./-component")
                 && fresh.contains("0 paused task(s)") =>
             {
+                Some(b"decision ")
+            }
+            31 if fresh.contains("decision ./-component ") => Some(b"do \t"),
+            32 if fresh.contains("Approve exact") && fresh.contains("application") => Some(b"\r"),
+            33 if fresh.contains("decision ./-component do 1") => Some(b"\r"),
+            34 if commands.contains(&"decision ./-component do 1")
+                && (fresh.to_ascii_lowercase().contains("error")
+                    || fresh.to_ascii_lowercase().contains("failed")) =>
+            {
+                assert_eq!(
+                    std::fs::read_to_string(&queues.child_path).unwrap(),
+                    queues.child_before
+                );
+                assert!(!fresh.contains("[Y/n]"), "{fresh}");
                 Some(b"exit\r")
             }
             _ => None,
@@ -637,7 +686,7 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
     }
 
     assert!(
-        phase == 31,
+        phase == 35,
         "all editor phases must complete (stopped at {phase}); output so far:\n{}",
         utf8_prefix(&bytes)
     );

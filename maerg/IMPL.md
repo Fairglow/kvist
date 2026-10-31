@@ -5,6 +5,40 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped numbered decision observations - 2026-10-31
+
+The fresh
+[`source-only shortcut observation`](../docs/reviews/decision-shortcuts-observation.md)
+describes the authenticated component-scoped response registry, typed native
+dispatch, retained-plan discovery and read-only completion snapshots. It
+excludes intent, queues, prior records and Git history. Its narrow correction
+addendum records native `plan --catalog` replay equivalence after the observer
+identified a hidden numbered-only freshness pin. The original finding remains
+historical evidence, not a description of the corrected dispatch.
+
+The observer records retained-registry numbering, historical/stale listings,
+bounded storage with no pruning, and repeated ordinary continuation rather than
+an exactly-once continuation promise. The real PTY test source exercises Tab
+selection and deliberately stale refusal; successful numbered application and
+interrupted recovery are separate integration/unit assertions.
+
+Implementation-agent execution, separately attributed: the missing short
+commands and later expanded-command discrepancy were reproduced before their
+repairs. The final post-correction Maerg suite passed 982 tests with seven
+existing ignores using one test thread. An unchanged timing-sensitive checkpoint
+assertion failed in earlier concurrent runs and passed in isolation and the
+final suite. Formatting, strict all-target Clippy, release build, command help
+inspection and component validation passed.
+
+The separate
+[`source-blind shortcut comparison`](../docs/reviews/decision-shortcuts-comparison.md)
+independently read the final aggregate log and established no current concrete
+intent contradiction within its permitted evidence. It retains replay/editor
+coverage and aggregate-log proof limits. These diagnostic records do not close
+the pending protected security/compliance tasks or authorize human acceptance.
+No live Galla decision, intent acceptance, installed-binary replacement or Git
+publication was performed.
+
 ## Scoped deterministic decision observations - 2026-10-30
 
 The fresh

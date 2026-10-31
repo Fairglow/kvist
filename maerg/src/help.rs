@@ -127,7 +127,9 @@ Kvist component lifecycle
   Decision support: `kvist decision DIR` inspects pauses; `discuss MESSAGE`
   asks/clarifies, `options` lists stable advisory choices, and
   `plan --option ID` or `plan --guidance TEXT` stages the complete effects.
-  Inspect its Markdown, then `apply PLAN_ID --approve SHA256 [--continue]`.
+  Inspect its Markdown, then `decision DIR do NUMBER` for the displayed approval.
+  `decision DIR actions` lists exact responses; Tab completes their numbers.
+  Advanced: `apply PLAN_ID --approve SHA256 [--continue]`.
   Manual: `plan --import draft.json --review-exception REASON`.
   Choosing only prepares; exact application calls no model or Git commit.
   Component implementation approval has no dedicated command yet.
@@ -181,7 +183,7 @@ How to achieve them
   blocked -> in-progress      kvist task transition [DIR] TASK in-progress
                               (dependency chain completed; then explicitly run TASK)
   awaiting-decision -> ...    kvist decision DIR plan --task TASK --guidance \"...\"
-                              inspect the exact plan; apply its printed approval
+                              inspect the exact plan; use its numbered approval response
                               (reopens pending; schedules prerequisites first)
   in-progress -> pending      kvist task transition [DIR] TASK pending  (reset)
 

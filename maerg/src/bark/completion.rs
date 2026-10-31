@@ -397,6 +397,7 @@ fn complete_flag(
 /// whose values carry no per-value detail.
 fn domain_description(domain: ValueDomain) -> &'static str {
     match domain {
+        ValueDomain::DecisionResponse => "Exact decision response",
         ValueDomain::Component => "Component directory",
         ValueDomain::Task => "Task ID",
         ValueDomain::Attempt => "Attempt ID",
@@ -535,6 +536,7 @@ fn option_domain(long: &str) -> Option<ValueDomain> {
 /// Routes a positional (by value name) to a dynamic value domain.
 fn positional_domain(value_name: &str) -> Option<ValueDomain> {
     match value_name {
+        "RESPONSE_NUMBER" => Some(ValueDomain::DecisionResponse),
         "COMPONENT_DIR" => Some(ValueDomain::Component),
         "TASK_ID" => Some(ValueDomain::Task),
         "ATTEMPT_ID" => Some(ValueDomain::Attempt),
@@ -559,6 +561,17 @@ fn dynamic_values(
     current_component: Option<&str>,
 ) -> Vec<ValueCandidate> {
     let candidates: Vec<ValueCandidate> = match domain {
+        ValueDomain::DecisionResponse => scope
+            .component
+            .as_ref()
+            .and_then(|component| state.decision_actions.get(component))
+            .into_iter()
+            .flatten()
+            .map(|action| ValueCandidate {
+                value: action.number.to_string(),
+                description: Some(format!("{} · {}", action.description, action.command)),
+            })
+            .collect(),
         ValueDomain::Component => {
             let mut components = state.components().to_vec();
             if let Some(current) = current_component
@@ -1290,6 +1303,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn decision_response_numbers_complete_exact_commands_in_explicit_scope() {
+        let mut state = fixture_state();
+        state.decision_actions.insert(
+            "maerg".into(),
+            vec![
+                crate::task_commands::decisions::ResponseAction {
+                    number: 7,
+                    description: "Approve and continue".into(),
+                    command: "kvist decision maerg apply exact --approve pinned --continue".into(),
+                },
+                crate::task_commands::decisions::ResponseAction {
+                    number: 12,
+                    description: "Prepare a choice".into(),
+                    command: "kvist decision maerg plan --option choice".into(),
+                },
+            ],
+        );
+        let c = completer_with_state_and_focus(state, Some("."));
+        assert_eq!(
+            positional_values(&complete(&c, "decision maerg do ")),
+            ["7", "12"]
+        );
+        let candidate = complete(&c, "decision maerg do 1").remove(0);
+        assert_eq!(candidate.value, "12");
+        assert!(
+            candidate
+                .description
+                .unwrap()
+                .contains("plan --option choice")
+        );
+        assert!(positional_values(&complete(&c, "decision . do ")).is_empty());
+        assert!(positional_values(&complete(&c, "decision unknown do ")).is_empty());
+        assert_eq!(values(&complete(&c, "decision ./maerg do 7")), ["7"]);
     }
 
     #[test]
