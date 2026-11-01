@@ -164,7 +164,7 @@ tasks:
       completed_at: "2026-10-28T22:47:58Z"
     blocked_reason: null
     recovery_state: null
-  - id: "blad-markdown-subset-intent-tests"
+  - id: "blad-markdown-subset-intent-write-tests"
     title: "write_tests: pin the current useful-subset baseline"
     description: "Before bounding the backlog, pin the currently supported Markdown subset and its terminal projection so intent changes have a stable fail-first baseline."
     context: "Baseline regression over the existing supported subset; claims no new intent."
@@ -197,7 +197,7 @@ tasks:
     kind: implementation
     status: pending
     depends_on:
-      - "blad-markdown-subset-intent-tests"
+      - "blad-markdown-subset-intent-write-tests"
     requirements:
       - "REQUIREMENTS.md#C-004"
       - "REQUIREMENTS.md#R-014"
@@ -213,7 +213,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-autolink-subset-tests"
+  - id: "blad-autolink-subset-write-tests"
     title: "write_tests: extended autolink boundaries"
     description: "From approved intent, pin bare www/email recognition, HTTP(S) boundary and balanced-parenthesis/punctuation rules, false positives and literal code/metadata exclusions."
     context: "Current bare-link scanning only handles HTTP(S) and is not the complete GFM extended-autolink grammar. Use relevant GFM examples as fixtures without claiming full conformance; test renderer/extractor agreement, repeated links, Unicode, wrapped labels, table cells and streaming."
@@ -232,7 +232,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-autolink-subset-code"
+  - id: "blad-autolink-subset-implement-code"
     title: "implement_code: consistent extended autolinks"
     description: "Implement the approved autolink subset through shared recognition for rendering and navigation; preserve source-owned identities and explicit-only destination opening."
     context: "Reuse existing parser/navigation boundaries rather than separate renderer and extractor heuristics. Keep code, frontmatter and existing links literal or non-nested as specified; update the README and user guide with exact supported rules and remaining limits."
@@ -241,7 +241,7 @@ tasks:
     kind: implementation
     status: pending
     depends_on:
-      - "blad-autolink-subset-tests"
+      - "blad-autolink-subset-write-tests"
     requirements:
       - "REQUIREMENTS.md#R-015"
       - "REQUIREMENTS.md#R-041"
@@ -251,7 +251,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-autolink-subset-audit"
+  - id: "blad-autolink-subset-security-audit"
     title: "security_audit: independently observe autolink boundaries"
     description: "Independently inspect source/tests for recognition bounds, untrusted destinations, inert controls and absence of implicit launches; derive a scoped IMPL.md record without intent, queue, prior records or history."
     context: "Pending independent source-only work, not an existing audit or certification."
@@ -260,7 +260,7 @@ tasks:
     kind: security-audit
     status: pending
     depends_on:
-      - "blad-autolink-subset-code"
+      - "blad-autolink-subset-implement-code"
     requirements:
       - "REQUIREMENTS.md#R-015"
       - "REQUIREMENTS.md#R-041"
@@ -270,7 +270,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-autolink-subset-review"
+  - id: "blad-autolink-subset-compliance-review"
     title: "compliance_review: compare autolink intent and evidence"
     description: "In a separate source-blind context, compare approved requirements, contract and design against the independent implementation record and test evidence; retain discrepancies for human arbitration."
     context: "Pending comparison; passing fixtures do not establish full GFM conformance or human acceptance."
@@ -279,7 +279,7 @@ tasks:
     kind: compliance-review
     status: pending
     depends_on:
-      - "blad-autolink-subset-audit"
+      - "blad-autolink-subset-security-audit"
     requirements:
       - "REQUIREMENTS.md#R-015"
       - "REQUIREMENTS.md#R-041"
@@ -289,7 +289,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-table-code-links-tests"
+  - id: "blad-table-code-links-write-tests"
     title: "write_tests: table inline code and link presentation"
     description: "Pin approved table-code styling, whitespace and atomic-span semantics plus normal link colors, including nested emphasis, linked code, Unicode, explicit breaks and overflow."
     context: "Currently table code uses ordinary normalized whitespace/wrapping and lacks dedicated styling; links remain navigable without normal link color. Test intentional geometry changes separately from unchanged table layout and alignment guarantees."
@@ -311,7 +311,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-table-code-links-code"
+  - id: "blad-table-code-links-implement-code"
     title: "implement_code: compose table code and link styles"
     description: "Extend the existing typed table-span and wrapping pipeline with approved code semantics and link colors; compose code/link/search/selection attributes without leaking into padding, separators or adjacent cells."
     context: "Reuse the table solver and source-owned navigation rather than adding a second layout engine. Preserve alignment, horizontal overflow, quoted/numbered viewports and color/plain geometry policies; document deliberate changes to current code whitespace and wrapping."
@@ -320,7 +320,7 @@ tasks:
     kind: implementation
     status: pending
     depends_on:
-      - "blad-table-code-links-tests"
+      - "blad-table-code-links-write-tests"
     requirements:
       - "REQUIREMENTS.md#R-033"
       - "REQUIREMENTS.md#R-041"
@@ -333,7 +333,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-table-code-links-audit"
+  - id: "blad-table-code-links-security-audit"
     title: "security_audit: independently observe table span composition"
     description: "Independently inspect source/tests for span bounds, Unicode clipping, inert controls, fallible writes and resource behavior; derive a scoped IMPL.md record excluding intent, queue, prior records and history."
     context: "Pending independent source-only work; include observed style precedence and geometry limitations."
@@ -342,7 +342,7 @@ tasks:
     kind: security-audit
     status: pending
     depends_on:
-      - "blad-table-code-links-code"
+      - "blad-table-code-links-implement-code"
     requirements:
       - "REQUIREMENTS.md#R-038"
       - "REQUIREMENTS.md#R-073"
@@ -353,7 +353,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-table-code-links-review"
+  - id: "blad-table-code-links-compliance-review"
     title: "compliance_review: compare table code/link evidence"
     description: "Separately compare approved local intent with the independent implementation record and tests in a source-blind context, retaining geometry, style and navigation discrepancies for human arbitration."
     context: "Pending comparison, not acceptance or a full table-conformance claim."
@@ -362,7 +362,7 @@ tasks:
     kind: compliance-review
     status: pending
     depends_on:
-      - "blad-table-code-links-audit"
+      - "blad-table-code-links-security-audit"
     requirements:
       - "REQUIREMENTS.md#R-033"
       - "REQUIREMENTS.md#R-041"
@@ -375,7 +375,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-html-text-tests"
+  - id: "blad-html-text-write-tests"
     title: "write_tests: bounded HTML text preservation"
     description: "Pin the approved inert HTML subset for line breaks, emphasis, keyboard labels, anchors and visible details/summary bodies, including readable-content fallback for unsupported markup."
     context: "Current HTML omission can hide whole sections. Freeze element/attribute admission, malformed-input handling, active-content treatment, source fallback and byte/depth/work/output bounds before these tests. Render details expanded; interactive folding remains deferred."
@@ -396,7 +396,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-html-text-code"
+  - id: "blad-html-text-implement-code"
     title: "implement_code: inert bounded HTML text projection"
     description: "Implement the approved subset through bounded structural parsing, not regex tag stripping; retain readable content/source with explicit unsupported and resource-limit handling."
     context: "Preserve renderer/navigation agreement and existing table-cell breaks. Do not fetch resources, apply CSS, execute JavaScript/templates, expand includes, display graphics or implement merged HTML tables. Keep details/summary expanded and document supported elements, active-content handling and remaining limits."
@@ -405,7 +405,7 @@ tasks:
     kind: implementation
     status: pending
     depends_on:
-      - "blad-html-text-tests"
+      - "blad-html-text-write-tests"
     requirements:
       - "REQUIREMENTS.md#C-004"
       - "REQUIREMENTS.md#R-014"
@@ -417,7 +417,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-html-text-audit"
+  - id: "blad-html-text-security-audit"
     title: "security_audit: independently observe HTML projection boundaries"
     description: "Independently inspect source/tests for parser bounds, malformed input, active-content isolation, URL/control handling and absence of resource fetching or execution; derive a scoped IMPL.md record without intent, queue, prior records or history."
     context: "Pending independent source-only work; assess any justified parser dependency and preserve evidence limits rather than claiming sanitization or browser conformance."
@@ -426,7 +426,7 @@ tasks:
     kind: security-audit
     status: pending
     depends_on:
-      - "blad-html-text-code"
+      - "blad-html-text-implement-code"
     requirements:
       - "REQUIREMENTS.md#C-004"
       - "REQUIREMENTS.md#R-014"
@@ -437,7 +437,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-html-text-review"
+  - id: "blad-html-text-compliance-review"
     title: "compliance_review: compare HTML preservation intent and evidence"
     description: "In a separate source-blind context, compare approved element/fallback/resource semantics against the independent implementation record and tests; retain lost-content or authority discrepancies for human arbitration."
     context: "Pending comparison, not approval of arbitrary HTML or full CommonMark/GFM conformance."
@@ -446,7 +446,7 @@ tasks:
     kind: compliance-review
     status: pending
     depends_on:
-      - "blad-html-text-audit"
+      - "blad-html-text-security-audit"
     requirements:
       - "REQUIREMENTS.md#C-004"
       - "REQUIREMENTS.md#R-014"
@@ -458,7 +458,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-definition-lists-tests"
+  - id: "blad-definition-lists-write-tests"
     title: "write_tests: definition-list terminal projection"
     description: "Pin the approved definition-list dialect, term/definition indentation and wrapping, multiple terms/definitions, nested blocks and literal non-matches."
     context: "Definition lists are not currently enabled. The existing parser offers an extension, but turning it on alone does not provide renderer layout or consistent link/heading navigation."
@@ -478,7 +478,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-definition-lists-code"
+  - id: "blad-definition-lists-implement-code"
     title: "implement_code: render the approved definition-list dialect"
     description: "Enable the approved parser extension consistently and implement definition-list events through existing block/inline layout, preserving source-owned navigation and plain output."
     context: "Reuse wrapping and style machinery, handle nested boundaries explicitly and document the selected dialect rather than claiming universal Markdown compatibility."
@@ -487,7 +487,7 @@ tasks:
     kind: implementation
     status: pending
     depends_on:
-      - "blad-definition-lists-tests"
+      - "blad-definition-lists-write-tests"
     requirements:
       - "REQUIREMENTS.md#C-004"
       - "REQUIREMENTS.md#R-015"
@@ -498,7 +498,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-definition-lists-audit"
+  - id: "blad-definition-lists-security-audit"
     title: "security_audit: independently observe definition-list handling"
     description: "Independently inspect source/tests for nesting, resource use, control handling, source ranges and fallible output; derive a scoped IMPL.md record excluding intent, queue, prior records and history."
     context: "Pending independent source-only work, not an existing compliance result."
@@ -507,7 +507,7 @@ tasks:
     kind: security-audit
     status: pending
     depends_on:
-      - "blad-definition-lists-code"
+      - "blad-definition-lists-implement-code"
     requirements:
       - "REQUIREMENTS.md#R-015"
       - "REQUIREMENTS.md#R-038"
@@ -517,7 +517,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-definition-lists-review"
+  - id: "blad-definition-lists-compliance-review"
     title: "compliance_review: compare definition-list intent and evidence"
     description: "Separately compare approved dialect/layout/navigation intent with the independent implementation record and tests in a source-blind context; retain discrepancies for human arbitration."
     context: "Pending comparison; support is limited to the approved dialect, not full extension conformance."
@@ -526,7 +526,7 @@ tasks:
     kind: compliance-review
     status: pending
     depends_on:
-      - "blad-definition-lists-audit"
+      - "blad-definition-lists-security-audit"
     requirements:
       - "REQUIREMENTS.md#R-015"
       - "REQUIREMENTS.md#R-041"
@@ -536,7 +536,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-footnote-navigation-tests"
+  - id: "blad-footnote-navigation-write-tests"
     title: "write_tests: footnote jumps and return behavior"
     description: "Pin approved reference-to-definition jumps and return semantics, repeated references, missing definitions, link-selection order and interactions with existing Enter/search behavior."
     context: "Footnotes currently have matching visual markers but no navigable footnote links. Define destination ownership and return behavior explicitly; do not silently repurpose existing file-history or tab keys."
@@ -557,7 +557,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-footnote-navigation-code"
+  - id: "blad-footnote-navigation-implement-code"
     title: "implement_code: footnote destinations and return navigation"
     description: "Wire approved footnote reference/definition identities into existing renderer-owned navigation and explicit return behavior, retaining marker/prose styling and actionable missing-target errors."
     context: "Preserve duplicate/repeated-reference identity through reflow and streaming, existing normal-link actions and search Enter precedence. Update help, key precedence and user documentation without adding document writes."
@@ -566,7 +566,7 @@ tasks:
     kind: implementation
     status: pending
     depends_on:
-      - "blad-footnote-navigation-tests"
+      - "blad-footnote-navigation-write-tests"
     requirements:
       - "REQUIREMENTS.md#R-015"
       - "REQUIREMENTS.md#R-041"
@@ -578,7 +578,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-footnote-navigation-audit"
+  - id: "blad-footnote-navigation-security-audit"
     title: "security_audit: independently observe footnote navigation"
     description: "Independently inspect source/tests for target identity, stale positions, bounded return state, malformed input, error propagation and lack of unintended external actions; derive a scoped IMPL.md record without intent, queue, prior records or history."
     context: "Pending independent source-only work; include resize/reload/streaming state boundaries."
@@ -587,7 +587,7 @@ tasks:
     kind: security-audit
     status: pending
     depends_on:
-      - "blad-footnote-navigation-code"
+      - "blad-footnote-navigation-implement-code"
     requirements:
       - "REQUIREMENTS.md#R-038"
       - "REQUIREMENTS.md#R-041"
@@ -598,7 +598,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-footnote-navigation-review"
+  - id: "blad-footnote-navigation-compliance-review"
     title: "compliance_review: compare footnote navigation evidence"
     description: "Compare approved jump/return and key-precedence intent with the independent implementation record and tests in a separate source-blind context; retain discrepancies for human arbitration."
     context: "Pending comparison, not certification or acceptance."
@@ -607,7 +607,7 @@ tasks:
     kind: compliance-review
     status: pending
     depends_on:
-      - "blad-footnote-navigation-audit"
+      - "blad-footnote-navigation-security-audit"
     requirements:
       - "REQUIREMENTS.md#R-015"
       - "REQUIREMENTS.md#R-041"
@@ -619,7 +619,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-toml-frontmatter-tests"
+  - id: "blad-toml-frontmatter-write-tests"
     title: "write_tests: leading TOML frontmatter"
     description: "Pin the approved leading +++ recognition, exact metadata source preservation and TOML highlighting, including empty/malformed headers, BOM/CRLF, trailing delimiter whitespace and unclosed/live candidates."
     context: "TOML is currently unsupported. Preserve the general YAML display-only model and prefix boundary; test literal Markdown in metadata, body source offsets and exclusion from links/headings/reference definitions."
@@ -640,7 +640,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-toml-frontmatter-code"
+  - id: "blad-toml-frontmatter-implement-code"
     title: "implement_code: source-preserving TOML metadata"
     description: "Extend the shared source-prefix/event projection with approved TOML recognition and syntax highlighting across rendering, links and headings, reusing code panels and explicit source-offset remapping."
     context: "Verify available highlighting assets and justify any required dependency/assets separately. Keep metadata literal, searchable and unwrapped; do not deserialize, sort, execute, apply configuration or implicitly recognize later blocks. Document exact syntax, streaming behavior and remaining exclusions."
@@ -649,7 +649,7 @@ tasks:
     kind: implementation
     status: pending
     depends_on:
-      - "blad-toml-frontmatter-tests"
+      - "blad-toml-frontmatter-write-tests"
     requirements:
       - "REQUIREMENTS.md#C-004"
       - "REQUIREMENTS.md#R-016"
@@ -661,7 +661,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-toml-frontmatter-audit"
+  - id: "blad-toml-frontmatter-security-audit"
     title: "security_audit: independently observe TOML metadata isolation"
     description: "Independently inspect source/tests for prefix recognition, source ranges, control normalization, input/work bounds and absence of metadata authority; derive a scoped IMPL.md record excluding intent, queue, prior records and history."
     context: "Pending independent source-only work; retain highlighting, cancellation and raw-versus-normalized offset limitations."
@@ -670,7 +670,7 @@ tasks:
     kind: security-audit
     status: pending
     depends_on:
-      - "blad-toml-frontmatter-code"
+      - "blad-toml-frontmatter-implement-code"
     requirements:
       - "REQUIREMENTS.md#C-004"
       - "REQUIREMENTS.md#R-038"
@@ -681,7 +681,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "blad-toml-frontmatter-review"
+  - id: "blad-toml-frontmatter-compliance-review"
     title: "compliance_review: compare TOML frontmatter intent and evidence"
     description: "In a separate source-blind context, compare approved recognition/display/isolation intent against the independent implementation record and tests; retain discrepancies for human arbitration."
     context: "Pending comparison; metadata display does not imply TOML validation, application-schema support or acceptance."
@@ -690,7 +690,7 @@ tasks:
     kind: compliance-review
     status: pending
     depends_on:
-      - "blad-toml-frontmatter-audit"
+      - "blad-toml-frontmatter-security-audit"
     requirements:
       - "REQUIREMENTS.md#C-004"
       - "REQUIREMENTS.md#R-016"

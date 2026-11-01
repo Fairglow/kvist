@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:9da32f0bd7f2651c4c5123f320e1df7e0d9d333192f19feac788a5e9c25d02db"
-  contract_revision: "sha256:f086d75a9315aa97655408ef9c1d562712335ab48766637306c7406d1955756f"
-  design_revision: "sha256:dfd9902edd6ea593fb8dc278cd66a6201fe61c526770dc28be63ae4a0c67165a"
+  requirements_revision: "sha256:4e1b156b7a8a8b9665304618bb6b0918115a41f43d55cb67d6ffd77df80050b4"
+  contract_revision: "sha256:995cd970c55fc203bd2cd560bdd920fdbaeb9d36fd3ab048d04d2192ab6c6842"
+  design_revision: "sha256:3ef8f2cfb2ec37b8b46211d5bda0124af46ec326c15455f39678b184d989dc64"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-30T07:36:21Z"
+    checked_at: "2026-10-31T12:44:11Z"
     stale_since: null
     causes: []
 tasks:
@@ -19,7 +19,8 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-DECISION-AUTOMATION"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
     timestamps:
       created_at: "2026-10-31T12:05:00Z"
       updated_at: "2026-10-31T12:33:00Z"
@@ -34,8 +35,10 @@ tasks:
     expected_outcome: "One numbered response invokes one displayed command."
     kind: implementation
     status: completed
-    depends_on: ["decision-shortcuts-write-tests"]
-    requirements: ["REQUIREMENTS.md#REQ-DECISION-AUTOMATION"]
+    depends_on:
+      - "decision-shortcuts-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
     timestamps:
       created_at: "2026-10-31T12:05:00Z"
       updated_at: "2026-10-31T12:33:00Z"
@@ -50,8 +53,10 @@ tasks:
     expected_outcome: "Shortcut controls and limitations remain inspectable."
     kind: security-audit
     status: pending
-    depends_on: ["decision-shortcuts-implement-code"]
-    requirements: ["REQUIREMENTS.md#REQ-DECISION-AUTOMATION"]
+    depends_on:
+      - "decision-shortcuts-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
     timestamps:
       created_at: "2026-10-31T12:05:00Z"
       updated_at: "2026-10-31T12:05:00Z"
@@ -66,8 +71,10 @@ tasks:
     expected_outcome: "Discrepancies and proof limitations remain durable."
     kind: compliance-review
     status: pending
-    depends_on: ["decision-shortcuts-security-audit"]
-    requirements: ["REQUIREMENTS.md#REQ-DECISION-AUTOMATION"]
+    depends_on:
+      - "decision-shortcuts-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
     timestamps:
       created_at: "2026-10-31T12:05:00Z"
       updated_at: "2026-10-31T12:05:00Z"
