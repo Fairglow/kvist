@@ -47,6 +47,7 @@ fn read(context: &TaskContext) -> Result<Option<(Registry, String)>> {
     let text = read_text(&path)?;
     let registry: Registry = serde_json::from_str(&text)
         .map_err(|error| fail(&path, format!("invalid shortcut JSON: {error}")))?;
+    let secret = existing_secret()?;
     if registry.schema_version != 1
         || registry.project != absolute(&context.project_dir)?
         || registry.component != absolute(&context.component_dir)?
@@ -56,10 +57,13 @@ fn read(context: &TaskContext) -> Result<Option<(Registry, String)>> {
             .actions
             .keys()
             .any(|number| *number == 0 || *number >= registry.next_number)
-        || !equal(
+        || (!equal(
             &registry.authentication_tag,
-            &authenticated(&registry, &existing_secret()?)?,
-        )
+            &authenticated(&registry, &secret)?,
+        ) && !equal(
+            &registry.authentication_tag,
+            &storage::authenticated_struct_order(&registry, &registry.authentication_tag, &secret)?,
+        ))
     {
         return Err(fail(
             &path,

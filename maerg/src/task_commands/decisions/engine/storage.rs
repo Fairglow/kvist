@@ -408,6 +408,27 @@ pub(super) fn authenticated<T: Serialize>(value: &T, secret: &[u8]) -> Result<St
     ))
 }
 
+pub(super) fn authenticated_struct_order<T: Serialize>(
+    value: &T,
+    current_tag: &str,
+    secret: &[u8],
+) -> Result<String> {
+    let encoded = encode(value)?;
+    let current_field = format!(
+        "\"authentication_tag\":{}",
+        serde_json::to_string(current_tag)
+            .map_err(|error| fail(Path::new(DIRECTORY), error.to_string()))?
+    );
+    let cleared = match encoded.rsplit_once(&current_field) {
+        Some((before, after)) => format!("{before}\"authentication_tag\":\"\"{after}"),
+        None => encoded,
+    };
+    Ok(format!(
+        "hmac-sha256:{}",
+        hmac_sha256(secret, cleared.as_bytes())
+    ))
+}
+
 pub(super) fn now() -> Result<Timestamp> {
     Timestamp::now().map_err(|source| KvistError::TaskClock { source })
 }

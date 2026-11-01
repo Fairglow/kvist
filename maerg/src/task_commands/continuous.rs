@@ -581,6 +581,29 @@ fn tag(ledger: &Ledger, secret: &[u8]) -> Result<String> {
     Ok(format!("hmac-sha256:{}", hmac_sha256(secret, &bytes)))
 }
 
+fn tag_struct_order(ledger: &Ledger, secret: &[u8]) -> Result<String> {
+    let encoded =
+        serde_json::to_string(ledger).map_err(|error| KvistError::AgentEvidenceFailed {
+            reason: error.to_string(),
+        })?;
+    let current_field = format!(
+        "\"authentication_tag\":{}",
+        serde_json::to_string(&ledger.authentication_tag).map_err(|error| {
+            KvistError::AgentEvidenceFailed {
+                reason: error.to_string(),
+            }
+        })?
+    );
+    let cleared = match encoded.rsplit_once(&current_field) {
+        Some((before, after)) => format!("{before}\"authentication_tag\":\"\"{after}"),
+        None => encoded,
+    };
+    Ok(format!(
+        "hmac-sha256:{}",
+        hmac_sha256(secret, cleared.as_bytes())
+    ))
+}
+
 fn load(context: &TaskContext, secret: &[u8]) -> Result<Option<Ledger>> {
     let path = context.component_dir.join(LEDGER_PATH);
     checked_directory(&context.component_dir.join(".kvist"))?;
@@ -598,7 +621,10 @@ fn load(context: &TaskContext, secret: &[u8]) -> Result<Option<Ledger>> {
     let bytes = read_bounded_regular_file(&path, &metadata, MAX_LEDGER_BYTES)?;
     let ledger: Ledger = serde_json::from_slice(&bytes)
         .map_err(|err| error(context, &format!("invalid continuous ledger: {err}")))?;
-    if ledger.version != LEDGER_VERSION || tag(&ledger, secret)? != ledger.authentication_tag {
+    if ledger.version != LEDGER_VERSION
+        || (tag(&ledger, secret)? != ledger.authentication_tag
+            && tag_struct_order(&ledger, secret)? != ledger.authentication_tag)
+    {
         return Err(error(
             context,
             "continuous ledger version/authentication failed; inspect retained state, do not delete recovery evidence",
