@@ -353,6 +353,13 @@ pub fn authorize_turn(
                 path: "completion-note".to_owned(),
                 content: "Task completion noted (`propose_decision` is only for blocking contradictions that prevent implementation, never for reporting task completion or routine status). Reply now with your final plain-text summary and NO tool calls so Kvist can run `cargo test` and complete the task.".to_owned(),
             });
+        } else if is_routine_internal_proposal(&decision) {
+            plan.reads.push(ReadRecord {
+                call_id: decision.call_id,
+                tool: "propose_decision".to_owned(),
+                path: "auto-resolved-decision".to_owned(),
+                content: "Auto-resolved without pausing: this task is already approved by the user, and routine implementation, test, or module-export checks do NOT require a human decision (everything is reviewed at the end). You have full authority to inspect files with `read_file` and modify `src/` and `tests/` directly with `edit_file` or `write_file`. Complete any remaining code/test edits now, or if your changes are complete, reply with a plain-text summary and NO tool calls.".to_owned(),
+            });
         } else {
             retained_decisions.push(decision);
         }
@@ -1263,6 +1270,19 @@ fn check_write_noop_or_destructive_overwrite(
     let destination = obj.get("destination").and_then(serde_json::Value::as_str)?;
     let content = obj.get("content").and_then(serde_json::Value::as_str)?;
     let (resolved, rel) = resolve_safe_read_path(component_root, destination, false).ok()?;
+    if rel.ends_with(".rs") {
+        let balance = rust_brace_balance(content);
+        if balance != 0 {
+            return Some(BrokerOutcome::Read(ReadRecord {
+                call_id: intent.id.clone(),
+                tool: "write_file".to_owned(),
+                path: rel.clone(),
+                content: format!(
+                    "error: `write_file` on `{rel}` was not applied because it has unbalanced `{{` / `}}` delimiters (net brace balance = {balance:+}). Ensure all blocks and functions have matching braces and retry."
+                ),
+            }));
+        }
+    }
     let existing = fs::read_to_string(&resolved).ok()?;
     if existing.trim() == content.trim() {
         return Some(BrokerOutcome::Read(ReadRecord {
@@ -1320,6 +1340,66 @@ fn is_completion_report_proposal(decision: &ProposedDecision) -> bool {
         || why_lower.contains("option 1")
         || why_lower.contains("alternative 1");
     has_completion_phrase && !has_alternatives
+}
+
+/// True when a `propose_decision` call is a routine internal developer note,
+/// code/test verification question, or status update rather than a genuine
+/// architectural contradiction presenting alternatives for human arbitration.
+pub fn is_routine_internal_proposal(decision: &ProposedDecision) -> bool {
+    if decision.summary == "Proposed modification to component Cargo.toml"
+        || decision.summary.starts_with("dependency `")
+    {
+        return false;
+    }
+    let summary_lower = decision.summary.to_ascii_lowercase();
+    let why_lower = decision.why.to_ascii_lowercase();
+    let patch_lower = decision
+        .patch
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let has_alternatives = why_lower.contains("## alternatives")
+        || why_lower.contains("option a")
+        || why_lower.contains("option 1")
+        || why_lower.contains("alternative 1");
+    if has_alternatives {
+        return false;
+    }
+    let internal_phrases = [
+        "need to verify",
+        "need to check",
+        "i need to",
+        "let me check",
+        "check if",
+        "verify public",
+        "public api",
+        "pub export",
+        "publicly exported",
+        "test file",
+        "in src/",
+        "in tests/",
+        "check src/",
+        "cargo test",
+        "cargo check",
+        "whether these are pub",
+        "add pub exports",
+        "compile",
+    ];
+    let has_internal_phrase = internal_phrases.iter().any(|phrase| {
+        summary_lower.contains(phrase) || why_lower.contains(phrase) || patch_lower.contains(phrase)
+    });
+    let comment_only_patch = decision.patch.as_deref().is_some_and(|patch| {
+        let trimmed = patch.trim();
+        !trimmed.is_empty()
+            && trimmed
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .all(|line| {
+                    let t = line.trim_start();
+                    t.starts_with("//") || t.starts_with('#')
+                })
+    });
+    has_internal_phrase || comment_only_patch
 }
 
 fn check_edit_rust_brace_balance(
@@ -2376,5 +2456,25 @@ mod tests {
         assert_eq!(turn_plan.decision_count(), 0);
         assert_eq!(turn_plan.reads.len(), 1);
         assert_eq!(turn_plan.reads[0].path, "completion-note");
+
+        let internal_note_turn = ModelTurn {
+            text: String::new(),
+            reasoning: None,
+            tool_intents: vec![propose_intent_raw(serde_json::json!({
+                "summary": "Need to verify public API exports in src/cache.rs for test file",
+                "why": "The test file I created uses types like PromotionPlan, promote, inspect_source which need to be publicly exported from the cache module. I need to check if these are pub or if I need to add pub exports.",
+                "patch": "// Check src/cache.rs for pub exports of:\n// - PromotionPlan\n// - promote function"
+            }))],
+            finish_reason: sav::FinishReason::ToolCalls,
+            provider: sav::LocalModelProvider::LlamaServer,
+            model: "fixture".into(),
+            response_id: None,
+            provider_request_id: None,
+            usage: None,
+        };
+        let internal_plan = authorize_turn(dir.path(), &internal_note_turn, &policy());
+        assert_eq!(internal_plan.decision_count(), 0);
+        assert_eq!(internal_plan.reads.len(), 1);
+        assert_eq!(internal_plan.reads[0].path, "auto-resolved-decision");
     }
 }

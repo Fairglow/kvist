@@ -281,8 +281,19 @@ fn show(project_dir: &Path, component: &Path, task_id: Option<&str>) -> Result<O
             });
         }
     };
+    let mut actions = engine::shortcuts::list_for_task(&context, &task.id)?;
+    if task.status == TaskStatus::AwaitingDecision && actions.is_empty() {
+        if let Err(error) = options(project_dir, component, Some(&task.id)) {
+            tracing::warn!(
+                task_id = %task.id,
+                %error,
+                "could not auto-generate decision options during decision show; falling back to existing state"
+            );
+        } else {
+            actions = engine::shortcuts::list_for_task(&context, &task.id)?;
+        }
+    }
     message.push_str(&support_index(&context, &task.id)?);
-    let actions = engine::shortcuts::list_for_task(&context, &task.id)?;
     message.push_str(&engine::shortcuts::markdown(component, &actions));
     let mut output = response(message, evidence);
     output.actions = actions;
