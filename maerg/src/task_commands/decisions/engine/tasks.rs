@@ -192,7 +192,11 @@ fn authored(existing: &mut Task, definition: TaskDefinition) {
     existing.expected_outcome = definition.expected_outcome;
     existing.kind = definition.kind;
     existing.depends_on = definition.depends_on;
+    existing.depends_on.sort();
+    existing.depends_on.dedup();
     existing.requirements = definition.requirements;
+    existing.requirements.sort();
+    existing.requirements.dedup();
 }
 
 fn new_task(definition: TaskDefinition, at: &Timestamp) -> Task {

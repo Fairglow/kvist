@@ -93,9 +93,11 @@ pub enum Disposition {
 pub struct Draft {
     pub schema_version: u32,
     pub rationale: String,
+    #[serde(default)]
     pub documents: BTreeMap<String, String>,
     #[serde(default)]
     pub document_edits: Vec<DocumentEdit>,
+    #[serde(default)]
     pub tasks: Vec<TaskEdit>,
     pub disposition: Disposition,
 }

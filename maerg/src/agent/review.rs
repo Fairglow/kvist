@@ -18,6 +18,7 @@ pub(crate) struct ReviewReport {
 pub(crate) struct ReviewSession<'a> {
     profile: &'a AgentProfile,
     choice: ModelChoice,
+    task_id: String,
     budget: TurnBudget,
     tokens: TokenBudget,
     cancellation: CancellationToken,
@@ -155,6 +156,7 @@ impl<'a> ReviewSession<'a> {
             decision_support,
             profile,
             choice,
+            task_id: task.to_owned(),
             budget: TurnBudget::new(Duration::from_secs(profile.timeout_seconds)),
             tokens: TokenBudget::new(profile.token_limit),
             cancellation,
@@ -518,10 +520,10 @@ impl<'a> ReviewSession<'a> {
                 "Answer the supplied human question about this decision in Markdown. Use the bounded persisted conversation as discussion, not compliance evidence. Explain assumptions and tradeoffs. Do not choose for the human or edit project state."
             }
             "decision-options" => {
-                "The report must itself be strict JSON with exactly summary (string) and options (array). Each option has exactly id (stable ASCII identifier), title, consequences, recommendation (strings). Offer substantive alternatives, not interaction actions such as ask/approve/reject. Recommendations are advisory. At most 32 options; include a useful investigation option when evidence is uncertain."
+                "The report field MUST itself be a strict JSON object string with exact keys \"summary\" (nonempty string) and \"options\" (array of 1 to 32 objects). Each option object has exact string keys \"id\" (stable ASCII identifier using letters, digits, `-`, or `_`), \"title\", \"consequences\", and \"recommendation\". Do NOT write Markdown prose directly in report; put all explanation inside \"summary\" and the option fields. Offer substantive alternatives, not interaction actions such as ask/approve/reject. Note: security-audit and compliance-review tasks are stateless, read-only checks of src/ and tests/; resolving a paused review task with no new prerequisite tasks and no intent edits will simply re-run the same review on unchanged files and pause again. Include concrete remediation options that add prerequisite test/implementation/security/compliance tasks or update local intent documents."
             }
             "decision-plan" => {
-                "Translate the authorized human selection/guidance into a strict JSON draft inside report, not Markdown. The supplied draft_schema is authoritative. Prefer document_edits with small exact unique before/after excerpts; never regenerate large unchanged files or abbreviate them with ellipses. Do not combine excerpt edits and full replacement on the same path. Only propose local intent changes and authored typed task edits. Never emit lifecycle, timestamp, acceptance or recovery fields. Preserve obligations and completed work. New work must precede the paused task and have valid test/implementation/security/compliance dependencies; the host wires all additions as prerequisites. A withdrawal must explicitly retire its whole affected dependency closure and explain why; never discard completed or live work. Do not claim findings are verified. No source writes."
+                "Translate the authorized human selection/guidance into a strict JSON draft object string inside report, not Markdown prose. The supplied draft_schema is authoritative. Note: security-audit and compliance-review tasks are stateless, read-only checks; when resolving a paused review task to address code or test findings, you MUST add the prerequisite lifecycle tasks (`<item>-write-tests`, `<item>-implement-code`, `<item>-security-audit`, `<item>-compliance-review`) in `tasks` (or edit local intent documents in `documents`/`document_edits`), because an empty `tasks: []` plan will merely re-run the same stateless review on unchanged files. Added tasks are spliced BEFORE the paused task and the host automatically wires the paused task to depend on them, so a new `-write-tests` task MUST have `\"depends_on\": []` and MUST NEVER depend on the paused task. Each `{\"action\":\"add\",\"task\":{...}}` element in `tasks` closes with exactly TWO braces `}}`, never three `}}}`. Prefer document_edits with small exact unique before/after excerpts; never regenerate large unchanged files or abbreviate them with ellipses. Do not combine excerpt edits and full replacement on the same path. Only propose local intent changes and authored typed task edits. Never emit lifecycle, timestamp, acceptance or recovery fields. Preserve obligations and completed work. A withdrawal must explicitly retire its whole affected dependency closure and explain why; never discard completed or live work. Do not claim findings are verified. No source writes."
             }
             "decision-intent-review" => {
                 "Provide a separate bounded advisory intent review of the human-directed draft against the supplied local intent/root/parent constraints. You have no source access. Review feasibility, missing tasks, dependencies, scope and consequences. Findings are nonbinding and not compliance certification; the human acknowledges them when approving the exact plan."
@@ -546,21 +548,33 @@ impl<'a> ReviewSession<'a> {
         } else {
             "Write report as human-readable Markdown."
         };
+        let structured_decision_json = matches!(phase, "decision-options" | "decision-plan");
+        let system_prompt = if structured_decision_json {
+            format!(
+                "{boundary} Phase `{phase}`. \
+                 {instructions} {scope} \
+                 {presentation} \
+                 CRITICAL: `report` MUST be a valid JSON object serialized as a JSON string (beginning with `{{` and ending with `}}`), NEVER Markdown prose or headings. \
+                 Return only JSON with exactly `report` (nonempty JSON-encoded object string) and `decision_required` (boolean, false). Do not claim prior reviews happened."
+            )
+        } else {
+            format!(
+                "{boundary} Phase `{phase}`. \
+                 {instructions} {scope} \
+                 {presentation} When arbitration is needed, explain \
+                 the situation, design implications, alternatives and their tradeoffs, \
+                 your advisory recommendation and why, and evidence needed for clarification. \
+                 Distinguish suspected findings from verified facts. If source-only evidence \
+                 cannot establish intended design, say so; do not invent intent or approve a choice. \
+                 Identify missing evidence and discrepancies honestly. Any discrepancy or decision needing human arbitration \
+                 must set decision_required=true. Return only JSON with exactly report (nonempty string) and \
+                 decision_required (boolean). Do not claim prior reviews happened."
+            )
+        };
         let mut request = ModelRequest {
             model,
             messages: vec![
-                sav::ModelMessage::System(format!(
-                    "{boundary} Phase `{phase}`. \
-                     {instructions} {scope} \
-                     {presentation} When arbitration is needed, explain \
-                     the situation, design implications, alternatives and their tradeoffs, \
-                     your advisory recommendation and why, and evidence needed for clarification. \
-                     Distinguish suspected findings from verified facts. If source-only evidence \
-                     cannot establish intended design, say so; do not invent intent or approve a choice. \
-                     Identify missing evidence and discrepancies honestly. Any discrepancy or decision needing human arbitration \
-                     must set decision_required=true. Return only JSON with exactly report (nonempty string) and \
-                     decision_required (boolean). Do not claim prior reviews happened."
-                )),
+                sav::ModelMessage::System(system_prompt),
                 sav::ModelMessage::User(evidence),
             ],
             tools: Vec::new(),
@@ -717,6 +731,35 @@ impl<'a> ReviewSession<'a> {
                     continue;
                 }
             }
+            if structured_decision_json
+                && turn.tool_intents.is_empty()
+                && attempts < retry_policy.max_attempts
+                && !self.cancellation.is_cancelled()
+                && !self.budget.remaining().is_zero()
+                && let Err(error) = parse_review_report(
+                    &turn,
+                    phase,
+                    &self.choice.model,
+                    &self.task_id,
+                    current_reserve,
+                    &self.redactions,
+                )
+                && self.tokens.preflight(&request).is_ok()
+            {
+                eprintln!(
+                    "{}",
+                    redact_bounded(
+                        &format!(
+                            "Advisory decision support: {phase} returned invalid inner JSON ({error}); regenerating (attempt {}/{}) for strict JSON.",
+                            attempts + 1,
+                            retry_policy.max_attempts,
+                        ),
+                        &self.redactions,
+                        4096,
+                    )
+                );
+                continue;
+            }
             break turn;
         };
         if !turn.tool_intents.is_empty() {
@@ -729,6 +772,7 @@ impl<'a> ReviewSession<'a> {
             &turn,
             phase,
             &self.choice.model,
+            &self.task_id,
             current_reserve,
             &self.redactions,
         )?;
@@ -741,40 +785,141 @@ fn parse_review_report(
     turn: &ModelTurn,
     phase: &str,
     model: &str,
+    task_id: &str,
     reserved_output_tokens: u32,
     redactions: &[String],
 ) -> Result<ReviewReport> {
-    match serde_json::from_str::<ReviewReport>(&turn.text) {
-        Ok(report) if !matches!(turn.finish_reason, sav::FinishReason::Length) => Ok(report),
-        Ok(_) => Err(KvistError::AgentEvidenceFailed {
-            reason: format_review_parse_failure(
-                "report JSON ended at the output token limit (`finish_reason=length`) and may be incomplete",
-                turn,
-                phase,
-                model,
-                reserved_output_tokens,
-                redactions,
-            ),
-        }),
-        Err(primary_error) => {
-            if matches!(turn.finish_reason, sav::FinishReason::Stop)
-                && let Some(stripped) = strip_markdown_json_fence(&turn.text)
-                && let Ok(report) = serde_json::from_str::<ReviewReport>(stripped)
-            {
-                return Ok(report);
-            }
-            Err(KvistError::AgentEvidenceFailed {
+    let mut report = match serde_json::from_str::<ReviewReport>(&turn.text) {
+        Ok(report) if !matches!(turn.finish_reason, sav::FinishReason::Length) => report,
+        Ok(_) => {
+            return Err(KvistError::AgentEvidenceFailed {
                 reason: format_review_parse_failure(
-                    &primary_error.to_string(),
+                    "report JSON ended at the output token limit (`finish_reason=length`) and may be incomplete",
                     turn,
                     phase,
                     model,
                     reserved_output_tokens,
                     redactions,
                 ),
-            })
+            });
+        }
+        Err(primary_error) => {
+            if matches!(turn.finish_reason, sav::FinishReason::Stop)
+                && let Some(stripped) = strip_markdown_json_fence(&turn.text)
+                && let Ok(report) = serde_json::from_str::<ReviewReport>(stripped)
+            {
+                report
+            } else {
+                return Err(KvistError::AgentEvidenceFailed {
+                    reason: format_review_parse_failure(
+                        &primary_error.to_string(),
+                        turn,
+                        phase,
+                        model,
+                        reserved_output_tokens,
+                        redactions,
+                    ),
+                });
+            }
+        }
+    };
+    if matches!(phase, "decision-options" | "decision-plan") {
+        if let Some(stripped) = strip_markdown_json_fence(&report.report) {
+            report.report = stripped.to_owned();
+        }
+        let mut candidate = report.report.trim().to_owned();
+        if serde_json::from_str::<serde_json::Value>(&candidate).is_err() {
+            let repaired = candidate
+                .replace("]}}},{", "]}},{")
+                .replace("]}}}]", "]}}]");
+            if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
+                candidate = repaired;
+            }
+        }
+        if phase == "decision-plan" {
+            match serde_json::from_str::<crate::task_commands::decisions::Draft>(&candidate) {
+                Ok(mut draft) => {
+                    let has_additions = draft.tasks.iter().any(|edit| {
+                        matches!(edit, crate::task_commands::decisions::TaskEdit::Add { .. })
+                    });
+                    if draft.disposition == crate::task_commands::decisions::Disposition::Resolve {
+                        draft.tasks.retain(|edit| {
+                            !matches!(
+                                edit,
+                                crate::task_commands::decisions::TaskEdit::Retire { .. }
+                            ) && !(has_additions
+                                && matches!(
+                                    edit,
+                                    crate::task_commands::decisions::TaskEdit::Update { .. }
+                                ))
+                        });
+                    }
+                    for edit in &mut draft.tasks {
+                        if let crate::task_commands::decisions::TaskEdit::Add { task } = edit {
+                            task.depends_on.retain(|dep| dep != task_id);
+                        }
+                    }
+                    if let Ok(normalized) = serde_json::to_string(&draft) {
+                        report.report = normalized;
+                    } else {
+                        report.report = candidate;
+                    }
+                }
+                Err(error) => {
+                    let snippet = error_context_snippet(&candidate, error.column(), redactions);
+                    return Err(KvistError::AgentEvidenceFailed {
+                        reason: redact_bounded(
+                            &format!(
+                                "decision support: `{phase}` returned invalid Draft JSON inside `report`: {error} (model `{model}`, around column {}: `{snippet}`)",
+                                error.column()
+                            ),
+                            redactions,
+                            4096,
+                        ),
+                    });
+                }
+            }
+        } else {
+            match serde_json::from_str::<serde_json::Value>(&candidate) {
+                Ok(value) if value.is_object() => {
+                    report.report = candidate;
+                }
+                Ok(_) => {
+                    let preview = sanitize_preview(&redact(&candidate, redactions), 256);
+                    return Err(KvistError::AgentEvidenceFailed {
+                        reason: redact_bounded(
+                            &format!(
+                                "decision support: `{phase}` returned a non-object JSON value inside `report` (model `{model}`, preview: `{preview}`)"
+                            ),
+                            redactions,
+                            4096,
+                        ),
+                    });
+                }
+                Err(error) => {
+                    let snippet = error_context_snippet(&candidate, error.column(), redactions);
+                    return Err(KvistError::AgentEvidenceFailed {
+                        reason: redact_bounded(
+                            &format!(
+                                "decision support: `{phase}` returned invalid JSON inside `report`: {error} (model `{model}`, around column {}: `{snippet}`)",
+                                error.column()
+                            ),
+                            redactions,
+                            4096,
+                        ),
+                    });
+                }
+            }
         }
     }
+    Ok(report)
+}
+
+fn error_context_snippet(text: &str, column: usize, redactions: &[String]) -> String {
+    let char_index = column.saturating_sub(1);
+    let start = char_index.saturating_sub(80);
+    let slice: String = text.chars().skip(start).take(160).collect();
+    sanitize_preview(&redact(&slice, redactions), 160)
 }
 
 fn strip_markdown_json_fence(text: &str) -> Option<&str> {
@@ -1005,6 +1150,7 @@ mod tests {
             &empty_length_turn,
             "source-only-security",
             "thinking-model",
+            "galla-reverification-security-audit",
             8192,
             &[],
         )
@@ -1026,6 +1172,7 @@ mod tests {
             &complete_looking_length_turn,
             "source-only-security",
             "thinking-model",
+            "galla-reverification-security-audit",
             8192,
             &[],
         )
@@ -1037,18 +1184,49 @@ mod tests {
                 .into(),
             reasoning: None,
             finish_reason: sav::FinishReason::Stop,
-            ..empty_length_turn
+            ..empty_length_turn.clone()
         };
         let report = parse_review_report(
             &fenced_stop_turn,
             "source-only-security",
             "thinking-model",
+            "galla-reverification-security-audit",
             8192,
             &[],
         )
         .expect("accept stop turn with markdown code fence");
         assert_eq!(report.report, "Observed behavior.");
         assert!(report.decision_required);
+
+        let decision_plan_turn = ModelTurn {
+            text: serde_json::json!({
+                "report": r#"{"schema_version":1,"rationale":"Remediate findings","tasks":[{"action":"add","task":{"id":"fix-write-tests","title":"write_tests: fix","description":"d","context":"c","purpose":"p","expected_outcome":"e","kind":"test","depends_on":["galla-reverification-security-audit"],"requirements":["REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"]}}}],"disposition":"resolve"}"#,
+                "decision_required": false
+            })
+            .to_string(),
+            reasoning: None,
+            finish_reason: sav::FinishReason::Stop,
+            ..empty_length_turn
+        };
+        let parsed = parse_review_report(
+            &decision_plan_turn,
+            "decision-plan",
+            "thinking-model",
+            "galla-reverification-security-audit",
+            32768,
+            &[],
+        )
+        .expect("repair over-closed task braces and strip self-dependency on paused task");
+        let draft: crate::task_commands::decisions::Draft =
+            serde_json::from_str(&parsed.report).expect("valid Draft JSON");
+        assert!(draft.documents.is_empty());
+        assert_eq!(draft.tasks.len(), 1);
+        match &draft.tasks[0] {
+            crate::task_commands::decisions::TaskEdit::Add { task } => {
+                assert!(task.depends_on.is_empty());
+            }
+            _ => panic!("expected Add task"),
+        }
     }
 
     #[test]

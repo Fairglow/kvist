@@ -587,7 +587,7 @@ fn prepare(
             {"action":"retire","id":"uncompleted-task","reason":"explicit withdrawal reason"}
         ],
         "disposition":"resolve or withdraw; exactly one word, not both",
-        "notes":"Do not include notes or absent/no-change documents in your actual draft. All arrays/maps may be empty. No other keys."
+        "notes":"Do not include this `notes` key in your actual draft. Keep `documents: {}` and `document_edits: []` when no documents change. Each `{\"action\":\"add\",\"task\":{...}}` item in `tasks` closes with exactly TWO braces `}}`, never `}}}`. Added tasks are inserted BEFORE the paused task as its prerequisites, so a new `-write-tests` task MUST use `\"depends_on\": []` (never the paused task ID). Do not `update` downstream tasks that already depend on the paused task."
     });
     let draft: Draft = if let Some(path) = import {
         let bytes = bounded_read(path)?;
@@ -883,7 +883,23 @@ fn strict_parse<T: for<'a> Deserialize<'a>>(text: &str) -> Result<T> {
     if text.len() > MAX_FILE as usize {
         return Err(decision_error("decision response/draft exceeds 1 MiB"));
     }
-    serde_json::from_str(text).map_err(json_error)
+    serde_json::from_str(text).map_err(|error| {
+        let preview: String = text
+            .chars()
+            .take(200)
+            .flat_map(|ch| {
+                if ch.is_control() {
+                    ch.escape_default().collect::<Vec<_>>()
+                } else {
+                    vec![ch]
+                }
+            })
+            .collect();
+        decision_error(&format!(
+            "invalid decision JSON: {error} (received {} bytes, preview: `{preview}`)",
+            text.len()
+        ))
+    })
 }
 
 fn bounded_read(path: &Path) -> Result<String> {
