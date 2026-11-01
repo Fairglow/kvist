@@ -3943,7 +3943,8 @@ fn authoring_scope_directive(write_scope: &[AttemptWriteScope]) -> String {
          - You may only create or modify files under {} within this component, using \
          component-relative destinations (for example `src/main.rs`).\n\
          - Do not write at the component root or anywhere outside those directories; \
-         the sandbox rejects any other destination. Use `read_file` to read `Cargo.toml`, `request_dependency` to request dependencies, or `propose_decision` if a manifest change requires human arbitration.\n\
+         the sandbox rejects any other destination. Use `read_file` to read `Cargo.toml` and `request_dependency` to request dependencies.\n\
+         - This task is ALREADY approved by the user: do NOT call `propose_decision` to report task completion, summarize your work, or ask for approval of normal implementation/test details.\n\
          - There is no shell or `cargo` tool during authoring: Kvist runs `cargo test` automatically in the verification sandbox as soon as you finish your turn by replying with a final text summary and NO tool calls.\n",
         list.join(", ")
     )

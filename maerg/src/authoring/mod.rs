@@ -343,7 +343,43 @@ pub fn authorize_turn(
     turn: &ModelTurn,
     policy: &BrokerPolicy,
 ) -> AuthoringPlan {
-    authorize_intents(component_root, &turn.tool_intents, policy)
+    let mut plan = authorize_intents(component_root, &turn.tool_intents, policy);
+    let mut retained_decisions = Vec::new();
+    for decision in plan.decisions.drain(..) {
+        if is_completion_report_proposal(&decision) {
+            plan.reads.push(ReadRecord {
+                call_id: decision.call_id,
+                tool: "propose_decision".to_owned(),
+                path: "completion-note".to_owned(),
+                content: "Task completion noted (`propose_decision` is only for blocking contradictions that prevent implementation, never for reporting task completion or routine status). Reply now with your final plain-text summary and NO tool calls so Kvist can run `cargo test` and complete the task.".to_owned(),
+            });
+        } else {
+            retained_decisions.push(decision);
+        }
+    }
+    plan.decisions = retained_decisions;
+
+    let mut retained_drops = Vec::new();
+    for dropped in plan.dropped.drain(..) {
+        if dropped.tool == "edit_file"
+            && (dropped.reason.contains("`replace` must occur exactly once")
+                || dropped.reason.contains("unbalanced `{` / `}`"))
+        {
+            plan.reads.push(ReadRecord {
+                call_id: dropped.call_id,
+                tool: dropped.tool,
+                path: "edit-error".to_owned(),
+                content: format!(
+                    "error: {}. Call `read_file` on the target file to check the exact lines and brace balance before retrying `edit_file`.",
+                    dropped.reason
+                ),
+            });
+        } else {
+            retained_drops.push(dropped);
+        }
+    }
+    plan.dropped = retained_drops;
+    plan
 }
 
 /// Authorize a bare slice of untrusted intents (used by the host turn and tests).
@@ -437,6 +473,9 @@ fn classify_intent(
         "edit_file" => {
             if let Some(outcome) = check_manifest_decision(component_root, intent, obj) {
                 return outcome;
+            }
+            if let Some(brace_err) = check_edit_rust_brace_balance(component_root, intent, obj) {
+                return brace_err;
             }
             match authorize_edit(component_root, intent, obj, policy) {
                 Ok(effect) => BrokerOutcome::Effect(effect),
@@ -768,12 +807,12 @@ pub fn authoring_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "propose_decision".to_owned(),
-            description: "Surface an impactful decision that is not already covered by \
-             the component's REQUIREMENTS, CONTRACT, DESIGN, or TODOS. This ends the \
-             task run and pauses it for a human; use it only for decisions that \
-             substantially alter the implementation, never for trivial issues. Do \
-             NOT use it to write REQUIREMENTS.md, CONTRACT.md, DESIGN.md, TODOS.yaml, \
-             or IMPL.md; Kvist maintains those separately."
+            description: "Surface an irreconcilable architectural contradiction that is not \
+             covered by REQUIREMENTS.md, CONTRACT.md, DESIGN.md, or TODOS.yaml and prevents \
+             completing the task without human choice between concrete alternatives. NEVER \
+             call this to report task completion, summarize implemented tests/code, or \
+             confirm that no manifest changes are needed — when your work is done, simply \
+             reply with plain text and NO tool calls."
                 .to_owned(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -1251,6 +1290,104 @@ fn check_write_noop_or_destructive_overwrite(
         }));
     }
     None
+}
+
+fn is_completion_report_proposal(decision: &ProposedDecision) -> bool {
+    let summary_lower = decision.summary.to_ascii_lowercase();
+    let why_lower = decision.why.to_ascii_lowercase();
+    let patch_lower = decision
+        .patch
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let completion_phrases = [
+        "task has been completed",
+        "tests have been added",
+        "tests implemented",
+        "implementation complete",
+        "successfully added",
+        "successfully implemented",
+        "no additional manifest changes",
+        "no manifest changes needed",
+        "no changes needed",
+        "all tests follow",
+    ];
+    let has_completion_phrase = completion_phrases.iter().any(|phrase| {
+        summary_lower.contains(phrase) || why_lower.contains(phrase) || patch_lower.contains(phrase)
+    });
+    let has_alternatives = why_lower.contains("## alternatives")
+        || why_lower.contains("option a")
+        || why_lower.contains("option 1")
+        || why_lower.contains("alternative 1");
+    has_completion_phrase && !has_alternatives
+}
+
+fn check_edit_rust_brace_balance(
+    component_root: &Path,
+    intent: &ToolIntent,
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Option<BrokerOutcome> {
+    let destination = obj.get("destination").and_then(serde_json::Value::as_str)?;
+    if !destination.trim().ends_with(".rs") {
+        return None;
+    }
+    let replacement = obj.get("replace").and_then(serde_json::Value::as_str)?;
+    let content = obj.get("content").and_then(serde_json::Value::as_str)?;
+    let (resolved, rel) = resolve_safe_read_path(component_root, destination, false).ok()?;
+    let existing = fs::read_to_string(&resolved).ok()?;
+    if count_occurrences(existing.as_bytes(), replacement.as_bytes()) != 1 {
+        return None;
+    }
+    let new_bytes = replace_single_occurrence(
+        existing.as_bytes(),
+        replacement.as_bytes(),
+        content.as_bytes(),
+    )?;
+    let new_text = std::str::from_utf8(&new_bytes).ok()?;
+    let old_balance = rust_brace_balance(&existing);
+    let new_balance = rust_brace_balance(new_text);
+    if old_balance == 0 && new_balance != 0 {
+        return Some(BrokerOutcome::Read(ReadRecord {
+            call_id: intent.id.clone(),
+            tool: "edit_file".to_owned(),
+            path: rel.clone(),
+            content: format!(
+                "error: `edit_file` on `{rel}` was not applied because it leaves unbalanced `{{` / `}}` delimiters (net brace balance = {new_balance:+}; did you omit the closing `}}` of `mod tests` or an enclosing block at the end of `content`?). Preserve balanced braces and retry `edit_file`."
+            ),
+        }));
+    }
+    None
+}
+
+fn rust_brace_balance(source: &str) -> i64 {
+    let mut balance = 0i64;
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        let mut in_string = false;
+        let mut escaped = false;
+        for ch in trimmed.chars() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match ch {
+                '"' => in_string = true,
+                '{' => balance += 1,
+                '}' => balance -= 1,
+                _ => {}
+            }
+        }
+    }
+    balance
 }
 
 fn resolve_safe_read_path(
@@ -2204,5 +2341,40 @@ mod tests {
                 .content
                 .contains("refused destructive overwrite")
         );
+
+        std::fs::write(
+            dir.path().join("src/cache.rs"),
+            "mod tests {\n    #[test]\n    fn a() {}\n}\n",
+        )
+        .unwrap();
+        let unbalanced_edit = edit_intent(
+            "src/cache.rs",
+            "    #[test]\n    fn a() {}\n}",
+            "    #[test]\n    fn a() {}\n    #[test]\n    fn b() {}",
+        );
+        let brace_plan = authorize_intents(dir.path(), &[unbalanced_edit], &policy());
+        assert!(brace_plan.effects.is_empty());
+        assert_eq!(brace_plan.reads.len(), 1);
+        assert!(brace_plan.reads[0].content.contains("unbalanced `{` / `}`"));
+
+        let completion_turn = ModelTurn {
+            text: "The tests have been successfully added.".into(),
+            reasoning: None,
+            tool_intents: vec![propose_intent_raw(serde_json::json!({
+                "summary": "Cache promotion atomicity and checksum verification tests implemented",
+                "why": "The task has been completed with comprehensive tests added to src/cache.rs.",
+                "patch": "No additional manifest changes needed - tests use existing tempfile dependency"
+            }))],
+            finish_reason: sav::FinishReason::ToolCalls,
+            provider: sav::LocalModelProvider::LlamaServer,
+            model: "fixture".into(),
+            response_id: None,
+            provider_request_id: None,
+            usage: None,
+        };
+        let turn_plan = authorize_turn(dir.path(), &completion_turn, &policy());
+        assert_eq!(turn_plan.decision_count(), 0);
+        assert_eq!(turn_plan.reads.len(), 1);
+        assert_eq!(turn_plan.reads[0].path, "completion-note");
     }
 }

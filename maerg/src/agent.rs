@@ -1551,7 +1551,12 @@ fn execute_agent_inner(
             // the conversation so the model can act on those results; otherwise
             // the model produced a final answer and the run completes.
             if plan.effects.is_empty() {
-                if !plan.reads.is_empty() || !accepted_requests.is_empty() {
+                let only_completion_note = !plan.reads.is_empty()
+                    && plan.reads.iter().all(|read| read.path == "completion-note")
+                    && !turn.text.trim().is_empty();
+                if (!plan.reads.is_empty() && !only_completion_note)
+                    || !accepted_requests.is_empty()
+                {
                     continue;
                 }
                 if !controls.finish_if_idle()? {
