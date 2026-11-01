@@ -2266,7 +2266,17 @@ fn parse_openai_tool_calls(value: Option<&Value>) -> Result<Vec<ToolIntent>> {
             })?;
         let name = required_bounded_string(function.get("name"), "tool name", 128)?;
         validate_provider_tool_name(&name)?;
-        let arguments = parse_openai_arguments(function.get("arguments"))?;
+        warn_extra_json_fields(
+            call.as_object(),
+            &["id", "type", "index", "function"],
+            "openai.tool_call",
+        );
+        warn_extra_json_fields(
+            Some(function),
+            &["name", "arguments"],
+            "openai.tool_call.function",
+        );
+        let arguments = parse_openai_arguments_for_tool(&name, function.get("arguments"))?;
         output.push(ToolIntent {
             id: id.clone(),
             provider_id: Some(id),
@@ -2318,6 +2328,16 @@ fn merge_openai_tool_deltas(
                 .ok_or_else(|| Error::MalformedModelResponse {
                     reason: "stream tool call function must be an object".to_owned(),
                 })?;
+            warn_extra_json_fields(
+                delta.as_object(),
+                &["index", "id", "type", "function"],
+                "openai.stream.tool_call_delta",
+            );
+            warn_extra_json_fields(
+                Some(function),
+                &["name", "arguments"],
+                "openai.stream.tool_call_delta.function",
+            );
             if let Some(name) = function.get("name") {
                 let name = name.as_str().ok_or_else(|| Error::MalformedModelResponse {
                     reason: "stream tool name must be text".to_owned(),
@@ -2361,7 +2381,8 @@ fn finish_openai_tool_calls(calls: BTreeMap<usize, PartialToolCall>) -> Result<V
             return Err(Error::DuplicateToolCall);
         }
         validate_provider_tool_name(&call.name)?;
-        let arguments = parse_openai_arguments(Some(&Value::String(call.arguments)))?;
+        let arguments =
+            parse_openai_arguments_for_tool(&call.name, Some(&Value::String(call.arguments)))?;
         output.push(ToolIntent {
             id: id.clone(),
             provider_id: Some(id),
@@ -2372,14 +2393,34 @@ fn finish_openai_tool_calls(calls: BTreeMap<usize, PartialToolCall>) -> Result<V
     Ok(output)
 }
 
-fn parse_openai_arguments(value: Option<&Value>) -> Result<Value> {
-    let arguments = match value {
-        Some(Value::String(value)) => {
-            serde_json::from_str(value).map_err(|_| Error::MalformedModelResponse {
-                reason: "tool arguments are invalid JSON".to_owned(),
-            })?
+fn warn_extra_json_fields(object: Option<&Map<String, Value>>, known_keys: &[&str], context: &str) {
+    let Some(object) = object else {
+        return;
+    };
+    for (key, value) in object {
+        if !known_keys.contains(&key.as_str()) {
+            let preview = sanitize_sse_diagnostic(&value.to_string(), 160);
+            tracing::warn!(
+                context,
+                field = %key,
+                value_preview = %preview,
+                "model provider response contains an unrecognized field; ignoring and continuing"
+            );
         }
+    }
+}
+
+fn parse_openai_arguments_for_tool(name: &str, value: Option<&Value>) -> Result<Value> {
+    let arguments = match value {
+        Some(Value::String(raw)) => parse_lenient_tool_arguments(name, raw)?,
         Some(value @ Value::Object(_)) => value.clone(),
+        None | Some(Value::Null) => {
+            tracing::warn!(
+                tool = name,
+                "model provider omitted tool arguments; defaulting to empty JSON object `{{}}`"
+            );
+            Value::Object(Map::new())
+        }
         _ => {
             return malformed("tool arguments must be JSON text or an object");
         }
@@ -2388,6 +2429,159 @@ fn parse_openai_arguments(value: Option<&Value>) -> Result<Value> {
         return malformed("tool arguments must be a JSON object");
     }
     Ok(arguments)
+}
+
+fn parse_lenient_tool_arguments(name: &str, raw: &str) -> Result<Value> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        tracing::warn!(
+            tool = name,
+            "model provider emitted empty tool arguments string; defaulting to empty JSON object `{{}}`"
+        );
+        return Ok(Value::Object(Map::new()));
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(parsed) => {
+            if !parsed.is_object() {
+                return malformed("tool arguments must be a JSON object");
+            }
+            Ok(parsed)
+        }
+        Err(err) => {
+            if let Some(repaired) = repair_tool_arguments_json(trimmed) {
+                tracing::warn!(
+                    tool = name,
+                    original_error = %err,
+                    raw_preview = %sanitize_sse_diagnostic(trimmed, 240),
+                    "repaired malformed tool arguments JSON from model provider"
+                );
+                return Ok(repaired);
+            }
+            let preview = sanitize_sse_diagnostic(trimmed, 240);
+            tracing::warn!(
+                tool = name,
+                parse_error = %err,
+                raw_len = raw.len(),
+                raw_preview = %preview,
+                "tool arguments are invalid JSON and could not be repaired; recording synthetic error payload so the agent turn can recover"
+            );
+            Ok(serde_json::json!({
+                "_malformed_arguments_error": err.to_string(),
+                "_malformed_arguments_preview": preview,
+            }))
+        }
+    }
+}
+
+fn repair_tool_arguments_json(raw: &str) -> Option<Value> {
+    let mut candidate = raw.trim();
+    if let Some(rest) = candidate.strip_prefix("```") {
+        let rest = rest
+            .strip_prefix("json")
+            .or_else(|| rest.strip_prefix("JSON"))
+            .unwrap_or(rest)
+            .trim_start();
+        candidate = rest.strip_suffix("```").unwrap_or(rest).trim();
+    }
+    if let (Some(start), Some(end)) = (candidate.find('{'), candidate.rfind('}'))
+        && start < end
+    {
+        candidate = &candidate[start..=end];
+    }
+    let normalized = escape_raw_controls_and_trailing_commas(candidate);
+    if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&normalized) {
+        return Some(Value::Object(map));
+    }
+    let mut trimmed = normalized.as_str();
+    while let Some(stripped) = trimmed.strip_suffix('}') {
+        let with_one = format!("{stripped}}}");
+        if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&with_one) {
+            return Some(Value::Object(map));
+        }
+        trimmed = stripped.trim_end();
+        if !trimmed.ends_with('}') {
+            break;
+        }
+    }
+    None
+}
+
+fn escape_raw_controls_and_trailing_commas(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len() + 16);
+    let mut in_string = false;
+    let mut backslash = false;
+    for ch in input.chars() {
+        if in_string {
+            if backslash {
+                backslash = false;
+                escaped.push(ch);
+                continue;
+            }
+            match ch {
+                '\\' => {
+                    backslash = true;
+                    escaped.push(ch);
+                }
+                '"' => {
+                    in_string = false;
+                    escaped.push(ch);
+                }
+                '\n' => escaped.push_str("\\n"),
+                '\r' => escaped.push_str("\\r"),
+                '\t' => escaped.push_str("\\t"),
+                c if c.is_control() => {
+                    for u in c.escape_unicode() {
+                        escaped.push(u);
+                    }
+                }
+                c => escaped.push(c),
+            }
+        } else {
+            if ch == '"' {
+                in_string = true;
+            }
+            escaped.push(ch);
+        }
+    }
+    let mut out = String::with_capacity(escaped.len());
+    let chars: Vec<char> = escaped.chars().collect();
+    let mut i = 0;
+    let mut str_mode = false;
+    let mut esc = false;
+    while i < chars.len() {
+        let ch = chars[i];
+        if str_mode {
+            if esc {
+                esc = false;
+            } else if ch == '\\' {
+                esc = true;
+            } else if ch == '"' {
+                str_mode = false;
+            }
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+        if ch == '"' {
+            str_mode = true;
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+        if ch == ',' {
+            let mut j = i + 1;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < chars.len() && (chars[j] == '}' || chars[j] == ']') {
+                i += 1;
+                continue;
+            }
+        }
+        out.push(ch);
+        i += 1;
+    }
+    out
 }
 
 fn parse_ollama_tool_calls(value: Option<&Value>, offset: usize) -> Result<Vec<ToolIntent>> {
@@ -2418,10 +2612,13 @@ fn parse_ollama_tool_calls(value: Option<&Value>, offset: usize) -> Result<Vec<T
         validate_provider_tool_name(&name)?;
         let arguments = match function.get("arguments") {
             Some(value @ Value::Object(_)) => value.clone(),
-            Some(Value::String(value)) => {
-                serde_json::from_str(value).map_err(|_| Error::MalformedModelResponse {
-                    reason: "tool arguments are invalid JSON".to_owned(),
-                })?
+            Some(Value::String(value)) => parse_lenient_tool_arguments(&name, value)?,
+            None | Some(Value::Null) => {
+                tracing::warn!(
+                    tool = %name,
+                    "ollama tool call omitted arguments; defaulting to empty JSON object `{{}}`"
+                );
+                Value::Object(Map::new())
             }
             _ => return malformed("tool arguments must be a JSON object"),
         };

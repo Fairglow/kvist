@@ -454,6 +454,30 @@ fn classify_intent(
             intent.name
         ));
     };
+    if let Some(err) = obj
+        .get("_malformed_arguments_error")
+        .and_then(serde_json::Value::as_str)
+    {
+        let preview = obj
+            .get("_malformed_arguments_preview")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let path = if intent.name == "propose_decision" {
+            "completion-note"
+        } else {
+            "malformed-tool-arguments"
+        };
+        return BrokerOutcome::Read(ReadRecord {
+            call_id: intent.id.clone(),
+            tool: intent.name.clone(),
+            path: path.to_owned(),
+            content: format!(
+                "warning: tool call to `{}` had malformed or truncated JSON arguments ({err}; preview: `{preview}`) and was not applied. If you still need to call `{}`, resend it with valid, smaller JSON arguments; if your task changes are already complete, reply now with a plain-text summary and NO tool calls.",
+                intent.name, intent.name
+            ),
+        });
+    }
+    warn_extra_tool_arguments(&intent.name, obj);
     match intent.name.as_str() {
         "read_file" => match authorize_read_file(component_root, intent, obj) {
             Ok(read) => BrokerOutcome::Read(read),
@@ -744,6 +768,10 @@ pub fn authoring_tool_definitions() -> Vec<ToolDefinition> {
                     "end_line": {
                         "type": "integer",
                         "description": "Optional 1-based last line to read (inclusive; defaults to start_line + 299)"
+                    },
+                    "search": {
+                        "type": "string",
+                        "description": "Optional substring to search for inside the file; returns matching lines with surrounding context and 1-based line numbers"
                     }
                 },
                 "required": ["path"],
@@ -1436,6 +1464,107 @@ fn check_edit_rust_brace_balance(
             ),
         }));
     }
+    if let Some((symbol, existing_line)) =
+        find_duplicate_rust_top_level_symbol(&existing, replacement, content)
+    {
+        return Some(BrokerOutcome::Read(ReadRecord {
+            call_id: intent.id.clone(),
+            tool: "edit_file".to_owned(),
+            path: rel.clone(),
+            content: format!(
+                "error: `edit_file` on `{rel}` was not applied because top-level item `{symbol}` is ALREADY defined in `{rel}` (around line {existing_line}). Do not add duplicate definitions; call `read_file` on `{rel}` with `start_line: {}` or `search: \"{symbol}\"` to inspect the existing implementation. If the required functionality is already in place, reply with a plain-text summary and NO tool calls.",
+                existing_line.saturating_sub(10).max(1)
+            ),
+        }));
+    }
+    None
+}
+
+fn warn_extra_tool_arguments(tool: &str, obj: &serde_json::Map<String, serde_json::Value>) {
+    let known: &[&str] = match tool {
+        "read_file" => &["path", "start_line", "end_line", "search"],
+        "list_files" => &["path"],
+        "write_file" => &["destination", "content"],
+        "edit_file" => &["destination", "replace", "content"],
+        "propose_decision" => &["summary", "why", "patch"],
+        "request_dependency" => &["name", "origin", "reason"],
+        _ => &[],
+    };
+    for (key, value) in obj {
+        if !known.contains(&key.as_str()) {
+            let mut preview = value.to_string();
+            if preview.len() > 160 {
+                preview.truncate(preview.floor_char_boundary(160));
+                preview.push_str("...");
+            }
+            tracing::warn!(
+                tool,
+                argument = %key,
+                value_preview = %preview,
+                "authoring tool call included an unrecognized argument field; ignoring extra field and continuing"
+            );
+        }
+    }
+}
+
+fn extract_top_level_rust_symbol(line: &str) -> Option<String> {
+    if line.starts_with(' ') || line.starts_with('\t') {
+        return None;
+    }
+    let mut rest = line.trim_start();
+    if let Some(after_pub) = rest.strip_prefix("pub ") {
+        rest = after_pub.trim_start();
+    } else if let Some(after_pub_crate) = rest.strip_prefix("pub(crate) ") {
+        rest = after_pub_crate.trim_start();
+    } else if let Some(after_pub_super) = rest.strip_prefix("pub(super) ") {
+        rest = after_pub_super.trim_start();
+    }
+    for kw in [
+        "async fn ",
+        "unsafe fn ",
+        "const fn ",
+        "fn ",
+        "struct ",
+        "enum ",
+    ] {
+        if let Some(after_kw) = rest.strip_prefix(kw) {
+            let ident: String = after_kw
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if !ident.is_empty() {
+                let kind = kw.split_whitespace().last().unwrap_or("item");
+                return Some(format!("{kind} {ident}"));
+            }
+        }
+    }
+    None
+}
+
+fn find_duplicate_rust_top_level_symbol(
+    existing: &str,
+    replacement: &str,
+    content: &str,
+) -> Option<(String, usize)> {
+    let replaced_symbols: std::collections::BTreeSet<String> = replacement
+        .lines()
+        .filter_map(extract_top_level_rust_symbol)
+        .collect();
+    let added_symbols: Vec<String> = content
+        .lines()
+        .filter_map(extract_top_level_rust_symbol)
+        .filter(|sym| !replaced_symbols.contains(sym))
+        .collect();
+    if added_symbols.is_empty() {
+        return None;
+    }
+    for (idx, line) in existing.lines().enumerate() {
+        if let Some(sym) = extract_top_level_rust_symbol(line)
+            && added_symbols.contains(&sym)
+        {
+            return Some((sym, idx + 1));
+        }
+    }
     None
 }
 
@@ -1594,6 +1723,56 @@ fn authorize_read_file(
             tool: "read_file".to_owned(),
             path: rel.clone(),
             content: format!("File: {rel} (empty, 0 lines)\n"),
+        });
+    }
+    if let Some(query) = obj
+        .get("search")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+    {
+        let mut match_lines = Vec::new();
+        for (idx, line) in lines.iter().enumerate() {
+            if line.contains(query) {
+                match_lines.push(idx + 1);
+            }
+        }
+        if match_lines.is_empty() {
+            return Ok(ReadRecord {
+                call_id: intent.id.clone(),
+                tool: "read_file".to_owned(),
+                path: rel.clone(),
+                content: format!(
+                    "File: {rel} ({total_lines} lines) — no occurrences of `{query}` found.\n"
+                ),
+            });
+        }
+        let mut out = format!(
+            "File: {rel} ({total_lines} lines) — found {} match(es) for `{query}` at line(s) {:?}:\n",
+            match_lines.len(),
+            match_lines
+        );
+        let mut printed_up_to = 0usize;
+        for &m in &match_lines {
+            let ctx_from = m.saturating_sub(8).max(1).max(printed_up_to + 1);
+            let ctx_to = (m + 12).min(total_lines);
+            if ctx_from > printed_up_to + 1 && printed_up_to > 0 {
+                out.push_str("   ...\n");
+            }
+            for line_no in ctx_from..=ctx_to {
+                let formatted = format!("{:>6}\t{}\n", line_no, lines[line_no - 1]);
+                if out.len().saturating_add(formatted.len()) > MAX_READ_SLICE_BYTES {
+                    break;
+                }
+                out.push_str(&formatted);
+                printed_up_to = line_no;
+            }
+        }
+        return Ok(ReadRecord {
+            call_id: intent.id.clone(),
+            tool: "read_file".to_owned(),
+            path: rel,
+            content: out,
         });
     }
     let from = start_line.min(total_lines);
@@ -2476,5 +2655,40 @@ mod tests {
         assert_eq!(internal_plan.decision_count(), 0);
         assert_eq!(internal_plan.reads.len(), 1);
         assert_eq!(internal_plan.reads[0].path, "auto-resolved-decision");
+
+        std::fs::write(
+            dir.path().join("src/cache.rs"),
+            "pub struct Staging;\n\npub fn promote() {}\n",
+        )
+        .unwrap();
+        let dup_edit = edit_intent(
+            "src/cache.rs",
+            "pub struct Staging;",
+            "pub struct Staging;\npub fn promote() {}",
+        );
+        let dup_plan = authorize_intents(dir.path(), &[dup_edit], &policy());
+        assert!(dup_plan.effects.is_empty());
+        assert_eq!(dup_plan.reads.len(), 1);
+        assert!(dup_plan.reads[0].content.contains("ALREADY defined"));
+
+        let search_read = intent(
+            "read_file",
+            serde_json::json!({ "path": "src/cache.rs", "search": "fn promote" }),
+        );
+        let search_plan = authorize_intents(dir.path(), &[search_read], &policy());
+        assert_eq!(search_plan.reads.len(), 1);
+        assert!(search_plan.reads[0].content.contains("found 1 match(es)"));
+
+        let malformed_arg_call = intent(
+            "edit_file",
+            serde_json::json!({
+                "_malformed_arguments_error": "EOF while parsing a string",
+                "_malformed_arguments_preview": "{\"destination\":\"src/cache.rs\""
+            }),
+        );
+        let malformed_plan = authorize_intents(dir.path(), &[malformed_arg_call], &policy());
+        assert_eq!(malformed_plan.dropped_count(), 0);
+        assert_eq!(malformed_plan.reads.len(), 1);
+        assert_eq!(malformed_plan.reads[0].path, "malformed-tool-arguments");
     }
 }
