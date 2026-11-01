@@ -662,37 +662,99 @@ fn execute_host_turn(
     // which the command embeds; the selector alone is not a model the gateway
     // recognizes (it returns 400). Fall back to the selector when the command
     // carries no such identifier.
-    complete_turn_counted(
-        || {
-            let deadline = budget.model_deadline(cancellation)?;
-            let transport = if let Some(native) = native {
-                native.transport_bounded(deadline, profile.max_output_bytes)?
-            } else {
-                DirectModelTransport::new(provider, &endpoint, deadline, profile.max_output_bytes)?
-            };
-            probe_gateway_reachable(&endpoint, budget, cancellation)?;
-            Ok(ObservedTransport {
-                transport,
-                live,
-                redactions,
-            })
-        },
-        &model_request,
-        request.stream_output,
-        redactions,
-        attempts,
-        &ModelRetry {
-            policy: model_retry_policy(native),
-            budget,
-            cancellation,
-            live: Some(live),
-            phase: "inference",
-            model: &choice.model,
-            endpoint: &endpoint,
+    let retry_policy = model_retry_policy(native);
+    let estimated_input = sav::runtime::context::estimate_request(&model_request);
+    let max_context_reserve = native
+        .and_then(|model| model.context_limit)
+        .map_or(1_048_576, |limit| {
+            limit.saturating_sub(estimated_input).min(1_048_576) as u32
+        });
+    let mut current_reserve = model_request.max_output_tokens.unwrap_or(1024);
+    loop {
+        model_request.max_output_tokens = Some(current_reserve);
+        let turn = complete_turn_counted(
+            || {
+                let deadline = budget.model_deadline(cancellation)?;
+                let transport = if let Some(native) = native {
+                    native.transport_bounded(deadline, profile.max_output_bytes)?
+                } else {
+                    DirectModelTransport::new(
+                        provider,
+                        &endpoint,
+                        deadline,
+                        profile.max_output_bytes,
+                    )?
+                };
+                probe_gateway_reachable(&endpoint, budget, cancellation)?;
+                Ok(ObservedTransport {
+                    transport,
+                    live,
+                    redactions,
+                })
+            },
+            &model_request,
+            request.stream_output,
             redactions,
-        },
-        tokens,
-    )
+            attempts,
+            &ModelRetry {
+                policy: retry_policy,
+                budget,
+                cancellation,
+                live: Some(live),
+                phase: "inference",
+                model: &choice.model,
+                endpoint: &endpoint,
+                redactions,
+            },
+            tokens,
+        )?;
+        if matches!(turn.finish_reason, sav::FinishReason::Length)
+            && *attempts < retry_policy.max_attempts
+            && !cancellation.is_cancelled()
+            && !budget.remaining().is_zero()
+        {
+            let next_reserve = current_reserve.saturating_mul(2).min(max_context_reserve);
+            let mut candidate = model_request.clone();
+            candidate.max_output_tokens = Some(next_reserve);
+            if next_reserve > current_reserve && tokens.preflight(&candidate).is_ok() {
+                let reasoning_bytes = turn.reasoning.as_ref().map_or(0, String::len);
+                live.record(
+                    &serde_json::json!({
+                        "type":"model_length_retry",
+                        "data":{
+                            "phase":"inference",
+                            "model":choice.model,
+                            "failed_attempt":*attempts,
+                            "next_attempt":*attempts + 1,
+                            "max_attempts":retry_policy.max_attempts,
+                            "previous_reserve":current_reserve,
+                            "next_reserve":next_reserve,
+                            "answer_bytes":turn.text.len(),
+                            "reasoning_bytes":reasoning_bytes,
+                        }
+                    }),
+                    true,
+                )?;
+                eprintln!(
+                    "{}",
+                    redact_bounded(
+                        &format!(
+                            "Model generation during inference for `{}` reached output token limit ({current_reserve} tokens, finish_reason=length, answer={} bytes, reasoning={reasoning_bytes} bytes); regenerating (attempt {}/{}) with {next_reserve} output tokens reserved.",
+                            choice.model,
+                            turn.text.len(),
+                            *attempts + 1,
+                            retry_policy.max_attempts,
+                        ),
+                        redactions,
+                        4096,
+                    )
+                );
+                current_reserve = next_reserve;
+                continue;
+            }
+        }
+        return Ok(turn);
+    }
 }
 
 fn model_retry_policy(native: Option<&sav::registry::NativeModel>) -> sav::runtime::RetryPolicy {

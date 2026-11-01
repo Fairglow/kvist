@@ -2102,3 +2102,77 @@ fn caller_deadline_and_cancellation_still_bound_heartbeat_streams() {
         );
     }
 }
+
+#[test]
+fn llama_server_stream_ignores_unsupported_sse_fields_and_continues() {
+    let records = [
+        "\u{feff}event: chat.completion.chunk\n",
+        "id: sse-event-123\n",
+        "retry: 3000\n",
+        "custom_field: {\"slot\":0}\n",
+        "bare_field_without_colon\n",
+        "event: ping\n",
+        "data: {}\n\n",
+        "data:\n\n",
+        "event: chat.completion.chunk\n",
+        "data: {\n",
+        "data: \"id\":\"chatcmpl-123\",\n",
+        "data: \"model\":\"server-model\",\n",
+        "data: \"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":\"stop\"}]\n",
+        "data: }\n\n",
+        "data: {\"timings\":{\"predicted_n\":1},\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":1,\"total_tokens\":5}}\n\n",
+        "event: done\n",
+        "data: [DONE]\n\n",
+    ];
+    let (endpoint, _) = serve_once(stream_response("text/event-stream", &records));
+    let mut events = Vec::new();
+    let turn = transport(LocalModelProvider::LlamaServer, &endpoint)
+        .stream(
+            &request(ToolChoice::None),
+            &CancellationToken::new(),
+            &mut |event| {
+                events.push(event);
+                Ok(())
+            },
+        )
+        .expect("support standard SSE fields, ignore unknown fields, and complete stream");
+    assert_eq!(turn.text, "Hello");
+    assert_eq!(turn.finish_reason, FinishReason::Stop);
+    assert_eq!(turn.response_id.as_deref(), Some("chatcmpl-123"));
+    assert_eq!(turn.provider_request_id.as_deref(), Some("sse-event-123"));
+    assert_eq!(
+        turn.usage.expect("usage from timings chunk").total_tokens,
+        5
+    );
+    assert_eq!(events, [ModelStreamEvent::TextDelta("Hello".to_owned())]);
+
+    let (endpoint, _) = serve_once(stream_response(
+        "text/event-stream",
+        &[
+            "event: error\n",
+            "data: {\"message\":\"failed\"}\n\n",
+            "data: [DONE]\n\n",
+        ],
+    ));
+    let error = transport(LocalModelProvider::LlamaServer, &endpoint)
+        .stream(
+            &request(ToolChoice::None),
+            &CancellationToken::new(),
+            &mut |_| Ok(()),
+        )
+        .expect_err("SSE error event must fail closed");
+    assert!(matches!(error, Error::MalformedModelResponse { .. }));
+
+    let (endpoint, _) = serve_once(stream_response(
+        "text/event-stream",
+        &["event: error\n", "custom: value\n\n"],
+    ));
+    let error = transport(LocalModelProvider::LlamaServer, &endpoint)
+        .stream(
+            &request(ToolChoice::None),
+            &CancellationToken::new(),
+            &mut |_| Ok(()),
+        )
+        .expect_err("stream without terminal [DONE] still fails closed");
+    assert!(matches!(error, Error::MalformedModelResponse { .. }));
+}

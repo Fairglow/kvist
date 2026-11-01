@@ -97,6 +97,9 @@ struct OpenAiStreamState {
     finish_reason: Option<FinishReason>,
     model: Option<String>,
     request_id: Option<String>,
+    event_id: Option<String>,
+    current_event: Option<String>,
+    pending_data: String,
     usage: Option<ModelUsage>,
 }
 
@@ -1758,6 +1761,9 @@ impl StreamDecoder {
                 finish_reason: None,
                 model: None,
                 request_id: None,
+                event_id: None,
+                current_event: None,
+                pending_data: String::new(),
                 usage: None,
             }),
             LocalModelProvider::Ollama => StreamState::Ollama(OllamaStreamState {
@@ -1862,13 +1868,134 @@ impl OpenAiStreamState {
         line: &str,
         on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
     ) -> Result<bool> {
-        if line.is_empty() || line.starts_with(':') {
+        let line = line.strip_prefix('\u{feff}').unwrap_or(line);
+        if line.is_empty() {
+            let progress = if !self.pending_data.is_empty() {
+                let data = std::mem::take(&mut self.pending_data);
+                self.process_data_payload(&data, on_event)?
+            } else {
+                false
+            };
+            self.current_event = None;
+            return Ok(progress);
+        }
+        if line.starts_with(':') {
             return Ok(false);
         }
-        let Some(data) = line.strip_prefix("data:") else {
-            return malformed("SSE record contains an unsupported field");
+        let (field, raw_value) = match line.split_once(':') {
+            Some((field, value)) => (field, value.strip_prefix(' ').unwrap_or(value)),
+            None => (line, ""),
         };
-        let data = data.strip_prefix(' ').unwrap_or(data);
+        match field {
+            "data" => {
+                if self.pending_data.is_empty() {
+                    if raw_value == "[DONE]" {
+                        self.terminal = true;
+                        return Ok(false);
+                    }
+                    if self.terminal {
+                        return malformed("SSE data followed terminal marker");
+                    }
+                    if raw_value.trim().is_empty() {
+                        return Ok(false);
+                    }
+                    if serde_json::from_slice::<Value>(raw_value.as_bytes()).is_ok() {
+                        return self.process_data_payload(raw_value, on_event);
+                    }
+                } else {
+                    self.pending_data.push('\n');
+                }
+                if self.pending_data.len().saturating_add(raw_value.len()) > MAX_RECORD_BYTES {
+                    return Err(Error::ModelResponseLimitExceeded {
+                        max_bytes: MAX_RECORD_BYTES,
+                    });
+                }
+                self.pending_data.push_str(raw_value);
+                Ok(false)
+            }
+            "event" => {
+                let event_name = raw_value.trim();
+                if event_name.is_empty()
+                    || event_name.len() > 128
+                    || event_name.chars().any(char::is_control)
+                {
+                    let value = sanitize_sse_diagnostic(raw_value, 256);
+                    tracing::warn!(
+                        value = %value,
+                        "ignoring malformed SSE event name in streaming model response"
+                    );
+                    eprintln!(
+                        "Warning: ignoring malformed SSE `event` value `{value}` in streaming model response."
+                    );
+                    return Ok(false);
+                }
+                if !matches!(
+                    event_name,
+                    "message"
+                        | "chat.completion.chunk"
+                        | "completion"
+                        | "ping"
+                        | "done"
+                        | "error"
+                        | "content_block_delta"
+                ) {
+                    let value = sanitize_sse_diagnostic(event_name, 128);
+                    tracing::warn!(
+                        event = %value,
+                        "observing non-standard SSE event type in streaming model response"
+                    );
+                }
+                self.current_event = Some(event_name.to_owned());
+                Ok(false)
+            }
+            "id" => {
+                if !raw_value.contains('\0')
+                    && !raw_value.trim().is_empty()
+                    && raw_value.len() <= 256
+                    && !raw_value.chars().any(char::is_control)
+                {
+                    self.event_id = Some(raw_value.to_owned());
+                }
+                Ok(false)
+            }
+            "retry" => {
+                if raw_value.is_empty() || !raw_value.bytes().all(|byte| byte.is_ascii_digit()) {
+                    let value = sanitize_sse_diagnostic(raw_value, 256);
+                    tracing::warn!(
+                        value = %value,
+                        "ignoring non-numeric SSE retry field in streaming model response"
+                    );
+                    eprintln!(
+                        "Warning: ignoring non-numeric SSE `retry` value `{value}` in streaming model response."
+                    );
+                }
+                Ok(false)
+            }
+            _ => {
+                let field = sanitize_sse_diagnostic(field, 64);
+                let value = sanitize_sse_diagnostic(raw_value, 256);
+                tracing::warn!(
+                    field = %field,
+                    value = %value,
+                    "ignoring unsupported SSE field in streaming model response"
+                );
+                eprintln!(
+                    "Warning: ignoring unsupported SSE field `{field}` with value `{value}` in streaming model response."
+                );
+                Ok(false)
+            }
+        }
+    }
+
+    fn process_data_payload(
+        &mut self,
+        data: &str,
+        on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
+    ) -> Result<bool> {
+        let data = data.trim();
+        if data.is_empty() {
+            return Ok(false);
+        }
         if data == "[DONE]" {
             self.terminal = true;
             return Ok(false);
@@ -1876,8 +2003,17 @@ impl OpenAiStreamState {
         if self.terminal {
             return malformed("SSE data followed terminal marker");
         }
+        if self.current_event.as_deref() == Some("error") {
+            return malformed("SSE stream reported an error event");
+        }
+        if self.current_event.as_deref() == Some("ping") && (data == "{}" || data == "null") {
+            return Ok(false);
+        }
 
         let chunk = parse_json(data.as_bytes())?;
+        if chunk.get("error").is_some() {
+            return malformed("streaming response reported a provider error");
+        }
         self.model = optional_bounded_string(chunk.get("model"), "model identity", 256)?
             .or(self.model.take());
         self.request_id = optional_bounded_string(chunk.get("id"), "request identity", 256)?
@@ -1885,12 +2021,21 @@ impl OpenAiStreamState {
         if let Some(usage) = parse_openai_usage(chunk.get("usage"))? {
             self.usage = Some(usage);
         }
-        let choices = chunk
-            .get("choices")
-            .and_then(Value::as_array)
-            .ok_or_else(|| Error::MalformedModelResponse {
-                reason: "streaming response has no choices array".to_owned(),
-            })?;
+        let choices = match chunk.get("choices") {
+            Some(Value::Array(choices)) => choices.as_slice(),
+            None | Some(Value::Null)
+                if chunk.get("usage").is_some()
+                    || chunk.get("timings").is_some()
+                    || self.current_event.as_deref() == Some("ping") =>
+            {
+                &[]
+            }
+            _ => {
+                return Err(Error::MalformedModelResponse {
+                    reason: "streaming response has no choices array".to_owned(),
+                });
+            }
+        };
         let mut progress = false;
         for choice in choices {
             if let Some(reason) = choice.get("finish_reason").filter(|value| !value.is_null()) {
@@ -1917,7 +2062,14 @@ impl OpenAiStreamState {
         Ok(progress)
     }
 
-    fn finish(self, on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>) -> Result<ModelTurn> {
+    fn finish(
+        mut self,
+        on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
+    ) -> Result<ModelTurn> {
+        if !self.pending_data.is_empty() {
+            let data = std::mem::take(&mut self.pending_data);
+            self.process_data_payload(&data, on_event)?;
+        }
         if !self.terminal {
             return malformed("stream ended without terminal record");
         }
@@ -1925,6 +2077,10 @@ impl OpenAiStreamState {
         for intent in &tool_intents {
             on_event(ModelStreamEvent::ToolIntent(intent.clone()))?;
         }
+        let response_id = self.request_id.or(self.event_id.clone());
+        let provider_request_id = self
+            .event_id
+            .filter(|event_id| response_id.as_ref() != Some(event_id));
         Ok(ModelTurn {
             text: self.text,
             reasoning: (!self.reasoning.is_empty()).then_some(self.reasoning),
@@ -1934,8 +2090,8 @@ impl OpenAiStreamState {
             tool_intents,
             provider: LocalModelProvider::LlamaServer,
             model: self.model.unwrap_or(self.requested_model),
-            response_id: self.request_id,
-            provider_request_id: None,
+            response_id,
+            provider_request_id,
             usage: self.usage,
         })
     }
@@ -2023,6 +2179,22 @@ fn parse_json(body: &[u8]) -> Result<Value> {
     serde_json::from_slice(body).map_err(|_| Error::MalformedModelResponse {
         reason: "provider returned invalid JSON".to_owned(),
     })
+}
+
+fn sanitize_sse_diagnostic(input: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for (count, ch) in input.chars().enumerate() {
+        if count >= max_chars {
+            out.push_str("...");
+            break;
+        }
+        if ch.is_control() {
+            out.extend(ch.escape_default());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn optional_string(value: Option<&Value>, label: &str) -> Result<String> {

@@ -124,7 +124,9 @@ impl<T: ModelTransport> ObservedTransport<'_, T> {
             Ok(turn) => self.live.record(
                 &json!({"type":"model_result","data":{
                     "model":turn.model,"text":redact_bounded(&turn.text,self.redactions,8192),
-                    "text_truncated":turn.text.len()>8192,"finish_reason":turn.finish_reason,
+                    "text_truncated":turn.text.len()>8192,
+                    "reasoning_bytes":turn.reasoning.as_ref().map_or(0, String::len),
+                    "finish_reason":turn.finish_reason,
                     "tool_count":turn.tool_intents.len(),"usage":turn.usage
                 }}),
                 false,
