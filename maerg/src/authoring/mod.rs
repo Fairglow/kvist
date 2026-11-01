@@ -56,6 +56,8 @@ use sha2::{Digest, Sha256};
 /// *not* supplied by agents: every model proposes arbitrary tool calls, and only
 /// these names are ever authorized.
 pub const ALLOWED_TOOLS: &[&str] = &[
+    "read_file",
+    "list_files",
     "write_file",
     "edit_file",
     "propose_decision",
@@ -181,11 +183,26 @@ pub struct DependencyRequest {
     pub reason: Option<String>,
 }
 
+/// A bounded, read-only file or directory inspection performed on the host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadRecord {
+    /// Turn-local call identity, echoed from the model intent.
+    pub call_id: String,
+    /// Authorized read tool name (`read_file` or `list_files`).
+    pub tool: String,
+    /// Normalized component-relative path inspected.
+    pub path: String,
+    /// Bounded UTF-8 result returned to the model.
+    pub content: String,
+}
+
 /// The class of a brokered turn outcome. A single funnel routes every intent to
 /// exactly one of these; the broker is total and infallible, so no untrusted
 /// intent can panic, wedge, or silently vanish.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BrokerOutcome {
+    /// A bounded, read-only inspection of component files.
+    Read(ReadRecord),
     /// An authorized write effect.
     Effect(CheckedIntent),
     /// A decision worthy of human intervention.
@@ -199,6 +216,9 @@ pub enum BrokerOutcome {
 /// The brokered result of authoring every intent from one model turn.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthoringPlan {
+    /// Bounded read-only inspections, in proposal order.
+    #[serde(default)]
+    pub reads: Vec<ReadRecord>,
     /// Authorized, capability-bound effects, in proposal order.
     pub effects: Vec<CheckedIntent>,
     /// Surfaced decisions, in proposal order, for durable evidence.
@@ -335,6 +355,7 @@ pub fn authorize_intents(
     let mut plan = AuthoringPlan::default();
     for intent in intents {
         match classify_intent(component_root, intent, policy) {
+            BrokerOutcome::Read(read) => plan.reads.push(read),
             BrokerOutcome::Effect(checked) => plan.effects.push(checked),
             BrokerOutcome::Decision(decision) => plan.decisions.push(decision),
             BrokerOutcome::Request(request) => plan.dependency_requests.push(request),
@@ -391,14 +412,32 @@ fn classify_intent(
         ));
     };
     match intent.name.as_str() {
-        "write_file" => match authorize_write(component_root, intent, obj, policy) {
-            Ok(effect) => BrokerOutcome::Effect(effect),
+        "read_file" => match authorize_read_file(component_root, intent, obj) {
+            Ok(read) => BrokerOutcome::Read(read),
             Err(reason) => BrokerOutcome::Drop(reason),
         },
-        "edit_file" => match authorize_edit(component_root, intent, obj, policy) {
-            Ok(effect) => BrokerOutcome::Effect(effect),
+        "list_files" => match authorize_list_files(component_root, intent, obj) {
+            Ok(read) => BrokerOutcome::Read(read),
             Err(reason) => BrokerOutcome::Drop(reason),
         },
+        "write_file" => {
+            if let Some(decision) = check_manifest_decision(intent, obj) {
+                return BrokerOutcome::Decision(decision);
+            }
+            match authorize_write(component_root, intent, obj, policy) {
+                Ok(effect) => BrokerOutcome::Effect(effect),
+                Err(reason) => BrokerOutcome::Drop(reason),
+            }
+        }
+        "edit_file" => {
+            if let Some(decision) = check_manifest_decision(intent, obj) {
+                return BrokerOutcome::Decision(decision);
+            }
+            match authorize_edit(component_root, intent, obj, policy) {
+                Ok(effect) => BrokerOutcome::Effect(effect),
+                Err(reason) => BrokerOutcome::Drop(reason),
+            }
+        }
         "propose_decision" => match classify_propose(intent, obj) {
             Ok(decision) => BrokerOutcome::Decision(decision),
             Err(reason) => BrokerOutcome::Drop(reason),
@@ -633,6 +672,49 @@ fn classify_dependency(
 /// intent the broker must drop on a shape error.
 pub fn authoring_tool_definitions() -> Vec<ToolDefinition> {
     vec![
+        ToolDefinition {
+            name: "read_file".to_owned(),
+            description:
+                "Read a file in the component (such as Cargo.toml, src/..., or tests/...) \
+             with 1-based line numbers. Always read existing files before modifying them so you \
+             preserve existing code."
+                    .to_owned(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Component-relative file path to read (for example Cargo.toml, src/lib.rs, or tests/conformance.rs)"
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Optional 1-based first line to read (defaults to 1)"
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Optional 1-based last line to read (inclusive; defaults to start_line + 299)"
+                    }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "list_files".to_owned(),
+            description: "List existing files and directories inside the component (excluding \
+             .kvist, .git, and target). Call this first to discover existing source and test files."
+                .to_owned(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Optional component-relative directory path to list (defaults to \".\")"
+                    }
+                },
+                "additionalProperties": false
+            }),
+        },
         ToolDefinition {
             name: "write_file".to_owned(),
             description: "Create or overwrite a single file under src/ or tests/ with \
@@ -1027,6 +1109,295 @@ fn authorize_edit(
         content_bytes: byte_len,
         purpose: format!("authoring: {}", intent.id),
     })
+}
+
+const EXCLUDED_READ_DIRS: &[&str] = &[".git", ".kvist", ".kvist-attempts", "target"];
+const MAX_READ_SLICE_BYTES: usize = 64 * 1024;
+const DEFAULT_READ_LINES: usize = 300;
+const MAX_LIST_ENTRIES: usize = 512;
+const MAX_LIST_DEPTH: usize = 8;
+
+fn check_manifest_decision(
+    intent: &ToolIntent,
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Option<ProposedDecision> {
+    let destination = obj.get("destination").and_then(serde_json::Value::as_str)?;
+    let normalized = destination.trim().trim_start_matches("./");
+    if normalized != "Cargo.toml" {
+        return None;
+    }
+    let content = obj
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let replace = obj.get("replace").and_then(serde_json::Value::as_str);
+    let mut patch = match replace {
+        Some(before) => {
+            format!("--- Cargo.toml (replace)\n{before}\n+++ Cargo.toml (with)\n{content}")
+        }
+        None => content.to_owned(),
+    };
+    if patch.len() > MAX_PATCH_BYTES {
+        patch.truncate(patch.floor_char_boundary(MAX_PATCH_BYTES));
+    }
+    Some(ProposedDecision {
+        call_id: intent.id.clone(),
+        summary: "Proposed modification to component Cargo.toml".to_owned(),
+        why: "The agent proposed modifying `Cargo.toml`, which is outside the automatic `src/` and `tests/` write scope because manifest and dependency changes require human review. Inspect the proposed `Cargo.toml` change and decide whether to approve it or redirect the task.".to_owned(),
+        patch: (!patch.is_empty()).then_some(patch),
+    })
+}
+
+fn resolve_safe_read_path(
+    component_root: &Path,
+    raw_path: &str,
+    allow_root: bool,
+) -> Result<(PathBuf, String), String> {
+    let trimmed = raw_path.trim();
+    if trimmed.is_empty() {
+        return Err("path must be non-empty".to_owned());
+    }
+    if Path::new(trimmed).is_absolute() {
+        return Err(format!(
+            "path `{trimmed}` must be relative to the component"
+        ));
+    }
+    let mut resolved = PathBuf::from(component_root);
+    let mut rel_parts = Vec::new();
+    for component in Path::new(trimmed).components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => {
+                let name = part
+                    .to_str()
+                    .ok_or_else(|| "path must be valid UTF-8".to_owned())?;
+                if EXCLUDED_READ_DIRS.contains(&name) {
+                    return Err(format!(
+                        "path `{trimmed}` accesses excluded directory `{name}`"
+                    ));
+                }
+                resolved.push(part);
+                rel_parts.push(name.to_owned());
+                if rel_parts.len() > MAX_DESTINATION_DEPTH {
+                    return Err(format!(
+                        "path `{trimmed}` exceeds the {MAX_DESTINATION_DEPTH}-depth bound"
+                    ));
+                }
+                if let Ok(metadata) = fs::symlink_metadata(&resolved)
+                    && metadata.file_type().is_symlink()
+                {
+                    return Err(format!("path `{trimmed}` traverses a symbolic link"));
+                }
+            }
+            Component::ParentDir => {
+                return Err(format!("path `{trimmed}` must not contain `..`"));
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "path `{trimmed}` must be relative to the component"
+                ));
+            }
+        }
+    }
+    if rel_parts.is_empty() && !allow_root {
+        return Err("path must name a file inside the component".to_owned());
+    }
+    let rel = if rel_parts.is_empty() {
+        ".".to_owned()
+    } else {
+        rel_parts.join("/")
+    };
+    Ok((resolved, rel))
+}
+
+fn authorize_read_file(
+    component_root: &Path,
+    intent: &ToolIntent,
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<ReadRecord, String> {
+    let raw_path = string_arg(obj, "path", false)?;
+    let (resolved, rel) = resolve_safe_read_path(component_root, &raw_path, false)?;
+    let start_line = obj
+        .get("start_line")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1)
+        .max(1) as usize;
+    let end_line = obj
+        .get("end_line")
+        .and_then(serde_json::Value::as_u64)
+        .map(|line| (line as usize).max(start_line))
+        .unwrap_or_else(|| start_line.saturating_add(DEFAULT_READ_LINES - 1));
+
+    let metadata = match fs::symlink_metadata(&resolved) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ReadRecord {
+                call_id: intent.id.clone(),
+                tool: "read_file".to_owned(),
+                path: rel.clone(),
+                content: format!(
+                    "error: file `{rel}` does not exist; call `list_files` to see existing files."
+                ),
+            });
+        }
+        Err(error) => {
+            return Err(format!("cannot inspect `{rel}`: {error}"));
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(format!("path `{rel}` is a symbolic link"));
+    }
+    if !metadata.is_file() {
+        return Ok(ReadRecord {
+            call_id: intent.id.clone(),
+            tool: "read_file".to_owned(),
+            path: rel.clone(),
+            content: format!(
+                "error: `{rel}` is a directory, not a regular file; use `list_files`."
+            ),
+        });
+    }
+    if metadata.len() > MAX_CONTENT_BYTES as u64 {
+        return Err(format!(
+            "file `{rel}` exceeds the {MAX_CONTENT_BYTES}-byte read bound"
+        ));
+    }
+    let text = fs::read_to_string(&resolved)
+        .map_err(|error| format!("file `{rel}` could not be read as UTF-8: {error}"))?;
+    let lines: Vec<&str> = text.lines().collect();
+    let total_lines = lines.len();
+    if total_lines == 0 {
+        return Ok(ReadRecord {
+            call_id: intent.id.clone(),
+            tool: "read_file".to_owned(),
+            path: rel.clone(),
+            content: format!("File: {rel} (empty, 0 lines)\n"),
+        });
+    }
+    let from = start_line.min(total_lines);
+    let to = end_line.min(total_lines);
+    let mut output = String::new();
+    let mut last_included = from;
+    for (idx, line) in lines.iter().enumerate().skip(from - 1).take(to - from + 1) {
+        let formatted = format!("{:>6}\t{line}\n", idx + 1);
+        if output.len().saturating_add(formatted.len()) > MAX_READ_SLICE_BYTES {
+            break;
+        }
+        output.push_str(&formatted);
+        last_included = idx + 1;
+    }
+    let mut header =
+        format!("File: {rel} (showing lines {from}..={last_included} of {total_lines})");
+    if last_included < total_lines {
+        header.push_str(&format!(
+            " — call read_file with start_line={} to read more",
+            last_included + 1
+        ));
+    }
+    header.push('\n');
+    header.push_str(&output);
+    Ok(ReadRecord {
+        call_id: intent.id.clone(),
+        tool: "read_file".to_owned(),
+        path: rel,
+        content: header,
+    })
+}
+
+fn authorize_list_files(
+    component_root: &Path,
+    intent: &ToolIntent,
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<ReadRecord, String> {
+    let raw_path = obj
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(".");
+    let (resolved, rel) = resolve_safe_read_path(component_root, raw_path, true)?;
+    let metadata = match fs::symlink_metadata(&resolved) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ReadRecord {
+                call_id: intent.id.clone(),
+                tool: "list_files".to_owned(),
+                path: rel.clone(),
+                content: format!("error: directory `{rel}` does not exist."),
+            });
+        }
+        Err(error) => return Err(format!("cannot inspect `{rel}`: {error}")),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(format!("path `{rel}` is a symbolic link"));
+    }
+    if !metadata.is_dir() {
+        return Ok(ReadRecord {
+            call_id: intent.id.clone(),
+            tool: "list_files".to_owned(),
+            path: rel.clone(),
+            content: format!(
+                "`{rel}` is a file ({} bytes); use `read_file` to read it.",
+                metadata.len()
+            ),
+        });
+    }
+    let mut entries = Vec::new();
+    collect_directory_entries(component_root, &resolved, 0, &mut entries)?;
+    let mut output = format!(
+        "Directory listing for `{rel}` ({} entries):\n",
+        entries.len()
+    );
+    for entry in entries {
+        output.push_str(&entry);
+        output.push('\n');
+    }
+    Ok(ReadRecord {
+        call_id: intent.id.clone(),
+        tool: "list_files".to_owned(),
+        path: rel,
+        content: output,
+    })
+}
+
+fn collect_directory_entries(
+    component_root: &Path,
+    dir: &Path,
+    depth: usize,
+    out: &mut Vec<String>,
+) -> Result<(), String> {
+    if depth >= MAX_LIST_DEPTH || out.len() >= MAX_LIST_ENTRIES {
+        return Ok(());
+    }
+    let read_dir = fs::read_dir(dir).map_err(|error| format!("cannot read directory: {error}"))?;
+    let mut children: Vec<PathBuf> = read_dir
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .collect();
+    children.sort();
+    for child in children {
+        if out.len() >= MAX_LIST_ENTRIES {
+            break;
+        }
+        let Some(name) = child.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if EXCLUDED_READ_DIRS.contains(&name) {
+            continue;
+        }
+        let Ok(metadata) = fs::symlink_metadata(&child) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        let rel = normalized_relative(component_root, &child);
+        if metadata.is_dir() {
+            out.push(format!("{rel}/"));
+            collect_directory_entries(component_root, &child, depth + 1, out)?;
+        } else if metadata.is_file() {
+            out.push(format!("{rel} ({} bytes)", metadata.len()));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1644,9 +2015,55 @@ mod tests {
             .into_iter()
             .map(|tool| tool.name)
             .collect();
+        assert!(names.contains(&"read_file".to_owned()));
+        assert!(names.contains(&"list_files".to_owned()));
         assert!(names.contains(&"write_file".to_owned()));
         assert!(names.contains(&"edit_file".to_owned()));
         assert!(names.contains(&"propose_decision".to_owned()));
         assert!(names.contains(&"request_dependency".to_owned()));
+    }
+
+    #[test]
+    fn read_file_and_list_files_inspect_component_and_exclude_protected_state_dirs() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".kvist")).unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"galla\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), "pub mod cache;\n").unwrap();
+        std::fs::write(dir.path().join(".kvist/secret"), "hidden").unwrap();
+
+        let list = intent("list_files", serde_json::json!({}));
+        let read_cargo = intent(
+            "read_file",
+            serde_json::json!({ "path": "Cargo.toml", "start_line": 1, "end_line": 10 }),
+        );
+        let read_secret = intent("read_file", serde_json::json!({ "path": ".kvist/secret" }));
+        let plan = authorize_intents(dir.path(), &[list, read_cargo, read_secret], &policy());
+        assert_eq!(plan.reads.len(), 2);
+        assert!(plan.reads[0].content.contains("Cargo.toml"));
+        assert!(plan.reads[0].content.contains("src/lib.rs"));
+        assert!(!plan.reads[0].content.contains(".kvist"));
+        assert!(plan.reads[1].content.contains("name = \"galla\""));
+        assert_eq!(plan.dropped_count(), 1);
+        assert!(plan.dropped[0].reason.contains("excluded directory"));
+    }
+
+    #[test]
+    fn cargo_toml_write_or_edit_surfaces_a_decision_instead_of_dropping() {
+        let dir = tempdir().unwrap();
+        let write_cargo = write_intent("Cargo.toml", "[package]\nname = \"galla\"\n");
+        let plan = authorize_intents(dir.path(), &[write_cargo], &policy());
+        assert_eq!(plan.decision_count(), 1);
+        assert_eq!(plan.dropped_count(), 0);
+        assert!(plan.effects.is_empty());
+        assert!(plan.decisions[0].summary.contains("Cargo.toml"));
+        assert_eq!(
+            plan.decisions[0].patch.as_deref(),
+            Some("[package]\nname = \"galla\"\n")
+        );
     }
 }

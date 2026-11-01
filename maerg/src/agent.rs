@@ -38,7 +38,7 @@ use crate::{
     KvistError, Result,
     authoring::{
         self, AuthoringPlan, BrokerPolicy, CheckedIntent, DependencyRequest, DroppedIntent,
-        ProposedDecision,
+        ProposedDecision, ReadRecord,
     },
     config::{AgentProfile, SandboxConfig, VcsSelection},
     sandbox,
@@ -110,6 +110,8 @@ pub fn split_command(
 struct RunTurn {
     /// The untrusted model turn.
     turn: ModelTurn,
+    /// Bounded read-only inspections performed on this turn.
+    reads: Vec<ReadRecord>,
     /// Authorized effects applied for this turn.
     effects: Vec<EffectRecord>,
     /// Brokered intents the model proposed that were not authorized.
@@ -1352,6 +1354,7 @@ fn execute_agent_inner(
             if let Ok(turn) = &generated {
                 run_turns.push(RunTurn {
                     turn: turn.clone(),
+                    reads: vec![],
                     effects: vec![],
                     drops: vec![],
                     surfaced_decisions: vec![],
@@ -1410,6 +1413,7 @@ fn execute_agent_inner(
                 authoring::authorize_turn(request.target_dir, &turn, &BrokerPolicy::default());
             run_turns[turn_index].drops = plan.dropped.clone();
             live.record(&serde_json::json!({"type":"broker_decision","data":{
+            "reads":plan.reads.len(),
             "authorized_effects":plan.effects.len(),"denied_intents":plan.dropped.len(),
             "decisions":plan.decisions.len(),"dependency_requests":plan.dependency_requests.len()
         }}), true)?;
@@ -1511,9 +1515,45 @@ fn execute_agent_inner(
                 }));
             }
 
-            // No intents at all: the model produced a final answer rather than
-            // another action. Complete the run.
+            // 3b. Deliver bounded, read-only inspections back to the model context.
+            for read in &plan.reads {
+                live.record(
+                    &serde_json::json!({"type":"tool_dispatch","data":{
+                        "call_id":read.call_id,"name":read.tool
+                    }}),
+                    true,
+                )?;
+                let redacted_content = redact_bounded(&read.content, &redactions, 65536);
+                conversation.record_tool_result(
+                    &read.call_id,
+                    &read.tool,
+                    &sav::runtime::ToolOutcome {
+                        exited: true,
+                        status: Some(0),
+                        stdout: redacted_content.into_bytes(),
+                        stderr: vec![],
+                        timed_out: false,
+                        output_limit_exceeded: false,
+                        cancelled: false,
+                    },
+                );
+                run_turns[turn_index].reads.push(read.clone());
+                live.record(
+                    &serde_json::json!({"type":"tool_result","data":{
+                        "call_id":read.call_id,"name":read.tool,"applied":true,
+                        "uncertain":false,"timed_out":false,"output_limit_exceeded":false
+                    }}),
+                    true,
+                )?;
+            }
+
+            // No write effects: if reads or dependency requests occurred, continue
+            // the conversation so the model can act on those results; otherwise
+            // the model produced a final answer and the run completes.
             if plan.effects.is_empty() {
+                if !plan.reads.is_empty() || !accepted_requests.is_empty() {
+                    continue;
+                }
                 if !controls.finish_if_idle()? {
                     steering.skip_calls(turn.tool_intents.iter(), &[], &mut conversation)?;
                     continue;
@@ -1694,6 +1734,10 @@ fn record_turn_outcome(
     // The final turn is the run's answer; the earlier turns are the steps that
     // led to it. Aggregate effects and dropped intents across the whole run so
     // the evidence is complete regardless of which turn produced them.
+    let all_reads: Vec<ReadRecord> = run_turns
+        .iter()
+        .flat_map(|run_turn| run_turn.reads.iter().cloned())
+        .collect();
     let all_effects: Vec<EffectRecord> = run_turns
         .iter()
         .flat_map(|run_turn| run_turn.effects.iter().cloned())
@@ -1785,8 +1829,16 @@ fn record_turn_outcome(
             }
         }
     }
-    if !all_effects.is_empty() || !all_dropped.is_empty() {
+    if !all_reads.is_empty() || !all_effects.is_empty() || !all_dropped.is_empty() {
         log.push_str("\n--- authoring broker ---\n");
+        for read in &all_reads {
+            log.push_str(&format!(
+                "read {} -> {} ({} bytes)\n",
+                read.tool,
+                read.path,
+                read.content.len()
+            ));
+        }
         for record in &all_effects {
             if record.applied {
                 log.push_str(&format!(
@@ -1887,6 +1939,28 @@ fn record_turn_outcome(
             new_tokens,
             eval_duration_ms: None,
         })?;
+        for read in &run_turn.reads {
+            let args = serde_json::json!({ "path": redact(&read.path, redactions) });
+            let tool = redact(&read.tool, redactions);
+            let call_id = redact(&read.call_id, redactions);
+            recorder.record_event(&sav::TrajectoryEvent::ToolDispatch {
+                turn: turn_number,
+                call_id: call_id.clone(),
+                tool: tool.clone(),
+                args: args.clone(),
+                action_hash: sav::compute_action_hash(&tool, &args),
+            })?;
+            recorder.record_event(&sav::TrajectoryEvent::ToolResult {
+                turn: turn_number,
+                call_id,
+                tool,
+                stdout: redact_bounded(&read.content, redactions, profile.max_output_bytes),
+                stderr: String::new(),
+                exit_code: 0,
+                bytes: read.content.len(),
+                state_mutated: false,
+            })?;
+        }
         for record in &run_turn.effects {
             let args =
                 serde_json::json!({ "destination": redact(&record.destination, redactions) });

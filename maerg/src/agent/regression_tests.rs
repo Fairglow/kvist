@@ -270,6 +270,7 @@ fn partial_effects_and_usage_survive_cancellation_and_later_dispatch_failure() {
         assert_eq!(plan.effects.len(), 2);
         let mut retained = RunTurn {
             turn,
+            reads: vec![],
             effects: vec![],
             drops: vec![],
             surfaced_decisions: vec![],
@@ -441,6 +442,7 @@ fn outcome_reports_known_cumulative_usage_without_treating_missing_reports_as_ze
         turn.finish_reason = sav::FinishReason::Stop;
         turns.push(RunTurn {
             turn,
+            reads: vec![],
             effects: vec![],
             drops: vec![],
             surfaced_decisions: vec![],
