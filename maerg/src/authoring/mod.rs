@@ -421,8 +421,13 @@ fn classify_intent(
             Err(reason) => BrokerOutcome::Drop(reason),
         },
         "write_file" => {
-            if let Some(decision) = check_manifest_decision(intent, obj) {
-                return BrokerOutcome::Decision(decision);
+            if let Some(outcome) = check_manifest_decision(component_root, intent, obj) {
+                return outcome;
+            }
+            if let Some(noop_or_guard) =
+                check_write_noop_or_destructive_overwrite(component_root, intent, obj)
+            {
+                return noop_or_guard;
             }
             match authorize_write(component_root, intent, obj, policy) {
                 Ok(effect) => BrokerOutcome::Effect(effect),
@@ -430,8 +435,8 @@ fn classify_intent(
             }
         }
         "edit_file" => {
-            if let Some(decision) = check_manifest_decision(intent, obj) {
-                return BrokerOutcome::Decision(decision);
+            if let Some(outcome) = check_manifest_decision(component_root, intent, obj) {
+                return outcome;
             }
             match authorize_edit(component_root, intent, obj, policy) {
                 Ok(effect) => BrokerOutcome::Effect(effect),
@@ -1118,9 +1123,10 @@ const MAX_LIST_ENTRIES: usize = 512;
 const MAX_LIST_DEPTH: usize = 8;
 
 fn check_manifest_decision(
+    component_root: &Path,
     intent: &ToolIntent,
     obj: &serde_json::Map<String, serde_json::Value>,
-) -> Option<ProposedDecision> {
+) -> Option<BrokerOutcome> {
     let destination = obj.get("destination").and_then(serde_json::Value::as_str)?;
     let normalized = destination.trim().trim_start_matches("./");
     if normalized != "Cargo.toml" {
@@ -1131,21 +1137,120 @@ fn check_manifest_decision(
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     let replace = obj.get("replace").and_then(serde_json::Value::as_str);
-    let mut patch = match replace {
+    let existing = fs::read_to_string(component_root.join("Cargo.toml")).unwrap_or_default();
+    let proposed = match replace {
         Some(before) => {
-            format!("--- Cargo.toml (replace)\n{before}\n+++ Cargo.toml (with)\n{content}")
+            if let Some(replaced) = replace_single_occurrence(
+                existing.as_bytes(),
+                before.as_bytes(),
+                content.as_bytes(),
+            ) {
+                String::from_utf8_lossy(&replaced).into_owned()
+            } else {
+                format!("--- Cargo.toml (replace)\n{before}\n+++ Cargo.toml (with)\n{content}")
+            }
         }
         None => content.to_owned(),
+    };
+    if !existing.is_empty() && proposed.trim() == existing.trim() {
+        return Some(BrokerOutcome::Read(ReadRecord {
+            call_id: intent.id.clone(),
+            tool: intent.name.clone(),
+            path: "Cargo.toml".to_owned(),
+            content: "`Cargo.toml` already has that exact content (no changes needed). Note: Kvist runs `cargo test` automatically in the verification sandbox after you finish. If your changes for this task are complete, reply with a plain-text summary and NO tool calls.".to_owned(),
+        }));
+    }
+    let mut patch = if !existing.is_empty() {
+        format_line_diff("Cargo.toml", &existing, &proposed)
+    } else {
+        proposed
     };
     if patch.len() > MAX_PATCH_BYTES {
         patch.truncate(patch.floor_char_boundary(MAX_PATCH_BYTES));
     }
-    Some(ProposedDecision {
+    Some(BrokerOutcome::Decision(ProposedDecision {
         call_id: intent.id.clone(),
         summary: "Proposed modification to component Cargo.toml".to_owned(),
-        why: "The agent proposed modifying `Cargo.toml`, which is outside the automatic `src/` and `tests/` write scope because manifest and dependency changes require human review. Inspect the proposed `Cargo.toml` change and decide whether to approve it or redirect the task.".to_owned(),
+        why: "The agent proposed modifying `Cargo.toml`, which is outside the automatic `src/` and `tests/` write scope because manifest and dependency changes require human review. Inspect the proposed `Cargo.toml` diff and decide whether to approve it or redirect the task.".to_owned(),
         patch: (!patch.is_empty()).then_some(patch),
-    })
+    }))
+}
+
+fn format_line_diff(label: &str, before: &str, after: &str) -> String {
+    let old_lines: Vec<&str> = before.lines().collect();
+    let new_lines: Vec<&str> = after.lines().collect();
+    let mut prefix = 0;
+    while prefix < old_lines.len()
+        && prefix < new_lines.len()
+        && old_lines[prefix] == new_lines[prefix]
+    {
+        prefix += 1;
+    }
+    let mut old_end = old_lines.len();
+    let mut new_end = new_lines.len();
+    while old_end > prefix && new_end > prefix && old_lines[old_end - 1] == new_lines[new_end - 1] {
+        old_end -= 1;
+        new_end -= 1;
+    }
+    let ctx_start = prefix.saturating_sub(2);
+    let mut diff = format!(
+        "--- a/{label}\n+++ b/{label}\n@@ -{},{} +{},{} @@\n",
+        ctx_start + 1,
+        old_end.saturating_sub(ctx_start),
+        ctx_start + 1,
+        new_end.saturating_sub(ctx_start)
+    );
+    for line in &old_lines[ctx_start..prefix] {
+        diff.push_str(&format!(" {line}\n"));
+    }
+    for line in &old_lines[prefix..old_end] {
+        diff.push_str(&format!("-{line}\n"));
+    }
+    for line in &new_lines[prefix..new_end] {
+        diff.push_str(&format!("+{line}\n"));
+    }
+    let suffix_end = (old_end + 2).min(old_lines.len());
+    for line in &old_lines[old_end..suffix_end] {
+        diff.push_str(&format!(" {line}\n"));
+    }
+    diff
+}
+
+fn check_write_noop_or_destructive_overwrite(
+    component_root: &Path,
+    intent: &ToolIntent,
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Option<BrokerOutcome> {
+    let destination = obj.get("destination").and_then(serde_json::Value::as_str)?;
+    let content = obj.get("content").and_then(serde_json::Value::as_str)?;
+    let (resolved, rel) = resolve_safe_read_path(component_root, destination, false).ok()?;
+    let existing = fs::read_to_string(&resolved).ok()?;
+    if existing.trim() == content.trim() {
+        return Some(BrokerOutcome::Read(ReadRecord {
+            call_id: intent.id.clone(),
+            tool: "write_file".to_owned(),
+            path: rel.clone(),
+            content: format!(
+                "`{rel}` already has that exact content (no write needed). Note: Kvist runs `cargo test` automatically in the verification sandbox after you finish. If your changes for this task are complete, reply with a plain-text summary and NO tool calls."
+            ),
+        }));
+    }
+    if resolved.starts_with(component_root.join("src"))
+        && existing.len() >= 256
+        && content.len().saturating_mul(2) < existing.len()
+    {
+        return Some(BrokerOutcome::Read(ReadRecord {
+            call_id: intent.id.clone(),
+            tool: "write_file".to_owned(),
+            path: rel.clone(),
+            content: format!(
+                "refused destructive overwrite of existing module `{rel}` ({} bytes -> {} bytes). Do not replace existing `src/` modules with stubs; call `read_file` on `{rel}` and use `edit_file` for targeted changes. If your task changes are complete, reply with a plain-text summary and NO tool calls so Kvist can run `cargo test`.",
+                existing.len(),
+                content.len()
+            ),
+        }));
+    }
+    None
 }
 
 fn resolve_safe_read_path(
@@ -2055,15 +2160,49 @@ mod tests {
     #[test]
     fn cargo_toml_write_or_edit_surfaces_a_decision_instead_of_dropping() {
         let dir = tempdir().unwrap();
-        let write_cargo = write_intent("Cargo.toml", "[package]\nname = \"galla\"\n");
-        let plan = authorize_intents(dir.path(), &[write_cargo], &policy());
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"galla\"\nversion = \"0.3.0\"\n",
+        )
+        .unwrap();
+
+        let noop_cargo = write_intent(
+            "Cargo.toml",
+            "[package]\nname = \"galla\"\nversion = \"0.3.0\"\n",
+        );
+        let noop_plan = authorize_intents(dir.path(), &[noop_cargo], &policy());
+        assert_eq!(noop_plan.decision_count(), 0);
+        assert_eq!(noop_plan.reads.len(), 1);
+        assert!(
+            noop_plan.reads[0]
+                .content
+                .contains("already has that exact content")
+        );
+
+        let changed_cargo = write_intent(
+            "Cargo.toml",
+            "[package]\nname = \"galla\"\nversion = \"0.4.0\"\n",
+        );
+        let plan = authorize_intents(dir.path(), &[changed_cargo], &policy());
         assert_eq!(plan.decision_count(), 1);
         assert_eq!(plan.dropped_count(), 0);
         assert!(plan.effects.is_empty());
         assert!(plan.decisions[0].summary.contains("Cargo.toml"));
-        assert_eq!(
-            plan.decisions[0].patch.as_deref(),
-            Some("[package]\nname = \"galla\"\n")
+        let patch = plan.decisions[0].patch.as_deref().expect("diff patch");
+        assert!(patch.contains("--- a/Cargo.toml"));
+        assert!(patch.contains("-version = \"0.3.0\""));
+        assert!(patch.contains("+version = \"0.4.0\""));
+
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/validation.rs"), "x".repeat(512)).unwrap();
+        let stub_overwrite = write_intent("src/validation.rs", "fn stub() {}");
+        let guard_plan = authorize_intents(dir.path(), &[stub_overwrite], &policy());
+        assert!(guard_plan.effects.is_empty());
+        assert_eq!(guard_plan.reads.len(), 1);
+        assert!(
+            guard_plan.reads[0]
+                .content
+                .contains("refused destructive overwrite")
         );
     }
 }

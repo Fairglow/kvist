@@ -1601,7 +1601,7 @@ fn execute_agent_inner(
             // can react to a failed or skipped write on a later turn.
             for record in effects {
                 let content = if record.applied {
-                    "applied".to_owned()
+                    "applied. (Note: Kvist runs `cargo test` automatically in the verification sandbox after you finish. Once all required file edits are applied, reply with a brief final summary and NO tool calls.)".to_owned()
                 } else {
                     format!("did not apply: {}", record.detail)
                 };

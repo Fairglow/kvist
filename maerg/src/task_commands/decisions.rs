@@ -282,7 +282,7 @@ fn show(project_dir: &Path, component: &Path, task_id: Option<&str>) -> Result<O
         }
     };
     message.push_str(&support_index(&context, &task.id)?);
-    let actions = engine::shortcuts::list(&context)?;
+    let actions = engine::shortcuts::list_for_task(&context, &task.id)?;
     message.push_str(&engine::shortcuts::markdown(component, &actions));
     let mut output = response(message, evidence);
     output.actions = actions;

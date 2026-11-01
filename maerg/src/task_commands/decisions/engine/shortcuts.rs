@@ -134,6 +134,29 @@ pub(in crate::task_commands::decisions) fn list(
         .unwrap_or_default())
 }
 
+pub(in crate::task_commands::decisions) fn list_for_task(
+    context: &TaskContext,
+    task_id: &str,
+) -> Result<Vec<ResponseAction>> {
+    let directory = context.component_dir.join(DIRECTORY);
+    Ok(read(context)?
+        .map(|(registry, _)| {
+            registry
+                .actions
+                .iter()
+                .filter(|(_, command)| match command {
+                    Command::OptionPlan { task, .. } => task == task_id,
+                    Command::ApplyPlan { task, plan_id, .. } => {
+                        task == task_id
+                            && !directory.join(format!("{plan_id}.applied.json")).exists()
+                    }
+                })
+                .map(|(number, command)| response(context, *number, command))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 fn register(context: &TaskContext, commands: Vec<Command>) -> Result<Vec<ResponseAction>> {
     safe_path(&context.component_dir, false)?;
     let lock = TaskLock::for_context(context, "decision-shortcuts", &now()?)?;

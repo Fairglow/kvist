@@ -870,6 +870,10 @@ impl Shell {
         } else {
             Some(self.stream_manager.start_spinner(&program))
         };
+        let mut decision_headlines: Option<(
+            String,
+            Vec<task_commands::decisions::ResponseAction>,
+        )> = None;
         let result = match cmd {
             cli::Command::Decision {
                 component_dir,
@@ -878,7 +882,15 @@ impl Shell {
                 |project| {
                     let component = project.resolve_component(Some(&component_dir))?;
                     task_commands::decisions::execute(&project.project_dir, &component, command)
-                        .map(|output| cli::CommandOutput::message(output.message))
+                        .map(|output| {
+                            if !output.actions.is_empty() {
+                                decision_headlines = Some((
+                                    task_commands::decisions::component_argument(&component),
+                                    output.actions,
+                                ));
+                            }
+                            cli::CommandOutput::message(output.message)
+                        })
                 },
             ),
             cli::Command::Task {
@@ -917,7 +929,24 @@ impl Shell {
                 .print_result_stage(&result, &feedback_target);
         } else {
             match &result {
-                Ok(output) => display_output(&output.to_string()),
+                Ok(output) => {
+                    display_output(&output.to_string());
+                    if let Some((comp, actions)) = &decision_headlines {
+                        println!(
+                            "\n{}",
+                            self.theme.bold(&format!(
+                                "Numbered responses (run `decision {comp} do <NUMBER>`):"
+                            ))
+                        );
+                        for action in actions {
+                            println!(
+                                "  {} {}",
+                                self.theme.bold(&format!("[{}]", action.number)),
+                                action.description
+                            );
+                        }
+                    }
+                }
                 Err(error) => {
                     if matches!(
                         error,
