@@ -1786,6 +1786,8 @@ pub struct DependencyAcquisition<'a> {
     pub cargo_path: &'a Path,
     /// Writable Cargo-home host directory (the acquisition cache source).
     pub cargo_home: &'a Path,
+    /// Read-only runtime bin directory (exposes toolchain binaries for PATH).
+    pub runtime_bin: &'a Path,
     /// Writable scratch host directory (target + HOME).
     pub scratch_host_dir: &'a Path,
     /// Writable lockfile-workspace host directory (contains `Cargo.lock`).
@@ -1816,6 +1818,7 @@ fn build_dependency_acquisition_request(
     toolchain_root: &Path,
     cargo_path: &Path,
     cargo_home: &Path,
+    runtime_bin: &Path,
     scratch_host_dir: &Path,
     lockfile_workspace: &Path,
     sources: &[SandboxAllowedSource],
@@ -1834,6 +1837,11 @@ fn build_dependency_acquisition_request(
         config,
         cargo_home,
         "canonicalize writable cargo home for dependency acquisition",
+    )?;
+    let runtime_bin = canonical_source_str(
+        config,
+        runtime_bin,
+        "canonicalize runtime bin for dependency acquisition",
     )?;
     let scratch_host_dir = canonical_source_str(
         config,
@@ -1888,10 +1896,11 @@ fn build_dependency_acquisition_request(
 
     let argv: Vec<String> = vec![cargo_sandbox_path.clone(), "fetch".to_owned()];
 
-    // Four mutually non-overlapping grants: the immutable toolchain, the
-    // writable Cargo home (the acquisition cache + promotion source), the
-    // writable scratch, and the isolated writable lockfile workspace (which is
-    // also the working directory, as the runner requires).
+    // Five mutually non-overlapping grants: the immutable toolchain, the
+    // read-only runtime bin (for PATH), the writable Cargo home (the acquisition
+    // cache + promotion source), the writable scratch, and the isolated writable
+    // lockfile workspace (which is also the working directory, as the runner
+    // requires).
     let grants: Vec<SandboxGrant> = vec![
         SandboxGrant {
             source: toolchain_root.clone(),
@@ -1899,6 +1908,13 @@ fn build_dependency_acquisition_request(
             access: "read-only",
             purpose: "toolchain",
             identity: toolchain_identity.to_owned(),
+        },
+        SandboxGrant {
+            source: runtime_bin.clone(),
+            destination: CARGO_RUNTIME_BIN_DEST.to_owned(),
+            access: "read-only",
+            purpose: "runtime",
+            identity: digest_label(format!("kvist-runtime-bin:{runtime_bin}").as_bytes()),
         },
         SandboxGrant {
             source: cargo_home.clone(),
@@ -2062,6 +2078,7 @@ pub fn execute_dependency_acquisition(
         request.toolchain_root,
         Path::new(&resolved.canonical_path),
         request.cargo_home,
+        request.runtime_bin,
         request.scratch_host_dir,
         request.lockfile_workspace,
         request.sources,
@@ -2173,6 +2190,8 @@ pub struct ResolvedCargoToolchain {
     pub root: PathBuf,
     /// The exact cargo executable beneath `root`.
     pub cargo: PathBuf,
+    /// The provisioned runtime bin directory (exposes toolchain binaries for PATH).
+    pub runtime_bin: PathBuf,
 }
 
 /// Derive and validate an immutable toolchain layout from a resolved `cargo`
@@ -2242,7 +2261,8 @@ pub(crate) fn cargo_toolchain_from_path(
             ),
         });
     }
-    Ok(ResolvedCargoToolchain { root, cargo })
+    let runtime_bin = provision_toolchain_bin(&root, runner)?;
+    Ok(ResolvedCargoToolchain { root, cargo, runtime_bin })
 }
 
 /// Locate the immutable Rust toolchain (cargo, rustc, rustlib, linker) so an
@@ -3889,6 +3909,9 @@ mod tests {
             identity: crate::acquisition::crates_io_identity().as_str().to_owned(),
         }];
 
+        // Read-only runtime bin directory (for PATH).
+        let runtime_bin = tempfile::tempdir().expect("runtime bin");
+
         let encoded = build_dependency_acquisition_request(
             &config,
             &runner_digest,
@@ -3899,6 +3922,7 @@ mod tests {
             toolchain.path(),
             &cargo,
             cargo_home.path(),
+            runtime_bin.path(),
             scratch.path(),
             lockfile_workspace.path(),
             &sources,
@@ -3912,15 +3936,17 @@ mod tests {
         assert_eq!(request.network.allowed_sources.len(), 1);
         assert_eq!(request.phase, galla::protocol::Phase::DependencyAcquisition);
 
-        // The closed acquisition topology is exactly four grants: toolchain,
-        // writable dependency-cache, writable scratch, and writable lockfile.
+        // The closed acquisition topology is exactly five grants: toolchain,
+        // read-only runtime bin, writable dependency-cache, writable scratch,
+        // and writable lockfile.
         assert_eq!(
             request.grants.len(),
-            4,
-            "acquisition topology is four grants"
+            5,
+            "acquisition topology is five grants"
         );
         let purposes: Vec<_> = request.grants.iter().map(|grant| grant.purpose).collect();
         assert!(purposes.contains(&Purpose::Toolchain));
+        assert!(purposes.contains(&Purpose::Runtime));
         assert!(purposes.contains(&Purpose::DependencyCache));
         assert!(purposes.contains(&Purpose::Scratch));
         assert!(purposes.contains(&Purpose::Lockfile));

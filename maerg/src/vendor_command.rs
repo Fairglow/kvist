@@ -622,6 +622,7 @@ fn provision_rust_via_acquisition_sandbox(
             toolchain_root: &toolchain.root,
             cargo_path: &toolchain.cargo,
             cargo_home: &cargo_home,
+            runtime_bin: &toolchain.runtime_bin,
             scratch_host_dir: &scratch,
             lockfile_workspace: &lockfile_workspace,
             lockfile_before_identity: &lockfile_before_identity,

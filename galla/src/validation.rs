@@ -514,7 +514,7 @@ fn validate_phase_purpose(
         ),
         Phase::DependencyAcquisition => matches!(
             purpose,
-            Purpose::Toolchain | Purpose::Scratch | Purpose::DependencyCache | Purpose::Lockfile
+            Purpose::Toolchain | Purpose::Runtime | Purpose::Scratch | Purpose::DependencyCache | Purpose::Lockfile
         ),
     };
     if !permitted {
@@ -975,6 +975,7 @@ fn validate_acquisition(request: &SandboxRequest) -> Result<(), ProtocolError> {
         request,
         &[
             Purpose::Toolchain,
+            Purpose::Runtime,
             Purpose::DependencyCache,
             Purpose::Scratch,
             Purpose::Lockfile,
@@ -1321,6 +1322,48 @@ fn validate_digest(value: &str, label: &str) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+fn path_contains(ancestor: &str, descendant: &str) -> bool {
+    ancestor == descendant
+        || ancestor == "/"
+        || descendant
+            .strip_prefix(ancestor)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+/// Whether a symlink target stays inside `scope_root`. Symlinks in the path are
+/// resolved when they exist; a dangling target is normalized lexically, and one
+/// that cannot be proven inside the scope is treated as an escape (fail safe).
+fn symlink_target_inside_scope(candidate: &std::path::Path, scope_root: &std::path::Path) -> bool {
+    match std::fs::canonicalize(candidate) {
+        Ok(resolved) => resolved.starts_with(scope_root),
+        Err(_) => lexical_normalizes_inside(candidate, scope_root),
+    }
+}
+
+/// Lexically resolve `candidate` against `scope_root` without touching the
+/// filesystem, for symlink targets that cannot be canonicalized (dangling or
+/// looping). Returns whether the result stays inside the scope.
+fn lexical_normalizes_inside(candidate: &std::path::Path, scope_root: &std::path::Path) -> bool {
+    let mut resolved: std::path::PathBuf = std::path::PathBuf::from(scope_root);
+    for component in candidate.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !resolved.pop() {
+                    return false;
+                }
+            }
+            std::path::Component::RootDir => {
+                resolved.clear();
+                resolved.push(std::path::Component::RootDir);
+            }
+            std::path::Component::Prefix(_) => return false,
+            std::path::Component::Normal(part) => resolved.push(part),
+        }
+    }
+    resolved.starts_with(scope_root)
+}
+
 #[cfg(test)]
 mod identity_binding_tests {
     use super::*;
@@ -1553,46 +1596,4 @@ mod identity_binding_tests {
             "rejection must name the origin-bound identity requirement: {error}"
         );
     }
-}
-
-fn path_contains(ancestor: &str, descendant: &str) -> bool {
-    ancestor == descendant
-        || ancestor == "/"
-        || descendant
-            .strip_prefix(ancestor)
-            .is_some_and(|suffix| suffix.starts_with('/'))
-}
-
-/// Whether a symlink target stays inside `scope_root`. Symlinks in the path are
-/// resolved when they exist; a dangling target is normalized lexically, and one
-/// that cannot be proven inside the scope is treated as an escape (fail safe).
-fn symlink_target_inside_scope(candidate: &std::path::Path, scope_root: &std::path::Path) -> bool {
-    match std::fs::canonicalize(candidate) {
-        Ok(resolved) => resolved.starts_with(scope_root),
-        Err(_) => lexical_normalizes_inside(candidate, scope_root),
-    }
-}
-
-/// Lexically resolve `candidate` against `scope_root` without touching the
-/// filesystem, for symlink targets that cannot be canonicalized (dangling or
-/// looping). Returns whether the result stays inside the scope.
-fn lexical_normalizes_inside(candidate: &std::path::Path, scope_root: &std::path::Path) -> bool {
-    let mut resolved: std::path::PathBuf = std::path::PathBuf::from(scope_root);
-    for component in candidate.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                if !resolved.pop() {
-                    return false;
-                }
-            }
-            std::path::Component::RootDir => {
-                resolved.clear();
-                resolved.push(std::path::Component::RootDir);
-            }
-            std::path::Component::Prefix(_) => return false,
-            std::path::Component::Normal(part) => resolved.push(part),
-        }
-    }
-    resolved.starts_with(scope_root)
 }
