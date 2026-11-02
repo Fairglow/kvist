@@ -293,24 +293,9 @@ impl Sandbox {
 #[test]
 #[ignore = "requires KVIST_GALLA, native Bubblewrap and system Python/Node/Go/C/C++"]
 fn system_toolchains_are_found_and_execute_real_programs() {
-    let mut sandbox = Sandbox::new();
-    let mut directories: Vec<_> = SYSTEM_PATH.split(':').map(PathBuf::from).collect();
-    for directory in search_directories() {
-        if !directories.contains(&directory) {
-            directories.push(directory);
-        }
-    }
-    let sandbox_directories: Vec<_> = directories
-        .iter()
-        .filter(|directory| system_path(directory))
-        .cloned()
-        .collect();
-    sandbox.request["environment"]["PATH"] = json!(
-        std::env::join_paths(sandbox_directories)
-            .unwrap()
-            .to_str()
-            .unwrap()
-    );
+    let sandbox = Sandbox::new();
+    let directories: Vec<_> =
+        std::env::split_paths(sandbox.request["environment"]["PATH"].as_str().unwrap()).collect();
     let mut selected = Vec::new();
     for (name, version) in [
         ("python3", "--version"),

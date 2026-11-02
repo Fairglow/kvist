@@ -3,6 +3,8 @@
 
 # Ignore settings
 /.cargo
+/.config/*
+!/.config/nextest.toml
 /.idea
 .kvist
 /.vscode

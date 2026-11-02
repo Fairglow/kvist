@@ -3,6 +3,7 @@
 import pathlib
 import shlex
 import subprocess
+import tempfile
 import tomllib
 import unittest
 
@@ -38,17 +39,27 @@ class NextestPolicyTests(unittest.TestCase):
                          "keep one canonical scheduling policy, not divergent copies")
 
     def test_only_the_shared_policy_is_exposed_by_git_ignore_rules(self):
-        for path, expected in [
-            (".config/nextest.toml", 1),
-            (".config/local-settings.toml", 0),
-            (".config/private/settings.toml", 0),
-        ]:
-            with self.subTest(path=path):
-                result = subprocess.run(
-                    ["git", "check-ignore", "--no-index", "--quiet", path],
-                    cwd=ROOT, capture_output=True, text=True, check=False,
-                )
-                self.assertEqual(result.returncode, expected, result.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = pathlib.Path(directory)
+            subprocess.run(
+                ["git", "init", "--quiet", "--template=", directory],
+                capture_output=True, text=True, check=True,
+            )
+            (checkout / ".gitignore").write_bytes((ROOT / ".gitignore").read_bytes())
+            for path, expected in [
+                (".config/nextest.toml", 1),
+                (".config/local-settings.toml", 0),
+                (".config/nextest.toml.local", 0),
+                (".config/private/settings.toml", 0),
+                (".config/private/nextest.toml", 0),
+            ]:
+                with self.subTest(path=path):
+                    result = subprocess.run(
+                        ["git", "-c", "core.excludesFile=/dev/null",
+                         "check-ignore", "--no-index", "--quiet", path],
+                        cwd=checkout, capture_output=True, text=True, check=False,
+                    )
+                    self.assertEqual(result.returncode, expected, result.stderr)
 
     def test_repository_entrypoints_use_standard_discovery(self):
         for path in ["justfile", ".github/workflows/rust.yml"]:

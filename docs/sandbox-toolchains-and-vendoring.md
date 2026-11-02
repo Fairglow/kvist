@@ -491,7 +491,12 @@ trials do not establish availability unless they actually execute.
 `galla/tests/toolchain_e2e.rs` adds strict native system-language execution and
 full installed-rustup inventory parity for explicit read-only grants, including
 per-version target compilation and host non-mutation snapshots. CI explicitly
-runs these otherwise ignored tests. `skott/tests/rustup_inventory.rs` additionally
+runs these otherwise ignored tests. The system-language trial selects host
+executables from the same fixed `/usr/local/bin:/usr/bin:/bin` PATH it submits
+to the sandbox; unrelated host PATH entries (including runner games and ghcup
+directories) are not imported. Provision system tools in those bin directories,
+with their resolved executables and Go runtime under the filtered System roots.
+`skott/tests/rustup_inventory.rs` additionally
 drives actual automatic Skott preparation, compares every installed version and
 target, verifies compiler/doc selection under all three Cargo selection forms,
 and checks denied mutations and unchanged host installations. CI explicitly

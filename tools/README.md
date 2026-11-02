@@ -38,8 +38,11 @@ reservations.
 
 `test_nextest_policy.py` pins default discovery, Git ignore visibility,
 entrypoint consistency, scoped selection, whole-pool allocation and
-CI-profile inheritance. Repository CI runs it with Python 3.11+ and Git (standard
-library only); it stays outside Blad's self-contained package tests:
+CI-profile inheritance. Ignore checks copy the tracked rules into a temporary
+Git repository with templates and global excludes disabled, so local/global
+ignore settings cannot hide a missing repository rule. Repository CI runs it
+with Python 3.11+ and Git (standard library only); it stays outside Blad's
+self-contained package tests:
 
 ```bash
 python3 -B -m unittest discover -s tools -p 'test_*.py'

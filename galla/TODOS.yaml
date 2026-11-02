@@ -10,6 +10,77 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "ci-system-path-write-tests"
+    title: "write_tests: reproduce native CI PATH rejection"
+    description: "Run the native system trial with GitHub runner PATH entries and retain the existing grant-validation failure."
+    context: "Latest main run 41505766386 fails on /usr/local/.ghcup/bin and games directories. Existing SR-REQ-TOOLCHAIN-E2E governs; this is a fixture repair, not a protocol change or acceptance. Explicit advisory exception while receipt enforcement is unavailable."
+    purpose: "Expose ambient PATH assumptions before repair."
+    expected_outcome: "The native trial reproduces the CI read-only PATH grant rejection."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-11-02T19:33:49Z"
+      updated_at: "2026-11-02T19:44:46Z"
+      completed_at: "2026-11-02T19:44:46Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "ci-system-path-implement-code"
+    title: "implement_code: align native discovery with request PATH"
+    description: "Use only the fixture's fixed System bin directories for host selection and sandbox PATH; retain grant enforcement and actual language execution."
+    purpose: "Remove dependence on ambient runner PATH without broadening authority."
+    expected_outcome: "Native system programs execute with noisy host PATH on stable and MSRV."
+    kind: implementation
+    status: completed
+    context: "Host selection now derives directly from the submitted fixed request PATH. All four Galla native/detection tests pass with CI-like host PATH on stable and Rust 1.95.0; strict stable workspace lint and formatting pass. No production validation or grants changed."
+    depends_on:
+      - "ci-system-path-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-11-02T19:33:49Z"
+      updated_at: "2026-11-02T19:44:46Z"
+      completed_at: "2026-11-02T19:44:46Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "ci-system-path-security-audit"
+    title: "security_audit: inspect scoped fixture authority"
+    description: "Inspect that the repair adds no mounts or grants, does not relax validation, and keeps network denied and host tools unmodified."
+    purpose: "Retain the existing enforcement boundary."
+    expected_outcome: "Any scoped authority discrepancy is explicit."
+    kind: security-audit
+    status: completed
+    context: "Scoped implementer inspection and independent source-only ci-fixture-source-observer record confirm no added grants or mounts and unchanged denied network and PATH validation. Native execution and host Rust non-mutation checks pass locally; no runner-wide audit claim."
+    depends_on:
+      - "ci-system-path-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-11-02T19:33:49Z"
+      updated_at: "2026-11-02T19:44:46Z"
+      completed_at: "2026-11-02T19:44:46Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "ci-system-path-compliance-review"
+    title: "compliance_review: compare independent fixture evidence"
+    description: "Derive a clean-slate source-only scoped record, then separately compare it with local intent and test evidence without source access."
+    purpose: "Avoid self-certification of the native fixture repair."
+    expected_outcome: "Scoped evidence and remote CI limitations are retained without component acceptance."
+    kind: compliance-review
+    status: completed
+    context: "Separate source-blind ci-fixture-intent-comparator found no concrete scoped mismatch against SR-REQ-TOOLCHAIN-E2E and related PATH/authority intent. It read only local intent, the new independent record and local native logs. Noisy PATH/compiler attribution remains implementer-reported, and remote CI is unverified. No component acceptance or runner-wide certification."
+    depends_on:
+      - "ci-system-path-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-11-02T19:33:49Z"
+      updated_at: "2026-11-02T19:44:46Z"
+      completed_at: "2026-11-02T19:44:46Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "nesting-regression-write-tests"
     title: "write_tests: independently reproduce both nesting failures"
     description: "Exercise probe and request separately with cleared environment and open stdin, retaining both failures."

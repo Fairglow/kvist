@@ -254,3 +254,57 @@ enforces isolated execution via Bubblewrap.
 - Descriptor-relative immutable Cargo-home generation staging and `RENAME_NOREPLACE` atomic publication (`src/cache.rs`).
 - Host kernel namespace and Bubblewrap backend capability probe (`src/probe.rs`).
 - Bubblewrap namespace isolation, `prlimit` resource capping, proxy mediation, and execution supervision (`src/enforcement.rs`).
+
+## Scoped CI fixture observation - 2026-11-02
+
+Independent clean-slate `ci-fixture-source-observer` read only enumerated
+source, tests and configuration, excluding intent, queues, implementation
+records, reviews and history. It ran no tests and made no compliance claim.
+
+The system-language trial searches the sandbox request's configured
+`/usr/local/bin:/usr/bin:/bin`, not host PATH. Selection requires an executable
+file whose original and canonical paths remain under allowed System prefixes,
+excluding administrative directories. The trial checks canonical Go GOROOT
+and asserts sandbox resolution matches each inspected host executable
+(`tests/toolchain_e2e.rs:13`, `:56-90`, `:294-339`).
+
+PATH validation implicitly accepts `/bin`, `/usr/bin` and `/usr/local/bin`.
+Other entries require a read-only grant destination; administrative entries
+are rejected separately (`src/validation.rs:202-234`, `:847-867`). The ignored
+trial runs Python/Node scripts, builds and executes Go/C/C++ programs and
+asserts five output markers (`tests/toolchain_e2e.rs:293-395`). Both stable
+and MSRV CI explicitly enable the native trials with `KVIST_GALLA`,
+`--ignored` and serial execution (`../.github/workflows/rust.yml:134-139`,
+`:253-258`). The system trial constructs an authoring request with denied
+network and writable component/scratch grants; it adds no toolchain grant.
+
+The observer also inspected the repository's `.config` ignore exception and
+its temporary-repository Python regression. Those checks are repository
+tooling, not runner authority. Source observations do not verify actual Git
+tracking, sandbox enforcement or remote CI outcomes.
+
+### Separately reported execution evidence
+
+The implementing context reproduced the native CI failure before repair by
+adding `/usr/local/.ghcup/bin:/usr/games:/usr/local/games` to host PATH:
+validation rejected the request with `PATH must select only granted read-only
+directories`. After repair, all four `toolchain_e2e` tests, including both
+otherwise ignored native trials, passed with that same noisy host PATH on
+stable and Rust 1.95.0. All 22 repository Python tests passed, including the
+isolated ignore checks. These are local results, not a remote workflow rerun,
+component acceptance or runner-wide certification.
+
+The implementing context also reports 2,219 passing all-feature workspace
+nextest tests with 15 existing skips, passing workspace doctests, four passing
+otherwise ignored maerg native Rust sandbox tests, and passing stable strict
+workspace lint and formatting.
+
+### Independent source-blind comparison
+
+Separate `ci-fixture-intent-comparator` read local requirements, contract and
+design, this scoped observation and the two native execution logs, without
+source access or test execution. It found no concrete scoped mismatch against
+SR-REQ-TOOLCHAIN-E2E or the related PATH/authority obligations. The local logs
+show four passing tests each, but noisy PATH and compiler attribution are
+separately reported rather than visible in those quiet logs. This is neither
+remote CI verification nor component acceptance.
