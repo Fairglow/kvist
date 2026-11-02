@@ -142,11 +142,12 @@ pub fn validate(request: &SandboxRequest) -> Result<(), ProtocolError> {
     // toolchain. Cargo-specific rules are layered on afterwards.
     validate_argv(&request.argv)?;
     validate_absolute(&request.working_directory, "working directory")?;
-    validate_environment_shape(&request.environment)?;
+    validate_environment_shape(request)?;
     validate_resources(&request.resources)?;
     validate_identities(request)?;
     validate_toolchain(request)?;
     validate_grants(request)?;
+    validate_path_grants(request)?;
     validate_network(request)?;
     validate_optional_roots(request)?;
 
@@ -172,7 +173,9 @@ fn validate_argv(argv: &[String]) -> Result<(), ProtocolError> {
     validate_absolute(&argv[0], "argv program")
 }
 
-fn validate_environment_shape(environment: &BTreeMap<String, String>) -> Result<(), ProtocolError> {
+fn validate_environment_shape(request: &SandboxRequest) -> Result<(), ProtocolError> {
+    let environment = &request.environment;
+
     if environment.len() > MAX_ENVIRONMENT_ENTRIES {
         return Err(invalid(format!(
             "environment has more than {MAX_ENVIRONMENT_ENTRIES} entries"
@@ -203,6 +206,30 @@ fn validate_environment_shape(environment: &BTreeMap<String, String>) -> Result<
         {
             return Err(invalid("PATH must not select administrative directories"));
         }
+    }
+    Ok(())
+}
+
+/// Whether every `PATH` entry selects a directory inside one granted
+/// read-only destination. This runs after grants are validated so a PATH
+/// entry cannot be rejected before a more specific identity or source
+/// requirement is reported.
+fn validate_path_grants(request: &SandboxRequest) -> Result<(), ProtocolError> {
+    let path_value = request
+        .environment
+        .get("PATH")
+        .map(String::as_str)
+        .unwrap_or_default();
+    if path_value.is_empty() {
+        return Ok(());
+    }
+    if path_value
+        .split(':')
+        .any(|entry| !path_within_grants(request, entry))
+    {
+        return Err(invalid(
+            "PATH must select only granted read-only directories",
+        ));
     }
     Ok(())
 }
@@ -813,6 +840,28 @@ fn grants_by_destination(request: &SandboxRequest) -> BTreeMap<&str, &Grant> {
         .collect()
 }
 
+/// Whether `value` selects a directory inside one granted read-only
+/// destination. A PATH entry must resolve to authority the request explicitly
+/// granted read-only: it cannot point at writable scratch, an unmounted host
+/// directory, or any destination the grant set does not cover. The single
+/// read-only Toolchain self-grant at `/usr` or `/usr/local` receives the
+/// already-filtered System view, so its destination is not treated as the
+/// unfiltered host tree.
+fn granted_read_only_contains(request: &SandboxRequest, value: &str) -> bool {
+    matches!(value, "/bin" | "/usr/bin" | "/usr/local/bin")
+        || request.grants.iter().any(|grant| {
+            grant.access == Access::ReadOnly && path_contains(&grant.destination, value)
+        })
+}
+
+/// Whether every `PATH` entry selects a directory inside one granted
+/// read-only destination. This is the generic check applied to any request
+/// that declares a `PATH`; the exact Cargo phases additionally require the
+/// single entry to be one explicit directory.
+fn path_within_grants(request: &SandboxRequest, entry: &str) -> bool {
+    granted_read_only_contains(request, entry)
+}
+
 // -- Phase-specific validation -------------------------------------------------
 
 fn validate_authoring(request: &SandboxRequest) -> Result<(), ProtocolError> {
@@ -909,6 +958,7 @@ fn validate_acquisition(request: &SandboxRequest) -> Result<(), ProtocolError> {
         ));
     }
     require_exact_environment(
+        request,
         &request.environment,
         &[
             ("HOME", child_path(&scratch.destination, "home")?),
@@ -970,6 +1020,7 @@ fn validate_cargo_verification(request: &SandboxRequest) -> Result<(), ProtocolE
         ));
     }
     require_exact_environment(
+        request,
         &request.environment,
         &[
             ("HOME", child_path(&scratch.destination, "home")?),
@@ -1120,6 +1171,7 @@ fn ensure_exact_cargo_purposes(
 }
 
 fn require_exact_environment(
+    request: &SandboxRequest,
     environment: &BTreeMap<String, String>,
     required: &[(&str, String)],
 ) -> Result<(), ProtocolError> {
@@ -1138,7 +1190,7 @@ fn require_exact_environment(
             .get(*name)
             .ok_or_else(|| invalid(format!("Cargo phase environment requires `{name}`")))?;
         if *name == "PATH" {
-            validate_path_environment(actual)?;
+            validate_path_environment(actual, request)?;
         } else if actual != expected {
             return Err(invalid(format!(
                 "Cargo phase environment `{name}` must be exactly `{expected}`"
@@ -1148,13 +1200,23 @@ fn require_exact_environment(
     Ok(())
 }
 
-fn validate_path_environment(value: &str) -> Result<(), ProtocolError> {
+fn validate_path_environment(value: &str, request: &SandboxRequest) -> Result<(), ProtocolError> {
     if value.is_empty() || value.contains(':') {
         return Err(invalid(
             "Cargo PATH must be one explicit nonempty canonical absolute directory",
         ));
     }
-    validate_absolute(value, "Cargo PATH")
+    validate_absolute(value, "Cargo PATH")?;
+    // A Cargo PATH selects the single runtime directory the build resolves
+    // executables from. It must live strictly inside one granted read-only
+    // destination so it cannot point at writable scratch, an unmounted host
+    // directory, or any authority the request did not explicitly grant.
+    if !granted_read_only_contains(request, value) {
+        return Err(invalid(
+            "Cargo PATH must select a directory inside a granted read-only destination",
+        ));
+    }
+    Ok(())
 }
 
 fn child_path(parent: &str, child: &str) -> Result<String, ProtocolError> {

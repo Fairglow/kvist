@@ -490,6 +490,111 @@ fn rejects_deny_network_with_sources() {
     assert!(error.to_string().contains("allowed_sources"));
 }
 
+// -- PATH grant validation -----------------------------------------------------
+
+/// A valid authoring request whose grant set includes a read-only
+/// `/workspace/src` context grant, so a `PATH` entry inside it is legitimate.
+/// The PATH grant tests mutate only the `PATH` value.
+fn path_baseline_request() -> Value {
+    let mut request = valid_request();
+    request["grants"]
+        .as_array_mut()
+        .expect("grants")
+        .insert(
+            0,
+            json!({
+                "source": "/host/src",
+                "destination": "/workspace/src",
+                "access": "read-only",
+                "purpose": "context",
+                "identity": digest(b"src")
+            }),
+        );
+    request["environment"]["PATH"] = json!("/workspace/src");
+    request
+}
+
+#[test]
+fn accepts_a_path_entry_within_a_granted_read_only_directory() {
+    let request = path_baseline_request();
+    validation::parse_and_validate(&encode(&request))
+        .expect("a PATH entry inside a granted read-only directory must be accepted");
+}
+
+#[test]
+fn rejects_a_path_entry_pointing_at_writable_scratch() {
+    let mut request = path_baseline_request();
+    request["environment"]["PATH"] = json!("/workspace/scratch");
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("a PATH entry inside writable scratch must be rejected");
+    assert!(
+        error.to_string().contains("PATH"),
+        "rejection must name PATH: {error}"
+    );
+}
+
+#[test]
+fn rejects_a_path_entry_pointing_at_a_writable_authoring_grant() {
+    let mut request = path_baseline_request();
+    request["environment"]["PATH"] = json!("/workspace/component/tests");
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("a PATH entry inside a writable authoring grant must be rejected");
+    assert!(error.to_string().contains("PATH"));
+}
+
+#[test]
+fn rejects_a_path_entry_outside_every_grant() {
+    let mut request = path_baseline_request();
+    request["environment"]["PATH"] = json!("/tmp");
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("a PATH entry outside every grant must be rejected");
+    assert!(error.to_string().contains("PATH"));
+}
+
+#[test]
+fn rejects_a_path_entry_selecting_an_unmounted_directory() {
+    let mut request = path_baseline_request();
+    request["environment"]["PATH"] = json!("/tooling/rustup");
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("a PATH entry into an unmounted directory must be rejected");
+    assert!(error.to_string().contains("PATH"));
+}
+
+#[test]
+fn rejects_a_path_entry_selecting_a_grandchild_of_writable_scratch() {
+    let mut request = path_baseline_request();
+    request["environment"]["PATH"] = json!("/workspace/scratch/home");
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("a PATH entry into a scratch descendant must be rejected");
+    assert!(error.to_string().contains("PATH"));
+}
+
+#[test]
+fn accepts_a_path_entry_within_a_granted_read_only_directory_under_verification() {
+    let mut request = cargo_verification_request();
+    request["environment"]["PATH"] = json!("/workspace/component");
+    validation::parse_and_validate(&encode(&request))
+        .expect("a PATH entry inside a granted read-only verification workspace must be accepted");
+}
+
+#[test]
+fn rejects_a_path_entry_within_writable_scratch_under_verification() {
+    let mut request = cargo_verification_request();
+    request["environment"]["PATH"] = json!("/workspace/scratch");
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("a PATH entry inside writable scratch must be rejected under verification");
+    assert!(error.to_string().contains("PATH"));
+}
+
+#[test]
+fn rejects_a_path_entry_selecting_an_unmounted_directory_under_acquisition() {
+    let mut request = cargo_acquisition_request();
+    request["environment"]["PATH"] = json!("/tooling/rustup");
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("a PATH entry into an unmounted directory must be rejected");
+    assert!(error.to_string().contains("PATH"));
+}
+
 // -- Mediated-Cargo acquisition and verification ------------------------------
 
 #[test]

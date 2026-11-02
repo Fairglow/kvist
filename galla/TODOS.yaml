@@ -559,14 +559,14 @@ tasks:
     purpose: "Establish test coverage for PATH grant validation before implementation."
     expected_outcome: "Tests verify PATH is restricted to granted read-only directories."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PROTOCOL-BOUNDARY"
     timestamps:
       created_at: "2026-11-01T16:58:47Z"
-      updated_at: "2026-11-01T16:58:47Z"
-      completed_at: null
+      updated_at: "2026-11-02T12:52:30Z"
+      completed_at: "2026-11-02T12:52:30Z"
     blocked_reason: null
     recovery_state: null
   - id: "path-grant-validation-implement-code"
@@ -576,15 +576,15 @@ tasks:
     purpose: "Prevent PATH from pointing to writable scratch or unmounted directories."
     expected_outcome: "PATH is validated against granted read-only directories."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "path-grant-validation-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PROTOCOL-BOUNDARY"
     timestamps:
       created_at: "2026-11-01T16:58:47Z"
-      updated_at: "2026-11-01T16:58:47Z"
-      completed_at: null
+      updated_at: "2026-11-02T13:15:28Z"
+      completed_at: "2026-11-02T13:15:28Z"
     blocked_reason: null
     recovery_state: null
   - id: "galla-reverification-security-audit"
