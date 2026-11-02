@@ -1054,6 +1054,7 @@ pub fn sandbox_fixture() -> TempDir {
     let fixture = temporary_directory("sandbox-");
     fs::create_dir(fixture.path().join("tests")).expect("create writable tests");
     fs::create_dir(fixture.path().join("scratch")).expect("create scratch");
+    fs::create_dir_all(fixture.path().join("runtime-bin")).expect("create runtime bin");
     fs::create_dir_all(fixture.path().join("child/src")).expect("create child implementation");
     fs::create_dir(fixture.path().join(".git")).expect("create protected Git metadata");
     fs::create_dir(fixture.path().join(".kvist")).expect("create protected evidence");

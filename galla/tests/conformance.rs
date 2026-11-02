@@ -173,6 +173,13 @@ fn cargo_acquisition_request() -> Value {
                 "identity": cargo_identity()
             },
             {
+                "source": "/host/runtime/bin",
+                "destination": "/workspace/runtime/bin",
+                "access": "read-only",
+                "purpose": "runtime",
+                "identity": digest(b"runtime-bin")
+            },
+            {
                 "source": "/host/attempt/cargo-home",
                 "destination": "/workspace/cargo-home",
                 "access": "read-write",
@@ -497,19 +504,16 @@ fn rejects_deny_network_with_sources() {
 /// The PATH grant tests mutate only the `PATH` value.
 fn path_baseline_request() -> Value {
     let mut request = valid_request();
-    request["grants"]
-        .as_array_mut()
-        .expect("grants")
-        .insert(
-            0,
-            json!({
-                "source": "/host/src",
-                "destination": "/workspace/src",
-                "access": "read-only",
-                "purpose": "context",
-                "identity": digest(b"src")
-            }),
-        );
+    request["grants"].as_array_mut().expect("grants").insert(
+        0,
+        json!({
+            "source": "/host/src",
+            "destination": "/workspace/src",
+            "access": "read-only",
+            "purpose": "context",
+            "identity": digest(b"src")
+        }),
+    );
     request["environment"]["PATH"] = json!("/workspace/src");
     request
 }

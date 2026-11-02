@@ -76,6 +76,13 @@ fn acquisition_request(fixture: &std::path::Path, argv: &[&str]) -> Value {
             "identity": toolchain_identity
         },
         {
+            "source": fixture.join("runtime-bin").canonicalize().expect("runtime bin"),
+            "destination": "/workspace/runtime/bin",
+            "access": "read-only",
+            "purpose": "runtime",
+            "identity": sha256_bytes(b"runtime-bin")
+        },
+        {
             "source": fixture.join("cargo-home").canonicalize().expect("cargo home"),
             "destination": "/workspace/cargo-home",
             "access": "read-write",
@@ -229,7 +236,7 @@ fn cargo_fixture() -> tempfile::TempDir {
     fs::create_dir(root.join("project-cache")).expect("create project cache");
     fs::create_dir(root.join("vendored")).expect("create vendored registry");
     fs::create_dir(root.join("cargo-config")).expect("create cargo config");
-    fs::create_dir(root.join("runtime-bin")).expect("create runtime bin");
+    fs::create_dir_all(root.join("runtime-bin")).expect("create runtime bin");
     fs::create_dir_all(root.join("component")).expect("create verification workspace");
     fs::write(root.join("lockfile/Cargo.lock"), "# lockfile\n").expect("write lockfile");
     write_fake_cargo(
