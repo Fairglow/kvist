@@ -634,21 +634,28 @@ pub(super) fn prepare(
     )?;
     let (head, branch) = head_branch(context)?;
     let real_index = index_path(context)?;
-    let baseline = entries(context, before, Some(&head), None)?;
-    verify_tree(context, before, &baseline).map_err(|err| {
-        if head != expected_head {
-            fail("HEAD changed before checkpoint preparation")
-        } else {
-            err
-        }
-    })?;
+    let expected_baseline = entries(context, before, Some(expected_head), None)?;
+    verify_tree(context, before, &expected_baseline)?;
+    let baseline = if head == expected_head {
+        expected_baseline.clone()
+    } else {
+        entries(context, before, Some(&head), None)?
+    };
     reject(
         entries(context, before, None, None)? != baseline || capture(context)? != *after,
         "worktree or staged overlap changed before preparation",
     )?;
     let mut changes = BTreeMap::new();
-    for path in before.entries.keys().chain(after.entries.keys()) {
-        if changes.contains_key(path) || before.entries.get(path) == after.entries.get(path) {
+    for path in before
+        .entries
+        .keys()
+        .chain(baseline.keys())
+        .chain(after.entries.keys())
+    {
+        if changes.contains_key(path)
+            || (before.entries.get(path) == after.entries.get(path)
+                && baseline.get(path) == expected_baseline.get(path))
+        {
             continue;
         }
         let post = match after.entries.get(path) {
