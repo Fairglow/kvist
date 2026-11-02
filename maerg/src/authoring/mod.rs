@@ -381,6 +381,20 @@ pub fn authorize_turn(
                     dropped.reason
                 ),
             });
+        } else if matches!(dropped.tool.as_str(), "edit_file" | "write_file")
+            && (dropped.reason.contains("names a protected intent document")
+                || dropped.reason.contains("is not under a writable root")
+                || dropped.reason.contains("does not exist"))
+        {
+            plan.reads.push(ReadRecord {
+                call_id: dropped.call_id,
+                tool: dropped.tool,
+                path: "write-scope-error".to_owned(),
+                content: format!(
+                    "error: {} (not applied). Protected documents (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, `IMPL.md`) are authoritative and read-only during task execution; only files under `src/` and `tests/` may be modified. Adjust your code/tests in `src/` and `tests/` to conform to the contract, or if your changes in `src/` and `tests/` are complete, reply now with a plain-text summary and NO tool calls.",
+                    dropped.reason
+                ),
+            });
         } else {
             retained_drops.push(dropped);
         }
