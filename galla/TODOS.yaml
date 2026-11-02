@@ -6,7 +6,7 @@ component:
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-31T11:35:56Z"
+    checked_at: "2026-11-01T16:58:47Z"
     stale_since: null
     causes: []
 tasks:
@@ -446,6 +446,147 @@ tasks:
       completed_at: "2026-09-12T14:32:54Z"
     blocked_reason: null
     recovery_state: null
+  - id: "cache-promotion-atomicity-write-tests"
+    title: "write_tests: cache promotion atomicity and checksum verification"
+    description: "Define tests for atomic immutable cache promotion with manifest checksums, collision detection, and recursive size accounting."
+    context: "Security audit found inspect_and_promote_cache uses non-atomic fs::copy and skips manifest checksums, contradicting contract obligations for atomic promotion."
+    purpose: "Establish test coverage for atomic promotion with checksums before implementation."
+    expected_outcome: "Tests verify atomic promotion, manifest checksums, collision detection, and recursive size accounting."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
+    timestamps:
+      created_at: "2026-11-01T16:58:47Z"
+      updated_at: "2026-11-01T22:42:59Z"
+      completed_at: "2026-11-01T22:42:59Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "cache-promotion-atomicity-implement-code"
+    title: "implement_code: atomic cache promotion with checksums"
+    description: "Implement atomic immutable cache promotion using RENAME_NOREPLACE with manifest checksums and recursive size accounting."
+    context: "Remediation for security audit finding that cache promotion is non-atomic and lacks checksums."
+    purpose: "Fix cache promotion to match contract obligations for atomic, checked promotion."
+    expected_outcome: "Cache promotion is atomic with manifest checksums and recursive size accounting."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "cache-promotion-atomicity-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
+    timestamps:
+      created_at: "2026-11-01T16:58:47Z"
+      updated_at: "2026-11-02T09:17:48Z"
+      completed_at: "2026-11-02T09:17:48Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "network-guard-https-write-tests"
+    title: "write_tests: network guard HTTPS CONNECT handling"
+    description: "Define tests for network guard HTTPS CONNECT method support and full URL parsing."
+    context: "Security audit found network guard handles only http:// absolute-form, not HTTPS CONNECT, potentially breaking HTTPS sources."
+    purpose: "Establish test coverage for HTTPS CONNECT handling before implementation."
+    expected_outcome: "Tests verify HTTPS CONNECT support and full URL parsing in network guard."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-01T16:58:47Z"
+      updated_at: "2026-11-01T16:58:47Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "network-guard-https-implement-code"
+    title: "implement_code: network guard HTTPS CONNECT support"
+    description: "Implement HTTPS CONNECT method support and full URL parsing in the network guard proxy."
+    context: "Remediation for security audit finding that network guard lacks HTTPS CONNECT support."
+    purpose: "Enable HTTPS sources to work through the network guard proxy."
+    expected_outcome: "Network guard supports HTTPS CONNECT and full URL parsing."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "network-guard-https-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-01T16:58:47Z"
+      updated_at: "2026-11-01T16:58:47Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "origin-identity-binding-write-tests"
+    title: "write_tests: registry origin identity binding"
+    description: "Define tests verifying registry source identity is bound to index/download origins, not just name."
+    context: "Security audit found registry sources accept identity equal to sha256 of name alone, weakening origin binding."
+    purpose: "Establish test coverage for origin-bound registry identities before implementation."
+    expected_outcome: "Tests verify registry identity is bound to index/download origins."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
+    timestamps:
+      created_at: "2026-11-01T16:58:47Z"
+      updated_at: "2026-11-01T16:58:47Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "origin-identity-binding-implement-code"
+    title: "implement_code: bind registry identity to origins"
+    description: "Implement registry source identity binding to index/download origins rather than name alone."
+    context: "Remediation for security audit finding that registry identity is not origin-bound."
+    purpose: "Strengthen registry source identity to prevent origin confusion attacks."
+    expected_outcome: "Registry source identity is bound to index/download origins."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "origin-identity-binding-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
+    timestamps:
+      created_at: "2026-11-01T16:58:47Z"
+      updated_at: "2026-11-01T16:58:47Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "path-grant-validation-write-tests"
+    title: "write_tests: PATH grant validation against writable scratch"
+    description: "Define tests verifying PATH cannot point to writable scratch or unmounted directories."
+    context: "Security audit found PATH is only checked as one absolute directory, allowing it to point to writable scratch."
+    purpose: "Establish test coverage for PATH grant validation before implementation."
+    expected_outcome: "Tests verify PATH is restricted to granted read-only directories."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PROTOCOL-BOUNDARY"
+    timestamps:
+      created_at: "2026-11-01T16:58:47Z"
+      updated_at: "2026-11-01T16:58:47Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "path-grant-validation-implement-code"
+    title: "implement_code: validate PATH against granted read-only directories"
+    description: "Implement PATH validation ensuring it only references granted read-only directories, not writable scratch."
+    context: "Remediation for security audit finding that PATH validation is insufficient."
+    purpose: "Prevent PATH from pointing to writable scratch or unmounted directories."
+    expected_outcome: "PATH is validated against granted read-only directories."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "path-grant-validation-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PROTOCOL-BOUNDARY"
+    timestamps:
+      created_at: "2026-11-01T16:58:47Z"
+      updated_at: "2026-11-01T16:58:47Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "galla-reverification-security-audit"
     title: "Re-run sandbox runner security audit"
     description: "Independently re-run the sandbox runner security audit in a genuine agent context, covering request parsing, canonical paths, mount construction, namespace isolation, Bubblewrap substitution, environment and network denial, resource enforcement, and fallback resistance."
@@ -455,14 +596,22 @@ tasks:
     kind: security-audit
     status: pending
     depends_on:
+      - "cache-promotion-atomicity-implement-code"
+      - "cache-promotion-atomicity-write-tests"
       - "galla-implement-code"
+      - "network-guard-https-implement-code"
+      - "network-guard-https-write-tests"
+      - "origin-identity-binding-implement-code"
+      - "origin-identity-binding-write-tests"
+      - "path-grant-validation-implement-code"
+      - "path-grant-validation-write-tests"
     requirements:
       - "CONTRACT.md#Security-and-authority"
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-11-01T12:36:57Z"
+      updated_at: "2026-11-01T16:58:47Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

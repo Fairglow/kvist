@@ -18,6 +18,13 @@ fn probe_invocation_succeeds() {
         .output()
         .expect("run scaffold probe");
 
+    if std::path::Path::new("/.galla-sandbox").exists() {
+        assert_eq!(output.status.code(), Some(3));
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("already inside a Galla sandbox"));
+        return;
+    }
+
     assert!(output.status.success());
     assert!(!output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).trim().is_empty());

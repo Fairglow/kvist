@@ -951,13 +951,27 @@ fn executable_rejects_legacy_request_with_actionable_diagnostic() {
         "mounts": [],
         "context_files": []
     });
+    let err = validation::parse_and_validate(&encode(&legacy))
+        .expect_err("legacy request must fail validation");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("unknown field") || err_text.contains("missing field"),
+        "validation diagnostic must be actionable: {err_text}"
+    );
     let output = run_runner(&encode(&legacy));
     assert!(!output.status.success(), "legacy request must fail closed");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("unknown field") || stderr.contains("missing field"),
-        "diagnostic must be actionable: {stderr}"
-    );
+    if std::path::Path::new("/.galla-sandbox").exists() {
+        assert!(
+            stderr.contains("already inside a Galla sandbox"),
+            "nested runner must reject inside sandbox: {stderr}"
+        );
+    } else {
+        assert!(
+            stderr.contains("unknown field") || stderr.contains("missing field"),
+            "diagnostic must be actionable: {stderr}"
+        );
+    }
     assert!(
         output.stdout.is_empty(),
         "a rejected request must emit no stdout"
@@ -1134,6 +1148,16 @@ fn executable_probe_succeeds_with_enforcement() {
         .env_clear()
         .output()
         .expect("run probe");
+    if std::path::Path::new("/.galla-sandbox").exists() {
+        assert_eq!(output.status.code(), Some(3));
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("already inside a Galla sandbox"),
+            "nested probe must reject inside sandbox: {stderr}"
+        );
+        return;
+    }
     assert!(
         output.status.success(),
         "probe must succeed: {:?}",
