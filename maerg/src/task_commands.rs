@@ -4909,19 +4909,92 @@ fn execute_task_under_lock(
             ))
         } else if run_result.success {
             if task.kind == TaskKind::Implementation {
-                tracing::info!(
-                    task_id = %task_id,
-                    "running test-command verification"
-                );
-                eprintln!("Running test-command verification...");
-                match verify_task(
-                    component_path,
-                    task_id,
-                    project_dir,
-                    &config,
-                    &sandbox_probe,
-                    &policy_identity,
-                ) {
+                const MAX_VERIFICATION_REPAIR_ROUNDS: usize = 3;
+                let mut repair_round = 0usize;
+                let verify_outcome = loop {
+                    tracing::info!(
+                        task_id = %task_id,
+                        repair_round,
+                        "running test-command verification"
+                    );
+                    eprintln!("Running test-command verification...");
+                    let res = verify_task(
+                        component_path,
+                        task_id,
+                        project_dir,
+                        &config,
+                        &sandbox_probe,
+                        &policy_identity,
+                    );
+                    let Ok(verify_res) = res else {
+                        break res;
+                    };
+                    if verify_res.success
+                        || verify_res.timed_out
+                        || repair_round >= MAX_VERIFICATION_REPAIR_ROUNDS
+                        || (verify_res.stdout.trim().is_empty()
+                            && verify_res.stderr.trim().is_empty())
+                    {
+                        break Ok(verify_res);
+                    }
+                    repair_round += 1;
+                    eprintln!(
+                        "Verification failed (repair round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS}); feeding test failure diagnostics back to the agent to investigate and fix..."
+                    );
+                    let pre_src = digest_path_tree(&context.component_dir.join("src")).ok();
+                    let pre_tests = digest_path_tree(&context.component_dir.join("tests")).ok();
+                    let stdout_tail = redact_bounded(
+                        verify_res.stdout.clone(),
+                        &evidence_redactions(&config),
+                        16384,
+                    );
+                    let stderr_tail = redact_bounded(
+                        verify_res.stderr.clone(),
+                        &evidence_redactions(&config),
+                        16384,
+                    );
+                    let repair_prompt = format!(
+                        "{prompt}\n\n## Verification Failure (Repair Round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS})\n\
+                         `{}` failed with exit code {:?}.\n\
+                         Inspect the compiler or test failure output below, read the relevant lines in `src/` or `tests/`, \
+                         fix the root cause using `edit_file` or `write_file`, and then reply with a plain-text summary \
+                         and NO tool calls so Kvist can re-run verification.\n\n\
+                         --- Verification Stdout ---\n{stdout_tail}\n\
+                         --- Verification Stderr ---\n{stderr_tail}\n",
+                        verify_res.command, verify_res.exit_code
+                    );
+                    let Ok(repair_run) = crate::agent::execute_agent_with_controls(
+                        agent_profile,
+                        sandbox_config,
+                        Some(&approved_runner),
+                        Some(&sandbox_probe),
+                        crate::agent::AgentExecutionRequest {
+                            project_root: project_dir,
+                            vcs_selection: config.vcs,
+                            prompt: &repair_prompt,
+                            context_paths: &context_files,
+                            read_only_mounts: &read_only_mounts,
+                            target_dir: &context.component_dir,
+                            task_id,
+                            stream_output: stream,
+                            role,
+                            policy_identity: &policy_identity,
+                        },
+                        allow_control,
+                    ) else {
+                        break Ok(verify_res);
+                    };
+                    if !repair_run.success || repair_run.surfaced_decision {
+                        break Ok(verify_res);
+                    }
+                    *explanation = Some(repair_run.stdout.clone());
+                    let post_src = digest_path_tree(&context.component_dir.join("src")).ok();
+                    let post_tests = digest_path_tree(&context.component_dir.join("tests")).ok();
+                    if pre_src == post_src && pre_tests == post_tests {
+                        break Ok(verify_res);
+                    }
+                };
+                match verify_outcome {
                     Ok(verify_res) => {
                         if verify_res.success {
                             let mut changes = Vec::new();
