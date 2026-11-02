@@ -514,7 +514,11 @@ fn validate_phase_purpose(
         ),
         Phase::DependencyAcquisition => matches!(
             purpose,
-            Purpose::Toolchain | Purpose::Runtime | Purpose::Scratch | Purpose::DependencyCache | Purpose::Lockfile
+            Purpose::Toolchain
+                | Purpose::Runtime
+                | Purpose::Scratch
+                | Purpose::DependencyCache
+                | Purpose::Lockfile
         ),
     };
     if !permitted {

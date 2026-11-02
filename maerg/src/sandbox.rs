@@ -2262,7 +2262,11 @@ pub(crate) fn cargo_toolchain_from_path(
         });
     }
     let runtime_bin = provision_toolchain_bin(&root, runner)?;
-    Ok(ResolvedCargoToolchain { root, cargo, runtime_bin })
+    Ok(ResolvedCargoToolchain {
+        root,
+        cargo,
+        runtime_bin,
+    })
 }
 
 /// Locate the immutable Rust toolchain (cargo, rustc, rustlib, linker) so an

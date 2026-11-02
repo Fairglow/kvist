@@ -594,7 +594,7 @@ tasks:
     purpose: "Replace the placeholder-era security receipts with genuine independent findings before the runner is trusted as the enforcement boundary."
     expected_outcome: "A genuine independent audit records or remediates every high-confidence finding, and its disposition is retained for human arbitration against the placeholder-era receipts."
     kind: security-audit
-    status: pending
+    status: awaiting-decision
     depends_on:
       - "cache-promotion-atomicity-implement-code"
       - "cache-promotion-atomicity-write-tests"
@@ -611,9 +611,9 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-11-01T16:58:47Z"
+      updated_at: "2026-11-02T13:51:02Z"
       completed_at: null
-    blocked_reason: null
+    blocked_reason: "one or more impactful, uncovered decisions surfaced and require a human decision before implementation continues. Human-readable summary: /opt/proj/kvist/galla/.kvist/attention/galla-reverification-security-audit.md. Raw proposal evidence: /opt/proj/kvist/./galla/.kvist/continuous-reviews."
     recovery_state: null
   - id: "galla-reverification-compliance-review"
     title: "Re-run sandbox runner compliance review"

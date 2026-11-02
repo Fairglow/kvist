@@ -500,16 +500,20 @@ impl OriginPolicy {
             // A registered-name host is authorized when its declared allowed
             // origin shares the same authority; address-class checks apply only
             // to IP-literal hosts.
-            return self.allowed.iter().any(|allowed| allowed.same_authority(&request));
+            return self
+                .allowed
+                .iter()
+                .any(|allowed| allowed.same_authority(&request));
         };
         match self.mode {
             TransportPolicyMode::ProductionRemote => self
                 .allowed
                 .iter()
                 .any(|allowed| allowed.same_authority(&request) && is_public_address(address)),
-            TransportPolicyMode::TestLoopback => self.allowed.iter().any(|allowed| {
-                allowed.same_authority(&request) && is_loopback_address(address)
-            }),
+            TransportPolicyMode::TestLoopback => self
+                .allowed
+                .iter()
+                .any(|allowed| allowed.same_authority(&request) && is_loopback_address(address)),
         }
     }
 

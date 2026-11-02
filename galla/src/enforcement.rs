@@ -121,7 +121,7 @@ fn parse_request_line(first_line: &str) -> Result<ParsedRequestLine, ()> {
                 let Ok(port) = port.parse::<u16>() else {
                     return Err(());
                 };
-                validate_connect_host(&host)?;
+                validate_connect_host(host)?;
                 (host.to_owned(), port)
             }
             // A bare `host` defaults to the HTTPS port.
@@ -1253,8 +1253,7 @@ mod tests {
 
     #[test]
     fn accepts_connect_with_valid_ipv4_host() {
-        let parsed =
-            parse_request_line("CONNECT 192.0.2.1:443 HTTP/1.1").expect("connect ipv4");
+        let parsed = parse_request_line("CONNECT 192.0.2.1:443 HTTP/1.1").expect("connect ipv4");
         match parsed {
             ParsedRequestLine::ConnectTunnel { host, port } => {
                 assert_eq!(host, "192.0.2.1");
