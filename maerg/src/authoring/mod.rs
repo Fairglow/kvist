@@ -368,30 +368,20 @@ pub fn authorize_turn(
 
     let mut retained_drops = Vec::new();
     for dropped in plan.dropped.drain(..) {
-        if dropped.tool == "edit_file"
-            && (dropped.reason.contains("`replace` must occur exactly once")
-                || dropped.reason.contains("unbalanced `{` / `}`"))
-        {
-            plan.reads.push(ReadRecord {
-                call_id: dropped.call_id,
-                tool: dropped.tool,
-                path: "edit-error".to_owned(),
-                content: format!(
-                    "error: {}. Call `read_file` on the target file to check the exact lines and brace balance before retrying `edit_file`.",
-                    dropped.reason
-                ),
-            });
-        } else if matches!(dropped.tool.as_str(), "edit_file" | "write_file")
-            && (dropped.reason.contains("names a protected intent document")
+        if matches!(dropped.tool.as_str(), "edit_file" | "write_file") {
+            let path = if dropped.reason.contains("names a protected intent document")
                 || dropped.reason.contains("is not under a writable root")
-                || dropped.reason.contains("does not exist"))
-        {
+            {
+                "write-scope-error"
+            } else {
+                "edit-error"
+            };
             plan.reads.push(ReadRecord {
                 call_id: dropped.call_id,
                 tool: dropped.tool,
-                path: "write-scope-error".to_owned(),
+                path: path.to_owned(),
                 content: format!(
-                    "error: {} (not applied). Protected documents (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, `IMPL.md`) are authoritative and read-only during task execution; only files under `src/` and `tests/` may be modified. Adjust your code/tests in `src/` and `tests/` to conform to the contract, or if your changes in `src/` and `tests/` are complete, reply now with a plain-text summary and NO tool calls.",
+                    "error: {} (not applied). Protected documents (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, `IMPL.md`) are read-only; only files under `src/` and `tests/` may be modified. For `edit_file`, both `replace` and `destination` must be non-empty and `replace` must occur once in the target file. Check the target file with `read_file` or reply with a plain-text summary and NO tool calls if your changes are complete.",
                     dropped.reason
                 ),
             });
