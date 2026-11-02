@@ -4909,7 +4909,7 @@ fn execute_task_under_lock(
             ))
         } else if run_result.success {
             if task.kind == TaskKind::Implementation {
-                const MAX_VERIFICATION_REPAIR_ROUNDS: usize = 3;
+                const MAX_VERIFICATION_REPAIR_ROUNDS: usize = 4;
                 let mut repair_round = 0usize;
                 let verify_outcome = loop {
                     tracing::info!(
@@ -4956,7 +4956,8 @@ fn execute_task_under_lock(
                     let repair_prompt = format!(
                         "{prompt}\n\n## Verification Failure (Repair Round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS})\n\
                          `{}` failed with exit code {:?}.\n\
-                         Inspect the compiler or test failure output below, read the relevant lines in `src/` or `tests/`, \
+                         Inspect the compiler or test failure output below, use `read_file` with `search` (e.g. `{{\"path\": \"src/...\", \"search\": \"fn ...\"}}`) \
+                         or `start_line`/`end_line` to jump directly to the relevant code in `src/` or `tests/`, \
                          fix the root cause using `edit_file` or `write_file`, and then reply with a plain-text summary \
                          and NO tool calls so Kvist can re-run verification.\n\n\
                          --- Verification Stdout ---\n{stdout_tail}\n\

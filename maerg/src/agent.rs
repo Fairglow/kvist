@@ -1712,6 +1712,7 @@ fn execute_agent_inner(
                             last_action_label = format!("{} {}", read.tool, read.path);
                         }
                         duplicate_read_streak = 0;
+                        repeated_text_streak = 0;
                         turn_had_new_read = true;
                     } else {
                         last_action_label = read.path.clone();
