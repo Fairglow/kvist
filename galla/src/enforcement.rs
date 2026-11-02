@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use sha2::Digest;
 
+use crate::origin::{OriginPolicy, RequestKind};
 use crate::probe::locate_backend;
 use crate::protocol::{Access, Grant, NetworkMode, Phase, Purpose, SandboxRequest};
 
@@ -73,6 +74,140 @@ fn add_workspace_vendor_mask(
     Ok(())
 }
 
+/// The parsed form of a network-guard request line.
+///
+/// The guard accepts two request shapes: an absolute-form request URI (used for
+/// plain HTTP, e.g. `GET http://host/path HTTP/1.1`) and the CONNECT method
+/// used to tunnel HTTPS through the proxy (e.g. `CONNECT host:443 HTTP/1.1`).
+enum ParsedRequestLine {
+    /// An absolute-form request targeting a plain-`http` upstream.
+    HttpAbsolute {
+        /// The upstream host.
+        host: String,
+        /// The upstream port (defaults to 80 when absent).
+        port: u16,
+        /// The request path forwarded verbatim to the upstream.
+        path: String,
+    },
+    /// A CONNECT tunnel request targeting an HTTPS upstream.
+    ConnectTunnel {
+        /// The upstream host.
+        host: String,
+        /// The upstream port (defaults to 443 when absent).
+        port: u16,
+    },
+}
+
+/// Parses the first line of an HTTP request received by the network guard.
+///
+/// Returns [`ParsedRequestLine::HttpAbsolute`] for an absolute-form request URI
+/// (plain HTTP) and [`ParsedRequestLine::ConnectTunnel`] for a `CONNECT`
+/// request line (HTTPS tunneling). Any other method, an empty authority, or a
+/// malformed authority/port yields `Err`.
+fn parse_request_line(first_line: &str) -> Result<ParsedRequestLine, ()> {
+    let parts: Vec<&str> = first_line.split_whitespace().collect();
+    if parts.len() != 3 {
+        return Err(());
+    }
+    let method = parts[0];
+    let target = parts[1];
+
+    if method.eq_ignore_ascii_case("CONNECT") {
+        let (host, port) = match target.split_once(':') {
+            Some((host, port)) => {
+                if host.is_empty() {
+                    return Err(());
+                }
+                let Ok(port) = port.parse::<u16>() else {
+                    return Err(());
+                };
+                validate_connect_host(&host)?;
+                (host.to_owned(), port)
+            }
+            // A bare `host` defaults to the HTTPS port.
+            None => {
+                validate_connect_host(target)?;
+                (target.to_owned(), 443)
+            }
+        };
+        return Ok(ParsedRequestLine::ConnectTunnel { host, port });
+    }
+
+    if (method.eq_ignore_ascii_case("GET") || method.eq_ignore_ascii_case("HEAD"))
+        && let Some(stripped) = target.strip_prefix("http://")
+    {
+        let (authority, path) = match stripped.split_once('/') {
+            Some((auth, path)) => (auth, format!("/{}", path)),
+            None => (stripped, "/".to_owned()),
+        };
+        let (host, port) = match authority.split_once(':') {
+            Some((host, port)) if !host.is_empty() => {
+                let Ok(port) = port.parse::<u16>() else {
+                    return Err(());
+                };
+                (host.to_owned(), port)
+            }
+            // A bare `host` defaults to the HTTP port.
+            _ if !authority.is_empty() => (authority.to_owned(), 80),
+            _ => return Err(()),
+        };
+        return Ok(ParsedRequestLine::HttpAbsolute { host, port, path });
+    }
+
+    Err(())
+}
+
+/// Validates a `CONNECT` authority host: a registered name or IP literal that
+/// cannot contain path separators, userinfo, or characters that would let a
+/// malformed host masquerade as a different origin.
+fn validate_connect_host(host: &str) -> Result<(), ()> {
+    if host.is_empty() {
+        return Err(());
+    }
+    if host.contains(['/', '@', ' ']) {
+        return Err(());
+    }
+    // A colon is only legal inside a bracketed IPv6 literal, which the
+    // `split_once(':')` caller would have already rejected as malformed.
+    if host.contains(':') {
+        return Err(());
+    }
+    if !host
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
+    {
+        return Err(());
+    }
+    if host.starts_with('.') || host.ends_with('.') || host.contains("..") {
+        return Err(());
+    }
+    Ok(())
+}
+
+impl ParsedRequestLine {
+    /// The policy target string the origin matcher authorizes against.
+    ///
+    /// CONNECT tunnels are reauthorized as canonical HTTPS origins that always
+    /// carry an explicit port. Absolute-form HTTP requests are reauthorized as
+    /// canonical HTTP origins whose default port (80) is omitted so the matcher
+    /// sees the same canonical shape it validates elsewhere.
+    fn policy_target(&self) -> String {
+        match self {
+            ParsedRequestLine::ConnectTunnel { host, port } => {
+                format!("https://{host}:{port}/")
+            }
+            ParsedRequestLine::HttpAbsolute { host, port, path } => {
+                let port_suffix = if *port == 80 {
+                    String::new()
+                } else {
+                    format!(":{port}")
+                };
+                format!("http://{host}{port_suffix}{path}")
+            }
+        }
+    }
+}
+
 fn start_network_guard_proxy(
     sources: &[crate::protocol::AllowedSource],
 ) -> Option<(u16, std::sync::mpsc::Sender<()>)> {
@@ -83,7 +218,7 @@ fn start_network_guard_proxy(
     let port = listener.local_addr().ok()?.port();
     let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
 
-    let mut allowed_prefixes = Vec::new();
+    let mut policy = OriginPolicy::new();
     for source in sources {
         match source {
             crate::protocol::AllowedSource::CargoRegistry {
@@ -91,11 +226,12 @@ fn start_network_guard_proxy(
                 download_origin,
                 ..
             } => {
-                allowed_prefixes.push(index_origin.clone());
-                allowed_prefixes.push(download_origin.clone());
+                if policy.allow_url(index_origin).is_ok() {
+                    let _ = policy.allow_url(download_origin);
+                }
             }
             crate::protocol::AllowedSource::CargoGit { repository, .. } => {
-                allowed_prefixes.push(repository.clone());
+                let _ = policy.allow_url(repository);
             }
         }
     }
@@ -113,41 +249,74 @@ fn start_network_guard_proxy(
                 Err(_) => break,
             };
 
-            let prefixes = allowed_prefixes.clone();
-            std::thread::spawn(move || {
-                let mut buffer = [0u8; 4096];
-                let count = match client.read(&mut buffer) {
-                    Ok(n) if n > 0 => n,
-                    _ => return,
-                };
-                let request_text = String::from_utf8_lossy(&buffer[..count]);
-                let first_line = request_text.lines().next().unwrap_or("");
-                let parts: Vec<&str> = first_line.split_whitespace().collect();
-                if parts.len() < 2 {
-                    return;
+            let mut buffer = [0u8; 4096];
+            let count = match client.read(&mut buffer) {
+                Ok(n) if n > 0 => n,
+                _ => return,
+            };
+            let request_text = String::from_utf8_lossy(&buffer[..count]);
+            let first_line = request_text.lines().next().unwrap_or("");
+            let parsed = match parse_request_line(first_line) {
+                Ok(parsed) => parsed,
+                Err(()) => return,
+            };
+
+            let policy_target = parsed.policy_target();
+            let authorized = match &parsed {
+                ParsedRequestLine::HttpAbsolute { .. } => policy.permits(&policy_target),
+                // A CONNECT tunnel forwards an encrypted stream whose request
+                // path the proxy cannot inspect, so it is authorized on
+                // authority alone (scheme, host, port) rather than path-prefix.
+                ParsedRequestLine::ConnectTunnel { .. } => {
+                    policy.authorizes_authority(&policy_target)
                 }
+            };
 
-                let target_url = parts[1];
-                let is_allowed = prefixes.iter().any(|prefix| target_url.starts_with(prefix));
+            if !authorized {
+                let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 14\r\nConnection: close\r\n\r\n403 Forbidden\n");
+                let _ = client.flush();
+                return;
+            }
 
-                if !is_allowed {
-                    let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 14\r\nConnection: close\r\n\r\n403 Forbidden\n");
-                    let _ = client.flush();
-                    return;
+            match parsed {
+                ParsedRequestLine::ConnectTunnel { host, port } => {
+                    // HTTPS tunnel: complete the CONNECT handshake, then
+                    // bidirectionally forward the encrypted stream. When the
+                    // upstream connection fails, reject the client with a clear
+                    // error instead of silently dropping the connection.
+                    if let Ok(mut upstream) = TcpStream::connect((host.as_str(), port)) {
+                        let _ = client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n");
+                        let _ = client.flush();
+                        let mut sink = [0u8; 4096];
+                        let mut source = [0u8; 4096];
+                        loop {
+                            let read = match upstream.read(&mut sink) {
+                                Ok(0) => break,
+                                Ok(n) => (n, true),
+                                Err(_) => break,
+                            };
+                            if client.write_all(&sink[..read.0]).is_err() {
+                                break;
+                            }
+                            let read = match client.read(&mut source) {
+                                Ok(0) => break,
+                                Ok(n) => (n, false),
+                                Err(_) => break,
+                            };
+                            if upstream.write_all(&source[..read.0]).is_err() {
+                                break;
+                            }
+                        }
+                    } else {
+                        let _ = client.write_all(
+                            b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 19\r\nConnection: close\r\n\r\n502 Bad Gateway\n",
+                        );
+                        let _ = client.flush();
+                    }
                 }
-
-                // Connect to upstream target
-                if let Some(stripped) = target_url.strip_prefix("http://") {
-                    let (authority, path) = match stripped.split_once('/') {
-                        Some((auth, path)) => (auth, format!("/{}", path)),
-                        None => (stripped, "/".to_owned()),
-                    };
-                    let (host, port) = match authority.split_once(':') {
-                        Some((h, p)) => (h, p.parse::<u16>().unwrap_or(80)),
-                        None => (authority, 80),
-                    };
-                    if let Ok(mut upstream) = TcpStream::connect((host, port)) {
-                        let mut forward_header = format!("{} {} HTTP/1.1\r\n", parts[0], path);
+                ParsedRequestLine::HttpAbsolute { host, port, path } => {
+                    if let Ok(mut upstream) = TcpStream::connect((host.as_str(), port)) {
+                        let mut forward_header = format!("{} {} HTTP/1.1\r\n", "GET", path);
                         for line in request_text.lines().skip(1) {
                             if line.is_empty() {
                                 forward_header.push_str("\r\n");
@@ -170,7 +339,7 @@ fn start_network_guard_proxy(
                         }
                     }
                 }
-            });
+            }
         }
     });
 
@@ -871,6 +1040,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::origin::{OriginPolicy, RequestKind};
     use std::fs;
     use std::os::unix::fs::symlink;
 
@@ -984,5 +1154,250 @@ mod tests {
             );
             assert!(arguments.is_empty());
         }
+    }
+
+    // -- Network guard HTTPS CONNECT handling and URL parsing -----------------
+
+    #[test]
+    fn parses_https_connect_tunnel_request_line() {
+        let parsed = parse_request_line("CONNECT example.com:443 HTTP/1.1").expect("connect");
+        match parsed {
+            ParsedRequestLine::ConnectTunnel { host, port } => {
+                assert_eq!(host, "example.com");
+                assert_eq!(port, 443);
+            }
+            _ => panic!("expected CONNECT tunnel"),
+        }
+    }
+
+    #[test]
+    fn parses_connect_tunnel_with_default_https_port() {
+        let parsed = parse_request_line("CONNECT example.com HTTP/1.1").expect("connect");
+        match parsed {
+            ParsedRequestLine::ConnectTunnel { host, port } => {
+                assert_eq!(host, "example.com");
+                assert_eq!(port, 443);
+            }
+            _ => panic!("expected CONNECT tunnel"),
+        }
+    }
+
+    #[test]
+    fn parses_connect_tunnel_case_insensitively() {
+        let parsed = parse_request_line("connect example.com:443 HTTP/1.1").expect("connect");
+        match parsed {
+            ParsedRequestLine::ConnectTunnel { host, port } => {
+                assert_eq!(host, "example.com");
+                assert_eq!(port, 443);
+            }
+            _ => panic!("expected CONNECT tunnel"),
+        }
+    }
+
+    #[test]
+    fn parses_absolute_http_form_request_line() {
+        let parsed =
+            parse_request_line("GET http://index.crates.io/index/serde HTTP/1.1").expect("http");
+        match parsed {
+            ParsedRequestLine::HttpAbsolute { host, port, path } => {
+                assert_eq!(host, "index.crates.io");
+                assert_eq!(port, 80);
+                assert_eq!(path, "/index/serde");
+            }
+            _ => panic!("expected HTTP absolute form"),
+        }
+    }
+
+    #[test]
+    fn parses_absolute_http_form_with_explicit_port() {
+        let parsed = parse_request_line("GET http://127.0.0.1:8080/index/ HTTP/1.1").expect("http");
+        match parsed {
+            ParsedRequestLine::HttpAbsolute { host, port, path } => {
+                assert_eq!(host, "127.0.0.1");
+                assert_eq!(port, 8080);
+                assert_eq!(path, "/index/");
+            }
+            _ => panic!("expected HTTP absolute form"),
+        }
+    }
+
+    #[test]
+    fn rejects_non_connect_non_http_methods() {
+        assert!(parse_request_line("POST http://host/path HTTP/1.1").is_err());
+        assert!(parse_request_line("GET https://host/path HTTP/1.1").is_err());
+        assert!(parse_request_line("GET ftp://host/path HTTP/1.1").is_err());
+    }
+
+    #[test]
+    fn rejects_connect_with_missing_or_malformed_port() {
+        assert!(parse_request_line("CONNECT :443 HTTP/1.1").is_err());
+        assert!(parse_request_line("CONNECT HTTP/1.1").is_err());
+        assert!(parse_request_line("CONNECT example.com:abc HTTP/1.1").is_err());
+        assert!(parse_request_line("CONNECT example.com HTTP/1.1 extra").is_err());
+    }
+
+    #[test]
+    fn rejects_connect_with_invalid_host() {
+        // A host carrying a path separator, userinfo, or space cannot name a
+        // valid CONNECT target.
+        assert!(parse_request_line("CONNECT example.com/path:443 HTTP/1.1").is_err());
+        assert!(parse_request_line("CONNECT user@host:443 HTTP/1.1").is_err());
+        assert!(parse_request_line("CONNECT bad host:443 HTTP/1.1").is_err());
+        // A colon in the host (a malformed IPv6 attempt without brackets) is
+        // rejected.
+        assert!(parse_request_line("CONNECT ::1:443 HTTP/1.1").is_err());
+        // Empty labels are rejected.
+        assert!(parse_request_line("CONNECT .example.com:443 HTTP/1.1").is_err());
+        assert!(parse_request_line("CONNECT example..com:443 HTTP/1.1").is_err());
+    }
+
+    #[test]
+    fn accepts_connect_with_valid_ipv4_host() {
+        let parsed =
+            parse_request_line("CONNECT 192.0.2.1:443 HTTP/1.1").expect("connect ipv4");
+        match parsed {
+            ParsedRequestLine::ConnectTunnel { host, port } => {
+                assert_eq!(host, "192.0.2.1");
+                assert_eq!(port, 443);
+            }
+            _ => panic!("expected CONNECT tunnel"),
+        }
+    }
+
+    #[test]
+    fn rejects_absolute_http_form_with_missing_authority() {
+        assert!(parse_request_line("GET http:// HTTP/1.1").is_err());
+        assert!(parse_request_line("GET http:///path HTTP/1.1").is_err());
+    }
+
+    #[test]
+    fn rejects_request_line_with_too_few_parts() {
+        assert!(parse_request_line("").is_err());
+        assert!(parse_request_line("GET").is_err());
+        assert!(parse_request_line("CONNECT").is_err());
+    }
+
+    #[test]
+    fn connect_policy_target_uses_https_scheme() {
+        let target = ParsedRequestLine::ConnectTunnel {
+            host: "example.com".into(),
+            port: 443,
+        };
+        let policy_target = match &target {
+            ParsedRequestLine::ConnectTunnel { host, port } => format!("https://{host}:{port}/"),
+            _ => unreachable!(),
+        };
+        assert_eq!(policy_target, "https://example.com:443/");
+    }
+
+    #[test]
+    fn http_absolute_policy_target_uses_http_scheme() {
+        let target = ParsedRequestLine::HttpAbsolute {
+            host: "index.crates.io".into(),
+            port: 80,
+            path: "/index/serde".into(),
+        };
+        assert_eq!(target.policy_target(), "http://index.crates.io/index/serde");
+    }
+
+    #[test]
+    fn connect_tunnel_is_allowed_for_matching_https_source() {
+        let mut policy = OriginPolicy::new();
+        policy
+            .allow_url("https://static.crates.io/crates/")
+            .expect("allow download");
+        // A CONNECT tunnel to the allowed origin's host is authorized.
+        assert!(policy.authorizes_request(
+            RequestKind::CargoCrateDownload,
+            "https://static.crates.io/crates/serde/serde-1.0.0.crate"
+        ));
+        // A CONNECT tunnel to an undeclared origin is denied.
+        assert!(!policy.authorizes_request(
+            RequestKind::CargoCrateDownload,
+            "https://evil.invalid/crates/serde.crate"
+        ));
+    }
+
+    #[test]
+    fn connect_tunnel_authorizes_on_authority_not_path() {
+        // The proxy reauthorizes a CONNECT tunnel on authority alone because the
+        // tunnelled HTTPS request path is encrypted and unseen. An allowed
+        // origin with a non-root path prefix must still authorize a CONNECT
+        // tunnel to the same authority.
+        let mut policy = OriginPolicy::new();
+        policy
+            .allow_url("https://static.crates.io/crates/")
+            .expect("allow download");
+        // The CONNECT policy target carries only the authority (root path).
+        let target = "https://static.crates.io:443/";
+        assert!(policy.authorizes_authority(target));
+        // The same authority with a different port is denied.
+        assert!(!policy.authorizes_authority("https://static.crates.io:8443/"));
+    }
+
+    // -- Full URL parsing through the validated origin matcher ------------------
+
+    #[test]
+    fn connect_tunnel_authorizes_by_full_url_parsing() {
+        // The guard reauthorizes a CONNECT tunnel through the strict origin
+        // parser, not a naive prefix match: scheme, host, port, and path
+        // components are all validated.
+        let mut policy = OriginPolicy::new();
+        policy
+            .allow_url("https://index.crates.io/")
+            .expect("allow index");
+
+        // A CONNECT tunnel to the allowed authority is authorized even though
+        // the CONNECT target carries no path.
+        assert!(
+            policy.authorizes_request(RequestKind::CargoCrateDownload, "https://index.crates.io/")
+        );
+
+        // Wrong host, wrong scheme, and wrong port are all denied by the same
+        // canonical parser.
+        assert!(!policy.authorizes_request(
+            RequestKind::CargoCrateDownload,
+            "https://index.crates.io:8443/"
+        ));
+        assert!(
+            !policy.authorizes_request(RequestKind::CargoCrateDownload, "http://index.crates.io/")
+        );
+        assert!(
+            !policy.authorizes_request(RequestKind::CargoCrateDownload, "https://mirror.invalid/")
+        );
+    }
+
+    #[test]
+    fn http_absolute_authorizes_by_full_url_parsing() {
+        // Absolute-form HTTP requests are authorized through the same strict
+        // parser, which rejects credentials, query strings, and fragments.
+        let mut policy = OriginPolicy::test_loopback();
+        policy
+            .allow_url("http://127.0.0.1:8080/")
+            .expect("allow loopback");
+
+        assert!(policy.permits("http://127.0.0.1:8080/index/serde"));
+        // Credentials, query, and fragment are rejected by the parser.
+        assert!(!policy.permits("http://user:pass@127.0.0.1:8080/index/"));
+        assert!(!policy.permits("http://127.0.0.1:8080/index/?token=1"));
+        assert!(!policy.permits("http://127.0.0.1:8080/index/#frag"));
+    }
+
+    #[test]
+    fn policy_target_uses_strict_origin_for_connect_and_http() {
+        // CONNECT tunnels are reauthorized as canonical HTTPS origins and
+        // absolute-form requests as canonical HTTP origins, so the policy
+        // matcher sees the exact same canonical shape it validates elsewhere.
+        let mut policy = OriginPolicy::new();
+        policy
+            .allow_url("https://static.crates.io/crates/")
+            .expect("allow download");
+
+        assert!(!policy.permits("http://static.crates.io/crates/serde-1.0.0.crate"));
+        assert!(!policy.permits("http://static.crates.io/crates/serde-1.0.0.crate?x=1"));
+        assert!(policy.authorizes_request(
+            RequestKind::CargoCrateDownload,
+            "https://static.crates.io/crates/serde-1.0.0.crate"
+        ));
     }
 }

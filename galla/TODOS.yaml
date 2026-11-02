@@ -489,14 +489,14 @@ tasks:
     purpose: "Establish test coverage for HTTPS CONNECT handling before implementation."
     expected_outcome: "Tests verify HTTPS CONNECT support and full URL parsing in network guard."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
     timestamps:
       created_at: "2026-11-01T16:58:47Z"
-      updated_at: "2026-11-01T16:58:47Z"
-      completed_at: null
+      updated_at: "2026-11-02T10:51:03Z"
+      completed_at: "2026-11-02T10:51:03Z"
     blocked_reason: null
     recovery_state: null
   - id: "network-guard-https-implement-code"
@@ -506,15 +506,15 @@ tasks:
     purpose: "Enable HTTPS sources to work through the network guard proxy."
     expected_outcome: "Network guard supports HTTPS CONNECT and full URL parsing."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "network-guard-https-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
     timestamps:
       created_at: "2026-11-01T16:58:47Z"
-      updated_at: "2026-11-01T16:58:47Z"
-      completed_at: null
+      updated_at: "2026-11-02T12:19:59Z"
+      completed_at: "2026-11-02T12:19:59Z"
     blocked_reason: null
     recovery_state: null
   - id: "origin-identity-binding-write-tests"

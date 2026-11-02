@@ -485,6 +485,34 @@ impl OriginPolicy {
         })
     }
 
+    /// Returns true when `url` is a strictly valid request whose authority
+    /// (scheme, host, and port) exactly matches a declared allowed origin,
+    /// regardless of the request path.
+    ///
+    /// A `CONNECT` tunnel forwards an encrypted stream whose request path the
+    /// proxy cannot inspect, so it must be authorized on authority alone rather
+    /// than path-prefix containment. Any parse failure denies.
+    pub fn authorizes_authority(&self, url: &str) -> bool {
+        let Ok(request) = parse(url) else {
+            return false;
+        };
+        let Ok(address) = request.host().parse::<IpAddr>() else {
+            // A registered-name host is authorized when its declared allowed
+            // origin shares the same authority; address-class checks apply only
+            // to IP-literal hosts.
+            return self.allowed.iter().any(|allowed| allowed.same_authority(&request));
+        };
+        match self.mode {
+            TransportPolicyMode::ProductionRemote => self
+                .allowed
+                .iter()
+                .any(|allowed| allowed.same_authority(&request) && is_public_address(address)),
+            TransportPolicyMode::TestLoopback => self.allowed.iter().any(|allowed| {
+                allowed.same_authority(&request) && is_loopback_address(address)
+            }),
+        }
+    }
+
     fn parse_request_target(&self, kind: RequestKind, url: &str) -> Result<Origin, OriginError> {
         if url.contains('#') {
             return Err(OriginError::new("request URL must not contain a fragment"));
@@ -874,6 +902,34 @@ mod tests {
             RequestKind::CargoRegistryIndex,
             "https://index.crates.io/index/serde"
         ));
+    }
+
+    #[test]
+    fn authorizes_authority_matches_on_authority_alone() {
+        let mut policy = OriginPolicy::new();
+        policy
+            .allow_url("https://static.crates.io/crates/")
+            .expect("allow download");
+        // A CONNECT tunnel target carries only an authority (root path), so it
+        // is authorized when the authority matches regardless of the allowed
+        // origin's path prefix.
+        assert!(policy.authorizes_authority("https://static.crates.io:443/"));
+        // Wrong host or port is denied by the same authority check.
+        assert!(!policy.authorizes_authority("https://static.crates.io:8443/"));
+        assert!(!policy.authorizes_authority("https://evil.invalid:443/"));
+        // Wrong scheme is denied.
+        assert!(!policy.authorizes_authority("http://static.crates.io:443/"));
+    }
+
+    #[test]
+    fn authorizes_authority_rejects_parse_failures() {
+        let mut policy = OriginPolicy::new();
+        policy
+            .allow_url("https://static.crates.io/crates/")
+            .expect("allow download");
+        assert!(!policy.authorizes_authority("https://static.crates.io:443/a//b"));
+        assert!(!policy.authorizes_authority("https://static.crates.io:443/%2e%2e/"));
+        assert!(!policy.authorizes_authority("ftp://static.crates.io:443/"));
     }
 
     #[test]
