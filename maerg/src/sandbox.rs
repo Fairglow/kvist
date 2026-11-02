@@ -2190,8 +2190,6 @@ pub struct ResolvedCargoToolchain {
     pub root: PathBuf,
     /// The exact cargo executable beneath `root`.
     pub cargo: PathBuf,
-    /// The provisioned runtime bin directory (exposes toolchain binaries for PATH).
-    pub runtime_bin: PathBuf,
 }
 
 /// Derive and validate an immutable toolchain layout from a resolved `cargo`
@@ -2261,12 +2259,7 @@ pub(crate) fn cargo_toolchain_from_path(
             ),
         });
     }
-    let runtime_bin = provision_toolchain_bin(&root, runner)?;
-    Ok(ResolvedCargoToolchain {
-        root,
-        cargo,
-        runtime_bin,
-    })
+    Ok(ResolvedCargoToolchain { root, cargo })
 }
 
 /// Locate the immutable Rust toolchain (cargo, rustc, rustlib, linker) so an
@@ -2333,7 +2326,7 @@ fn provision_cargo_home(project_root: &Path) -> Result<PathBuf> {
 /// toolchain destination, and the system binutils at their host path (which the
 /// runner binds read-only into the sandbox). It is regenerated on every run
 /// under the Kvist-owned `.kvist/` directory.
-fn provision_toolchain_bin(project_root: &Path, runner: &str) -> Result<PathBuf> {
+pub(crate) fn provision_toolchain_bin(project_root: &Path, runner: &str) -> Result<PathBuf> {
     let bin_dir = project_root.join(".kvist").join("toolchain-bin");
     // Recreate from scratch so a stale set of symlinks from a previous run (or a
     // different toolchain) never leaks into the grant.

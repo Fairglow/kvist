@@ -524,6 +524,7 @@ fn provision_rust_via_acquisition_sandbox(
 
     // Provision the writable acquisition inputs under the Kvist-owned
     // `.kvist/acquisition/` directory, regenerated on every pass.
+    let runtime_bin = crate::sandbox::provision_toolchain_bin(project_dir, &sandbox_config.runner)?;
     let acquisition = project_dir.join(".kvist").join("acquisition");
     let cargo_home = acquisition.join("cargo-home");
     let scratch = acquisition.join("scratch");
@@ -622,7 +623,7 @@ fn provision_rust_via_acquisition_sandbox(
             toolchain_root: &toolchain.root,
             cargo_path: &toolchain.cargo,
             cargo_home: &cargo_home,
-            runtime_bin: &toolchain.runtime_bin,
+            runtime_bin: &runtime_bin,
             scratch_host_dir: &scratch,
             lockfile_workspace: &lockfile_workspace,
             lockfile_before_identity: &lockfile_before_identity,

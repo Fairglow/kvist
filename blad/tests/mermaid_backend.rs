@@ -338,7 +338,7 @@ fn node_edge_nesting_and_grapheme_ceiling_rejections_are_resources() {
 
 #[test]
 fn exact_source_ceiling_and_long_labels_retain_all_authored_words() {
-    let base = "flowchart LR\nA[Alpha] --> B[Beta]\n%%";
+    let base = "flowchart LR\nA[Alpha] --> B[Beta]\n%% ";
     let exact = format!("{base}{}", " ".repeat(65_536 - base.len()));
     let expected = render(base, false, None).unwrap();
     assert_eq!(render(&exact, false, None).unwrap(), expected);

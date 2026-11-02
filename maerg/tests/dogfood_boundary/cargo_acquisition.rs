@@ -508,13 +508,19 @@ exit 73
 "#
         ),
     );
+    let index_origin = format!("http://127.0.0.1:{allowed_port}/index/");
+    let download_origin = format!("http://127.0.0.1:{allowed_port}/crates/");
     let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
     request["network"]["allowed_sources"] = json!([{
         "kind": "cargo-registry",
         "name": "controlled-local-registry",
-        "index_origin": format!("http://127.0.0.1:{allowed_port}/index/"),
-        "download_origin": format!("http://127.0.0.1:{allowed_port}/crates/"),
-        "identity": sha256_bytes(b"controlled-local-registry")
+        "index_origin": index_origin,
+        "download_origin": download_origin,
+        "identity": galla::validation::registry_identity(
+            "controlled-local-registry",
+            &index_origin,
+            &download_origin,
+        )
     }]);
 
     let output = run_runner_request(&request);

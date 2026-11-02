@@ -251,43 +251,80 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
     let backend = backend.expect("install Bubblewrap on the host");
     let worktree = worktree.expect("run inside a worktree");
 
-    type State = BTreeMap<PathBuf, (u32, u64, i64, i64, i64, i64, String)>;
-    fn snapshot(path: &Path, state: &mut State) {
+    type Entry = (u32, u64, i64, i64, i64, i64, String);
+    type State = BTreeMap<PathBuf, Entry>;
+    fn entry(metadata: &fs::Metadata, content: String) -> Entry {
+        (
+            metadata.mode(),
+            metadata.len(),
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+            content,
+        )
+    }
+    fn enumerate(path: &Path, state: &mut State, files: &mut Vec<PathBuf>) {
         let metadata = fs::symlink_metadata(path).unwrap();
         let content = if metadata.is_symlink() {
             format!("{:?}", fs::read_link(path).unwrap())
         } else if metadata.is_file() {
-            let mut hash = Sha256::new();
-            let mut file = fs::File::open(path).unwrap();
-            let mut buffer = [0; 65536];
-            loop {
-                let count = file.read(&mut buffer).unwrap();
-                if count == 0 {
-                    break;
-                }
-                hash.update(&buffer[..count]);
-            }
-            hex::encode(hash.finalize())
+            files.push(path.to_path_buf());
+            String::new()
         } else {
             assert!(metadata.is_dir());
             "directory".into()
         };
-        state.insert(
-            path.into(),
-            (
-                metadata.mode(),
-                metadata.len(),
-                metadata.mtime(),
-                metadata.mtime_nsec(),
-                metadata.ctime(),
-                metadata.ctime_nsec(),
-                content,
-            ),
-        );
+        state.insert(path.into(), entry(&metadata, content));
         if metadata.is_dir() {
-            for entry in fs::read_dir(path).unwrap() {
-                snapshot(&entry.unwrap().path(), state);
+            for child in fs::read_dir(path).unwrap() {
+                enumerate(&child.unwrap().path(), state, files);
             }
+        }
+    }
+    fn snapshot(path: &Path, state: &mut State) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let mut files = Vec::new();
+        enumerate(path, state, &mut files);
+        let workers = std::thread::available_parallelism()
+            .map_or(1, |count| count.get().min(8))
+            .min(files.len().max(1));
+        let next = AtomicUsize::new(0);
+        let digests = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..workers)
+                .map(|_| {
+                    let files = &files;
+                    let next = &next;
+                    scope.spawn(move || {
+                        let mut results = Vec::new();
+                        let mut buffer = [0u8; 65536];
+                        loop {
+                            let index = next.fetch_add(1, Ordering::Relaxed);
+                            let Some(file_path) = files.get(index) else {
+                                break;
+                            };
+                            let mut hash = Sha256::new();
+                            let mut file = fs::File::open(file_path).unwrap();
+                            loop {
+                                let count = file.read(&mut buffer).unwrap();
+                                if count == 0 {
+                                    break;
+                                }
+                                hash.update(&buffer[..count]);
+                            }
+                            results.push((file_path.clone(), hex::encode(hash.finalize())));
+                        }
+                        results
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        for (file_path, digest) in digests {
+            state.get_mut(&file_path).unwrap().6 = digest;
         }
     }
     fn host(args: &[&str]) -> Vec<u8> {
@@ -359,22 +396,29 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
             name.bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
         );
-        for (suffix, args) in [
-            ("version", vec!["run", name, "rustc", "--version"]),
-            ("doc", vec!["run", name, "rustdoc", "--version"]),
-            (
-                "targets",
-                vec!["target", "list", "--installed", "--toolchain", name],
-            ),
-            ("catalogue", vec!["target", "list", "--toolchain", name]),
-            (
-                "components",
-                vec!["component", "list", "--installed", "--toolchain", name],
-            ),
-        ] {
-            fs::write(expected.join(format!("{name}.{suffix}")), host(&args)).unwrap();
-        }
     }
+    std::thread::scope(|scope| {
+        for name in &names {
+            let expected = &expected;
+            scope.spawn(move || {
+                for (suffix, args) in [
+                    ("version", vec!["run", name, "rustc", "--version"]),
+                    ("doc", vec!["run", name, "rustdoc", "--version"]),
+                    (
+                        "targets",
+                        vec!["target", "list", "--installed", "--toolchain", name],
+                    ),
+                    ("catalogue", vec!["target", "list", "--toolchain", name]),
+                    (
+                        "components",
+                        vec!["component", "list", "--installed", "--toolchain", name],
+                    ),
+                ] {
+                    fs::write(expected.join(format!("{name}.{suffix}")), host(&args)).unwrap();
+                }
+            });
+        }
+    });
     let script = project.path().join("rust-proof.sh");
     fs::write(&script, r#"set -eu
     test "$RUSTUP_HOME" = /tmp/rustup-home
@@ -397,8 +441,8 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
       for target in $(cat "tests/expected/$name.targets"); do
         rustc --crate-type lib --target "$target" src/lib.rs -o /tmp/trial.rlib
       done
-      cargo test --lib
-      cargo test --doc
+      cargo test --lib -q
+      cargo test --doc -q
       test ! -w "$(rustup which rustc)"
       if rustup toolchain uninstall "$name"; then exit 1; fi
     done
@@ -483,7 +527,40 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
     );
     let mut after = State::new();
     snapshot(&home, &mut after);
-    assert_eq!(before, after, "host Rust state changed");
+    if before != after {
+        let mut only_before = 0usize;
+        let mut only_after = 0usize;
+        let mut changed = 0usize;
+        let mut samples = Vec::new();
+        for (key, value) in &before {
+            match after.get(key) {
+                None => {
+                    only_before += 1;
+                    if samples.len() < 10 {
+                        samples.push(format!("removed: {}", key.display()));
+                    }
+                }
+                Some(other) if other != value => {
+                    changed += 1;
+                    if samples.len() < 10 {
+                        samples.push(format!("changed: {}", key.display()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for key in after.keys() {
+            if !before.contains_key(key) {
+                only_after += 1;
+                if samples.len() < 10 {
+                    samples.push(format!("added: {}", key.display()));
+                }
+            }
+        }
+        panic!(
+            "host Rust state changed (removed={only_before}, added={only_after}, changed={changed}; sample={samples:?})"
+        );
+    }
     assert!(
         result.output.status.success(),
         "{}\n{}",

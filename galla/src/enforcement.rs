@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use sha2::Digest;
 
-use crate::origin::OriginPolicy;
+use crate::origin::{self, OriginPolicy};
 use crate::probe::locate_backend;
 use crate::protocol::{Access, Grant, NetworkMode, Phase, Purpose, SandboxRequest};
 
@@ -218,7 +218,29 @@ fn start_network_guard_proxy(
     let port = listener.local_addr().ok()?.port();
     let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
 
-    let mut policy = OriginPolicy::new();
+    // Select the transport policy mode that can represent the declared sources.
+    // A request whose every origin is loopback is a controlled local test
+    // endpoint and needs the test-loopback policy; anything else uses the
+    // production policy. An empty source list admits nothing in either mode.
+    let all_loopback = !sources.is_empty()
+        && sources.iter().all(|source| match source {
+            crate::protocol::AllowedSource::CargoRegistry {
+                index_origin,
+                download_origin,
+                ..
+            } => {
+                origin::is_loopback_origin_url(index_origin)
+                    && origin::is_loopback_origin_url(download_origin)
+            }
+            crate::protocol::AllowedSource::CargoGit { repository, .. } => {
+                origin::is_loopback_origin_url(repository)
+            }
+        });
+    let mut policy = if all_loopback {
+        OriginPolicy::test_loopback()
+    } else {
+        OriginPolicy::new()
+    };
     for source in sources {
         match source {
             crate::protocol::AllowedSource::CargoRegistry {

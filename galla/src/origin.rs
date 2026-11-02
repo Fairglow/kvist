@@ -361,6 +361,13 @@ fn is_loopback_host(host: &str) -> bool {
     false
 }
 
+/// Returns true when `url` parses as a loopback origin (`localhost`, `::1`, or
+/// `127.0.0.0/8`). Any parse failure is not loopback. Used to select the
+/// transport policy mode that can represent the declared sources.
+pub fn is_loopback_origin_url(url: &str) -> bool {
+    parse(url).is_ok_and(|origin| is_loopback_host(origin.host()))
+}
+
 /// Canonicalizes and validates the path portion of a URL.
 fn canonical_path(path: &str) -> Result<String, OriginError> {
     if path.is_empty() {

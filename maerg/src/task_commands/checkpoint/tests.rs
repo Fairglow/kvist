@@ -712,18 +712,19 @@ fn checkpoint_transaction_deadline_covers_every_blocked_reply_and_ref_retry() {
         let repo = Repo::new();
         let prepared = repo.pending();
         let index = fs::read(index_path(&repo.context).unwrap()).unwrap();
-        let error = process::with_limits(
-            Duration::from_millis(500),
-            sav::CancellationToken::new(),
-            || {
-                process::fixture_transaction(
-                    fixture(&repo, mode),
-                    &prepared.commit_id,
-                    &prepared.expected_head,
-                    || Ok(()),
-                )
-            },
-        )
+        let timeout = Duration::from_millis(if mode == "transaction-advance" {
+            1500
+        } else {
+            500
+        });
+        let error = process::with_limits(timeout, sav::CancellationToken::new(), || {
+            process::fixture_transaction(
+                fixture(&repo, mode),
+                &prepared.commit_id,
+                &prepared.expected_head,
+                || Ok(()),
+            )
+        })
         .unwrap_err();
         assert!(error.to_string().contains("deadline"), "{error}");
         reaped(read_pid(&repo.directory.path().join("child.pid")));

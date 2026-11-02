@@ -531,12 +531,19 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
     }));
     let mut after = HostState::new();
     snapshot(&rustup_home, &mut after);
-    let changes: Vec<_> = before
+    let mut changes: Vec<_> = before
         .keys()
         .chain(after.keys())
         .filter(|path| before.get(*path) != after.get(*path))
         .collect();
-    assert!(changes.is_empty(), "host installation changed: {changes:?}");
+    changes.sort();
+    changes.dedup();
+    assert!(
+        changes.is_empty(),
+        "host installation changed ({} paths, sample={:?})",
+        changes.len(),
+        &changes[..changes.len().min(10)]
+    );
     if let Err(error) = result {
         std::panic::resume_unwind(error);
     }

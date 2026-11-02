@@ -797,14 +797,18 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
         );
     }));
     let after = snapshot(&roots);
-    let changed: Vec<_> = before
+    let mut changed: Vec<_> = before
         .keys()
         .chain(after.keys())
         .filter(|key| before.get(*key) != after.get(*key))
         .collect();
+    changed.sort();
+    changed.dedup();
     assert!(
         changed.is_empty(),
-        "host rustup/toolchain state changed: {changed:?}"
+        "host rustup/toolchain state changed ({} paths, sample={:?})",
+        changed.len(),
+        &changed[..changed.len().min(10)]
     );
     if let Err(error) = result {
         std::panic::resume_unwind(error);
