@@ -2446,6 +2446,17 @@ pub fn run_offline_cargo_verification(
         path: PathBuf::from("."),
         source,
     })?;
+    let staged_component = prepare_component_verification_workspace(
+        project_root,
+        component_dir,
+        &toolchain.cargo,
+        &cargo_home,
+        &vendored_registry,
+        &config.runner,
+    )?;
+    let effective_component_dir = staged_component
+        .as_ref()
+        .map_or(component_dir, tempfile::TempDir::path);
 
     tracing::info!(
         component = %component_dir.display(),
@@ -2477,7 +2488,7 @@ pub fn run_offline_cargo_verification(
         cargo_config: &cargo_config,
         runtime_bin: &runtime_bin,
         scratch_host_dir: scratch.path(),
-        component_dir,
+        component_dir: effective_component_dir,
         lockfile_digest: enforcement.lockfile_digest,
         policy_identity,
         backend: &probe.backend,
@@ -2486,6 +2497,126 @@ pub fn run_offline_cargo_verification(
     };
 
     execute_offline_cargo_verification(config, &request, options)
+}
+
+fn prepare_component_verification_workspace(
+    project_root: &Path,
+    component_dir: &Path,
+    cargo_path: &Path,
+    cargo_home: &Path,
+    vendored_registry: &Path,
+    runner: &str,
+) -> Result<Option<tempfile::TempDir>> {
+    let root_lock = project_root.join("Cargo.lock");
+    if component_dir.join("Cargo.lock").is_file() || !root_lock.is_file() {
+        return Ok(None);
+    }
+    let staged = tempfile::tempdir().map_err(|source| KvistError::Io {
+        operation: "create staged component workspace for offline cargo verification",
+        path: component_dir.to_path_buf(),
+        source,
+    })?;
+    copy_component_verification_tree(component_dir, staged.path())?;
+    let staged_lock = staged.path().join("Cargo.lock");
+    fs::copy(&root_lock, &staged_lock).map_err(|source| KvistError::Io {
+        operation: "copy workspace Cargo.lock into staged component verification directory",
+        path: staged_lock,
+        source,
+    })?;
+    let config_dir = tempfile::tempdir().map_err(|source| KvistError::Io {
+        operation: "create temporary cargo config directory for lockfile normalization",
+        path: component_dir.to_path_buf(),
+        source,
+    })?;
+    let config_file = config_dir.path().join("config.toml");
+    let canonical_vendored = vendored_registry
+        .canonicalize()
+        .unwrap_or_else(|_| vendored_registry.to_path_buf());
+    let config_body = format!(
+        "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.vendored-sources]\ndirectory = {:?}\n",
+        canonical_vendored.to_string_lossy()
+    );
+    fs::write(&config_file, config_body).map_err(|source| KvistError::Io {
+        operation: "write temporary cargo config for lockfile normalization",
+        path: config_file.clone(),
+        source,
+    })?;
+    let output = Command::new(cargo_path)
+        .args([
+            "metadata",
+            "--offline",
+            "--format-version=1",
+            "--config",
+            config_file.to_string_lossy().as_ref(),
+        ])
+        .current_dir(staged.path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("CARGO_HOME", cargo_home)
+        .output()
+        .map_err(|source| KvistError::Io {
+            operation: "normalize component Cargo.lock offline before verification",
+            path: cargo_path.to_path_buf(),
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: format!(
+                "could not prepare offline component Cargo.lock for `{}`: {}",
+                component_dir.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        });
+    }
+    Ok(Some(staged))
+}
+
+fn copy_component_verification_tree(src: &Path, dst: &Path) -> Result<()> {
+    let entries = fs::read_dir(src).map_err(|source| KvistError::Io {
+        operation: "read component directory for verification staging",
+        path: src.to_path_buf(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| KvistError::Io {
+            operation: "read component directory entry for verification staging",
+            path: src.to_path_buf(),
+            source,
+        })?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if matches!(
+            name_str.as_ref(),
+            ".git" | ".kvist" | ".kvist-attempts" | "target"
+        ) {
+            continue;
+        }
+        let src_path = entry.path();
+        let dst_path = dst.join(&name);
+        let metadata = fs::symlink_metadata(&src_path).map_err(|source| KvistError::Io {
+            operation: "inspect component entry for verification staging",
+            path: src_path.clone(),
+            source,
+        })?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            fs::create_dir_all(&dst_path).map_err(|source| KvistError::Io {
+                operation: "create staged verification subdirectory",
+                path: dst_path.clone(),
+                source,
+            })?;
+            copy_component_verification_tree(&src_path, &dst_path)?;
+        } else if metadata.is_file() {
+            fs::copy(&src_path, &dst_path).map_err(|source| KvistError::Io {
+                operation: "copy component file into staged verification directory",
+                path: dst_path,
+                source,
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// Spawns the verified runner launch with one protocol argument, optionally
