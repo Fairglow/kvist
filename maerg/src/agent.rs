@@ -501,17 +501,71 @@ fn run_stream_attempt<T: ModelTransport>(
     redactions: &[String],
 ) -> (sav::Result<ModelTurn>, bool) {
     let mut emitted = false;
+    let mut printed_text_newline = false;
+    let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
     let mut redactor = StreamRedactor::new(redactions);
     let mut relay = |event: ModelStreamEvent| -> sav::Result<()> {
         emitted = true;
         if let ModelStreamEvent::TextDelta(delta) = event {
-            StreamRedactor::emit_to_stdout(&redactor.absorb(&delta));
+            let chunk = redactor.absorb(&delta);
+            if !chunk.is_empty() {
+                if is_tty && !printed_text_newline {
+                    eprintln!();
+                    printed_text_newline = true;
+                }
+                StreamRedactor::emit_to_stdout(&chunk);
+            }
         }
         Ok(())
     };
     let turn = transport.stream(request, cancellation, &mut relay);
-    StreamRedactor::emit_to_stdout(&redactor.finish());
+    let tail = redactor.finish();
+    if !tail.is_empty() {
+        if is_tty && !printed_text_newline {
+            eprintln!();
+        }
+        StreamRedactor::emit_to_stdout(&tail);
+    }
     (turn, emitted)
+}
+
+fn parse_read_line_range(content: &str) -> Option<(usize, usize)> {
+    let first_line = content.lines().next()?;
+    let (_, after) = first_line.split_once("(showing lines ")?;
+    let (range_part, _) = after.split_once(" of ")?;
+    let (from_str, to_str) = range_part.split_once("..=")?;
+    Some((from_str.parse().ok()?, to_str.parse().ok()?))
+}
+
+fn is_range_covered(ranges: &[(usize, usize)], from: usize, to: usize) -> bool {
+    let mut cursor = from;
+    let mut sorted = ranges.to_vec();
+    sorted.sort_unstable_by_key(|&(start, _)| start);
+    for (start, end) in sorted {
+        if start <= cursor && end >= cursor {
+            if end >= to {
+                return true;
+            }
+            cursor = end + 1;
+        }
+    }
+    false
+}
+
+fn record_covered_range(ranges: &mut Vec<(usize, usize)>, from: usize, to: usize) {
+    ranges.push((from, to));
+    ranges.sort_unstable_by_key(|&(start, _)| start);
+    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
+    for (start, end) in ranges.drain(..) {
+        if let Some(last) = merged.last_mut()
+            && start <= last.1.saturating_add(1)
+        {
+            last.1 = last.1.max(end);
+        } else {
+            merged.push((start, end));
+        }
+    }
+    *ranges = merged;
 }
 
 /// Performs one model turn, retrying transient gateway-availability failures
@@ -1306,9 +1360,23 @@ fn execute_agent_inner(
 
         let mut generations = 0u64;
         let mut model_attempts = 0;
+        let mut covered_ranges: std::collections::BTreeMap<String, Vec<(usize, usize)>> =
+            std::collections::BTreeMap::new();
+        let mut seen_read_hashes: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        let mut duplicate_read_streak = 0usize;
+        let mut total_duplicate_reads = 0usize;
+        let mut read_only_turn_streak = 0usize;
+        let mut repeated_text_streak = 0usize;
+        let mut last_assistant_text: Option<String> = None;
+        let mut last_action_label = "init".to_owned();
+        let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
 
         loop {
             if cancellation.is_cancelled() || controls.is_shutdown() {
+                if is_tty {
+                    eprintln!();
+                }
                 return Err(KvistError::Sav(ModelError::Cancelled));
             }
             if steering.deliver(&mut conversation)? {
@@ -1331,12 +1399,44 @@ fn execute_agent_inner(
             if let Some(compaction) = compaction {
                 live.record(&serde_json::json!({"type":"context_compaction","data":{"completed_groups":compaction.compacted_turns,"compactions":context.compactions(),"lossy":true,"canonical_evidence":false}}),true)?;
             }
-            eprintln!(
-                "Starting inference: approximately {} input tokens, {} output tokens reserved; {:.1}s approved task time remains.",
-                sav::runtime::context::estimate_request(&model_request),
-                reserve,
-                budget.remaining().as_secs_f64(),
-            );
+            let est_input = sav::runtime::context::estimate_request(&model_request);
+            if is_tty {
+                let total_reads: usize = run_turns.iter().map(|t| t.reads.len()).sum();
+                let total_edits: usize = run_turns
+                    .iter()
+                    .flat_map(|t| t.effects.iter())
+                    .filter(|e| e.applied)
+                    .count();
+                let unique_files = covered_ranges.len();
+                let elapsed = budget.started.elapsed().as_secs_f64();
+                let rem = budget.remaining().as_secs_f64();
+                let dup_info = if total_duplicate_reads > 0 {
+                    format!(", {} dup suppressed", total_duplicate_reads)
+                } else {
+                    String::new()
+                };
+                eprint!(
+                    "\r\x1b[2K  ⟳ Turn {} │ ~{:.1}k in ({:.1}k rsv) │ reads: {} ({} files{}) · edits: {} │ last: {} │ {:.1}s ({:.0}s rem)",
+                    generations,
+                    est_input as f64 / 1000.0,
+                    reserve as f64 / 1000.0,
+                    total_reads,
+                    unique_files,
+                    dup_info,
+                    total_edits,
+                    last_action_label,
+                    elapsed,
+                    rem,
+                );
+                let _ = std::io::Write::flush(&mut std::io::stderr());
+            } else {
+                eprintln!(
+                    "Starting inference: approximately {} input tokens, {} output tokens reserved; {:.1}s approved task time remains.",
+                    est_input,
+                    reserve,
+                    budget.remaining().as_secs_f64(),
+                );
+            }
             let generated = execute_host_turn(
                 &choice,
                 profile,
@@ -1545,7 +1645,19 @@ fn execute_agent_inner(
                 }));
             }
 
-            // 3b. Deliver bounded, read-only inspections back to the model context.
+            // 3b. Deliver bounded, read-only inspections back to the model context,
+            //     suppressing duplicate/redundant reads so the model cannot get stuck
+            //     re-reading the same file slices in an infinite loop.
+            let trimmed_text = turn.text.trim();
+            if !trimmed_text.is_empty() {
+                if last_assistant_text.as_deref() == Some(trimmed_text) {
+                    repeated_text_streak += 1;
+                } else {
+                    repeated_text_streak = 0;
+                    last_assistant_text = Some(trimmed_text.to_owned());
+                }
+            }
+            let mut turn_had_new_read = false;
             for read in &plan.reads {
                 live.record(
                     &serde_json::json!({"type":"tool_dispatch","data":{
@@ -1553,7 +1665,60 @@ fn execute_agent_inner(
                     }}),
                     true,
                 )?;
-                let redacted_content = redact_bounded(&read.content, &redactions, 65536);
+                let is_real_file_read = matches!(read.tool.as_str(), "read_file" | "list_files");
+                let range_opt = if read.tool == "read_file" {
+                    parse_read_line_range(&read.content)
+                } else {
+                    None
+                };
+                let sig = format!(
+                    "{}:{}:{}",
+                    read.tool,
+                    read.path,
+                    hex::encode(<sha2::Sha256 as sha2::Digest>::digest(
+                        read.content.as_bytes()
+                    ))
+                );
+                let already_covered = is_real_file_read
+                    && (seen_read_hashes.contains_key(&sig)
+                        || range_opt.is_some_and(|(from, to)| {
+                            covered_ranges
+                                .get(&read.path)
+                                .is_some_and(|ranges| is_range_covered(ranges, from, to))
+                        }));
+                let delivered_content = if already_covered {
+                    let count = seen_read_hashes
+                        .entry(sig)
+                        .and_modify(|c| *c += 1)
+                        .or_insert(2);
+                    duplicate_read_streak += 1;
+                    total_duplicate_reads += 1;
+                    last_action_label = format!("dup-read {}", read.path);
+                    format!(
+                        "[Duplicate read suppressed — repeat #{count}] You ALREADY read `{}` earlier in this session and its contents have NOT changed. Do NOT call `{}` on `{}` again. Either call `edit_file` / `write_file` to make required changes, inspect a different unread file, or if the existing code and tests already satisfy the task requirements, reply now with a plain-text summary and NO tool calls.",
+                        read.path, read.tool, read.path
+                    )
+                } else {
+                    if is_real_file_read {
+                        seen_read_hashes.insert(sig, 1);
+                        if let Some((from, to)) = range_opt {
+                            record_covered_range(
+                                covered_ranges.entry(read.path.clone()).or_default(),
+                                from,
+                                to,
+                            );
+                            last_action_label = format!("read {}:{from}..{to}", read.path);
+                        } else {
+                            last_action_label = format!("{} {}", read.tool, read.path);
+                        }
+                        duplicate_read_streak = 0;
+                        turn_had_new_read = true;
+                    } else {
+                        last_action_label = read.path.clone();
+                    }
+                    read.content.clone()
+                };
+                let redacted_content = redact_bounded(&delivered_content, &redactions, 65536);
                 conversation.record_tool_result(
                     &read.call_id,
                     &read.tool,
@@ -1581,6 +1746,9 @@ fn execute_agent_inner(
             // the conversation so the model can act on those results; otherwise
             // the model produced a final answer and the run completes.
             if plan.effects.is_empty() {
+                if !plan.reads.is_empty() {
+                    read_only_turn_streak += 1;
+                }
                 let has_applied_effect = run_turns
                     .iter()
                     .any(|prior| prior.effects.iter().any(|effect| effect.applied));
@@ -1599,6 +1767,35 @@ fn execute_agent_inner(
                     run_turns[turn_index].turn.text =
                         "Completed task changes and ready for verification.".to_owned();
                 }
+                if duplicate_read_streak >= 4
+                    || repeated_text_streak >= 3
+                    || read_only_turn_streak >= 30
+                {
+                    if is_tty {
+                        eprintln!();
+                    }
+                    tracing::warn!(
+                        task_id = %request.task_id,
+                        duplicate_read_streak,
+                        repeated_text_streak,
+                        read_only_turn_streak,
+                        "breaking repeated read-only loop in authoring session and proceeding to verification"
+                    );
+                    if run_turns[turn_index].turn.text.trim().is_empty() {
+                        run_turns[turn_index].turn.text =
+                            "Completed code inspection; proceeding to verification.".to_owned();
+                    }
+                    break;
+                }
+                if (duplicate_read_streak == 2
+                    || repeated_text_streak == 2
+                    || read_only_turn_streak == 20)
+                    && !turn_had_new_read
+                {
+                    conversation.push_user(
+                        "SYSTEM LOOP WARNING: You are repeating read calls on files that are already in your context or repeating the same assistant text without modifying any files. Stop calling `read_file` and `list_files`. On your very next turn, you MUST either call `edit_file` / `write_file` to make the required changes, or reply with a plain-text summary and NO tool calls if the existing implementation already satisfies the task.",
+                    );
+                }
                 if (!plan.reads.is_empty() && !only_completion_note)
                     || !accepted_requests.is_empty()
                 {
@@ -1607,6 +1804,9 @@ fn execute_agent_inner(
                 if !controls.finish_if_idle()? {
                     steering.skip_calls(turn.tool_intents.iter(), &[], &mut conversation)?;
                     continue;
+                }
+                if is_tty {
+                    eprintln!();
                 }
                 break;
             }
@@ -1650,6 +1850,14 @@ fn execute_agent_inner(
             // Feed each effect's outcome back to the model as a tool result so it
             // can react to a failed or skipped write on a later turn.
             for record in effects {
+                if record.applied {
+                    covered_ranges.remove(&record.destination);
+                    let prefix = format!("read_file:{}:", record.destination);
+                    seen_read_hashes.retain(|k, _| !k.starts_with(&prefix));
+                    duplicate_read_streak = 0;
+                    read_only_turn_streak = 0;
+                    last_action_label = format!("{} {}", record.tool, record.destination);
+                }
                 let content = if record.applied {
                     "applied. (Note: Kvist runs `cargo test` automatically in the verification sandbox after you finish. Once all required file edits are applied, reply with a brief final summary and NO tool calls.)".to_owned()
                 } else {

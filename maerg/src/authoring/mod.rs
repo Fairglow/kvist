@@ -767,7 +767,7 @@ pub fn authoring_tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "end_line": {
                         "type": "integer",
-                        "description": "Optional 1-based last line to read (inclusive; defaults to start_line + 299)"
+                        "description": "Optional 1-based last line to read (inclusive; defaults to start_line + 1199)"
                     },
                     "search": {
                         "type": "string",
@@ -1192,7 +1192,7 @@ fn authorize_edit(
 
 const EXCLUDED_READ_DIRS: &[&str] = &[".git", ".kvist", ".kvist-attempts", "target"];
 const MAX_READ_SLICE_BYTES: usize = 64 * 1024;
-const DEFAULT_READ_LINES: usize = 300;
+const DEFAULT_READ_LINES: usize = 1200;
 const MAX_LIST_ENTRIES: usize = 512;
 const MAX_LIST_DEPTH: usize = 8;
 
