@@ -1719,7 +1719,7 @@ fn execute_agent_inner(
                     read.content.clone()
                 };
                 let redacted_content = redact_bounded(&delivered_content, &redactions, 65536);
-                conversation.record_tool_result(
+                conversation.record_tool_result_with_limit(
                     &read.call_id,
                     &read.tool,
                     &sav::runtime::ToolOutcome {
@@ -1731,6 +1731,7 @@ fn execute_agent_inner(
                         output_limit_exceeded: false,
                         cancelled: false,
                     },
+                    96 * 1024,
                 );
                 run_turns[turn_index].reads.push(read.clone());
                 live.record(

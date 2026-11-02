@@ -363,6 +363,17 @@ impl AgentSession {
 
     /// Records a status-bearing, combined bounded preview as a model message.
     pub fn record_tool_result(&mut self, call_id: &str, name: &str, outcome: &ToolOutcome) {
+        self.record_tool_result_with_limit(call_id, name, outcome, MAX_TOOL_RESULT_BYTES);
+    }
+
+    /// Records a status-bearing, combined bounded preview as a model message with an explicit byte ceiling.
+    pub fn record_tool_result_with_limit(
+        &mut self,
+        call_id: &str,
+        name: &str,
+        outcome: &ToolOutcome,
+        max_result_bytes: usize,
+    ) {
         let mut body = format!(
             "[process: exited={}, status={:?}, timed_out={}, cancelled={}, output_limit_exceeded={}]\n",
             outcome.exited,
@@ -372,7 +383,7 @@ impl AgentSession {
             outcome.output_limit_exceeded,
         );
         const TRUNCATION_NOTICE: &str = "\n[output truncated; use a smaller read/search page]\n";
-        let available = MAX_TOOL_RESULT_BYTES.saturating_sub(body.len() + TRUNCATION_NOTICE.len());
+        let available = max_result_bytes.saturating_sub(body.len() + TRUNCATION_NOTICE.len());
         let stderr_budget = available.min(outcome.stderr.len()).min(available / 2);
         let stdout = model_output(&outcome.stdout, available.saturating_sub(stderr_budget));
         let stderr = model_output(&outcome.stderr, stderr_budget);
@@ -383,7 +394,7 @@ impl AgentSession {
             body.push_str(&stderr);
         }
         // Lossy UTF-8 decoding may expand bytes; bound the final encoded preview.
-        let cap = MAX_TOOL_RESULT_BYTES.saturating_sub(TRUNCATION_NOTICE.len() + 2);
+        let cap = max_result_bytes.saturating_sub(TRUNCATION_NOTICE.len() + 2);
         let mut encoded = 2usize;
         let mut end = 0;
         for (index, character) in body.char_indices() {

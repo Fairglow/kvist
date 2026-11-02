@@ -633,13 +633,15 @@ pub(super) fn prepare(
         "invalid expected HEAD or checkpoint message",
     )?;
     let (head, branch) = head_branch(context)?;
-    reject(
-        head != expected_head,
-        "HEAD changed before checkpoint preparation",
-    )?;
     let real_index = index_path(context)?;
-    let baseline = entries(context, before, Some(expected_head), None)?;
-    verify_tree(context, before, &baseline)?;
+    let baseline = entries(context, before, Some(&head), None)?;
+    verify_tree(context, before, &baseline).map_err(|err| {
+        if head != expected_head {
+            fail("HEAD changed before checkpoint preparation")
+        } else {
+            err
+        }
+    })?;
     reject(
         entries(context, before, None, None)? != baseline || capture(context)? != *after,
         "worktree or staged overlap changed before preparation",
@@ -686,14 +688,14 @@ pub(super) fn prepare(
     git(
         context,
         Some(&index),
-        &["read-tree", expected_head],
+        &["read-tree", &head],
         &[],
         MAX_GIT_OUTPUT,
     )?;
     write_entries(context, &index, after, &changes)?;
     let tree = git_text(context, Some(&index), &["write-tree"])?;
     reject(!valid_oid(&tree), "Git produced an invalid tree ID")?;
-    let mut args = vec!["commit-tree", &tree, "-p", expected_head];
+    let mut args = vec!["commit-tree", &tree, "-p", &head];
     if signing_policy(context)? {
         args.push("-S");
     }
@@ -707,14 +709,14 @@ pub(super) fn prepare(
     )?)?;
     reject(!valid_oid(&commit_id), "Git produced an invalid commit ID")?;
     reject(
-        head_branch(context)? != (head, branch.clone())
+        head_branch(context)? != (head.clone(), branch.clone())
             || capture(context)? != *after
             || entries(context, before, None, None)? != baseline,
         "HEAD, branch, worktree or staged overlap changed during preparation",
     )?;
     Ok(PreparedCommit {
         commit_id,
-        expected_head: expected_head.to_owned(),
+        expected_head: head,
         branch,
         after: after.clone(),
         changes,
