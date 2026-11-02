@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use sha2::Digest;
 
-use crate::origin::{OriginPolicy, RequestKind};
+use crate::origin::OriginPolicy;
 use crate::probe::locate_backend;
 use crate::protocol::{Access, Grant, NetworkMode, Phase, Purpose, SandboxRequest};
 

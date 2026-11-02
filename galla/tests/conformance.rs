@@ -886,7 +886,7 @@ fn cargo_phase_topology_is_exact() {
 #[test]
 fn source_identities_use_golden_vectors_and_reject_substitutions() {
     assert_eq!(
-        registry_identity(
+        validation::registry_identity(
             "private",
             "https://registry.example.invalid/index/",
             "https://registry.example.invalid/crates/"

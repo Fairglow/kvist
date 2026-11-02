@@ -594,11 +594,7 @@ fn validate_source(
             origins.push(index_origin_parsed);
             origins.push(download_origin_parsed);
             let derived = registry_identity(name, index_origin, download_origin);
-            let name_digest = format!(
-                "sha256:{}",
-                hex::encode(sha2::Sha256::digest(name.as_bytes()))
-            );
-            if identity != &derived && identity != &name_digest {
+            if identity != &derived {
                 return Err(invalid(format!(
                     "{label} identity does not equal the independently derived registry identity"
                 )));
@@ -1171,6 +1167,10 @@ fn child_path(parent: &str, child: &str) -> Result<String, ProtocolError> {
 }
 
 /// Independently derives the canonical registry identity used by the maerg.
+///
+/// The identity is bound to the registry name, index origin, and download
+/// origin (`kvist/cargo-registry/v1\0` + length-prefixed `name`, `index_origin`,
+/// `download_origin`), never to the registry name alone.
 pub fn registry_identity(name: &str, index_origin: &str, download_origin: &str) -> String {
     source_identity(
         b"kvist/cargo-registry/v1\0",
@@ -1257,6 +1257,240 @@ fn validate_digest(value: &str, label: &str) -> Result<(), ProtocolError> {
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod identity_binding_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn identity_digest(bytes: &[u8]) -> String {
+        format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+    }
+
+    fn encode_request(value: &serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(value).expect("encode request")
+    }
+
+    /// Builds a valid `<cargo> fetch` acquisition request whose single allowed
+    /// source is `source`. The source is supplied as a full JSON object so a
+    /// test can substitute the identity, name, or origins to probe the binding.
+    fn acquisition_request_with_source(source: &serde_json::Value) -> SandboxRequest {
+        let network = serde_json::json!({
+            "mode": "package-sources",
+            "allowed_sources": [source]
+        });
+        let resources = serde_json::json!({
+            "wall_time_ms": 5000,
+            "max_output_bytes": 65536,
+            "max_processes": 16,
+            "max_files": 256,
+            "max_file_bytes": 1048576,
+            "max_scratch_bytes": 1048576,
+            "max_cache_bytes": 1048576
+        });
+        let identities = serde_json::json!({
+            "runner": identity_digest(b"runner"),
+            "backend": {
+                "kind": "bubblewrap",
+                "path": "/usr/bin/bwrap",
+                "digest": identity_digest(b"backend")
+            },
+            "policy": identity_digest(b"policy"),
+            "toolchain": identity_digest(b"cargo"),
+            "command": identity_digest(b"command"),
+            "mount_plan": identity_digest(b"mount-plan")
+        });
+        let grants = serde_json::json!([
+            {
+                "source": "/host/toolchain",
+                "destination": "/workspace/toolchain",
+                "access": "read-only",
+                "purpose": "toolchain",
+                "identity": identity_digest(b"cargo")
+            },
+            {
+                "source": "/host/attempt/cargo-home",
+                "destination": "/workspace/cargo-home",
+                "access": "read-write",
+                "purpose": "dependency-cache",
+                "identity": identity_digest(b"attempt-cargo-home")
+            },
+            {
+                "source": "/host/attempt/scratch",
+                "destination": "/workspace/scratch",
+                "access": "read-write",
+                "purpose": "scratch",
+                "identity": identity_digest(b"acquisition-scratch")
+            },
+            {
+                "source": "/host/attempt/lockfile",
+                "destination": "/workspace/lockfile",
+                "access": "read-write",
+                "purpose": "lockfile",
+                "identity": identity_digest(b"lockfile-before")
+            }
+        ]);
+        let toolchain = serde_json::json!({
+            "kind": "cargo",
+            "identity": identity_digest(b"cargo"),
+            "root": "/workspace/toolchain",
+            "cargo": "/workspace/toolchain/cargo"
+        });
+        let cache = serde_json::json!({
+            "cargo_home": "/workspace/cargo-home",
+            "registry": "/workspace/cargo-home/registry",
+            "git": "/workspace/cargo-home/git",
+            "writable": {
+                "destination": "/workspace/cargo-home",
+                "identity": identity_digest(b"attempt-cargo-home")
+            },
+            "lockfile": {
+                "destination": "/workspace/lockfile",
+                "before_identity": identity_digest(b"lockfile-before")
+            },
+            "promotion": {
+                "enabled": true,
+                "source": "/workspace/cargo-home"
+            }
+        });
+        let scratch = serde_json::json!({
+            "destination": "/workspace/scratch",
+            "identity": identity_digest(b"acquisition-scratch")
+        });
+        let environment: BTreeMap<String, String> = [
+            ("HOME".to_owned(), "/workspace/scratch/home".to_owned()),
+            ("PATH".to_owned(), "/usr/bin".to_owned()),
+            ("CARGO_HOME".to_owned(), "/workspace/cargo-home".to_owned()),
+            (
+                "CARGO_TARGET_DIR".to_owned(),
+                "/workspace/scratch/target".to_owned(),
+            ),
+            (
+                "CARGO_NET_GIT_FETCH_WITH_CLI".to_owned(),
+                "false".to_owned(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let bytes = serde_json::json!({
+            "protocol": "kvist-sandbox-request-v1",
+            "protocol_version": 1,
+            "phase": "dependency-acquisition",
+            "argv": ["/workspace/toolchain/cargo", "fetch"],
+            "working_directory": "/workspace/lockfile",
+            "environment": environment,
+            "network": network,
+            "resources": resources,
+            "identities": identities,
+            "grants": grants,
+            "toolchain": toolchain,
+            "cache": cache,
+            "scratch": scratch
+        });
+        parse_request(&encode_request(&bytes)).expect("acquisition request must parse")
+    }
+
+    /// The registry identity MUST be bound to the index and download origins,
+    /// not to the registry name alone. A name-only SHA-256 is not a valid
+    /// identity: it would let any registry reuse another's identity under a
+    /// different name, or claim a different origin under the same name.
+    #[test]
+    fn registry_identity_is_bound_to_origins_not_name() {
+        let index = "https://registry.example.invalid/index/";
+        let download = "https://registry.example.invalid/crates/";
+        let derived = registry_identity("private", index, download);
+
+        // The name-only digest is a different value than the origin-bound one.
+        let name_only = format!("sha256:{}", hex::encode(Sha256::digest(b"private")));
+        assert_ne!(
+            name_only, derived,
+            "name-only digest must not equal the origin-bound identity"
+        );
+
+        // Changing either origin changes the derived identity.
+        let different_index =
+            registry_identity("private", "https://mirror.invalid/index/", download);
+        let different_download =
+            registry_identity("private", index, "https://mirror.invalid/crates/");
+        assert_ne!(
+            derived, different_index,
+            "a different index origin must change the identity"
+        );
+        assert_ne!(
+            derived, different_download,
+            "a different download origin must change the identity"
+        );
+
+        // Changing any bound field (name, index_origin, or download_origin) changes the identity.
+        let different_name = registry_identity("other", index, download);
+        assert_ne!(
+            derived, different_name,
+            "changing the bound registry name also changes the identity"
+        );
+    }
+
+    /// A request that supplies a name-only identity for a registry MUST be
+    /// rejected: the identity must equal the independently derived, origin-bound
+    /// value, never the SHA-256 of the name alone.
+    #[test]
+    fn request_rejects_name_only_registry_identity() {
+        let index = "https://registry.example.invalid/index/";
+        let download = "https://registry.example.invalid/crates/";
+        let source = serde_json::json!({
+            "kind": "cargo-registry",
+            "name": "private",
+            "index_origin": index,
+            "download_origin": download,
+            "identity": format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(b"private"))
+            )
+        });
+        let request = acquisition_request_with_source(&source);
+        let bytes = serde_json::to_value(&request).expect("reserialize");
+        let error = parse_and_validate(&encode_request(&bytes))
+            .expect_err("a name-only registry identity must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("independently derived registry identity"),
+            "rejection must name the origin-bound identity requirement: {error}"
+        );
+    }
+
+    /// An identity derived from a different set of origins than the ones
+    /// submitted must be rejected: the identity must be the one independently
+    /// derived from the submitted index and download origins, not from any
+    /// other origin pair.
+    #[test]
+    fn request_rejects_origin_identity_mismatch() {
+        // The identity is the correct origin-bound value for a *different* set
+        // of origins than the ones submitted. It must be rejected because the
+        // identity is not the one independently derived from the submitted
+        // index and download origins.
+        let source = serde_json::json!({
+            "kind": "cargo-registry",
+            "name": "private",
+            "index_origin": "https://registry.example.invalid/index/",
+            "download_origin": "https://registry.example.invalid/crates/",
+            "identity": registry_identity(
+                "private",
+                "https://mirror.invalid/index/",
+                "https://mirror.invalid/crates/"
+            )
+        });
+        let request = acquisition_request_with_source(&source);
+        let bytes = serde_json::to_value(&request).expect("reserialize");
+        let error = parse_and_validate(&encode_request(&bytes))
+            .expect_err("an identity bound to different origins must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("independently derived registry identity"),
+            "rejection must name the origin-bound identity requirement: {error}"
+        );
+    }
 }
 
 fn path_contains(ancestor: &str, descendant: &str) -> bool {
