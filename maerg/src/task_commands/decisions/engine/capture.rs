@@ -243,7 +243,9 @@ fn unknown_journals(
         if !known && !recognizes_retired_journal(&context.component_dir, &entry)? {
             return Err(fail(
                 &entry,
-                "attempt journal has no active or authenticated retired task; inspect unknown evidence before planning",
+                format!(
+                    "attempt journal for task `{id}` matches no task in the queue and has no authenticated Withdraw receipt, so it blocks planning; re-introduce the task into TODOS.yaml with the status its journal ended in, or stage a Withdraw plan to retire it, then plan again"
+                ),
             ));
         }
     }
