@@ -230,13 +230,61 @@ impl DirectModelTransport {
         if model.trim().is_empty() || model.len() > 256 || model.chars().any(char::is_control) {
             return invalid_request("capacity discovery requires a bounded nonblank model id");
         }
-        let path = match self.provider {
-            LocalModelProvider::LlamaServer => format!("/props?model={}", query_component(model)),
-            LocalModelProvider::Ollama => "/api/ps".into(),
-        };
+        match self.provider {
+            LocalModelProvider::LlamaServer => {
+                // Router mode lists every registered model's context_length via
+                // /models without loading or switching. A 404 means standalone
+                // mode, which falls back to /props?model= (which may load the model).
+                match self.llama_router_context_limit(model, cancellation) {
+                    Ok(limit) => Ok(limit),
+                    Err(error) if matches!(error, Error::ModelProviderStatus { status: 404 }) => {
+                        self.llama_standalone_context_limit(model, cancellation)
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            LocalModelProvider::Ollama => self.ollama_context_limit(model, cancellation),
+        }
+    }
+
+    /// Router-mode capacity discovery: /models lists every registered model with
+    /// its context_length, without loading or switching. Read-only and fast, so it
+    /// never stalls on a model load the way /props?model= can.
+    fn llama_router_context_limit(
+        &self,
+        model: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<usize>> {
         let bytes = get_bounded(
             &format!("http://{}", self.endpoint.authority),
-            &path,
+            "/models",
+            self.deadline.min(MAX_CAPACITY_DISCOVERY),
+            1024 * 1024,
+            cancellation,
+        )?;
+        let value = parse_json(&bytes)?;
+        let Some(models) = value.get("data").and_then(Value::as_array) else {
+            return malformed("router model metadata must contain a data array");
+        };
+        if models.len() > 4096 {
+            return malformed("router model metadata exceeds 4096 models");
+        }
+        let selected = models
+            .iter()
+            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(model));
+        parse_context_limit(selected.and_then(|entry| entry.get("context_length")))
+    }
+
+    /// Standalone-mode capacity discovery: /props?model= may load or switch to the
+    /// requested model before answering, so it is slower than the router probe.
+    fn llama_standalone_context_limit(
+        &self,
+        model: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<usize>> {
+        let bytes = get_bounded(
+            &format!("http://{}", self.endpoint.authority),
+            &format!("/props?model={}", query_component(model)),
             self.deadline.min(MAX_CAPACITY_DISCOVERY),
             1024 * 1024,
             cancellation,
@@ -245,37 +293,51 @@ impl DirectModelTransport {
         if !value.is_object() {
             return malformed("model capacity metadata must be an object");
         }
-        match self.provider {
-            LocalModelProvider::LlamaServer => {
-                parse_context_limit(value.pointer("/default_generation_settings/n_ctx"))
-            }
-            LocalModelProvider::Ollama => {
-                let Some(models) = value.get("models") else {
-                    return Ok(None);
-                };
-                let models = models
-                    .as_array()
-                    .ok_or_else(|| Error::MalformedModelResponse {
-                        reason: "loaded model metadata must contain a models array".into(),
-                    })?;
-                if models.len() > 128 {
-                    return malformed("loaded model metadata exceeds 128 models");
-                }
-                let implicit_latest = format!("{model}:latest");
-                let untagged = model
-                    .rsplit('/')
-                    .next()
-                    .is_some_and(|name| !name.contains([':', '@']));
-                let selected = models.iter().find(|entry| {
-                    ["name", "model"].iter().any(|key| {
-                        entry.get(key).and_then(Value::as_str).is_some_and(|name| {
-                            name == model || (untagged && name == implicit_latest)
-                        })
-                    })
-                });
-                parse_context_limit(selected.and_then(|entry| entry.get("context_length")))
-            }
+        parse_context_limit(value.pointer("/default_generation_settings/n_ctx"))
+    }
+
+    /// Ollama capacity discovery: /api/ps lists loaded models with context_length.
+    fn ollama_context_limit(
+        &self,
+        model: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<usize>> {
+        let bytes = get_bounded(
+            &format!("http://{}", self.endpoint.authority),
+            "/api/ps",
+            self.deadline.min(MAX_CAPACITY_DISCOVERY),
+            1024 * 1024,
+            cancellation,
+        )?;
+        let value = parse_json(&bytes)?;
+        if !value.is_object() {
+            return malformed("model capacity metadata must be an object");
         }
+        let Some(models) = value.get("models") else {
+            return Ok(None);
+        };
+        let models = models
+            .as_array()
+            .ok_or_else(|| Error::MalformedModelResponse {
+                reason: "loaded model metadata must contain a models array".into(),
+            })?;
+        if models.len() > 128 {
+            return malformed("loaded model metadata exceeds 128 models");
+        }
+        let implicit_latest = format!("{model}:latest");
+        let untagged = model
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| !name.contains([':', '@']));
+        let selected = models.iter().find(|entry| {
+            ["name", "model"].iter().any(|key| {
+                entry
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name == model || (untagged && name == implicit_latest))
+            })
+        });
+        parse_context_limit(selected.and_then(|entry| entry.get("context_length")))
     }
 
     /// Reports the provider's currently-loaded model without inference, without

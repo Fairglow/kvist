@@ -19,9 +19,10 @@ pub enum Error {
         model: Option<String>,
         reason: String,
     },
-    /// A request and its generation reserve do not fit.
+    /// A request and its generation reserve do not fit, even after compaction
+    /// removed every reducible turn.
     #[error(
-        "request needs {used} input tokens plus {reserve} output tokens; context limit is {limit}"
+        "request needs {used} input tokens plus {reserve} output tokens; the {limit}-token context limit is exceeded even after compaction. If the limit is a provisional working budget (the model's real context window is unknown), set the profile's context_limit to the actual serving window; otherwise reduce the task's evidence or select a model with a larger context"
     )]
     ContextBudget {
         used: usize,
