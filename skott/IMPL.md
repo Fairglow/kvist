@@ -1112,3 +1112,34 @@ original-host failure's cause.
 The observer also identified `grant`'s metadata-error closure shadowing its
 source-path parameter: its error context uses OS error text instead of the
 grant path. That diagnostic defect is outside the traversal/stage changes.
+
+## 2026-11-03 capacity fixture observations
+
+Independent `skott-fixture-observer` inspected only
+`tests/headless_cli.rs` and `tests/startup_lifecycle.rs`, excluding intent,
+queues, prior records/reviews, history, logs and peers. It executed no tests.
+
+- The headless capacity fixture expects `GET /models` before inference, without
+  a CLI capacity override. It supplies 262144 tokens, asserts that same capacity
+  and provider provenance in the initial event, and asserts `max_tokens: 8192`.
+- The fixture reads the HTTP header terminator and remaining declared body.
+  Its Content-Length lookup is case-sensitive and request buffering unbounded.
+- The explicit-selection PTY fixture asserts `/models` first rather than an
+  active-model `/props` probe. While capacity remains blocked, typed text must
+  remain visible. Quit must succeed within one second and restore the terminal.
+
+The blocked-capacity case neither submits a prompt nor releases discovery.
+These are source assertions, not executed results or broad security/compliance
+certification.
+
+The separate source-blind `skott-fixture-comparator` found no demonstrated scoped
+contradiction with the large-capacity, reserve/provenance and editable/cancellable
+wait intent. It retained the distinction between source assertions and attributed
+execution, and noted that the blocked fixture does not establish queued dispatch
+or post-discovery selection preservation.
+
+The implementing context passed five headless and eleven lifecycle tests;
+the final all-feature workspace nextest run passed 2219 tests, zero failures
+and 15 existing skips. Strict workspace Clippy, formatting and the workspace
+documentation test passed. These attributed results are not acceptance,
+review receipts or broad certification.

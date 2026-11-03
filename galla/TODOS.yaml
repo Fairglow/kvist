@@ -2,11 +2,11 @@ schema_version: 1
 component:
   requirements_revision: "sha256:d846fa3e810e2faee74824d13031e4202da0e37bdf407a891b20a0d4aab3fd95"
   contract_revision: "sha256:ac446c07f06f127e854760044b7c7595a8c512ab13a060451f4c9fa4961e47c7"
-  design_revision: "sha256:e2f1bcd82684c388e52400061dcc90cecab0038d683bb09a56bc8f262baefda3"
+  design_revision: "sha256:fac93c3855b2117896a14afd8f05b7519f291100f7e7d4d4e6f4a77a08d7bb02"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-11-01T16:58:47Z"
+    checked_at: "2026-11-03T18:40:59Z"
     stale_since: null
     causes: []
 tasks:
@@ -30,11 +30,11 @@ tasks:
   - id: "ci-system-path-implement-code"
     title: "implement_code: align native discovery with request PATH"
     description: "Use only the fixture's fixed System bin directories for host selection and sandbox PATH; retain grant enforcement and actual language execution."
+    context: "Host selection now derives directly from the submitted fixed request PATH. All four Galla native/detection tests pass with CI-like host PATH on stable and Rust 1.95.0; strict stable workspace lint and formatting pass. No production validation or grants changed."
     purpose: "Remove dependence on ambient runner PATH without broadening authority."
     expected_outcome: "Native system programs execute with noisy host PATH on stable and MSRV."
     kind: implementation
     status: completed
-    context: "Host selection now derives directly from the submitted fixed request PATH. All four Galla native/detection tests pass with CI-like host PATH on stable and Rust 1.95.0; strict stable workspace lint and formatting pass. No production validation or grants changed."
     depends_on:
       - "ci-system-path-write-tests"
     requirements:
@@ -48,11 +48,11 @@ tasks:
   - id: "ci-system-path-security-audit"
     title: "security_audit: inspect scoped fixture authority"
     description: "Inspect that the repair adds no mounts or grants, does not relax validation, and keeps network denied and host tools unmodified."
+    context: "Scoped implementer inspection and independent source-only ci-fixture-source-observer record confirm no added grants or mounts and unchanged denied network and PATH validation. Native execution and host Rust non-mutation checks pass locally; no runner-wide audit claim."
     purpose: "Retain the existing enforcement boundary."
     expected_outcome: "Any scoped authority discrepancy is explicit."
     kind: security-audit
     status: completed
-    context: "Scoped implementer inspection and independent source-only ci-fixture-source-observer record confirm no added grants or mounts and unchanged denied network and PATH validation. Native execution and host Rust non-mutation checks pass locally; no runner-wide audit claim."
     depends_on:
       - "ci-system-path-implement-code"
     requirements:
@@ -66,11 +66,11 @@ tasks:
   - id: "ci-system-path-compliance-review"
     title: "compliance_review: compare independent fixture evidence"
     description: "Derive a clean-slate source-only scoped record, then separately compare it with local intent and test evidence without source access."
+    context: "Separate source-blind ci-fixture-intent-comparator found no concrete scoped mismatch against SR-REQ-TOOLCHAIN-E2E and related PATH/authority intent. It read only local intent, the new independent record and local native logs. Noisy PATH/compiler attribution remains implementer-reported, and remote CI is unverified. No component acceptance or runner-wide certification."
     purpose: "Avoid self-certification of the native fixture repair."
     expected_outcome: "Scoped evidence and remote CI limitations are retained without component acceptance."
     kind: compliance-review
     status: completed
-    context: "Separate source-blind ci-fixture-intent-comparator found no concrete scoped mismatch against SR-REQ-TOOLCHAIN-E2E and related PATH/authority intent. It read only local intent, the new independent record and local native logs. Noisy PATH/compiler attribution remains implementer-reported, and remote CI is unverified. No component acceptance or runner-wide certification."
     depends_on:
       - "ci-system-path-security-audit"
     requirements:
@@ -658,6 +658,112 @@ tasks:
       completed_at: "2026-11-02T13:15:28Z"
     blocked_reason: null
     recovery_state: null
+  - id: "bwrap-argv-boundary-write-tests"
+    title: "write_tests: bwrap argv boundary option injection"
+    description: "Define tests that request.argv tokens beginning with -- cannot be parsed as bwrap options."
+    context: "Security audit found run appends request.argv to bwrap args without a -- separator."
+    purpose: "Establish test coverage for the bwrap argv boundary before implementation."
+    expected_outcome: "Tests verify the argv boundary rejects option-injection tokens."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+    timestamps:
+      created_at: "2026-11-02T21:58:57Z"
+      updated_at: "2026-11-02T22:11:50Z"
+      completed_at: "2026-11-02T22:11:50Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "bwrap-argv-boundary-implement-code"
+    title: "implement_code: bwrap argv boundary option injection"
+    description: "Insert -- before request.argv (or validate tokens) so bwrap cannot be reconfigured via argv."
+    context: "Remediation for the security audit bwrap argv injection finding."
+    purpose: "Close the argv option-injection gap."
+    expected_outcome: "bwrap argv boundary prevents option injection; cargo test --locked passes."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "bwrap-argv-boundary-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+    timestamps:
+      created_at: "2026-11-02T22:11:51Z"
+      updated_at: "2026-11-03T19:16:49Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "enable-native-e2e-write-tests"
+    title: "write_tests: verify enabled native Bubblewrap e2e tests"
+    description: "Write tests to verify that the enabled native Bubblewrap e2e tests (system_toolchains and rustup) execute correctly and provide genuine enforcement evidence."
+    context: "The ignored native e2e tests need to be enabled and verified before the security audit can establish enforcement evidence."
+    purpose: "Ensure the enabled native e2e tests work correctly and provide the enforcement evidence needed by the security audit."
+    expected_outcome: "Tests pass, confirming the enabled native e2e tests execute correctly and provide enforcement evidence."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-11-03T18:40:59Z"
+      updated_at: "2026-11-03T18:40:59Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "enable-native-e2e-implement-code"
+    title: "implement_code: enable ignored native Bubblewrap e2e tests"
+    description: "Remove #[ignore] attributes from the system_toolchains and rustup native e2e tests to enable them and establish genuine Bubblewrap enforcement evidence."
+    context: "The native e2e tests are currently ignored, so there is no recorded evidence that Bubblewrap sandbox enforcement works. Enabling them addresses the root cause of the audit's inability to verify enforcement."
+    purpose: "Enable the ignored native e2e tests to establish genuine enforcement evidence."
+    expected_outcome: "The system_toolchains and rustup tests are enabled and run successfully, providing enforcement evidence."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "enable-native-e2e-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-11-03T18:40:59Z"
+      updated_at: "2026-11-03T18:40:59Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "enable-native-e2e-security-audit"
+    title: "security_audit: inspect enabled native e2e test authority"
+    description: "Audit the security implications of enabling the native Bubblewrap e2e tests, including test authority, environment constraints, and enforcement evidence validity."
+    context: "Enabling the ignored tests changes the test suite's behavior and may expose environment constraints or test infrastructure issues."
+    purpose: "Verify that enabling the tests does not introduce security issues and that the enforcement evidence is valid."
+    expected_outcome: "Security audit records findings about the enabled tests and their enforcement evidence."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "enable-native-e2e-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-11-03T18:40:59Z"
+      updated_at: "2026-11-03T18:40:59Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "enable-native-e2e-compliance-review"
+    title: "compliance_review: compare enabled native e2e test evidence"
+    description: "Independently review the compliance of the enabled native e2e tests against requirements and verify that the enforcement evidence is valid."
+    context: "The enabled tests must comply with the SR-REQ-TOOLCHAIN-E2E requirement and provide valid enforcement evidence."
+    purpose: "Verify that the enabled tests comply with requirements and provide valid enforcement evidence."
+    expected_outcome: "Compliance review records findings about the enabled tests' compliance and enforcement evidence validity."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "enable-native-e2e-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-11-03T18:40:59Z"
+      updated_at: "2026-11-03T18:40:59Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "galla-reverification-security-audit"
     title: "Re-run sandbox runner security audit"
     description: "Independently re-run the sandbox runner security audit in a genuine agent context, covering request parsing, canonical paths, mount construction, namespace isolation, Bubblewrap substitution, environment and network denial, resource enforcement, and fallback resistance."
@@ -665,10 +771,14 @@ tasks:
     purpose: "Replace the placeholder-era security receipts with genuine independent findings before the runner is trusted as the enforcement boundary."
     expected_outcome: "A genuine independent audit records or remediates every high-confidence finding, and its disposition is retained for human arbitration against the placeholder-era receipts."
     kind: security-audit
-    status: awaiting-decision
+    status: pending
     depends_on:
       - "cache-promotion-atomicity-implement-code"
       - "cache-promotion-atomicity-write-tests"
+      - "enable-native-e2e-compliance-review"
+      - "enable-native-e2e-implement-code"
+      - "enable-native-e2e-security-audit"
+      - "enable-native-e2e-write-tests"
       - "galla-implement-code"
       - "network-guard-https-implement-code"
       - "network-guard-https-write-tests"
@@ -682,9 +792,9 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-11-02T13:51:02Z"
+      updated_at: "2026-11-03T18:40:59Z"
       completed_at: null
-    blocked_reason: "one or more impactful, uncovered decisions surfaced and require a human decision before implementation continues. Human-readable summary: /opt/proj/kvist/galla/.kvist/attention/galla-reverification-security-audit.md. Raw proposal evidence: /opt/proj/kvist/./galla/.kvist/continuous-reviews."
+    blocked_reason: null
     recovery_state: null
   - id: "galla-reverification-compliance-review"
     title: "Re-run sandbox runner compliance review"

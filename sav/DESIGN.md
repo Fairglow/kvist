@@ -75,13 +75,19 @@ before returning them. No model-qualified GET or inference is used.
 
 ## Selected-model capacity and usage
 
+Capacity fixtures model llama-server's initial `/models` request separately
+from the `/props?model=` fallback after HTTP 404. Ollama fixtures accept only
+`/api/ps`, without a llama-server preflight. Assert exact routes before replying;
+keep missing and invalid selected-model metadata distinct.
+
 Native profile parsing and construction default request deadlines to 7200
 seconds and validate 1–86400 seconds, matching direct transport's 24-hour
 maximum. Preserve `min(profile_deadline, host_remaining)` construction and
 unchanged cadence, retry and byte bounds; perform validation before I/O.
 
-Direct transport reuses bounded loopback GET for llama-server model-qualified
-properties and Ollama loaded-model metadata. Encode the model query as percent
+Direct transport reuses bounded loopback GET for llama-server router model
+capacity, falling back only on HTTP 404 to model-qualified properties, and for
+Ollama loaded-model metadata. Encode the model query as percent
 escaped UTF-8, validate positive integer capacity within 1048576 tokens, and
 return absent capacity distinctly. Limit discovery to 1 MiB and the caller's
 request deadline (at most 24 hours):

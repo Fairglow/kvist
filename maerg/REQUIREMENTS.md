@@ -69,6 +69,12 @@ capacity discovery from inference and report estimated request size.
 This human-requested repair has an explicit advisory exception while receipts
 are unavailable; independent observation and comparison remain separate.
 
+Provider fixtures MUST handle capacity requests separately from generation
+callbacks, so metadata cannot advance scripted tool turns or generation counts.
+Invalid-capacity tests MUST exercise both router and standalone metadata.
+The human-requested fixture repair has the same advisory exception and MUST NOT
+relax task lifecycle, retry or no-replay assertions.
+
 Delivered human guidance MUST renew model-generation attempts, without
 resetting approved task wall/token budgets. Both shared-native and explicit
 endpoint transports MUST clip individual calls to their independent deadline

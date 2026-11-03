@@ -4,6 +4,11 @@
 
 ## Shared registry realization (ADR 0015)
 
+Mock gateways route capacity metadata before passing inference bodies to
+generation callbacks. Count generation callbacks, not metadata requests, when
+checking completed-task replay. Raw HTTP fixtures retain explicit route/status
+control for capacity and retry tests.
+
 Build and validate the selected local context before probing metadata. Parse
 the entire bounded queue with the existing strict parser, select the exact task
 ID and serialize only its authored fields as quoted JSON data under the original

@@ -108,6 +108,11 @@ bounded; queue rejection restores the submitted text to the editor.
 
 ## October run remediation
 
+Startup fixtures serve router capacity through `/models` and assert that the
+same selected-model value reaches the journal. Keep the existing large-window
+value and output-reserve assertion. Capacity-cancellation tests block the first
+metadata route, so editable input and quit are observed during the actual wait.
+
 Resolve model budgets in one shared startup helper used by headless and each
 TUI worker. Use bounded model-qualified serving metadata for llama-server,
 and actual loaded Ollama context where advertised; configured capacity is the

@@ -1492,3 +1492,50 @@ Maerg package suite then passed **785 tests, zero failures, seven existing
 ignores**. Formatting also passed. Those executions precede this final record;
 the affected targets and structural checks run again afterward. No accepted
 intent revisions or operational task state are rewritten by these observations.
+
+## 2026-11-03 capacity fixture observations
+
+Independent `maerg-fixture-observer` inspected only `tests/model_startup.rs`
+and the specified HTTP-helper, continuous-run, retry and explicit-task ranges
+of `tests/task_commands.rs`. It excluded intent, queues, prior records/reviews,
+history, logs, production implementations and peers. It executed no tests.
+
+- `MockGateway::serve` examines raw HTTP bytes, returns 404 `{}` for `/models`
+  and `/props?` GET prefixes, then forwards only inference bodies to callbacks.
+  Raw/status callers retain explicit metadata routing. The callback moves into
+  one sequential worker and requires `Fn + Send + 'static`, not `Sync`.
+- Startup assertions cover router 404 and standalone unavailable statuses,
+  provisional provenance, configured discovery bypass, and known router
+  capacity. Both router and standalone paths exercise zero capacity, malformed
+  JSON, HTTP 401 and HTTP 403, asserting errors and no `model_request` event.
+- Metadata bypasses generation counters. Continuous-run assertions require five
+  additional generations for fresh work and checkpoint recovery. Retry coverage
+  asserts two metadata requests, five inference attempts and four retry events.
+  Interrupted-stream assertions discard provisional output without recording
+  a sandbox request. Explicit-task assertions leave follow-ups pending.
+- Additional assertions preserve large input, bound recorded discovery budgets,
+  and retain an unsuccessful provider context rejection with one model request.
+  These are source assertions, not verified execution results.
+
+Limits include broad metadata prefixes, Content-Length-oriented fixture readers
+without explicit request-size bounds, possible callback invocation after an
+incomplete body, ignored worker-join failure, and shutdown waits on active work.
+The inspected numeric cases are not comprehensive, and absence of a journal
+request is not an independent network-generation count. No broad security or
+compliance certification follows.
+
+The separate source-blind `maerg-fixture-comparator` found no demonstrated scoped
+contradiction between intent and the metadata/generation separation, invalid
+capacity and no-replay assertions. It retained every observation limit above;
+test outcomes were implementer-attributed and queue lifecycle was not proof.
+The implementing context passed all 151 affected tests and the final all-feature
+workspace nextest run passed 2219 tests with zero failures and 15 existing skips.
+Strict workspace Clippy, formatting and the workspace documentation test passed.
+
+An earlier full nextest run caught missing required `context` fields in this
+repair's task definitions; those were restored and both repository-queue tests
+passed. That run also saw one checkpoint-lock cleanup assertion fail. The
+unchanged checkpoint test then passed isolated, in the 29-test parallel
+checkpoint/continuous group, in 40/40 stress iterations and in the full rerun.
+Its cause remains unestablished; no lock-recovery fix or certification is claimed.
+The capacity-fixture observation does not cover that transient failure.

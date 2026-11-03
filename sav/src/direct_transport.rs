@@ -237,7 +237,7 @@ impl DirectModelTransport {
                 // mode, which falls back to /props?model= (which may load the model).
                 match self.llama_router_context_limit(model, cancellation) {
                     Ok(limit) => Ok(limit),
-                    Err(error) if matches!(error, Error::ModelProviderStatus { status: 404 }) => {
+                    Err(Error::ModelProviderStatus { status: 404 }) => {
                         self.llama_standalone_context_limit(model, cancellation)
                     }
                     Err(error) => Err(error),

@@ -1698,20 +1698,35 @@ fn capacity_discovery_waits_past_the_fifteen_second_streaming_header_limit() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let worker = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(3)))
+        for (expected, status, body, delay) in [
+            ("GET /models ", 404, "{}", Duration::ZERO),
+            (
+                "GET /props?model=cold-model ",
+                200,
+                r#"{"default_generation_settings":{"n_ctx":32768}}"#,
+                Duration::from_millis(15_250),
+            ),
+        ] {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut header = Vec::new();
+            let mut byte = [0];
+            while !header.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).unwrap();
+                header.push(byte[0]);
+                assert!(header.len() <= 4096);
+            }
+            assert!(String::from_utf8(header).unwrap().starts_with(expected));
+            thread::sleep(delay);
+            write!(
+                stream,
+                "HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
             .unwrap();
-        let mut bytes = [0; 4096];
-        let count = stream.read(&mut bytes).unwrap();
-        assert!(String::from_utf8_lossy(&bytes[..count]).starts_with("GET /props?model="));
-        thread::sleep(Duration::from_millis(15_250));
-        let body = r#"{"default_generation_settings":{"n_ctx":32768}}"#;
-        let _ = write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
-            body.len()
-        );
+        }
     });
     let result = DirectModelTransport::new(
         LocalModelProvider::LlamaServer,

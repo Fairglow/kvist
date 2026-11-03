@@ -627,10 +627,10 @@ fn manual_model_choice_survives_a_late_active_model_result() {
 
 #[test]
 fn explicit_selection_skips_active_probe_and_capacity_wait_is_cancellable() {
-    let provider = Provider::blocked("/props?model=");
+    let provider = Provider::blocked("/models");
     let mut tui = Tui::start(&provider, Some("a"), true);
     tui.wait_for("skott ready");
-    assert_eq!(provider.next().0, "/props?model=Model-A");
+    assert_eq!(provider.next().0, "/models");
     tui.type_text(b"editable-during-capacity");
     tui.wait_for("editable-during-capacity");
     tui.quit();

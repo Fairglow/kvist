@@ -200,7 +200,7 @@ fn startup_uses_selected_serving_capacity_without_a_cli_override() {
     let endpoint = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
         let mut posted = Vec::new();
-        for expected in ["GET /props?model=test ", "POST /v1/chat/completions "] {
+        for expected in ["GET /models ", "POST /v1/chat/completions "] {
             let (mut socket, _) = listener.accept().unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(5)))
@@ -228,7 +228,7 @@ fn startup_uses_selected_serving_capacity_without_a_cli_override() {
                 request.extend_from_slice(&buffer[..count]);
             }
             let body = if expected.starts_with("GET") {
-                json!({"default_generation_settings":{"n_ctx":262144}}).to_string()
+                json!({"data":[{"id":"test","context_length":262144}]}).to_string()
             } else {
                 posted = request[end..].to_vec();
                 format!(

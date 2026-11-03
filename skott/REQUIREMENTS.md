@@ -259,6 +259,12 @@ rendering support for every Markdown extension.
 
 ## RUN-REQ-RELIABILITY
 
+Capacity startup fixtures MUST retain the advertised selected-model capacity,
+output-reserve and provider-provenance assertions when adapting to router
+discovery. Cancellation fixtures MUST block the route actually requested.
+This human-requested test repair has an explicit advisory exception while
+review receipts are unavailable and changes no runtime authority.
+
 The October 2026 run remediation MUST resolve the selected model's effective
 serving context, never silently assuming an 8192-token window. Explicit CLI
 and per-model capacities MAY replace unavailable discovery; absent capacity

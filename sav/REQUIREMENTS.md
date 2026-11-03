@@ -307,6 +307,12 @@ configuration, filesystem, and endpoint guarantees require Linux-native tests.
 Provider promotion requires targeted security audit and independent compliance
 review.
 
+Capacity fixtures MUST distinguish llama-server router discovery, its standalone
+404 fallback, and Ollama's loaded-model route. Fixture repairs MUST preserve
+selected-model matching, malformed-capacity rejection and deadline assertions.
+This human-requested test repair has an explicit advisory exception while
+review receipts are unavailable; it does not change transport authority.
+
 The consumer boundary is defined in [`CONTRACT.md`](CONTRACT.md), private
 realization in [`DESIGN.md`](DESIGN.md), supplemental authority design in
 [`../../docs/architecture.md`](../../docs/architecture.md),

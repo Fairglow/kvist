@@ -202,6 +202,11 @@ impl MockGateway {
                     .position(|part| part == b"\r\n\r\n")
                     .unwrap()
                     + 4;
+                // Route capacity discovery requests to return 404 so the agent
+                // falls back to provisional budget.
+                if request.starts_with(b"GET /models") || request.starts_with(b"GET /props?") {
+                    return (404, "{}".to_string());
+                }
                 (200, respond(&request[header_end..]))
             },
             delay,
@@ -2802,7 +2807,7 @@ fn continuous_run_new_work_uses_a_fresh_baseline_and_approved_commit_policy() {
         "{}",
         String::from_utf8_lossy(&next.stderr)
     );
-    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst) - before, 7);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst) - before, 5);
     let queue = kvist::task_queue::parse(&fs::read_to_string(path).unwrap()).unwrap();
     assert!(
         queue
@@ -3130,8 +3135,8 @@ fn continuous_run_retries_failed_checkpoint_without_replaying_completed_tasks() 
         String::from_utf8_lossy(&retry.stderr)
     );
     let after = calls.load(std::sync::atomic::Ordering::SeqCst);
-    // Two authoring metadata requests plus five generations per item; only item two remains.
-    assert_eq!(after - before, 7);
+    // Only item two's five generations reach the callback; metadata is routed separately.
+    assert_eq!(after - before, 5);
     let log = Command::new("git")
         .args(["log", "--format=%s"])
         .current_dir(project.path())
@@ -3521,6 +3526,9 @@ fn task_run_runtime_budgets_allow_large_wire_responses_and_text_deltas() {
         let expected = generated.clone();
         let gateway = MockGateway::serve_raw(
             move |request| {
+                if request.starts_with(b"GET /models") {
+                    return "HTTP/1.1 404 Fixture\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_string();
+                }
                 let (content_type, body) = if request.starts_with(b"GET /props?") {
                     (
                         "application/json",
@@ -3645,6 +3653,10 @@ fn task_run_skips_unavailable_capacity_and_retries_inference_without_replaying_t
                         r#"{"default_generation_settings":{"n_ctx":32768}}"#.into(),
                     )
                 }
+            } else if request.starts_with(b"GET /models") {
+                // Count the /models probe as a capacity probe too
+                counts.0.fetch_add(1, Ordering::SeqCst);
+                (404, "{}".into())
             } else if counts.1.fetch_add(1, Ordering::SeqCst) < 4 {
                 (429, "{}".into())
             } else {
@@ -3659,8 +3671,8 @@ fn task_run_skips_unavailable_capacity_and_retries_inference_without_replaying_t
     assert!(output.status.success(), "{diagnostic}");
     assert_eq!(
         capacity.load(Ordering::SeqCst),
-        1,
-        "optional metadata must not consume inference retries"
+        2,
+        "optional metadata must not consume inference retries (one /models probe + one /props?model= probe)"
     );
     assert_eq!(
         inference.load(Ordering::SeqCst),
@@ -3693,6 +3705,9 @@ fn interrupted_stream_discards_provisional_output_and_incomplete_tool_proposals_
     let count = calls.clone();
     let gateway = MockGateway::serve_raw(
         move |request| {
+            if request.starts_with(b"GET /models") {
+                return "HTTP/1.1 404 Fixture\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_string();
+            }
             let body = if request.starts_with(b"GET /props?") {
                 r#"{"default_generation_settings":{"n_ctx":32768}}"#.to_owned()
             } else if count.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -3991,7 +4006,9 @@ fn a_durably_blocked_attempt_can_be_deliberately_returned_to_pending_and_retried
 fn explicit_task_stops_for_finalization_without_running_followups() {
     let gateway = MockGateway::serve_with_status(
         |request| {
-            if request.starts_with(b"GET /props?") {
+            if request.starts_with(b"GET /models") {
+                (404, "{}".into())
+            } else if request.starts_with(b"GET /props?") {
                 (
                     200,
                     r#"{"default_generation_settings":{"n_ctx":32768}}"#.into(),

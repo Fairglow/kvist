@@ -10,6 +10,74 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "capacity-fixtures-write-tests"
+    title: "write_tests: reproduce capacity fixture protocol mismatches"
+    description: "Run existing Ollama and llama-server capacity regressions before repairing the fixtures."
+    context: "Ollama matching regression fails because the fixture expects GET /models instead of GET /api/ps."
+    purpose: "Preserve provider-specific route and capacity assertions."
+    expected_outcome: "Record the failure before changing test support."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:29:02Z"
+      completed_at: "2026-11-03T22:29:02Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "capacity-fixtures-implement-code"
+    title: "implement_code: repair provider capacity fixtures"
+    description: "Restrict the router preflight to llama-server and retain standalone fallback and Ollama matching checks."
+    context: "Provider-specific fixtures and bounded complete-header reads pass the affected tests and full 2219-test all-feature workspace nextest run. Strict lint and formatting pass; transport authority is unchanged."
+    purpose: "Repair test support without changing transport semantics."
+    expected_outcome: "Capacity and transport tests pass without weaker assertions."
+    kind: implementation
+    status: completed
+    depends_on: ["capacity-fixtures-write-tests"]
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:45:18Z"
+      completed_at: "2026-11-03T22:45:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "capacity-fixtures-security-audit"
+    title: "security_audit: independently observe capacity fixture boundaries"
+    description: "Derive scoped source-only observations without intent, queues, prior records or history."
+    context: "Clean-slate sav-fixture-observer derived scoped source-only observations. Separate sav-header-observer inspected the final bounded-header follow-up. IMPL retains scope limits; no transport-wide audit or certification."
+    purpose: "Retain independent observations without claiming a transport-wide audit."
+    expected_outcome: "Persist a scoped source-derived IMPL supplement."
+    kind: security-audit
+    status: completed
+    depends_on: ["capacity-fixtures-implement-code"]
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:45:18Z"
+      completed_at: "2026-11-03T22:45:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "capacity-fixtures-compliance-review"
+    title: "compliance_review: compare capacity fixture evidence"
+    description: "Compare local intent with independent observations and attributed tests without source access."
+    context: "Source-blind sav-fixture-comparator found no demonstrated scoped contradiction and retained attributed-execution and coverage limits. A later source-only header observation closes its narrow observation gap. No acceptance or receipt."
+    purpose: "Avoid implementer self-certification."
+    expected_outcome: "Record a separate scoped comparison and its limitations."
+    kind: compliance-review
+    status: completed
+    depends_on: ["capacity-fixtures-security-audit"]
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:45:18Z"
+      completed_at: "2026-11-03T22:45:18Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "native-budgets-write-tests"
     title: "write_tests: pin slow native profile deadlines"
     description: "Pin two-hour defaults, the 24-hour ceiling, invalid deadlines and host clipping."

@@ -10,6 +10,27 @@ fn capacity(provider: LocalModelProvider, model: &str, body: Value) -> sav::Resu
     let address = listener.local_addr().unwrap();
     let model_id = model.to_owned();
     let worker = std::thread::spawn(move || {
+        if provider == LocalModelProvider::LlamaServer {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut header = Vec::new();
+            let mut byte = [0];
+            while !header.ends_with(b"\r\n\r\n") {
+                socket.read_exact(&mut byte).unwrap();
+                header.push(byte[0]);
+                assert!(header.len() <= 4096);
+            }
+            let header = String::from_utf8(header).unwrap();
+            assert!(header.starts_with("GET /models "));
+            write!(
+                socket,
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+            )
+            .unwrap();
+        }
+
         let (mut socket, _) = listener.accept().unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(5)))

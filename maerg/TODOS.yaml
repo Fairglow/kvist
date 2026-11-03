@@ -10,6 +10,74 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "capacity-fixtures-write-tests"
+    title: "write_tests: reproduce provider fixture regressions"
+    description: "Run startup and task-command tests before repairing metadata routing and generation accounting."
+    context: "Review found metadata routing duplicated in a body-only callback and retry comments counting excluded metadata."
+    purpose: "Keep capacity and no-replay regressions meaningful."
+    expected_outcome: "Identify fixture failures without weakening lifecycle assertions."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:29:02Z"
+      completed_at: "2026-11-03T22:29:02Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "capacity-fixtures-implement-code"
+    title: "implement_code: separate metadata and generation fixtures"
+    description: "Route metadata before generation callbacks and exercise invalid capacity on both llama-server paths."
+    context: "Metadata stays outside generation callbacks and counts; both invalid-capacity paths are tested. All 151 affected tests and the full 2219-test all-feature nextest rerun pass, with strict lint/format. Missing context fields in these new definitions were restored."
+    purpose: "Preserve scripted turns, inference retries and no-replay evidence."
+    expected_outcome: "Startup and task-command tests pass with exact generation counts."
+    kind: implementation
+    status: completed
+    depends_on: ["capacity-fixtures-write-tests"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:45:18Z"
+      completed_at: "2026-11-03T22:45:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "capacity-fixtures-security-audit"
+    title: "security_audit: independently observe mock gateway boundaries"
+    description: "Derive scoped source-only observations without intent, queues, prior records or history."
+    context: "Clean-slate maerg-fixture-observer derived scoped source-only observations without intent, history, peers or production source. IMPL retains reader, routing and counting limitations; no task-authority audit or certification."
+    purpose: "Retain independent observations without claiming a task-authority audit."
+    expected_outcome: "Persist a scoped source-derived IMPL supplement."
+    kind: security-audit
+    status: completed
+    depends_on: ["capacity-fixtures-implement-code"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:45:18Z"
+      completed_at: "2026-11-03T22:45:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "capacity-fixtures-compliance-review"
+    title: "compliance_review: compare mock gateway evidence"
+    description: "Compare local intent with independent observations and attributed tests without source access."
+    context: "Source-blind maerg-fixture-comparator found no demonstrated scoped contradiction. IMPL retains attributed evidence and the unrelated checkpoint-lock failure seen once then passing unchanged isolated, parallel-group, 40 stress and full-suite reruns; cause unestablished. No acceptance or receipt."
+    purpose: "Avoid implementer self-certification."
+    expected_outcome: "Record a separate scoped comparison and its limitations."
+    kind: compliance-review
+    status: completed
+    depends_on: ["capacity-fixtures-security-audit"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:45:18Z"
+      completed_at: "2026-11-03T22:45:18Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "decision-shortcuts-write-tests"
     title: "write_tests: numbered exact decision responses"
     description: "Pin numbered option/approval commands, exact continuation mode, stale/tampered/unknown rejection, retained numbering, old-plan discovery and scoped tab completion before implementation."
@@ -52,14 +120,14 @@ tasks:
     purpose: "Retain independent authority findings."
     expected_outcome: "Shortcut controls and limitations remain inspectable."
     kind: security-audit
-    status: pending
+    status: in-progress
     depends_on:
       - "decision-shortcuts-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
     timestamps:
       created_at: "2026-10-31T12:05:00Z"
-      updated_at: "2026-10-31T12:05:00Z"
+      updated_at: "2026-11-03T14:39:05Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

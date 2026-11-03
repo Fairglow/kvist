@@ -701,3 +701,49 @@ Terminal records now force a tail check even in the final batch slot. Currently 
 **Sav addendum — source-derived:** `ContextManager::prepare` saturating-increments its counter once when successful preparation removes history or changes the rolling summary—not once per removed turn. No-op preparations and errors leave the counter unchanged; errors also preserve the request and summary. Successful no-ops may still set `max_output_tokens`. Legacy `compact` increments on its rolling branch, not its short-history no-op. Skott’s `protected_message_count_limit_is_exact_and_failure_is_atomic` asserts that 1,024 protected messages succeed without compaction or message changes; 1,025 yield `InvalidModelTurn` with the entire request unchanged. Both cases assert an empty summary and zero counter.
 
 No commands, tests, or builds were executed; these are source observations and test-source assertions, not compliance certification.
+
+## 2026-11-03 capacity fixture observations
+
+Independent `sav-fixture-observer` inspected only `tests/model_capacity.rs`,
+`tests/model_transport.rs:1690-1765`, and `src/direct_transport.rs:210-350`.
+It excluded intent, queues, prior records/reviews, history, logs and peers.
+No tests or other checks were executed by the observer.
+
+- llama-server discovery first requests `/models`, selects an exact model `id`,
+  and reads `context_length`. Only the literal HTTP 404 error pattern triggers
+  model-qualified `/props` fallback. Standalone capacity reads runtime `n_ctx`,
+  not `n_ctx_train`.
+- Ollama requests `/api/ps`, matching `name` or `model`; untagged requested
+  names also match `:latest`. Its fixture does not expect a llama-server probe.
+- Test assertions cover query escaping, absent/runtime capacity, invalid
+  numeric/string metadata, model matching, cancellation and unsafe endpoints.
+  The slow-header assertion returns 32768 after a 15250-ms standalone delay,
+  following router 404, within a configured 25-second transport budget.
+- These assertions are not executed results. This scope does not exercise
+  successful router discovery or non-404 router failures. Helper internals and
+  constant values were not inspected. Blocking fixture accepts have no separate
+  timeout, and the observed slow-header test used single request reads.
+
+After observation, the implementing context replaced the slow-header fixture's
+single reads with complete, 4096-byte-bounded header reads for both exact routes
+and made response-write failures explicit. The observer did not reinspect that
+follow-up. No transport authority or deadline semantics were changed.
+
+The separate source-blind `sav-fixture-comparator` found no demonstrated scoped
+contradiction between local intent, these observations and attributed execution.
+It retained successful-router/non-404 coverage and helper-inspection limits;
+test and lint outcomes were attributed, not independently verified. At comparison
+time the complete-header-read follow-up remained an observation gap.
+
+A subsequent clean-slate `sav-header-observer` read only the final slow-header
+test. It observed sequential `/models` 404 and `/props?model=cold-model` 200
+requests, complete one-byte-at-a-time header reads capped at 4096 bytes with
+three-second read timeouts, explicit response-write failures, and the 15250-ms
+delay with a configured 25-second budget and `Some(32768)` assertion. It ran
+nothing; this closes the narrow source-observation gap, not production
+deadline/elapsed-time verification.
+
+The implementing context's final all-feature workspace nextest run passed
+2219 tests with zero failures and 15 existing skips. Strict workspace Clippy,
+formatting and the workspace documentation test passed. These are attributed
+execution results, not acceptance, review receipts or broad certification.

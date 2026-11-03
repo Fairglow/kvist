@@ -158,6 +158,12 @@ fn missing_unsupported_or_transient_capacity_does_not_prevent_inference() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let selected = profile(format!("http://{}", listener.local_addr().unwrap()), None);
         let provider = thread::spawn(move || {
+            // Router mode probe: /models returns 404 to simulate standalone mode
+            let (mut stream, header, _) = request(&listener);
+            assert!(header.starts_with("GET /models "));
+            reply(&mut stream, 404, "{}");
+            drop(stream);
+            // Standalone mode probe: /props?model=
             let (mut stream, header, _) = request(&listener);
             assert!(header.starts_with("GET /props?model=fixture "));
             reply(&mut stream, status, body);
@@ -229,13 +235,15 @@ fn known_capacity_and_explicit_configuration_remain_authoritative() {
         );
         let provider = thread::spawn(move || {
             if !configured {
+                // Router mode probe: /models
                 let (mut stream, header, _) = request(&listener);
-                assert!(header.starts_with("GET "));
+                assert!(header.starts_with("GET /models "));
                 reply(
                     &mut stream,
                     200,
-                    r#"{"default_generation_settings":{"n_ctx":4096}}"#,
+                    r#"{"data":[{"id":"fixture","context_length":4096}]}"#,
                 );
+                drop(stream);
             }
             let (mut stream, header, body) = request(&listener);
             assert!(header.starts_with("POST "));
@@ -265,26 +273,45 @@ fn known_capacity_and_explicit_configuration_remain_authoritative() {
 
 #[test]
 fn invalid_capacity_and_authorization_failures_do_not_become_fallbacks() {
-    for (status, body) in [
-        (200, r#"{"default_generation_settings":{"n_ctx":0}}"#),
-        (200, "not JSON"),
-        (401, "{}"),
-        (403, "{}"),
-    ] {
-        let directory = tempfile::tempdir().unwrap();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let selected = profile(format!("http://{}", listener.local_addr().unwrap()), None);
-        let provider = thread::spawn(move || {
-            let (mut stream, _, _) = request(&listener);
-            reply(&mut stream, status, body);
-        });
-        assert!(execute(directory.path(), &selected, &[]).is_err());
-        provider.join().unwrap();
-        assert!(
-            !events(directory.path())
-                .iter()
-                .any(|event| event["type"] == "model_request")
-        );
+    for standalone in [false, true] {
+        for (status, body) in [
+            (
+                200,
+                if standalone {
+                    r#"{"default_generation_settings":{"n_ctx":0}}"#
+                } else {
+                    r#"{"data":[{"id":"fixture","context_length":0}]}"#
+                },
+            ),
+            (200, "not JSON"),
+            (401, "{}"),
+            (403, "{}"),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let selected = profile(format!("http://{}", listener.local_addr().unwrap()), None);
+            let provider = thread::spawn(move || {
+                if standalone {
+                    let (mut stream, header, _) = request(&listener);
+                    assert!(header.starts_with("GET /models "));
+                    reply(&mut stream, 404, "{}");
+                }
+                let (mut stream, header, _) = request(&listener);
+                assert!(header.starts_with(if standalone {
+                    "GET /props?model=fixture "
+                } else {
+                    "GET /models "
+                }));
+                reply(&mut stream, status, body);
+            });
+            assert!(execute(directory.path(), &selected, &[]).is_err());
+            provider.join().unwrap();
+            assert!(
+                !events(directory.path())
+                    .iter()
+                    .any(|event| event["type"] == "model_request")
+            );
+        }
     }
 }
 
@@ -296,6 +323,11 @@ fn provisional_budget_preserves_large_approved_input_without_claiming_capacity()
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let selected = profile(format!("http://{}", listener.local_addr().unwrap()), None);
     let provider = thread::spawn(move || {
+        // Router mode probe: /models returns 404 to simulate standalone mode
+        let (mut stream, _, _) = request(&listener);
+        reply(&mut stream, 404, "{}");
+        drop(stream);
+        // Standalone mode probe: /props?model=
         let (mut stream, _, _) = request(&listener);
         reply(&mut stream, 200, "{}");
         drop(stream);
@@ -339,8 +371,14 @@ fn unknown_capacity_does_not_hide_provider_context_rejection() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let selected = profile(format!("http://{}", listener.local_addr().unwrap()), None);
     let provider = thread::spawn(move || {
+        // Router mode probe: /models returns 404 to simulate standalone mode
         let (mut stream, header, _) = request(&listener);
-        assert!(header.starts_with("GET "));
+        assert!(header.starts_with("GET /models "));
+        reply(&mut stream, 404, "{}");
+        drop(stream);
+        // Standalone mode probe: /props?model=
+        let (mut stream, header, _) = request(&listener);
+        assert!(header.starts_with("GET /props?model=fixture "));
         reply(&mut stream, 200, "{}");
         drop(stream);
         let (mut stream, header, _) = request(&listener);

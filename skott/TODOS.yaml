@@ -10,6 +10,76 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "capacity-fixtures-write-tests"
+    title: "write_tests: reproduce startup capacity fixture mismatch"
+    description: "Run the existing headless selected-capacity regression before changing the fixture."
+    context: "The test observes 32768 tokens but retains the original 262144-token assertion; the fixture also triggers unused_assignments."
+    purpose: "Preserve large-context and provider-provenance coverage."
+    expected_outcome: "Record the failure before repairing test support."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
+      - "REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:29:02Z"
+      completed_at: "2026-11-03T22:29:02Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "capacity-fixtures-implement-code"
+    title: "implement_code: repair startup router capacity fixtures"
+    description: "Serve the original large capacity through the router route and retain cancellation checks on the active metadata route."
+    context: "The router fixture preserves 262144 tokens, 8192 reserve and provider provenance without unused assignments. Five headless and eleven lifecycle tests, full 2219-test all-feature nextest, strict lint and formatting pass. Runtime authority is unchanged."
+    purpose: "Repair test support without changing runtime capacity or authority."
+    expected_outcome: "Headless and lifecycle tests pass without weaker assertions or lint warnings."
+    kind: implementation
+    status: completed
+    depends_on: ["capacity-fixtures-write-tests"]
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
+      - "REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:45:18Z"
+      completed_at: "2026-11-03T22:45:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "capacity-fixtures-security-audit"
+    title: "security_audit: independently observe startup fixture boundaries"
+    description: "Derive scoped source-only observations without intent, queues, prior records or history."
+    context: "Clean-slate skott-fixture-observer inspected only startup/headless test source, excluding intent, queues, prior records/history and peers. IMPL retains scoped source assertions and limitations, not a runtime-wide audit."
+    purpose: "Retain independent observations without claiming a runtime-wide audit."
+    expected_outcome: "Persist a scoped source-derived IMPL supplement."
+    kind: security-audit
+    status: completed
+    depends_on: ["capacity-fixtures-implement-code"]
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:45:18Z"
+      completed_at: "2026-11-03T22:45:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "capacity-fixtures-compliance-review"
+    title: "compliance_review: compare startup fixture evidence"
+    description: "Compare local intent with independent observations and attributed tests without source access."
+    context: "Source-blind skott-fixture-comparator found no demonstrated scoped contradiction. IMPL retains attributed execution and the blocked fixture's lack of queued-dispatch/post-discovery coverage. No acceptance, receipt or broad certification."
+    purpose: "Avoid implementer self-certification."
+    expected_outcome: "Record a separate scoped comparison and its limitations."
+    kind: compliance-review
+    status: completed
+    depends_on: ["capacity-fixtures-security-audit"]
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
+    timestamps:
+      created_at: "2026-11-03T22:29:02Z"
+      updated_at: "2026-11-03T22:45:18Z"
+      completed_at: "2026-11-03T22:45:18Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "external-fixture-write-tests"
     title: "write_tests: reproduce ambient registry contamination"
     description: "Retain external-only listing and terminal refusal assertions; require no native or additional external profiles."
