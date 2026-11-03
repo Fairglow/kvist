@@ -70,9 +70,9 @@ the canonical component table in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 | Component | Directory | Binary         | Role                                                                                                         | Status                   |
 | --------- | --------- | -------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------ |
-| **maerg** | `maerg/`  | `kvist`        | The CLI and workflow engine: project artifacts, discovery, status, queues, task lifecycle, policy, evidence. | In progress              |
-| **sav**   | `sav/`    | `sav-run`      | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport.      | In progress              |
-| **galla** | `galla/`  | `galla-runner` | Independent Linux enforcement boundary: request validation and Bubblewrap isolation.                         | In progress              |
+| **maerg** | `maerg/`  | `kvist`        | The CLI and workflow engine: project artifacts, discovery, status, queues, task lifecycle, policy, evidence. | In progress (pre-alpha)  |
+| **sav**   | `sav/`    | `sav-run`      | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport.      | In progress (pre-alpha)  |
+| **galla** | `galla/`  | `galla-runner` | Independent Linux enforcement boundary: request validation and Bubblewrap isolation.                         | In progress (beta state) |
 | **skott** | `skott/`  | `skott`        | Interactive/headless sandboxed workspace agent shell.                                                        | In progress (beta state) |
 | **blad**  | `blad/`   | `blad`         | Terminal Markdown viewer and streaming pager for skott session transcripts and standalone files.             | Released (`kvist-blad`)  |
 
