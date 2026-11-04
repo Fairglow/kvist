@@ -3,7 +3,7 @@ use std::io;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
         Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
@@ -13,6 +13,7 @@ use ratatui::{
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use super::super::render;
 use super::{Overlay, Workspace};
 use crate::presentation::sanitize;
 
@@ -31,6 +32,9 @@ impl Workspace {
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) -> io::Result<()> {
         let area = frame.area();
         let (base, accent) = super::super::render::chrome(self.theme);
+        let raised = render::panel(self.theme);
+        let selected = render::selection(self.theme);
+        let border = render::border(self.theme);
         frame.render_widget(Block::default().style(base), area);
         let parts = Layout::vertical([
             Constraint::Length(1),
@@ -46,7 +50,8 @@ impl Workspace {
             self.progress
         );
         frame.render_widget(
-            Paragraph::new(sanitize(&heading)).style(base.fg(accent).add_modifier(Modifier::BOLD)),
+            Paragraph::new(sanitize(&heading))
+                .style(raised.fg(accent).add_modifier(Modifier::BOLD)),
             parts[0],
         );
         let run = self
@@ -63,7 +68,10 @@ impl Workspace {
             self.status.stale_locks,
             run,
         );
-        frame.render_widget(Paragraph::new(sanitize(&stats)).style(base), parts[1]);
+        frame.render_widget(
+            Paragraph::new(sanitize(&stats)).style(raised.patch(render::secondary(self.theme))),
+            parts[1],
+        );
         let body = parts[2];
         let title = format!(
             " Transcript {}/{} | {}{} ",
@@ -79,7 +87,7 @@ impl Workspace {
         let panel = Block::default()
             .borders(Borders::TOP)
             .title(title)
-            .border_style(Style::default().fg(accent))
+            .border_style(border)
             .style(base);
         let mut inner = panel.inner(body);
         inner.width = inner.width.saturating_sub(1);
@@ -116,7 +124,7 @@ impl Workspace {
                 .begin_symbol(None)
                 .end_symbol(None)
                 .thumb_style(Style::default().fg(accent))
-                .track_style(Style::default().fg(Color::DarkGray)),
+                .track_style(border),
             body,
             &mut scrollbar,
         );
@@ -129,8 +137,8 @@ impl Workspace {
         let input = Block::default()
             .borders(Borders::TOP)
             .title(" Command ")
-            .style(base)
-            .border_style(Style::default().fg(accent));
+            .style(raised)
+            .border_style(border);
         let input_area = input.inner(footer);
         frame.render_widget(input, footer);
         let display = if self.running.is_some() {
@@ -158,7 +166,7 @@ impl Workspace {
         }
         let text = format!("{label}{}", &display[start..]);
         frame.render_widget(
-            Paragraph::new(sanitize(&text)).style(base),
+            Paragraph::new(sanitize(&text)).style(raised),
             Rect {
                 height: 1,
                 ..input_area
@@ -174,12 +182,12 @@ impl Workspace {
             ));
         }
         let hints = if self.notice.is_empty() {
-            "Tab complete  F1 help  F2 settings  PgUp/PgDn scroll  Ctrl+C cancel  Ctrl+D EOF/exit"
+            super::bindings::footer()
         } else {
-            &self.notice
+            self.notice.clone()
         };
         frame.render_widget(
-            Paragraph::new(sanitize(hints)).style(base.fg(accent)),
+            Paragraph::new(sanitize(&hints)).style(raised.patch(render::secondary(self.theme))),
             Rect {
                 y: input_area.y.saturating_add(1),
                 height: 1,
@@ -207,60 +215,94 @@ impl Workspace {
             .block(
                 Block::bordered().title(" Completion: Tab / arrows; Enter selects; Esc dismisses "),
             )
-            .style(base)
-            .highlight_style(base.add_modifier(Modifier::REVERSED));
+            .style(raised)
+            .highlight_style(selected);
             let mut state = ListState::default().with_selected(Some(self.candidate));
             frame.render_stateful_widget(list, popup, &mut state);
         }
-        if let Some(overlay) = &self.overlay {
+        if let Some(overlay) = &mut self.overlay {
             let popup = centered(area);
             frame.render_widget(Clear, popup);
             match overlay {
-                Overlay::Menu {
-                    title,
-                    choices,
-                    selected,
-                } => {
-                    let list = List::new(
-                        choices
-                            .iter()
-                            .map(|(label, _)| ListItem::new(sanitize(label))),
-                    )
-                    .block(Block::bordered().title(format!(" {title} | arrows / Enter / Esc ")))
-                    .style(base)
-                    .highlight_style(base.add_modifier(Modifier::REVERSED));
-                    let mut state = ListState::default().with_selected(Some(*selected));
-                    frame.render_stateful_widget(list, popup, &mut state);
-                }
-                Overlay::Confirm { prompt, .. } => {
-                    frame.render_widget(
-                        Paragraph::new(format!(
-                            "Confirm {}?\n\ny: proceed     n / Esc: cancel",
-                            sanitize(prompt)
+                Overlay::Menu(menu) => {
+                    let block = Block::bordered()
+                        .title(format!(" {} ", sanitize(&menu.title)))
+                        .title_bottom(" arrows / Enter | Esc back | F1 help ")
+                        .border_style(border)
+                        .style(raised);
+                    let mut inner = block.inner(popup);
+                    frame.render_widget(block, popup);
+                    let visible = menu.visible();
+                    if menu.page.searchable() && inner.height > 0 {
+                        frame.render_widget(
+                            Paragraph::new(format!(
+                                "Filter: {}  ({} matches)",
+                                sanitize(&menu.query),
+                                visible.len()
+                            ))
+                            .style(raised),
+                            Rect { height: 1, ..inner },
+                        );
+                        inner.y = inner.y.saturating_add(1);
+                        inner.height = inner.height.saturating_sub(1);
+                    }
+                    let height = usize::from(inner.height);
+                    let start = menu.selected.saturating_add(1).saturating_sub(height);
+                    let end = (start + height).min(visible.len());
+                    let list = List::new(visible[start.min(end)..end].iter().map(|&index| {
+                        let entry = &menu.choices[index];
+                        ListItem::new(format!(
+                            "{}{}",
+                            if entry.current { "[current] " } else { "" },
+                            sanitize(&entry.label)
                         ))
-                        .block(Block::bordered().title(" Explicit confirmation "))
-                        .style(base),
+                    }))
+                    .style(raised)
+                    .highlight_style(selected);
+                    let mut state = ListState::default().with_selected(
+                        (!visible.is_empty()).then_some(menu.selected.saturating_sub(start)),
+                    );
+                    frame.render_stateful_widget(list, inner, &mut state);
+                    if visible.is_empty() {
+                        frame.render_widget(
+                            Paragraph::new("No matching entries").style(raised),
+                            inner,
+                        );
+                    }
+                }
+                Overlay::Confirm { prompt, scroll, .. } => {
+                    *scroll = document(
+                        frame,
                         popup,
+                        "Confirm: y / n / Esc",
+                        &format!("{prompt}\n\n**y:** proceed. **n / Esc:** cancel."),
+                        *scroll,
+                        self.theme,
+                    )?;
+                }
+                Overlay::Quit => {
+                    frame.render_widget(
+                        Paragraph::new("A command is running. Cancel it and quit?\n\nTask effects are not rolled back; review/recovery may be required.\n\ny: cancel and quit     n / Esc: keep running")
+                            .block(Block::bordered().title(" Quit workspace ").border_style(border))
+                            .style(raised).wrap(ratatui::widgets::Wrap { trim: false }), popup
                     );
                 }
                 Overlay::Help { scroll } => {
-                    let block = Block::bordered()
-                        .title(" Keyboard help | arrows / PgUp / PgDn | Esc closes ")
-                        .style(base);
-                    let inner = block.inner(popup);
-                    let help = super::super::render::markdown(
-                        super::actions::view_help(),
-                        inner.width,
+                    *scroll = document(
+                        frame,
+                        popup,
+                        "Keyboard help",
+                        &super::actions::view_help(),
+                        *scroll,
                         self.theme,
                     )?;
-                    let start =
-                        (*scroll).min(help.lines.len().saturating_sub(usize::from(inner.height)));
-                    let end = (start + usize::from(inner.height)).min(help.lines.len());
-                    frame.render_widget(block, popup);
-                    frame.render_widget(
-                        Paragraph::new(Text::from(help.lines[start..end].to_vec())).style(base),
-                        inner,
-                    );
+                }
+                Overlay::Details {
+                    title,
+                    markdown,
+                    scroll,
+                } => {
+                    *scroll = document(frame, popup, title, markdown, *scroll, self.theme)?;
                 }
             }
         }
@@ -268,10 +310,123 @@ impl Workspace {
     }
 }
 
+fn document(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    source: &str,
+    scroll: usize,
+    theme: crate::bark::Theme,
+) -> io::Result<usize> {
+    let style = render::panel(theme);
+    let block = Block::bordered()
+        .title(format!(
+            " {} | arrows / PgUp / PgDn | Esc back ",
+            sanitize(title)
+        ))
+        .border_style(render::border(theme))
+        .style(style);
+    let inner = block.inner(area);
+    let text = render::markdown(source, inner.width, theme)?;
+    let start = scroll.min(text.lines.len().saturating_sub(usize::from(inner.height)));
+    let end = (start + usize::from(inner.height)).min(text.lines.len());
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(Text::from(text.lines[start..end].to_vec())).style(style),
+        inner,
+    );
+    Ok(start)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn long_confirmations_can_scroll_to_all_source_and_consumer_warnings() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut workspace = Workspace::new(dir.path()).unwrap();
+        workspace.overlay = Some(super::super::Overlay::Confirm {
+            prompt: format!(
+                "Remove model?\n\n{}\nUnknown consumers.",
+                "Source details continue here.\n".repeat(40)
+            ),
+            arguments: vec![],
+            scroll: 0,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+        let mut capture = |workspace: &mut Workspace| {
+            terminal
+                .draw(|frame| workspace.draw(frame).unwrap())
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+        };
+        assert!(!capture(&mut workspace).contains("Unknown consumers."));
+        workspace
+            .overlay_key(crossterm::event::KeyCode::End.into())
+            .unwrap();
+        assert!(capture(&mut workspace).contains("Unknown consumers."));
+        let Some(super::super::Overlay::Confirm { scroll: bottom, .. }) = &workspace.overlay else {
+            panic!("expected confirmation");
+        };
+        let bottom = *bottom;
+        assert!(bottom > 0 && bottom < usize::MAX);
+        workspace
+            .overlay_key(crossterm::event::KeyCode::Up.into())
+            .unwrap();
+        let Some(super::super::Overlay::Confirm { scroll, .. }) = &workspace.overlay else {
+            panic!("expected confirmation");
+        };
+        assert_eq!(*scroll, bottom - 1);
+    }
+
+    #[test]
+    fn nested_settings_back_restores_parent_cursor_and_command_draft() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut workspace = Workspace::new(dir.path()).unwrap();
+        workspace.input.set("status --format json");
+        workspace
+            .open_menu(super::super::menus::Page::Root)
+            .unwrap();
+        for _ in 0..3 {
+            workspace
+                .overlay_key(crossterm::event::KeyCode::Down.into())
+                .unwrap();
+        }
+        workspace
+            .overlay_key(crossterm::event::KeyCode::Enter.into())
+            .unwrap();
+        workspace
+            .overlay_key(crossterm::event::KeyCode::Esc.into())
+            .unwrap();
+        let Some(super::super::Overlay::Menu(menu)) = &workspace.overlay else {
+            panic!("expected parent menu");
+        };
+        assert_eq!(menu.selected, 3);
+        assert_eq!(workspace.input.text, "status --format json");
+    }
+
+    #[test]
+    fn theme_picker_preselects_current_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut workspace = Workspace::new(dir.path()).unwrap();
+        workspace.set_theme("light").unwrap();
+        workspace
+            .open_menu(super::super::menus::Page::Theme)
+            .unwrap();
+        let Some(super::super::Overlay::Menu(menu)) = &workspace.overlay else {
+            panic!("expected theme picker");
+        };
+        assert_eq!(menu.choices[menu.selected].label, "light");
+        assert!(menu.choices[menu.selected].current);
+    }
 
     #[test]
     fn layout_has_status_transcript_scrollbar_and_command_footer() {
@@ -343,11 +498,14 @@ mod tests {
     fn settings_expose_choices_and_failed_theme_changes_leave_preference_unchanged() {
         let dir = tempfile::tempdir().unwrap();
         let mut workspace = Workspace::new(dir.path()).unwrap();
-        workspace.menu("Settings");
-        let Some(super::super::Overlay::Menu { choices, .. }) = &workspace.overlay else {
+        workspace
+            .open_menu(super::super::menus::Page::Root)
+            .unwrap();
+        let Some(super::super::Overlay::Menu(menu)) = &workspace.overlay else {
             panic!("expected settings menu");
         };
-        assert_eq!(choices.len(), 6);
+        assert_eq!(menu.choices.len(), 7);
+        assert!(menu.choices.iter().any(|entry| entry.label == "Quit"));
         workspace.set_theme("light").unwrap();
         assert_eq!(workspace.theme.name(), "light");
         let saved = std::fs::read_to_string(dir.path().join(".kvist/theme")).unwrap();

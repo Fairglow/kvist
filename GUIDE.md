@@ -56,12 +56,15 @@ kvist
 The shell is a full-screen terminal UI in the shape of the `skott` layout, not a
 line-oriented REPL:
 
-Use F1 for Markdown shortcut help and F2 for settings. PageUp/PageDown and the
+Use Esc or F2 for the workspace menu and F1 for Markdown shortcut help.
+Esc dismisses completion first, otherwise returns one menu level; only the
+top-level menu closes back to the command. PageUp/PageDown and the
 mouse wheel browse the transcript; its scrollbar spans all history pages.
 Ctrl+Home jumps to the oldest page; Ctrl+End resumes following new output.
 Ctrl+C cancels the running command without rolling back effects; Ctrl+D on an
-empty input sends EOF to the command or exits when idle. Ctrl+Q always exits,
-cancelling and reaping any active command. While a command runs, footer
+empty input sends EOF to the command or exits when idle. Ctrl+Q and the Quit
+menu item exit immediately when idle, or ask before cancelling/reaping active
+work. Effects are not rolled back. While a command runs, footer
 input answers its stdin; answers are masked and never saved.
 
 History lives privately in `.kvist/transcript/` at project and component scope.
@@ -95,11 +98,23 @@ for explicit project selection. Redirected bare invocation stays finite.
   `status --format text` and `--format json` report forms are unchanged for
   scripts, and the plain-text degradation contract still applies when the
   terminal cannot host the TUI.
-- **Settings Menu:** A menu (the `skott` overlay pattern) exposes the major
-  choices: model, reasoning effort, session history, component selection,
-  theme, and other settings. Selecting a component from the menu is the same
-  focus change as the `cd` builtin and pre-fills the component for subsequent
-  commands.
+- **Workspace Menu:** Components, role assignments, models, appearance, history,
+  help and quit share one hierarchy. Pickers highlight and mark their current
+  value. Type to filter component/model lists; Ctrl+P in Components pins/unpins
+  the highlighted entry (at most 12 pins and 12 recent components). Back-navigation
+  preserves the parent selection/filter and command draft. Component selection
+  is the same focus change as `cd` and pre-fills subsequent commands.
+- **Role Assignments:** Inspect developer, architect and security-reviewer models,
+  provider, effective effort and configuration source. Edit project or user
+  defaults per role; Default/inherit is distinct from explicit `none`.
+  Changing settings never changes task-kind roles or approves execution.
+- **Model Library:** Inspect configured profiles without contacting providers.
+  Add/check explicitly invoke bounded host discovery/qualification; credentials
+  are not displayed. Registry-backed enable/disable/removal identifies the
+  exact source and refuses stale or referenced definitions. Shared sources may
+  have consumers outside this project; deletion can expose a fallback profile.
+  Persisted settings (including appearance and pins) require an idle command;
+  inspection and transcript navigation remain available during execution.
 - **Run the Whole Component:** bare `task run COMPONENT` iterates the component's tasks in
   dependency order, running each ready task, and stops when the component is
   complete, when a task becomes blocked, or when a task reaches an

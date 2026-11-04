@@ -31,6 +31,7 @@ pub mod language_vendoring;
 pub mod language_verification;
 pub mod logging;
 mod markdown_structure;
+pub mod model_settings;
 pub mod presentation;
 pub mod project_state;
 pub mod prompt_input;

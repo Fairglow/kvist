@@ -311,7 +311,11 @@ fn load_document(config_path: &Path, project_local: bool) -> Result<(DocumentMut
                 });
             }
             Some(
-                fs::read_to_string(config_path).map_err(|source| KvistError::Io {
+                crate::file_io::read_text_bounded(
+                    config_path,
+                    config::MAX_CONFIGURATION_BYTES as usize,
+                )
+                .map_err(|source| KvistError::Io {
                     operation: "read agent configuration",
                     path: config_path.to_path_buf(),
                     source,
@@ -1221,66 +1225,178 @@ pub fn set_role_model_with_effort(
     model_name: &str,
     thinking_effort: Option<sav::ReasoningEffort>,
 ) -> Result<String> {
+    set_role_model_settings(
+        config_path,
+        project_dir,
+        project_local,
+        role,
+        model_name,
+        thinking_effort,
+        false,
+        None,
+    )
+}
+
+/// Assigns a validated, enabled profile, optionally resetting just role effort.
+///
+/// A supplied revision pins configuration bytes, not execution approval.
+#[allow(clippy::too_many_arguments)]
+pub fn set_role_model_settings(
+    config_path: &Path,
+    project_dir: &Path,
+    project_local: bool,
+    role: &str,
+    model_name: &str,
+    thinking_effort: Option<sav::ReasoningEffort>,
+    inherit_effort: bool,
+    expected_revision: Option<&str>,
+) -> Result<String> {
+    set_role_model_pinned(
+        config_path,
+        project_dir,
+        project_local,
+        role,
+        model_name,
+        thinking_effort,
+        inherit_effort,
+        expected_revision,
+        crate::model_settings::ProfilePin::default(),
+    )
+}
+
+/// Assigns a role with optional pins for both configuration and model definition.
+#[allow(clippy::too_many_arguments)]
+pub fn set_role_model_pinned(
+    config_path: &Path,
+    project_dir: &Path,
+    project_local: bool,
+    role: &str,
+    model_name: &str,
+    thinking_effort: Option<sav::ReasoningEffort>,
+    inherit_effort: bool,
+    expected_revision: Option<&str>,
+    profile_pin: crate::model_settings::ProfilePin<'_>,
+) -> Result<String> {
+    if thinking_effort.is_some() && inherit_effort {
+        return Err(KvistError::AgentSetupFailed {
+            reason: "--inherit-effort conflicts with --thinking-effort".into(),
+        });
+    }
     let normalized_role = normalize_role_name(role)?;
+    let _lock = crate::model_settings::lock_source(config_path)?;
     let (mut document, existing_contents) = load_document(config_path, project_local)?;
-
-    let mut found = false;
-    if let Ok(config) = config::load_agent_file(config_path) {
-        found = config.shared_profiles.contains_key(model_name);
-    }
-
-    if let Some(agent) = document.get("agent").and_then(Item::as_table)
-        && let Some(profiles) = agent.get("profiles").and_then(Item::as_table)
-    {
-        if profiles.contains_key(model_name) {
-            found = true;
-        } else {
-            for (_, p_item) in profiles.iter() {
-                if let Some(p_table) = p_item.as_table()
-                    && let Some(models) = p_table.get("models").and_then(Item::as_array_of_tables)
-                {
-                    for m in models.iter() {
-                        if m.get("name")
-                            .and_then(Item::as_value)
-                            .and_then(Value::as_str)
-                            == Some(model_name)
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
-                }
+    crate::model_settings::check_revision(config_path, expected_revision)?;
+    // Inspection also validates otherwise shadowed user input; never turn a
+    // malformed configuration into a successful default-profile assignment.
+    let inspection = crate::model_settings::inspect_scope(project_dir, !project_local)?;
+    let effective = if project_local {
+        config::load(project_dir)?.agent
+    } else if existing_contents.is_some() {
+        config::load_agent_file(config_path)?
+    } else {
+        config::AgentConfig::default()
+    };
+    let selected = effective.profiles.get(model_name);
+    let configured = inspection.profiles.iter().any(|profile| {
+        profile.name == model_name
+            && profile.enabled
+            && if project_local {
+                profile.effective
+            } else if let Some(shared) = effective.shared_profiles.get(model_name) {
+                crate::model_settings::absolute(&shared.source)
+                    .is_ok_and(|source| source == profile.source.path)
+            } else {
+                profile.source.scope == crate::model_settings::Scope::User
             }
-        }
-    }
-
-    if !found
-        && let Ok(cfg) = config::load(project_dir)
-        && cfg.agent.profiles.contains_key(model_name)
-    {
-        found = true;
-    }
-
-    if !found
-        && let Some(user_config_path) = config::global_user_config_path()
-        && let Ok((user_doc, Some(_))) = load_document(&user_config_path, false)
-        && let Some(agent) = user_doc.get("agent").and_then(Item::as_table)
-        && let Some(profiles) = agent.get("profiles").and_then(Item::as_table)
-        && profiles.contains_key(model_name)
-    {
-        found = true;
-    }
-
-    if !found {
+    });
+    if selected.is_none() || !configured {
         return Err(KvistError::AgentSetupFailed {
             reason: format!(
-                "model profile `{model_name}` is not configured in `{}`.\nRun 'kvist agent profile add' to configure it first.",
+                "model profile `{model_name}` is disabled, unsupported, or not configured for `{}`. Run `kvist agent setup` to configure an enabled profile first.",
                 config_path.display()
             ),
         });
     }
+    if let Some(profile) = selected
+        && profile.command.is_none()
+        && !effective.providers.contains_key(&profile.provider)
+    {
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!(
+                "model profile `{model_name}` references an unavailable provider; correct its configuration before assignment"
+            ),
+        });
+    }
+    let role_kind = config::Role::from_str_case_insensitive(&normalized_role).ok_or_else(|| {
+        KvistError::AgentSetupFailed {
+            reason: format!("unknown role `{normalized_role}`"),
+        }
+    })?;
+    let chosen_override = if inherit_effort {
+        None
+    } else {
+        thinking_effort.or(effective.role(role_kind).thinking_effort)
+    };
+    let chosen_effort =
+        chosen_override.or_else(|| selected.and_then(|profile| profile.default_thinking_effort));
+    if chosen_effort.is_some_and(|effort| effort != sav::ReasoningEffort::None)
+        && selected.is_some_and(|profile| profile.supports_thinking == Some(false))
+    {
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!(
+                "model profile `{model_name}` declares thinking unsupported; choose another profile or effort none/inherit"
+            ),
+        });
+    }
+    match (profile_pin.source, profile_pin.revision) {
+        (Some(source), Some(revision)) => {
+            let source = crate::model_settings::absolute(source)?;
+            let pinned = inspection.profiles.iter().find(|profile| {
+                profile.name == model_name && profile.source.path == source
+                    && if project_local {
+                        profile.effective
+                    } else if let Some(shared) = effective.shared_profiles.get(model_name) {
+                        crate::model_settings::absolute(&shared.source).is_ok_and(|actual| actual == profile.source.path)
+                    } else {
+                        profile.source.scope == crate::model_settings::Scope::User
+                    }
+            }).ok_or_else(|| KvistError::AgentSetupFailed {
+                reason: "selected model definition is not available in this role configuration scope; inspect again".into(),
+            })?;
+            if pinned.source.revision != revision || !pinned.enabled {
+                return Err(KvistError::AgentSetupFailed {
+                    reason:
+                        "stale or disabled model selection; inspect again before assigning the role"
+                            .into(),
+                });
+            }
+        }
+        (None, None) => {}
+        _ => {
+            return Err(KvistError::AgentSetupFailed {
+                reason:
+                    "profile selection pins require both --profile-source and --profile-revision"
+                        .into(),
+            });
+        }
+    }
 
+    let forked = preserve_inherited_roles(
+        &mut document,
+        config_path,
+        project_dir,
+        project_local,
+        &effective,
+    )?;
     let agent = ensure_table(&mut document["agent"], "agent")?;
+    if !agent.contains_key("registry")
+        && let Some(shared) = effective.shared_profiles.get(model_name)
+    {
+        // A new project binding to a user-fallback shared model must remain a
+        // shared reference, rather than turning into a copied/missing profile.
+        let registry = ensure_table(&mut agent["registry"], "agent.registry")?;
+        registry["path"] = value(shared.source.to_string_lossy().as_ref());
+    }
     let roles = ensure_table(&mut agent["roles"], "agent.roles")?;
     let role_key = if normalized_role == "security-reviewer"
         && roles.contains_key("security_reviewer")
@@ -1295,6 +1411,10 @@ pub fn set_role_model_with_effort(
     role_table["profile"] = value(model_name);
     if let Some(effort) = thinking_effort {
         role_table["thinking_effort"] = value(effort.as_str());
+        role_table.remove("reasoning_effort");
+    } else if inherit_effort {
+        role_table.remove("thinking_effort");
+        role_table.remove("reasoning_effort");
     }
 
     let contents = document.to_string();
@@ -1303,16 +1423,124 @@ pub fn set_role_model_with_effort(
     } else {
         config::validate_agent_configuration_contents(config_path, &contents)?;
     }
+    if crate::model_settings::inspect_scope(project_dir, !project_local)? != inspection {
+        return Err(KvistError::AgentSetupFailed {
+            reason: "settings changed while assigning the role; inspect again before editing"
+                .into(),
+        });
+    }
+    crate::model_settings::check_revision(config_path, expected_revision)?;
     if existing_contents.is_some() {
         replace_file_atomically(config_path, &contents)?;
     } else {
         write_new_file_atomically(config_path, &contents)?;
     }
 
-    Ok(format!(
+    let mut message = format!(
         "Successfully assigned model profile `{model_name}` to role `{normalized_role}` in `{}`.",
         config_path.display()
-    ))
+    );
+    if forked {
+        message.push_str(" Created project role configuration preserving all effective role assignments and resource policies; project role bindings now take precedence over later user role changes. Effort inheritance removes only this role's override.");
+    }
+    Ok(message)
+}
+
+fn preserve_inherited_roles(
+    document: &mut DocumentMut,
+    config_path: &Path,
+    project_dir: &Path,
+    project_local: bool,
+    effective: &config::AgentConfig,
+) -> Result<bool> {
+    if !project_local
+        || crate::model_settings::absolute(config_path)? == Path::new(&effective.source.identity)
+        || effective.source.identity == "built-in:agent-default-v1"
+    {
+        return Ok(false);
+    }
+    if [
+        config::Role::Developer,
+        config::Role::Architect,
+        config::Role::SecurityReviewer,
+    ]
+    .into_iter()
+    .any(|role| !effective.role(role).redaction_values.is_empty())
+    {
+        return Err(KvistError::AgentSetupFailed {
+            reason: "cannot fork inherited role policy containing sensitive redaction values into project files. Use the existing configuration scope (for user configuration, --global), or explicitly configure project-local policy first. Nothing was written.".into(),
+        });
+    }
+    if effective.shared_profiles.is_empty()
+        && config::global_user_config_path()
+            .as_deref()
+            .map(crate::model_settings::absolute)
+            .transpose()?
+            .as_ref()
+            != Some(&PathBuf::from(&effective.source.identity))
+    {
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!(
+                "effective local agent definitions come from `{}` and cannot be inherited by a new root role table without copying commands. Configure this project's agent source explicitly first; no inherited assignments or policies were changed.",
+                effective.source.identity,
+            ),
+        });
+    }
+    let agent = ensure_table(&mut document["agent"], "agent")?;
+    if !effective.shared_profiles.is_empty() {
+        let inherited_path = Path::new(&effective.source.identity);
+        let (inherited, _) = load_document(inherited_path, false)?;
+        let lookup = inherited.get("agent").unwrap_or(inherited.as_item());
+        let declaration = lookup.get("registry");
+        let base = inherited_path.parent().unwrap_or(project_dir);
+        let registry_project = if base.file_name().is_some_and(|name| name == ".kvist") {
+            base.parent().unwrap_or(base)
+        } else {
+            base
+        };
+        let paths = sav::registry::RegistryPaths::for_project(registry_project);
+        let explicit = declaration.and_then(|r| r.get("path")).and_then(Item::as_str)
+            .map(|path| crate::model_settings::absolute(&base.join(path))).transpose()?
+            .or_else(|| paths.project.filter(|path| path.is_file()))
+            .or(paths.user)
+            .ok_or_else(|| KvistError::AgentSetupFailed {
+                reason: "cannot retain inherited registry selection; configure the project registry explicitly first".into(),
+            })?;
+        let mut target_paths = sav::registry::RegistryPaths::for_project(project_dir);
+        target_paths.explicit = Some(explicit.clone());
+        let target = target_paths.load()?;
+        for (name, existing) in &effective.shared_profiles {
+            let selected = target.resolve(name)?;
+            if selected != *existing {
+                return Err(KvistError::AgentSetupFailed {
+                    reason: format!(
+                        "creating project role configuration would change inherited registry definition `{name}` because of source precedence. Configure the project registry deliberately first, or edit the existing user configuration with --global. Nothing was written.",
+                    ),
+                });
+            }
+        }
+        let registry = ensure_table(&mut agent["registry"], "agent.registry")?;
+        registry["path"] = value(explicit.to_string_lossy().as_ref());
+    }
+    let roles = ensure_table(&mut agent["roles"], "agent.roles")?;
+    for role in [
+        config::Role::Developer,
+        config::Role::Architect,
+        config::Role::SecurityReviewer,
+    ] {
+        let effective = effective.role(role);
+        let binding = ensure_table(&mut roles[role.as_str()], "agent.roles.ROLE")?;
+        binding["profile"] = value(effective.profile.as_str());
+        binding["timeout_seconds"] = value(effective.timeout_seconds as i64);
+        binding["max_output_bytes"] = value(effective.max_output_bytes as i64);
+        if let Some(limit) = effective.token_limit {
+            binding["token_limit"] = value(limit as i64);
+        }
+        if let Some(effort) = effective.thinking_effort {
+            binding["thinking_effort"] = value(effort.as_str());
+        }
+    }
+    Ok(true)
 }
 
 /// Clears role assignment(s) in project or global configuration.
@@ -1323,6 +1551,20 @@ pub fn clear_role(
     role: Option<&str>,
     all: bool,
 ) -> Result<String> {
+    clear_role_with_revision(config_path, project_dir, project_local, role, all, None)
+}
+
+/// Clears bindings from one scope, optionally pinning its inspected revision.
+pub fn clear_role_with_revision(
+    config_path: &Path,
+    project_dir: &Path,
+    project_local: bool,
+    role: Option<&str>,
+    all: bool,
+    expected_revision: Option<&str>,
+) -> Result<String> {
+    let _lock = crate::model_settings::lock_source(config_path)?;
+    crate::model_settings::check_revision(config_path, expected_revision)?;
     let (mut document, existing_contents) = load_document(config_path, project_local)?;
     if existing_contents.is_none() {
         return Err(KvistError::AgentSetupFailed {
@@ -1357,7 +1599,8 @@ pub fn clear_role(
             }
         }
 
-        // Also check legacy agent.profiles tables
+        // A role-like name alone does not distinguish an old role assignment
+        // from a canonical profile whose model identifier must remain intact.
         if let Some(profiles) = agent.get_mut("profiles").and_then(Item::as_table_mut) {
             for (role_key, profile_item) in profiles.iter_mut() {
                 let should_clear = if all {
@@ -1371,9 +1614,39 @@ pub fn clear_role(
                 };
 
                 if should_clear
+                    && config::Role::from_str_case_insensitive(&role_key).is_some()
                     && let Some(profile_table) = profile_item.as_table_mut()
                     && profile_table.contains_key("model")
                 {
+                    let legacy_shape = [
+                        "command_template",
+                        "models",
+                        "token_limit",
+                        "timeout_seconds",
+                    ]
+                    .iter()
+                    .any(|key| profile_table.contains_key(key));
+                    if !legacy_shape {
+                        continue;
+                    }
+                    if [
+                        "provider",
+                        "command",
+                        "context_window",
+                        "supports_thinking",
+                        "default_thinking_effort",
+                        "temperature",
+                        "system_prompt",
+                    ]
+                    .iter()
+                    .any(|key| profile_table.contains_key(key))
+                    {
+                        return Err(KvistError::AgentSetupFailed {
+                            reason: format!(
+                                "ambiguous role/profile table `agent.profiles.{role_key}` combines canonical model fields with legacy role fields. Separate model definitions from `agent.roles` bindings before clearing roles; nothing was written."
+                            ),
+                        });
+                    }
                     profile_table.remove("model");
                     cleared += 1;
                 }
@@ -1397,6 +1670,11 @@ pub fn clear_role(
         config::validate_project_configuration_contents(config_path, project_dir, &contents)?;
     } else {
         config::validate_agent_configuration_contents(config_path, &contents)?;
+    }
+    if crate::model_settings::read_optional(config_path)? != existing_contents {
+        return Err(KvistError::AgentSetupFailed {
+            reason: "role configuration changed while clearing its binding; inspect again".into(),
+        });
     }
     replace_file_atomically(config_path, &contents)?;
 

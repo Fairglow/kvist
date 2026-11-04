@@ -844,6 +844,46 @@ from the menu MUST be the same focus change as the `cd` builtin and MUST
 pre-fill the component for subsequent commands. Theme, model, and effort
 selections MUST persist the preference and apply immediately to the session.
 
+The workspace MUST use one hierarchical Esc/F2 menu with Components, Role
+assignments, Models, Appearance, History, Help and Quit, and Cancel command
+while work is active. Esc MUST first dismiss completion, otherwise return one
+menu level, and open the menu from the unobstructed workspace. Back-navigation
+MUST restore the parent's cursor/filter without changing settings or the command
+draft. Quit and Ctrl+Q MUST share cancellation/reaping and warn before terminating
+active work. Ctrl+C remains cancel/clear, not quit; CLI editing/completion,
+F1 help and transcript navigation MUST retain their existing semantics.
+
+Pickers MUST preselect and independently mark the current choice. Component
+selection MUST be searchable and expose bounded recent/pinned shortcuts rather
+than an unbounded tab strip. Role settings MUST show developer, architect and
+security-reviewer assignments, effective model/effort and their configuration
+source. Editing a role MUST NOT change task-kind role selection or approve
+policy. Effort inheritance MUST be distinct from explicit `none`; unknown or
+unsupported capabilities MUST NOT be presented as verified support. Active
+execution configuration MUST remain pinned and settings mutations MUST wait
+until the owned command finishes.
+
+### REQ-MODEL-MANAGEMENT
+
+The CLI and TUI MUST share typed, filesystem-only inspection of configured model
+profiles and role assignments, including actual registry/configuration sources,
+enabled state, backend/provider/model identifiers, known capability evidence and
+current-project role references. Inspection MUST NOT contact providers, execute
+commands, expose credentials, or invent missing metadata.
+
+The model library MUST provide searchable Add, Details, Check, Enable/Disable
+and Remove actions. Add/check MUST reuse bounded Sav discovery/qualification
+and explicit host-authority/billing acknowledgement; opening a menu is not
+acknowledgement. Registry-backed disable/removal MUST mutate the actual selected
+definition, preserve unrelated profiles and require explicit source/scope.
+Referenced profiles MUST require reassignment/unassignment before disable or
+removal. Shared/user mutations MUST warn about unknown external consumers;
+removing a shadowing definition MUST disclose any newly exposed fallback.
+Stale inspected definitions MUST be refused before writing. Writes MUST remain
+bounded, validated and atomic, and MUST never approve protected task policy.
+This human-requested settings refinement has an explicit advisory exception
+while intent-review receipts are unavailable.
+
 ### REQ-RUN-COMPONENT
 
 Bare `task run COMPONENT` MUST run the whole selected component: it
@@ -1097,7 +1137,7 @@ available width MUST be hard-split at the width rather than dropped.
 
 The interactive shell MUST render all presentation through a semantic color
 palette of named roles (prompt, component, failure, indicator, border, dim,
-six status hues, and the agent result surface) so no renderer hard-codes a
+six status hues, agent result, raised panel and selection surfaces) so no renderer hard-codes a
 color, and MUST provide the built-in `dark` (default) and `light` themes.
 The `theme` builtin MUST show a live in-terminal preview of every available
 theme, and `theme set <NAME|PATH>` MUST switch the session theme immediately
@@ -1115,8 +1155,11 @@ named ANSI color, or a 0-255 index; a spec MUST NOT exceed 8 KiB, MUST
 reject unknown roles, and an invalid, over-size, or unreadable spec MUST
 fail with an actionable diagnostic without changing the session. The
 plain-text degradation contract of `REQ-INTERACTIVE-SHELL` MUST apply to
-every theme. In the `dark` theme, the agent result surface MUST use a true
-black background for maximum contrast.
+every theme. Built-in dark/light palettes MUST use independent explicit RGB
+colors, a deep near-black/clear white canvas and visibly distinct raised and
+selected surfaces. Normal and secondary text MUST meet 4.5:1 contrast against
+their built-in surfaces; meaningful UI edges MUST meet 3:1. State MUST remain
+recognizable without color alone. The same palette MUST reach Blad and UI chrome.
 
 ### REQ-SCROLL-PAGER
 

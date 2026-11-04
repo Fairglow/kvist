@@ -76,12 +76,15 @@ and diagrams. The input footer retains the CLI grammar and dynamic Tab
 completion. Use `cd COMPONENT` or F2 to focus a component; its argument is
 inserted into the editable command rather than hidden from you.
 
-F1 opens shortcut help; F2 opens component/model/effort/theme/history settings.
+Esc or F2 opens the workspace menu; F1 opens shortcut help. Esc first dismisses
+completion, otherwise goes back one level, restoring the parent selection/filter
+and command draft. Pickers highlight and independently mark `[current]` values.
 PageUp/PageDown and the mouse wheel browse history; Ctrl+Home reaches the oldest
 page and Ctrl+End resumes following. The scrollbar navigates all pages.
 Ctrl+C cancels the owned command, preserving observed effects for normal
 review/recovery. Ctrl+D with empty input sends EOF to a command (exits when idle);
-Ctrl+Q always quits and reaps active commands. During commands, input answers
+Ctrl+Q and the Quit menu item share idle exit and active-work cancellation
+confirmation/reaping. During commands, input answers
 stdin and is masked, never retained.
 
 Canonical Markdown history is private local diagnostic state under each scope's
@@ -92,6 +95,26 @@ An individual page is a Markdown document; cross-page reference links and
 footnotes do not resolve across the complete history. History is not workflow
 evidence. Model/effort settings use normal role configuration and do not approve
 changed execution policy.
+
+Components and models have searchable lists. Components offers up to 12 pinned
+and 12 recent shortcuts (Ctrl+P toggles a pin), not a tab per component.
+Role assignments show developer, architect and security-reviewer defaults,
+provider/model, effective reasoning effort and source, with project/user editing.
+Default/inherit removes a role effort override; explicit `none` is different.
+Settings do not modify an active command's pinned execution configuration.
+All persisted settings changes, including appearance and pins, require an idle
+command; read-only inspection and transcript navigation remain available.
+
+The model library offers Add, Details, Check, Enable/Disable and Remove.
+Opening it performs filesystem-only inspection. Add/check require explicit
+bounded host discovery/qualification acknowledgement and may incur provider
+charges. Profile mutations identify their exact source/revision, refuse stale
+or referenced definitions and warn about shared consumers or newly exposed
+fallbacks. Qualification never authorizes protected tasks.
+
+Independent RGB dark/light palettes give the canvas, raised panels and selected
+entries distinct surfaces. Built-in text and meaningful-edge contrast are
+measured; the same palette supplies Blad, menus and terminal chrome.
 
 Small/unsupported terminals and disabled styling use the line-oriented
 fallback. Explicit `--json`, `status --format text|json`, completion scripts
@@ -128,11 +151,21 @@ design lives in [`docs/command-set.md`](../docs/command-set.md).
 | `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a sandboxed prompt; the workspace embeds headless Markdown, while standalone terminal invocation opens Skott. Global `--json` selects headless NDJSON. |
 | `kvist agent setup [--force]`                                | Discover or reuse a shared profile, qualify new profiles, and persist a role/profile reference. |
 | `kvist agent list`                                           | List all configured and standalone model profiles with their active role assignments.                                                                                                                                   |
-| `kvist agent remove <MODEL_NAME> [--all]`                    | Remove local definitions/bindings or clear agent configuration; shared registry definitions are not deleted. |
+| `kvist agent show <MODEL_NAME> [--registry PATH]`            | Inspect offline model details, capabilities, references, source revision and fallback without displaying credentials. |
+| `kvist agent enable\|disable <MODEL_NAME> --registry PATH --expected-revision DIGEST` | Change exactly one registry definition; disabling refuses known role references. |
+| `kvist agent remove <MODEL_NAME> [--registry PATH --expected-revision DIGEST] [--global]` | Remove an unreferenced definition from its explicit registry, or a config-local definition when no registry is specified. |
+| `kvist agent remove --all [--global]`                       | Reset the selected local agent configuration, not shared registry definitions. |
 | `kvist agent role [list]`                                    | Inspect current role assignments (developer, architect, security-reviewer).                                                                                                                                             |
-| `kvist agent role set <ROLE> <MODEL>`                        | Bind a configured or standalone profile to a role.                                                                                                                                                                      |
+| `kvist agent role set <ROLE> <MODEL> [--thinking-effort EFFORT \| --inherit-effort] [--global]` | Bind a model and optionally set/reset only this role's effort override. Existing overrides are preserved unless changed explicitly. |
 | `kvist agent role clear <ROLE> [--all]`                      | Clear role assignment(s).                                                                                                                                                                                               |
 | `kvist agent check [--global]`                               | Live-verify configured model profiles behind an explicit acknowledgement; remove or ignore failures.                                                                                                                    |
+
+Registry mutations require the exact digest from `agent show`; re-inspect after
+another write. Config-local removal and role set/clear also accept
+`--expected-revision DIGEST`. Role selection can additionally pin
+`--profile-source PATH --profile-revision DIGEST`. The TUI supplies these pins
+automatically. Shared profiles may serve other projects; unknown external
+consumers cannot be enumerated. Changing settings never approves execution.
 
 Delivery is organized into phases. The completed, current, and planned phase
 scope, context, and acceptance criteria are maintained in

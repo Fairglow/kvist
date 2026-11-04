@@ -1,12 +1,10 @@
 use std::io::{self, Write};
 use std::path::Path;
 
-use clap::Parser;
-use crossterm::event::{KeyCode, KeyEvent};
-
-use super::super::{editor::quote, process::Running, storage::Transcript};
-use super::{MenuAction, Overlay, Screen, TerminalGuard, Workspace};
+use super::super::{process::Running, storage::Transcript};
+use super::{Overlay, Screen, TerminalGuard, Workspace, menus::Page};
 use crate::{bark, cli, presentation};
+use clap::Parser;
 
 impl Workspace {
     pub(super) fn submit(&mut self, terminal: &mut Screen) -> io::Result<()> {
@@ -45,9 +43,9 @@ impl Workspace {
         self.follow = true;
         let (program, arguments) = sav::split_raw_command(&line).map_err(io::Error::other)?;
         match program.as_str() {
-            "exit" | "quit" if arguments.is_empty() => self.quit = true,
+            "exit" | "quit" if arguments.is_empty() => self.request_quit(),
             "shell" => self.append("Already in the Kvist workspace.\n")?,
-            "settings" if arguments.is_empty() => self.menu("Settings"),
+            "settings" if arguments.is_empty() => self.open_menu(Page::Root)?,
             "cd" => {
                 let focus = match arguments.as_slice() {
                     [] => return self.append(&format!("**Component:** {}\n", presentation::literal(self.focus().as_deref().unwrap_or("(project)")))),
@@ -125,7 +123,7 @@ impl Workspace {
                 self.refresh();
             }
             "theme" => match arguments.as_slice() {
-                _ if arguments.is_empty() || arguments == ["list"] => self.menu("Theme"),
+                _ if arguments.is_empty() || arguments == ["list"] => self.open_menu(Page::Theme)?,
                 [set, value] if set == "set" => self.set_theme(value)?,
                 _ => return Err(io::Error::other("usage: theme [list|set NAME|PATH]")),
             },
@@ -226,6 +224,7 @@ impl Workspace {
             self.overlay = Some(Overlay::Confirm {
                 prompt: prompt.into(),
                 arguments,
+                scroll: 0,
             });
             return Ok(());
         }
@@ -257,6 +256,7 @@ impl Workspace {
         self.overlay = Some(Overlay::Confirm {
             prompt: "submit authored prompt".into(),
             arguments,
+            scroll: 0,
         });
         Ok(())
     }
@@ -298,16 +298,24 @@ impl Workspace {
             }
             None => self.project.clone(),
         };
+        let mut preferences = self.preferences.clone();
+        if let Some(component) = &focus {
+            preferences.visit(component);
+        }
         if scope.join(".kvist/transcript") != self.transcript.directory {
             let transcript = Transcript::open(&scope)?;
             let history = transcript.history()?;
             let segment = transcript.latest();
             let source = transcript.read(segment)?;
+            preferences.save(&self.project)?;
             self.transcript = transcript;
             self.history = history;
             self.segment = segment;
             self.source = source;
+        } else {
+            preferences.save(&self.project)?;
         }
+        self.preferences = preferences;
         *self
             .focus
             .lock()
@@ -327,6 +335,11 @@ impl Workspace {
     }
 
     pub(super) fn set_theme(&mut self, value: &str) -> io::Result<()> {
+        if self.running.is_some() {
+            return Err(io::Error::other(
+                "wait for the running command before changing appearance settings",
+            ));
+        }
         let value = match bark::theme::match_preference(value) {
             bark::theme::Preference::Path(path) => {
                 path.canonicalize()?.to_string_lossy().into_owned()
@@ -350,178 +363,8 @@ impl Workspace {
             presentation::literal(&theme.name())
         ))
     }
-
-    pub(super) fn menu(&mut self, title: &'static str) {
-        let choices = match title {
-            "Component" => std::iter::once(("(project)".into(), MenuAction::Focus(None)))
-                .chain(
-                    self.state
-                        .components()
-                        .iter()
-                        .map(|name| (name.clone(), MenuAction::Focus(Some(name.clone())))),
-                )
-                .collect(),
-            "Theme" => bark::theme::registered()
-                .into_iter()
-                .map(|(name, _, _)| (name.clone(), MenuAction::Theme(name)))
-                .collect(),
-            "Model" => self
-                .state
-                .models()
-                .iter()
-                .map(|model| {
-                    (
-                        model.clone(),
-                        MenuAction::Command(vec![
-                            "agent".into(),
-                            "role".into(),
-                            "set".into(),
-                            "developer".into(),
-                            model.clone(),
-                        ]),
-                    )
-                })
-                .collect(),
-            "Reasoning effort" => {
-                let model = &self.status.default_model;
-                ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
-                    .into_iter()
-                    .map(|effort| {
-                        (
-                            effort.into(),
-                            MenuAction::Command(vec![
-                                "agent".into(),
-                                "role".into(),
-                                "set".into(),
-                                "developer".into(),
-                                model.clone(),
-                                "--thinking-effort".into(),
-                                effort.into(),
-                            ]),
-                        )
-                    })
-                    .collect()
-            }
-            "History" => {
-                // A bounded selector; PageUp can still reach every older segment.
-                let last = self.transcript.latest();
-                (last.saturating_sub(99)..=last)
-                    .rev()
-                    .map(|sequence| {
-                        (
-                            format!("Transcript segment {}", sequence + 1),
-                            MenuAction::Segment(sequence),
-                        )
-                    })
-                    .collect()
-            }
-            _ => vec![
-                ("Component".into(), MenuAction::Menu("Component")),
-                (
-                    "Model (developer role; policy reapproval may be required)".into(),
-                    MenuAction::Menu("Model"),
-                ),
-                (
-                    "Reasoning effort (developer role)".into(),
-                    MenuAction::Menu("Reasoning effort"),
-                ),
-                ("Theme".into(), MenuAction::Menu("Theme")),
-                ("Session history".into(), MenuAction::Menu("History")),
-                ("Follow latest output".into(), MenuAction::Follow),
-            ],
-        };
-        self.overlay = Some(Overlay::Menu {
-            title: title.into(),
-            choices,
-            selected: 0,
-        });
-    }
-
-    pub(super) fn overlay_key(&mut self, key: KeyEvent) -> io::Result<()> {
-        let Some(overlay) = self.overlay.take() else {
-            return Ok(());
-        };
-        match overlay {
-            Overlay::Help { mut scroll } => {
-                match key.code {
-                    KeyCode::Esc | KeyCode::F(1) => return Ok(()),
-                    KeyCode::Up => scroll = scroll.saturating_sub(1),
-                    KeyCode::Down => scroll = scroll.saturating_add(1),
-                    KeyCode::PageUp => scroll = scroll.saturating_sub(self.viewport),
-                    KeyCode::PageDown => scroll = scroll.saturating_add(self.viewport),
-                    _ => {}
-                }
-                self.overlay = Some(Overlay::Help { scroll });
-            }
-            Overlay::Confirm { prompt, arguments } => match key.code {
-                KeyCode::Char('y' | 'Y') => self.start(arguments)?,
-                KeyCode::Esc | KeyCode::Char('n' | 'N') => {
-                    self.prompt_file.take();
-                    self.append("\n\nOperation cancelled.\n")?;
-                }
-                _ => self.overlay = Some(Overlay::Confirm { prompt, arguments }),
-            },
-            Overlay::Menu {
-                title,
-                mut choices,
-                mut selected,
-            } => {
-                if key.code == KeyCode::Esc {
-                    return Ok(());
-                }
-                if key.code == KeyCode::Up {
-                    selected = selected.saturating_sub(1);
-                }
-                if key.code == KeyCode::Down {
-                    selected = (selected + 1).min(choices.len().saturating_sub(1));
-                }
-                if key.code != KeyCode::Enter || choices.is_empty() {
-                    self.overlay = Some(Overlay::Menu {
-                        title,
-                        choices,
-                        selected,
-                    });
-                    return Ok(());
-                }
-                let (_, action) = choices.remove(selected);
-                match action {
-                    MenuAction::Menu(title) => self.menu(title),
-                    MenuAction::Focus(focus) => self.change_focus(focus)?,
-                    MenuAction::Theme(theme) => self.set_theme(&theme)?,
-                    MenuAction::Command(arguments) => {
-                        if self.running.is_some() {
-                            return Err(io::Error::other(
-                                "wait for the running command before changing model/effort",
-                            ));
-                        }
-                        self.append(&format!(
-                            "\n\n## Settings command\n\n{}\n\n",
-                            presentation::fence(
-                                &arguments
-                                    .iter()
-                                    .map(|argument| quote(argument))
-                                    .collect::<Vec<_>>()
-                                    .join(" "),
-                                "text"
-                            )
-                        ))?;
-                        self.start(arguments)?;
-                    }
-                    MenuAction::Segment(segment) => {
-                        self.follow = false;
-                        self.load_segment(segment, false)?;
-                    }
-                    MenuAction::Follow => {
-                        self.follow = true;
-                        self.load_segment(self.transcript.latest(), true)?;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
-pub(super) fn view_help() -> &'static str {
-    "## Keyboard\n\n| Key | Action |\n| --- | --- |\n| Tab / Shift+Tab | Complete / select candidate |\n| Enter | Accept candidate or submit command |\n| Up / Down | Command history |\n| Left / Right, Home / End | Edit input |\n| Ctrl+Left / Right | Move by word |\n| Ctrl+A / E / U / K / W / Z | Start / end / delete before / after / word / undo |\n| PageUp / PageDown, mouse wheel | Browse transcript across segments |\n| Ctrl+Home / End | Oldest / latest transcript |\n| Alt+Left / Right | Horizontal transcript scroll |\n| F1 / F2 | Help / settings |\n| Escape | Dismiss completion or overlay |\n| Ctrl+C | Clear input or cancel owned command |\n| Ctrl+D (empty input) | Send command EOF; exit when idle |\n| Ctrl+Q | Quit and reap any active command |\n| exit | Leave workspace when idle |\n\nWhile a command runs, input answers its prompts. Answers are masked and not retained. For `prompt --file -`, enter the prompt then Ctrl+D on empty input. Model/effort settings update the existing developer role; they never approve execution policy. Transcript history is local diagnostic state, not canonical evidence.\n"
+pub(super) fn view_help() -> String {
+    super::bindings::help()
 }

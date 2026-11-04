@@ -631,13 +631,15 @@ mod tests {
     fn agent_node_exposes_its_subcommands() {
         let root = root();
         let agent = node(&root, "agent");
-        for name in ["setup", "list", "remove", "check", "role"] {
+        for name in [
+            "setup", "list", "show", "enable", "disable", "remove", "check", "role",
+        ] {
             assert!(
                 agent.find_subcommand(name).is_some(),
                 "missing agent {name}"
             );
         }
-        assert_eq!(agent.subcommands.len(), 5);
+        assert_eq!(agent.subcommands.len(), 8);
         assert!(
             agent.find_subcommand("profile").is_none(),
             "agent profile was merged into agent setup/list/remove"

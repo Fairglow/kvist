@@ -113,6 +113,27 @@ pub(super) fn chrome(theme: crate::bark::Theme) -> (Style, Color) {
     (Style::default().bg(background).fg(foreground), accent)
 }
 
+pub(super) fn panel(theme: crate::bark::Theme) -> Style {
+    chrome(theme)
+        .0
+        .patch(sgr(&theme.palette().panel_background))
+}
+
+pub(super) fn selection(theme: crate::bark::Theme) -> Style {
+    panel(theme)
+        .patch(sgr(&theme.palette().selection_background))
+        .patch(sgr(&theme.palette().selection_foreground))
+        .add_modifier(Modifier::BOLD)
+}
+
+pub(super) fn secondary(theme: crate::bark::Theme) -> Style {
+    sgr(&theme.palette().dim)
+}
+
+pub(super) fn border(theme: crate::bark::Theme) -> Style {
+    sgr(&theme.palette().border)
+}
+
 fn blad_color(color: Color) -> blad::Color {
     match color {
         Color::Rgb(r, g, b) => blad::Color::Rgb(r, g, b),
@@ -135,7 +156,7 @@ pub(super) fn markdown(
         _ => blad::Theme::Dark,
     };
     let colors = host.palette();
-    let background = base.bg.map(blad_color);
+    let background = panel(host).bg.map(blad_color);
     let mut palette = blad::Palette::for_theme(theme);
     palette.heading = blad_color(sgr(&colors.blue).fg.unwrap_or(Color::Cyan));
     palette.link = blad_color(sgr(&colors.cyan).fg.unwrap_or(Color::Cyan));
@@ -164,6 +185,68 @@ pub(super) fn markdown(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn luminance(color: Color) -> f64 {
+        let Color::Rgb(r, g, b) = color else {
+            panic!("built-in colors must not depend on the terminal ANSI palette");
+        };
+        let linear = |channel: u8| {
+            let value = f64::from(channel) / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+    }
+
+    fn contrast(foreground: Color, background: Color) -> f64 {
+        let first = luminance(foreground);
+        let second = luminance(background);
+        (first.max(second) + 0.05) / (first.min(second) + 0.05)
+    }
+
+    #[test]
+    fn built_in_surfaces_have_measured_text_and_edge_contrast() {
+        for theme in [crate::bark::Theme::dark(), crate::bark::Theme::light()] {
+            let palette = theme.palette();
+            let (base, accent) = chrome(theme);
+            let canvas = base.bg.unwrap();
+            assert!(contrast(base.fg.unwrap(), canvas) >= 4.5);
+            assert!(contrast(sgr(&palette.dim).fg.unwrap(), canvas) >= 4.5);
+            assert!(contrast(accent, canvas) >= 4.5);
+            assert!(contrast(sgr(&palette.border).fg.unwrap(), canvas) >= 3.0);
+            assert!(!sgr(&palette.dim).add_modifier.contains(Modifier::DIM));
+            let raised = panel(theme).bg.unwrap();
+            assert_ne!(canvas, raised);
+            assert!(contrast(base.fg.unwrap(), raised) >= 4.5);
+            assert!(contrast(sgr(&palette.dim).fg.unwrap(), raised) >= 4.5);
+            assert!(contrast(sgr(&palette.border).fg.unwrap(), raised) >= 3.0);
+            for role in [
+                &palette.red,
+                &palette.green,
+                &palette.yellow,
+                &palette.blue,
+                &palette.magenta,
+                &palette.cyan,
+            ] {
+                let foreground = sgr(role).fg.unwrap();
+                assert!(
+                    contrast(foreground, canvas) >= 4.5,
+                    "{} on canvas",
+                    theme.name()
+                );
+                assert!(
+                    contrast(foreground, raised) >= 4.5,
+                    "{} on raised panel",
+                    theme.name()
+                );
+            }
+            let selected = selection(theme);
+            assert!(contrast(selected.fg.unwrap(), selected.bg.unwrap()) >= 4.5);
+        }
+    }
 
     #[test]
     fn markdown_uses_blad_for_tables_code_math_and_diagrams() {

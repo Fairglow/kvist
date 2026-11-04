@@ -928,11 +928,11 @@ Presentation lives in `shell/style.rs` and `shell/theme.rs`. A `Theme` is a
 copyable handle `{enabled, id}` into a process-wide theme registry (an
 `OnceLock` of theme definitions): the built-in `dark` (id 0, the default) and
 `light` (id 1) are always present, and a user theme registers when the user
-spec file is loaded (once per process). A `Palette` is 14 semantic SGR roles
+spec file is loaded (once per process). A `Palette` is 17 semantic SGR roles
 (prompt, component, failure, indicator, border, dim, the six status hues, and
-the agent result foreground/background); the dark palette renders bright text
-on the terminal's background with the agent result on a true black surface
-(`37;40`), and the light palette darkens the text with a white agent surface.
+the agent result foreground/background, raised panel background and selection
+foreground/background). Independent RGB tables provide a near-black dark canvas
+and clear-white light canvas with contrasting text, borders, panels and selection.
 Every renderer is a pure function of its inputs plus the theme, so styled and
 plain output are unit-testable without a terminal, and the plain theme (the
 `NO_COLOR`/`CLICOLOR=0`/`TERM=dumb`/non-terminal degradation, with
@@ -1018,6 +1018,45 @@ retries the transient Linux `ETXTBSY` ("text file busy") a bounded number of
 times before reporting it.
 
 ### Markdown-first output and the Blad-rendered TUI
+
+**Settings refinement.** Use typed menu pages and an explicit navigation stack,
+not title-string dispatch. Store cursor, search text and stable entry identities
+per page; returning restores the parent, while reopening a value picker resolves
+its current setting. Selection highlight is distinct from a `[current]` marker.
+Esc resolves completion before overlays; F2 aliases the workspace menu from all
+overlays, cancelling a pending confirmation rather than approving it. Share
+Skott's interaction conventions without adding a dependency on its internals.
+Quit routes through one idle/active-confirmation action for menu and Ctrl+Q.
+All keyboard hints/help derive from one local binding description.
+
+Canvas colors remain the agent-result foreground/background, with explicit
+raised-panel and selected foreground/background palette roles. Dark/light bases
+are independent RGB tables, including secondary text and borders; Blad receives
+the same canvas/accent/raised colors. Contrast tests calculate relative luminance
+for the built-in foreground/background and meaningful edges instead of merely
+asserting different color strings.
+
+Model/role pages consume typed filesystem-only inspection, never parse the
+human CLI listing. Preserve source paths/digests, profile scope and effective
+role effort inheritance. Mutations use CLI/domain operations with exact source
+and revision pins, and refuse referenced/disabled invalid selections. After the
+owned child completes, rebuild from actual filesystem state even on failure;
+errors remain visible and never imply successful persistence. Do not refresh
+during a mutation. Source-specific model management edits
+the Sav registry via its validated public representation and bounded atomic
+persistence; it does not pretend removing a Kvist alias deletes a registry
+profile. Registry/user writes warn about unenumerable external consumers.
+An inspected shadowed fallback is disclosed before deletion.
+
+Add delegates to the existing acknowledged setup wizard; Check requires explicit
+host-authority acknowledgement. Provider discovery/qualification stays bounded
+and off the drawing loop. Details show only known facts, with unknown support
+explicit. Role editing chooses the configuration scope independently of component
+focus and never becomes a new current execution role. All persisted settings
+changes, including model/effort, appearance and shortcuts, are disabled while a
+command runs; read-only inspection and transcript navigation remain available.
+Component search has bounded recent/pinned entries
+in private local preferences; it does not create concurrent component executors.
 
 The full-screen host is separate from the Reedline degradation host. It reuses
 the clap-derived completion tree and component-prefill resolver, with a

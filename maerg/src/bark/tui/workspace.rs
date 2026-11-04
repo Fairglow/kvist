@@ -1,6 +1,14 @@
 //! Interactive workspace state and event loop.
 
 mod actions;
+mod bindings;
+#[cfg(test)]
+mod menu_tests;
+mod menus;
+#[cfg(test)]
+mod model_menu_tests;
+mod model_menus;
+mod preferences;
 mod view;
 
 use std::io::{self, IsTerminal};
@@ -32,28 +40,22 @@ use crate::bark::{
 };
 use crate::{KvistError, Result};
 
-pub(super) enum Overlay {
+enum Overlay {
     Help {
         scroll: usize,
     },
-    Menu {
-        title: String,
-        choices: Vec<(String, MenuAction)>,
-        selected: usize,
-    },
+    Menu(menus::Menu),
     Confirm {
         prompt: String,
         arguments: Vec<String>,
+        scroll: usize,
     },
-}
-
-pub(super) enum MenuAction {
-    Menu(&'static str),
-    Focus(Option<String>),
-    Theme(String),
-    Command(Vec<String>),
-    Segment(u64),
-    Follow,
+    Details {
+        title: String,
+        markdown: String,
+        scroll: usize,
+    },
+    Quit,
 }
 
 pub(super) struct Workspace {
@@ -80,6 +82,10 @@ pub(super) struct Workspace {
     history_index: Option<usize>,
     history_draft: String,
     overlay: Option<Overlay>,
+    quit_return: Option<Overlay>,
+    menu_stack: Vec<menus::Menu>,
+    pending_page: Option<menus::Page>,
+    preferences: preferences::Preferences,
     running: Option<Running>,
     streams: [Stream; 2],
     redactions: Vec<String>,
@@ -194,21 +200,26 @@ pub(crate) fn run(project: &Path) -> Result<()> {
                             workspace.record_error(&error.to_string())?;
                         }
                     }
-                    Event::Paste(text) => {
-                        if !workspace.input.insert(&text) {
-                            workspace.notice = "Input exceeds 8192 UTF-8 bytes".into();
-                        }
-                        workspace.candidates.clear();
-                        if workspace.running.is_none() {
-                            workspace.input.prefill(&workspace.prefill);
-                        }
-                    }
+                    Event::Paste(text) => workspace.paste(&text),
                     Event::Mouse(mouse) => match mouse.kind {
+                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                            if workspace.overlay.is_some() =>
+                        {
+                            let key = if mouse.kind == MouseEventKind::ScrollUp {
+                                KeyCode::Up
+                            } else {
+                                KeyCode::Down
+                            };
+                            for _ in 0..3 {
+                                workspace.overlay_key(key.into())?;
+                            }
+                        }
                         MouseEventKind::ScrollUp => workspace.navigate(-3)?,
                         MouseEventKind::ScrollDown => workspace.navigate(3)?,
                         MouseEventKind::Down(event::MouseButton::Left)
                         | MouseEventKind::Drag(event::MouseButton::Left)
-                            if mouse.column == size.width.saturating_sub(1) =>
+                            if workspace.overlay.is_none()
+                                && mouse.column == size.width.saturating_sub(1) =>
                         {
                             let height = size.height.saturating_sub(7).max(1);
                             let row = mouse.row.saturating_sub(3).min(height);
@@ -238,6 +249,7 @@ impl Workspace {
         let segment = transcript.latest();
         let source = transcript.read(segment)?;
         let history = transcript.history()?;
+        let preferences = preferences::Preferences::load(&project)?;
         let tree = build_root();
         let focus = Arc::new(Mutex::new(None));
         let prefill = ComponentPrefill::new(tree.clone(), focus.clone());
@@ -266,6 +278,10 @@ impl Workspace {
             history_index: None,
             history_draft: String::new(),
             overlay: None,
+            quit_return: None,
+            menu_stack: Vec::new(),
+            pending_page: None,
+            preferences,
             running: None,
             streams: Default::default(),
             redactions: Vec::new(),
@@ -278,7 +294,10 @@ impl Workspace {
             prompt_file: None,
         };
         workspace.refresh();
-        workspace.append("\n\n# Kvist workspace\n\nCommands are Markdown; Tab completes, F1 opens help, F2 opens settings.\n\n")?;
+        workspace.append(&format!(
+            "\n\n# Kvist workspace\n\nCommands are Markdown. {}.\n\n",
+            bindings::footer()
+        ))?;
         Ok(workspace)
     }
 
@@ -493,6 +512,15 @@ impl Workspace {
             if !self.capture_failed {
                 self.notice.clear();
             }
+            if !self.quit
+                && let Some(page) = self.pending_page.take()
+                && self.overlay.is_none()
+            {
+                match self.build_menu(page) {
+                    Ok(menu) => self.overlay = Some(Overlay::Menu(menu)),
+                    Err(error) => self.record_error(&format!("refresh settings: {error}"))?,
+                }
+            }
         }
         Ok(())
     }
@@ -500,10 +528,7 @@ impl Workspace {
     fn key(&mut self, key: KeyEvent, terminal: &mut Screen) -> io::Result<()> {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         if control && key.code == KeyCode::Char('q') {
-            self.quit = true;
-            if let Some(run) = &mut self.running {
-                run.cancel()?;
-            }
+            self.request_quit();
             return Ok(());
         }
         if control && key.code == KeyCode::Char('c') {
@@ -515,6 +540,7 @@ impl Workspace {
                 self.input.set("");
                 self.candidates.clear();
                 self.overlay = None;
+                self.menu_stack.clear();
                 self.prefill.begin_submission();
             }
             return Ok(());
@@ -528,6 +554,9 @@ impl Workspace {
             }
             return Ok(());
         }
+        if key.code == KeyCode::Esc {
+            return self.escape();
+        }
         if self.overlay.is_some() {
             return self.overlay_key(key);
         }
@@ -540,8 +569,11 @@ impl Workspace {
             return Ok(());
         }
         match key.code {
-            KeyCode::F(1) => self.overlay = Some(Overlay::Help { scroll: 0 }),
-            KeyCode::F(2) => self.menu("Settings"),
+            KeyCode::F(1) => {
+                self.candidates.clear();
+                self.overlay = Some(Overlay::Help { scroll: 0 });
+            }
+            KeyCode::F(2) => self.open_menu(menus::Page::Root)?,
             KeyCode::PageUp => self.navigate(-(self.viewport.max(1) as isize))?,
             KeyCode::PageDown => self.navigate(self.viewport.max(1) as isize)?,
             KeyCode::Home if control => {
@@ -586,10 +618,6 @@ impl Workspace {
             KeyCode::Down if !self.candidates.is_empty() => {
                 self.candidate = (self.candidate + 1) % self.candidates.len()
             }
-            KeyCode::Esc => {
-                self.candidates.clear();
-                self.notice.clear();
-            }
             KeyCode::Up => self.recall(true),
             KeyCode::Down => self.recall(false),
             KeyCode::Enter => self.submit(terminal)?,
@@ -602,6 +630,36 @@ impl Workspace {
             }
         }
         Ok(())
+    }
+
+    fn escape(&mut self) -> io::Result<()> {
+        if self.overlay.is_some() {
+            self.overlay_key(KeyCode::Esc.into())
+        } else if self.candidates.is_empty() {
+            self.open_menu(menus::Page::Root)
+        } else {
+            self.candidates.clear();
+            Ok(())
+        }
+    }
+
+    fn paste(&mut self, text: &str) {
+        if let Some(Overlay::Menu(menu)) = &mut self.overlay {
+            if menu.page.searchable() && !menu.filter_insert(text) {
+                self.notice = "Search exceeds 256 UTF-8 bytes".into();
+            }
+            return;
+        }
+        if self.overlay.is_some() {
+            return;
+        }
+        if !self.input.insert(text) {
+            self.notice = "Input exceeds 8192 UTF-8 bytes".into();
+        }
+        self.candidates.clear();
+        if self.running.is_none() {
+            self.input.prefill(&self.prefill);
+        }
     }
 
     fn accept_candidate(&mut self) {

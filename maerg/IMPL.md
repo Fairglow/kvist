@@ -5,6 +5,67 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped workspace settings observations - 2026-11-04
+
+The fresh
+[`source-only settings supplement`](../docs/reviews/workspace-settings-observation.md)
+and its correction addendum derive the current settings behavior without
+intent, queues, prior implementation records, reviews, or Git history.
+Its four original findings are historical: actual idle-Esc dispatch, canonical
+profile preservation during role clearing, XDG theme lookup, and absent-user
+fallback disclosure were repaired and independently reobserved.
+
+The observed implementation provides independent RGB dark/light palettes with
+17 semantic roles, raised surfaces and selection colors. Contrast assertions
+require 4.5:1 for tested text/accent combinations and 3:1 for borders; they do
+not certify arbitrary custom themes or syntax highlighting. Typed Esc/F2 menus
+retain parent cursor/filter and command drafts, distinguish current markers
+from selection, and share the idle/active-confirmed Quit path. Markdown detail
+and confirmation documents scroll through all warnings.
+The final source-only addendum observes F2 from every overlay, cancellation
+of a staged confirmation without authorization, and refusal of persisted
+theme/shortcut changes while an owned command is active. These supersede the
+earlier observation's contextual F2 and active-preference limitations.
+
+Searchable component shortcuts persist privately with at most 12 pins and
+12 recent entries. Typed filesystem-only inspection supports all three roles,
+project/user scope, effort inheritance distinct from explicit `none`, model
+details and source-specific lifecycle actions. Registry mutations pin source
+and revision, refuse known references before disable/removal, and disclose
+known fallbacks and unknown external consumers. Setup/check retain explicit
+host acknowledgement; none of these settings approve protected execution.
+
+Observed limits remain explicit: registry thinking/default-effort metadata can
+be unknown; lower registry layers are not a complete independently editable
+inventory; references cannot enumerate external projects; cooperative locks
+do not cover arbitrary writers or every older unpinned setup/removal path.
+The source-only record distinguishes inspected assertions from executed
+evidence and does not establish universal concurrency or provider behavior.
+
+Implementation-agent execution, separately attributed: the final all-feature
+workspace Nextest run `4d20f182-7fb9-43d9-a043-4fb943c4e90e` passed 2304 tests
+with 15 existing skips at two-test concurrency. The concurrent all-feature
+Maerg library run after the final F2/preference corrections passed 652 tests
+with one existing ignore; six targeted
+suites passed 52 tests. Formatting, strict all-target/all-feature Maerg Clippy,
+component document validation and the final release build passed. Release
+smoke checks verified finite bare Markdown/help and structured role-list JSON.
+
+The separate
+[`source-blind settings comparison`](../docs/reviews/workspace-settings-comparison.md)
+and correction addendum record bounded agreement. Its F2 discrepancy and
+active-preference interpretation boundary remain historical: the former was
+repaired, and persisted preference changes now follow the broader active-command
+restriction without weakening the requirement. The comparison read the
+post-correction library/targeted evidence before the final workspace/release
+reruns; the latter results above are attributed to the implementation agent.
+
+The earlier workspace run exposed two queue-order failures, repaired by
+sorting the new task requirement references, plus unchanged Blad deadline and
+checkpoint index-lock failures. Those latter tests passed in isolation and
+the final workspace run; their causes are not established. Protected audit
+and compliance queue gates and intent acceptance remain separate and pending.
+
 ## Scoped Markdown workspace observations - 2026-11-03
 
 The independent

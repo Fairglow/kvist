@@ -235,9 +235,20 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
 | -------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `agent setup`  | `kvist agent setup [--force]`                                                         | wizard: discover, qualify, save a model profile                  |
 | `agent list`   | `kvist agent list`                                                                    | profiles and their role assignments                              |
-| `agent remove` | `kvist agent remove [MODEL_NAME] [--all] [--global]`                                  | remove profile(s)                                                |
+| `agent show`   | `kvist agent show MODEL_NAME [--registry PATH]`                                       | offline credential-free details, references, source digest and fallback |
+| `agent enable` | `kvist agent enable MODEL_NAME --registry PATH --expected-revision DIGEST [--global]` | enable exactly one inspected registry definition |
+| `agent disable` | `kvist agent disable MODEL_NAME --registry PATH --expected-revision DIGEST [--global]` | disable an unreferenced registry definition |
+| `agent remove` | `kvist agent remove MODEL_NAME [--registry PATH --expected-revision DIGEST] [--global]` | remove an unreferenced explicit registry or config-local definition |
+| `agent remove --all` | `kvist agent remove --all [--global]` | reset local agent configuration, never the shared registry |
 | `agent check`  | `kvist agent check [--global]`                                                        | live-verify configured profiles                                  |
-| `agent role`   | `kvist agent role [list\|set ROLE MODEL [--effort E]\|clear ROLE [--all]] [--global]` | bind roles (developer, architect, security-reviewer) to profiles |
+| `agent role`   | `kvist agent role [list\|set ROLE MODEL [--thinking-effort E \| --inherit-effort]\|clear ROLE [--all]] [--global]` | inspect/edit developer, architect and security-reviewer assignments |
+
+Config-local removal and role set/clear accept `--expected-revision DIGEST`.
+Role set additionally accepts `--profile-source PATH --profile-revision DIGEST`.
+The TUI supplies these source/revision pins from offline inspection. Registry
+mutations require the exact source and its digest from `agent show`; referenced
+definitions must be unassigned first. Add/check remain explicit host-execution
+acknowledgements, not task-policy approval.
 
 ### 4.5 The interactive TUI and Markdown-first output
 
@@ -275,7 +286,11 @@ The host owns terminal drawing; child commands use isolated pipes, never a
 nested terminal UI. Input while a command runs supplies its stdin; answers are
 masked and excluded from history. Ctrl+C cancels the owned command without
 claiming rollback. Ctrl+D on empty input closes a running command's stdin (EOF)
-or exits when idle. Ctrl+Q always quits, cancelling/reaping an active command.
+or exits when idle. Ctrl+Q and menu Quit share idle exit and an explicit
+cancel-and-quit confirmation while a command runs, followed by reaping.
+F2 opens the root menu from every overlay and cancels, never approves, a staged
+confirmation. Persisted settings (including appearance and pins) require an idle
+command; read-only inspection and transcript navigation remain available.
 `exit` also quits when idle. Host-execution prompt opt-outs require the
 standalone interactive command, not the embedded workspace.
 
@@ -283,12 +298,13 @@ standalone interactive command, not the embedded workspace.
 | --- | --- |
 | Tab / Shift+Tab | Open/cycle completions; Enter accepts a selection |
 | Up / Down | Command recall (or completion/menu selection) |
-| F1 / F2 | Scrollable Markdown shortcut help / settings |
+| F1 / F2 | Scrollable Markdown shortcut help / unified workspace menu |
 | PageUp / PageDown; mouse wheel | Browse transcript, including older segments |
 | Ctrl+Home / Ctrl+End | Oldest history / resume following latest output |
 | Alt+Left / Alt+Right | Horizontal transcript scrolling |
-| Escape | Close overlay or completion |
-| Ctrl+C / Ctrl+D / Ctrl+Q | Cancel or clear input / EOF (idle: exit) / quit and reap |
+| Escape | Dismiss completion; go back one menu level; otherwise open the menu |
+| Ctrl+C / Ctrl+D / Ctrl+Q | Cancel or clear input / EOF (idle: exit) / shared Quit action |
+| Ctrl+P in Components | Pin/unpin the highlighted component |
 
 History is private local diagnostic state at `.kvist/transcript/` for the
 project and each selected component. Numbered Markdown pages target 1 MiB,
@@ -302,11 +318,22 @@ explicitly. Do not treat transcript text as execution or compliance evidence.
 Unsupported/small terminals, `NO_COLOR`, `CLICOLOR=0` or `TERM=dumb` retain the
 line-oriented fallback.
 
-**Settings menu.** The TUI provides a settings menu (the `skott` overlay
-pattern) exposing model, reasoning effort, session history, component
-selection, theme, and other settings. Selecting a component from the menu is
-the same focus change as the `cd` builtin and pre-fills the component for
-subsequent commands.
+**Workspace menu.** Esc and F2 open Components, Role assignments, Models,
+Appearance, History, Help and Quit; Cancel command is available during work.
+Esc returns one level and preserves parent cursor/filter and command draft.
+Current choices are preselected and independently marked. Type to filter
+component/model lists. Components has bounded recent/pinned shortcuts instead
+of an unbounded tab strip and retains `cd` focus/prefill semantics.
+Role settings expose all predefined roles and project/user scope; inherited
+effort is distinct from explicit `none`. Changes retain task-role and policy
+authority and wait until active execution finishes.
+
+Models supplies local details plus explicit Add/check and source/revision-pinned
+enable/disable/remove actions. Inspection never contacts providers; discovery
+and qualification require acknowledged host authority and may incur billing.
+Mutations refuse references/stale definitions and disclose shared-consumer and
+fallback effects. Dark/light RGB palettes independently style transcript,
+raised/selected surfaces and Blad with measured contrast.
 
 **Run the whole component.** Bare `task run COMPONENT_DIR` iterates the
 component's tasks in dependency order, running each ready task, and stops when

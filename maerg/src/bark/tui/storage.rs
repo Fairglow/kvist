@@ -52,7 +52,7 @@ fn open_private(path: &Path, create: bool) -> io::Result<File> {
     Ok(file)
 }
 
-fn read_private(path: &Path, limit: usize) -> io::Result<String> {
+pub(super) fn read_private(path: &Path, limit: usize) -> io::Result<String> {
     let file = open_private(path, false)?;
     let mut bytes = Vec::new();
     file.take(limit as u64 + 1).read_to_end(&mut bytes)?;

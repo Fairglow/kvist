@@ -243,23 +243,18 @@ impl DynamicState {
         {
             return;
         }
-        let mut names: Vec<String> = Vec::new();
-        if let Ok(cfg) = crate::config::load(project_dir) {
-            for name in cfg.agent.profiles.keys() {
-                names.push(name.clone());
+        let inspection = match crate::model_settings::inspect(project_dir) {
+            Ok(inspection) => inspection,
+            Err(error) => {
+                tracing::warn!(%error, "model metadata unavailable for completion; model commands will report the cause");
+                return;
             }
-        }
-        if let Some(user_path) = crate::config::global_user_config_path()
-            && let Ok(user_contents) = std::fs::read_to_string(&user_path)
-            && let Ok(user_table) = user_contents.parse::<toml::Value>()
-        {
-            let lookup = user_table.get("agent").unwrap_or(&user_table);
-            if let Some(profiles) = lookup.get("profiles").and_then(toml::Value::as_table) {
-                for name in profiles.keys() {
-                    names.push(name.clone());
-                }
-            }
-        }
+        };
+        let mut names: Vec<String> = inspection
+            .profiles
+            .into_iter()
+            .map(|profile| profile.name)
+            .collect();
         names.sort();
         names.dedup();
         self.models = names;
@@ -708,6 +703,36 @@ tasks:
             state.runnable_task_ids_for("demo"),
             vec!["write-tests".to_owned(), "implement-code".to_owned()]
         );
+    }
+
+    #[test]
+    fn model_completion_includes_disabled_registry_definitions_for_management() {
+        let dir = tempfile::tempdir().unwrap();
+        current_project(dir.path());
+        fs::write(dir.path().join("providers.toml"),
+            "schema_version = 1\n[profiles.registry-enabled.backend]\nkind = \"native\"\nprovider = \"ollama\"\nmodel = \"fixture\"\n\
+             [profiles.registry-disabled]\nenabled = false\n[profiles.registry-disabled.backend]\nkind = \"native\"\nprovider = \"ollama\"\nmodel = \"old-fixture\"\n").unwrap();
+        fs::write(dir.path().join("kvist.toml"),
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.registry]\npath = \"providers.toml\"\n\
+             [agent.roles.developer]\nprofile = \"registry-enabled\"\n").unwrap();
+        let state = DynamicState::load(dir.path());
+        let tree = crate::bark::tree::build_root();
+        for verb in ["show", "enable", "disable", "remove"] {
+            let input = format!("agent {verb} registry-");
+            let candidates = crate::bark::completion::KvistCompleter::resolve(
+                &tree,
+                &state,
+                None,
+                &input,
+                input.len(),
+            );
+            assert!(
+                candidates
+                    .iter()
+                    .any(|candidate| candidate.value == "registry-disabled"),
+                "disabled definition missing from {input}: {candidates:?}"
+            );
+        }
     }
 
     #[test]

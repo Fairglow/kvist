@@ -182,10 +182,30 @@ The `kvist` executable provides (the authoritative design is
   `--role`, `--model`, and `--reasoning-effort`
 - `agent setup [--force]`
 - `agent list`
-- `agent remove [MODEL_NAME] [--all] [--global]`
-- `agent role list`, `agent role set ROLE MODEL_NAME [--effort EFFORT]
-[--global]`, and `agent role clear [ROLE] [--all] [--global]`
+- `agent show MODEL_NAME [--registry PATH]` (bounded, credential-free offline
+  details, source revision, capabilities, references and removal fallback)
+- `agent enable MODEL_NAME --registry PATH --expected-revision DIGEST [--global]`
+- `agent disable MODEL_NAME --registry PATH --expected-revision DIGEST [--global]`
+- `agent remove MODEL_NAME [--global] [--registry PATH]
+  [--expected-revision DIGEST]`, or `agent remove --all [--global]`
+- `agent role list`, `agent role set ROLE MODEL_NAME
+[--thinking-effort EFFORT | --inherit-effort]
+[--expected-revision DIGEST] [--profile-source PATH --profile-revision DIGEST]
+[--global]`, and `agent role clear [ROLE] [--all]
+[--expected-revision DIGEST] [--global]`
 - `agent check [--global]`
+
+Registry enable/disable/removal requires the exact source and its inspected
+revision. Config-local removal accepts a configuration revision pin and does
+not delete registry definitions. Disable/removal refuses known role references;
+unassignment is separate and never silently clears other roles. `--all` resets
+the selected local agent configuration, not the shared registry. First project
+role edits preserve effective inherited bindings and resource policies, or
+refuse a fork that cannot preserve them safely. Scope inspection resolves
+available profiles in the selected project/user scope; user edits never assign
+a project-only definition. Outside an initialized project, role pages start in
+user scope, matching the CLI's agent-command fallback. Known unsupported non-`none` reasoning overrides
+refuse without writing; unknown capability support remains explicitly unknown.
 - `completions SHELL`
 - `help [TOPIC]` with TOPIC one of `concepts`, `lifecycle`, `task-states`
   (tab-completable); no topic renders the guided tour listing the available
@@ -727,7 +747,10 @@ environment variable, the project-local `.kvist/theme` preference, the user
 preference at `~/.config/kvist/theme`, an OSC 11 terminal-background probe
 (light when the probed surface is light), and the `dark` default; an
 unresolvable preference reports a warning and falls back to detection. The
-`dark` theme renders the agent result surface on a true black background.
+`dark` theme renders the agent result surface on a deep near-black RGB background;
+`light` uses clear white with independently contrasting accents. Raised panel
+background and selection foreground/background are additional semantic roles,
+shared by the full-screen host and Blad.
 Styled rendering keeps table columns aligned on visible width. When stdout is a
 terminal with a known width, the shell soft-wraps output at word boundaries so
 no line overflows: titled boxes (welcome banner, streaming stages, the
@@ -789,8 +812,14 @@ requests cancellation, not rollback or replay. PageUp/PageDown and mouse wheel
 browse output without editing input; Ctrl+Home/End reach history ends.
 Tab/Shift+Tab navigate completion, Enter accepts a visible candidate before
 submission, Up/Down recall command history, F1 opens help and F2 settings.
-Escape dismisses completion/overlays. Pasted newlines are input, never a batch
+Escape dismisses completion first, otherwise returns one menu level, and opens
+the unified menu from the workspace. F2 opens that same menu from every overlay;
+it cancels any pending confirmation without authorizing its action. Submenus retain
+their parent cursor/filter and do not clear the command draft. Pasted newlines are input, never a batch
 execution request. Destructive confirmations remain explicit.
+Persisted settings, including appearance and component shortcuts, cannot change
+while an owned command is active. Read-only inspection and transcript navigation
+remain available.
 
 Transcript segments live in private `.kvist/transcript/` directories (project
 scope) and component `.kvist/transcript/` directories (focused scope).
@@ -801,7 +830,9 @@ scrollbar allocates equal bands to segments and tracks rendered lines within
 the selected segment; it does not pretend all historical line counts are
 loaded. There is no automatic history deletion.
 Ctrl+D with empty input closes child stdin (EOF), or exits when idle. Ctrl+Q
-quits and cancels/reaps any active command. Each bounded page is an independent
+uses the same Quit action as the menu: idle exit, or explicit cancellation/quit
+confirmation while a command is active, followed by cancellation/reaping.
+Each bounded page is an independent
 Markdown document; reference links and footnotes do not resolve across pages.
 The viewport loads one bounded segment at a time and navigation crosses
 segment boundaries. History is local diagnostic
@@ -830,6 +861,25 @@ of the `skott` layout:
 - **Command footer.** The same command surface as the CLI with full
   tab-completion (static from the clap surface, dynamic from the project
   state) and keyboard-shortcut help rendered the same way `skott` does it.
+
+  The menu exposes Components, Role assignments, Models, Appearance, History,
+  Help, Quit and a running-command Cancel action. Lists preselect and mark their
+  current entry independently of cursor movement. Components use a searchable
+  selector with bounded recent/pinned shortcuts, not a tab per discovered component.
+  Role assignments show all three predefined roles, provider/model, effective
+  effort, source and approval implications. Per-role edits retain task-kind role
+  selection. Effort `Default/inherit` removes the role override; `none` is explicit.
+  Menus never silently modify an active command's pinned configuration.
+
+  Model inspection is local and displays actual profile provenance, enabled state,
+  backend/model and known capabilities/references. Add and Check are explicit
+  bounded host operations using existing setup/verification; their acknowledgement
+  is separate from opening the menu. Enable/Disable and Remove target the selected
+  registry definition, refuse stale definitions and current-project/user role
+  references, preserve unrelated entries and disclose shared-consumer/fallback
+  effects before TUI confirmation. Explicit CLI mutations have the same domain
+  validation and source/scope requirements. Provider credentials and unknown
+  capability facts are not displayed or inferred.
 
 The TUI degrades to the plain-text line-oriented shell when the terminal cannot
 host it, and the plain-text degradation contract of `REQ-INTERACTIVE-SHELL`

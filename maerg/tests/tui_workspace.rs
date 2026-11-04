@@ -55,6 +55,13 @@ fn transcript(path: &std::path::Path) -> String {
     }
 }
 
+fn escape(master: &impl AsFd, levels: usize) {
+    for _ in 0..levels {
+        write(master, b"\x1b").unwrap();
+        std::thread::sleep(Duration::from_millis(60));
+    }
+}
+
 #[test]
 fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
     let dir = tempfile::tempdir().unwrap();
@@ -80,9 +87,30 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
     let stub = dir.path().join("stub-skott");
     std::fs::write(&stub, "#!/bin/sh\nprintf '%s\\n' '{\"report\":\"# Agent report\\n\\n**Readable** output.\\n\\n| Key | Value |\\n|---|---|\\n| mode | test |\",\"decision_required\":false}'\nread answer || :\nprintf 'Accepted default\\n'\nprintf '\\033]52;c;inert\\007' >&2\n").unwrap();
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let user_config = dir.path().join("user-config/kvist");
+    std::fs::create_dir_all(&user_config).unwrap();
+    std::fs::write(
+        user_config.join("theme.toml"),
+        "name = \"fixture-user\"\nmode = \"dark\"\n[colors]\nagent_background = \"#123456\"\n",
+    )
+    .unwrap();
+    std::fs::write(user_config.join("theme"), "fixture-user").unwrap();
     let config = dir.path().join("kvist.toml");
     let text = std::fs::read_to_string(&config).unwrap();
-    std::fs::write(config, format!("{text}\n[agent.profiles.developer]\nmodel = \"fixture\"\ndefault_model = \"fixture\"\nmodels = [{{ name = \"fixture\", command = \"/usr/bin/false\" }}]\n")).unwrap();
+    std::fs::create_dir(dir.path().join(".kvist")).unwrap();
+    std::fs::write(dir.path().join(".kvist/providers.toml"),
+        "schema_version = 1\n[profiles.fixture-a.backend]\nkind = \"native\"\nprovider = \"ollama\"\nmodel = \"fixture-a\"\n\
+        [profiles.fixture-b.backend]\nkind = \"native\"\nprovider = \"ollama\"\nmodel = \"fixture-b\"\n").unwrap();
+    std::fs::write(
+        config,
+        format!(
+            "{text}\n[agent.registry]\npath = \".kvist/providers.toml\"\n\
+        [agent.roles.developer]\nprofile = \"fixture-a\"\n\
+        [agent.roles.architect]\nprofile = \"fixture-a\"\n\
+        [agent.roles.security-reviewer]\nprofile = \"fixture-a\"\n"
+        ),
+    )
+    .unwrap();
     assert!(
         Command::new(env!("CARGO_BIN_EXE_kvist"))
             .args(["component", "accept", "."])
@@ -116,7 +144,7 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
     let mut child = Guard(
         Command::new(env!("CARGO_BIN_EXE_kvist"))
             .current_dir(dir.path())
-            .env("KVIST_THEME", "dark")
+            .env_remove("KVIST_THEME")
             .env("KVIST_LOG", "debug")
             .env("TERM", "xterm-256color")
             .env("KVIST_SKOTT", &stub)
@@ -139,6 +167,15 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
     wait_for(&pty.master, &mut output, || {
         transcript(dir.path()).contains("### Host diagnostics")
     });
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        pump(&pty.master, &mut output);
+        if String::from_utf8_lossy(&output).contains("48;2;18;52;86") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "XDG user theme was not loaded");
+        std::thread::sleep(Duration::from_millis(20));
+    }
     write(&pty.master, b"cd .\r").unwrap();
     let component = dir.path().join("src");
     wait_for(&pty.master, &mut output, || {
@@ -162,18 +199,21 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
         transcript(&component).matches("Command finished").count() >= 2
     });
     // Theme, model and effort use the actual menu dispatch, not a test shortcut.
-    write(&pty.master, b"\x1bOQ\x1b[B\x1b[B\x1b[B\r\x1b[B\r").unwrap();
+    escape(&pty.master, 1);
+    write(&pty.master, b"\x1b[B\x1b[B\x1b[B\r\r\x1b[H\x1b[B\r").unwrap();
     wait_for(&pty.master, &mut output, || {
         std::fs::read_to_string(dir.path().join(".kvist/theme"))
             .is_ok_and(|text| text.trim() == "light")
     });
-    write(&pty.master, b"\x1bOQ\x1b[B\r\r").unwrap();
+    escape(&pty.master, 2);
+    write(&pty.master, b"\x1bOQ\x1b[B\r\r\r\x1b[B\r").unwrap();
     wait_for(&pty.master, &mut output, || {
         transcript(&component).matches("Command finished").count() >= 3
     });
+    escape(&pty.master, 3);
     write(
         &pty.master,
-        b"\x1bOQ\x1b[B\x1b[B\r\x1b[B\x1b[B\x1b[B\x1b[B\r",
+        b"\x1bOQ\x1b[B\r\r\x1b[B\r\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\r",
     )
     .unwrap();
     wait_for(&pty.master, &mut output, || {
@@ -184,6 +224,12 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
             .unwrap()
             .contains("thinking_effort = \"high\"")
     );
+    assert!(
+        std::fs::read_to_string(dir.path().join("kvist.toml"))
+            .unwrap()
+            .contains("profile = \"fixture-b\"")
+    );
+    escape(&pty.master, 3);
     write(&pty.master, b"prompt --file -\r").unwrap();
     wait_for(&pty.master, &mut output, || {
         transcript(&component).contains("prompt --file -")
@@ -208,7 +254,8 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
     write(&pty.master, b"\x1b[5~").unwrap();
     std::thread::sleep(Duration::from_millis(100));
     write(&pty.master, b"\x1b[1;5F").unwrap();
-    write(&pty.master, b"exit\r").unwrap();
+    escape(&pty.master, 1);
+    write(&pty.master, b"\x1b[F\r").unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         pump(&pty.master, &mut output);
@@ -216,7 +263,11 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
             assert!(status.success());
             break;
         }
-        assert!(Instant::now() < deadline, "workspace did not exit");
+        assert!(
+            Instant::now() < deadline,
+            "workspace did not exit:\n{}",
+            String::from_utf8_lossy(&output[output.len().saturating_sub(12_000)..])
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
     let stored = transcript(&component);

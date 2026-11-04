@@ -9,8 +9,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::{
     KvistError, Result, component_documents, config, context, convert, discovery, help::HelpTopic,
-    import, init, project_state, prompt_input, repair, reverse_discovery, status, task_commands,
-    task_queue::TaskStatus, toolchain, tree, vendor_command, wizard,
+    import, init, model_settings, project_state, prompt_input, repair, reverse_discovery, status,
+    task_commands, task_queue::TaskStatus, toolchain, tree, vendor_command, wizard,
 };
 
 /// Kvist's top-level command-line interface.
@@ -358,6 +358,17 @@ pub enum AgentRoleCommand {
         /// Optional thinking effort for this role: none, minimal, low, medium, high, xhigh, max.
         #[arg(long, value_name = "EFFORT")]
         thinking_effort: Option<String>,
+        /// Remove only this role's effort override, inheriting the profile baseline.
+        #[arg(long, conflicts_with = "thinking_effort")]
+        inherit_effort: bool,
+        /// Refuse a stale inspected role-configuration revision.
+        #[arg(long, value_name = "DIGEST")]
+        expected_revision: Option<String>,
+        /// Pin the selected model definition's source without changing that source.
+        #[arg(long, value_name = "PATH", requires = "profile_revision")]
+        profile_source: Option<PathBuf>,
+        #[arg(long, value_name = "DIGEST", requires = "profile_source")]
+        profile_revision: Option<String>,
         /// Update global user configuration instead of project configuration.
         #[arg(long)]
         global: bool,
@@ -373,6 +384,9 @@ pub enum AgentRoleCommand {
         /// Update global user configuration instead of project configuration.
         #[arg(long)]
         global: bool,
+        /// Refuse a stale inspected configuration before clearing its binding.
+        #[arg(long, value_name = "DIGEST")]
+        expected_revision: Option<String>,
     },
 }
 
@@ -387,6 +401,37 @@ pub enum AgentCommand {
     },
     /// List configured model profiles and their role assignments.
     List,
+    /// Inspect model metadata without executing commands or contacting providers.
+    Show {
+        #[arg(value_name = "MODEL_NAME")]
+        name: String,
+        /// Explicit source overlay; otherwise use the effective configuration.
+        #[arg(long, value_name = "PATH")]
+        registry: Option<PathBuf>,
+    },
+    /// Enable a definition in an explicitly acknowledged registry source.
+    Enable {
+        #[arg(value_name = "MODEL_NAME")]
+        name: String,
+        #[arg(long, value_name = "PATH")]
+        registry: PathBuf,
+        #[arg(long, value_name = "DIGEST")]
+        expected_revision: String,
+        /// Explicitly acknowledge user scope (the registry path remains exact).
+        #[arg(long)]
+        global: bool,
+    },
+    /// Disable an unreferenced definition in an acknowledged registry source.
+    Disable {
+        #[arg(value_name = "MODEL_NAME")]
+        name: String,
+        #[arg(long, value_name = "PATH")]
+        registry: PathBuf,
+        #[arg(long, value_name = "DIGEST")]
+        expected_revision: String,
+        #[arg(long)]
+        global: bool,
+    },
     /// Remove configured model profile(s).
     Remove {
         /// Name of the model profile to remove.
@@ -398,6 +443,17 @@ pub enum AgentCommand {
         /// Remove from global user configuration instead of project configuration.
         #[arg(long)]
         global: bool,
+        /// Acknowledge the exact registry source to edit, not a local role alias.
+        #[arg(
+            long,
+            value_name = "PATH",
+            conflicts_with = "all",
+            requires = "expected_revision"
+        )]
+        registry: Option<PathBuf>,
+        /// Exact revision displayed by `agent show`; mandatory for registry edits.
+        #[arg(long, value_name = "DIGEST", conflicts_with = "all")]
+        expected_revision: Option<String>,
     },
     /// Live-verify that configured model profiles are reachable and working.
     Check {
@@ -653,6 +709,27 @@ impl std::fmt::Display for CommandOutput {
 /// This dispatch layer deliberately contains no process handling; callers can
 /// test command behavior and choose how errors are presented.
 pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
+    let json_agent_command = if json {
+        match &command {
+            Some(Command::Agent { command }) => Some(match command {
+                AgentCommand::Show { .. } => "agent-show",
+                AgentCommand::Enable { .. } => "agent-enable",
+                AgentCommand::Disable { .. } => "agent-disable",
+                AgentCommand::Remove { .. } => "agent-remove",
+                AgentCommand::Role { command } => match command {
+                    Some(AgentRoleCommand::Set { .. }) => "agent-role-set",
+                    Some(AgentRoleCommand::Clear { .. }) => "agent-role-clear",
+                    _ => "agent-role-list",
+                },
+                AgentCommand::List => "agent-list",
+                AgentCommand::Setup { .. } => "agent-setup",
+                AgentCommand::Check { .. } => "agent-check",
+            }),
+            _ => None,
+        }
+    } else {
+        None
+    };
     let native = json
         || matches!(
             &command,
@@ -675,7 +752,18 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
         _ => "Kvist",
     };
     let tree_output = matches!(&command, Some(Command::Tree { .. }));
-    let output = execute_raw(command, json)?;
+    let output = execute_raw(command, json).map_err(|error| {
+        if let Some(command) = json_agent_command {
+            KvistError::JsonCommandFailure {
+                output: serde_json::json!({
+                    "status": "error", "command": command, "error": error.to_string(),
+                })
+                .to_string(),
+            }
+        } else {
+            error
+        }
+    })?;
     if native || output.is_empty() || output.0.starts_with("# ") {
         Ok(output)
     } else {
@@ -818,17 +906,20 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 let (current_dir, fallback_global) = agent_scope()?;
                 match command.unwrap_or(AgentRoleCommand::List) {
                     AgentRoleCommand::List => {
-                        let text = wizard::list_roles(&current_dir)?;
-                        let mut text_json = String::new();
-                        json_string_escape(&mut text_json, &text);
-                        Ok(CommandOutput::message(format!(
-                            r#"{{"status":"success","command":"agent-role-list","output":{text_json}}}"#
-                        )))
+                        let inspection = model_settings::inspect(&current_dir)?;
+                        Ok(CommandOutput::message(serde_json::json!({
+                            "status": "success", "command": "agent-role-list",
+                            "output": inspection.roles_markdown(), "inspection": inspection,
+                        }).to_string()))
                     }
                     AgentRoleCommand::Set {
                         role,
                         model,
                         thinking_effort,
+                        inherit_effort,
+                        expected_revision,
+                        profile_source,
+                        profile_revision,
                         global,
                     } => {
                         let global = global || fallback_global;
@@ -841,17 +932,17 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                             })?),
                             None => None,
                         };
-                        let msg = wizard::set_role_model_with_effort(&config_path, &current_dir, !global, &role, &model, effort)?;
+                        let msg = wizard::set_role_model_pinned(&config_path, &current_dir, !global, &role, &model, effort, inherit_effort, expected_revision.as_deref(), model_settings::ProfilePin { source: profile_source.as_deref(), revision: profile_revision.as_deref() })?;
                         let mut msg_json = String::new();
                         json_string_escape(&mut msg_json, &msg);
                         Ok(CommandOutput::message(format!(
                             r#"{{"status":"success","command":"agent-role-set","message":{msg_json}}}"#
                         )))
                     }
-                    AgentRoleCommand::Clear { role, all, global } => {
+                    AgentRoleCommand::Clear { role, all, global, expected_revision } => {
                         let global = global || fallback_global;
                         let config_path = agent_config_path(&current_dir, global)?;
-                        let msg = wizard::clear_role(&config_path, &current_dir, !global, role.as_deref(), all)?;
+                        let msg = wizard::clear_role_with_revision(&config_path, &current_dir, !global, role.as_deref(), all, expected_revision.as_deref())?;
                         let mut msg_json = String::new();
                         json_string_escape(&mut msg_json, &msg);
                         Ok(CommandOutput::message(format!(
@@ -893,21 +984,20 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 )))
             }
             Command::Agent {
-                command: AgentCommand::Remove { name, all, global },
+                command: command @ (AgentCommand::Show { .. } | AgentCommand::Enable { .. } | AgentCommand::Disable { .. }),
+            } => execute_model_settings(&command, true),
+            Command::Agent {
+                command: AgentCommand::Remove { name, all, global, registry, expected_revision },
             } => {
                 let (current_dir, fallback_global) = agent_scope()?;
                 let global = global || fallback_global;
                 let config_path = agent_config_path(&current_dir, global)?;
-                let msg = if all {
-                    wizard::remove_all_models(&config_path, &current_dir, !global)?
-                } else if let Some(model_name) = name {
-                    wizard::remove_model(&config_path, &current_dir, !global, &model_name)?
-                } else {
-                    return Err(KvistError::AgentSetupFailed {
-                        reason: "specify a model name or use --all to clear all agent configuration"
-                            .to_owned(),
-                    });
-                };
+                if let Some(registry) = registry {
+                    let model_name = name.ok_or_else(|| model_settings::failure("specify a model name for registry removal"))?;
+                    let revision = expected_revision.ok_or_else(|| model_settings::failure("registry removal requires --expected-revision from `agent show`"))?;
+                    return registry_mutation_output(&current_dir, &registry, &model_name, &revision, model_settings::RegistryChange::Remove, true);
+                }
+                let msg = remove_agent_models(&config_path, &current_dir, !global, name.as_deref(), all, expected_revision.as_deref())?;
                 let mut msg_json = String::new();
                 json_string_escape(&mut msg_json, &msg);
                 Ok(CommandOutput::message(format!(
@@ -1452,13 +1542,16 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             } => {
                 let (current_dir, fallback_global) = agent_scope()?;
                 match command.unwrap_or(AgentRoleCommand::List) {
-                    AgentRoleCommand::List => {
-                        wizard::list_roles(&current_dir).map(CommandOutput::message)
-                    }
+                    AgentRoleCommand::List => model_settings::inspect(&current_dir)
+                        .map(|inspection| CommandOutput::message(inspection.roles_markdown())),
                     AgentRoleCommand::Set {
                         role,
                         model,
                         thinking_effort,
+                        inherit_effort,
+                        expected_revision,
+                        profile_source,
+                        profile_revision,
                         global,
                     } => {
                         let global = global || fallback_global;
@@ -1471,25 +1564,37 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                             })?),
                             None => None,
                         };
-                        wizard::set_role_model_with_effort(
+                        wizard::set_role_model_pinned(
                             &config_path,
                             &current_dir,
                             !global,
                             &role,
                             &model,
                             effort,
+                            inherit_effort,
+                            expected_revision.as_deref(),
+                            model_settings::ProfilePin {
+                                source: profile_source.as_deref(),
+                                revision: profile_revision.as_deref(),
+                            },
                         )
                         .map(CommandOutput::message)
                     }
-                    AgentRoleCommand::Clear { role, all, global } => {
+                    AgentRoleCommand::Clear {
+                        role,
+                        all,
+                        global,
+                        expected_revision,
+                    } => {
                         let global = global || fallback_global;
                         let config_path = agent_config_path(&current_dir, global)?;
-                        wizard::clear_role(
+                        wizard::clear_role_with_revision(
                             &config_path,
                             &current_dir,
                             !global,
                             role.as_deref(),
                             all,
+                            expected_revision.as_deref(),
                         )
                         .map(CommandOutput::message)
                     }
@@ -1518,24 +1623,51 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 wizard::list_models(&current_dir).map(CommandOutput::message)
             }
             Command::Agent {
-                command: AgentCommand::Remove { name, all, global },
+                command:
+                    command @ (AgentCommand::Show { .. }
+                    | AgentCommand::Enable { .. }
+                    | AgentCommand::Disable { .. }),
+            } => execute_model_settings(&command, false),
+            Command::Agent {
+                command:
+                    AgentCommand::Remove {
+                        name,
+                        all,
+                        global,
+                        registry,
+                        expected_revision,
+                    },
             } => {
                 let (current_dir, fallback_global) = agent_scope()?;
                 let global = global || fallback_global;
                 let config_path = agent_config_path(&current_dir, global)?;
-                if all {
-                    wizard::remove_all_models(&config_path, &current_dir, !global)
-                        .map(CommandOutput::message)
-                } else if let Some(model_name) = name {
-                    wizard::remove_model(&config_path, &current_dir, !global, &model_name)
-                        .map(CommandOutput::message)
-                } else {
-                    Err(KvistError::AgentSetupFailed {
-                        reason:
-                            "specify a model name or use --all to clear all agent configuration"
-                                .to_owned(),
-                    })
+                if let Some(registry) = registry {
+                    let model_name = name.ok_or_else(|| {
+                        model_settings::failure("specify a model name for registry removal")
+                    })?;
+                    let revision = expected_revision.ok_or_else(|| {
+                        model_settings::failure(
+                            "registry removal requires --expected-revision from `agent show`",
+                        )
+                    })?;
+                    return registry_mutation_output(
+                        &current_dir,
+                        &registry,
+                        &model_name,
+                        &revision,
+                        model_settings::RegistryChange::Remove,
+                        false,
+                    );
                 }
+                remove_agent_models(
+                    &config_path,
+                    &current_dir,
+                    !global,
+                    name.as_deref(),
+                    all,
+                    expected_revision.as_deref(),
+                )
+                .map(CommandOutput::message)
             }
             Command::Agent {
                 command: AgentCommand::Check { global },
@@ -2295,6 +2427,151 @@ fn run_headless_prompt(
 /// Returns `(directory, effective_global)`: the directory whose `kvist.toml`
 /// holds the project configuration when not global, and a usable base
 /// directory otherwise.
+fn execute_model_settings(command: &AgentCommand, json: bool) -> Result<CommandOutput> {
+    let (project, _) = agent_scope()?;
+    match command {
+        AgentCommand::Show { name, registry } => {
+            let inspection = model_settings::inspect_with_registry(&project, registry.as_deref())?;
+            let profile = inspection
+                .profiles
+                .iter()
+                .find(|p| p.name == *name && p.effective)
+                .or_else(|| inspection.profiles.iter().find(|p| p.name == *name))
+                .ok_or_else(|| {
+                    model_settings::failure(format!(
+                        "model profile `{name}` is not configured; run `kvist agent setup`"
+                    ))
+                })?;
+            let text = profile.details_markdown();
+            if json {
+                Ok(CommandOutput::message(
+                    serde_json::json!({
+                        "status": "success", "command": "agent-show",
+                        "profile": profile, "output": text,
+                    })
+                    .to_string(),
+                ))
+            } else {
+                Ok(CommandOutput::message(text))
+            }
+        }
+        AgentCommand::Enable {
+            name,
+            registry,
+            expected_revision,
+            ..
+        }
+        | AgentCommand::Disable {
+            name,
+            registry,
+            expected_revision,
+            ..
+        } => {
+            let change = if matches!(command, AgentCommand::Enable { .. }) {
+                model_settings::RegistryChange::Enable
+            } else {
+                model_settings::RegistryChange::Disable
+            };
+            registry_mutation_output(&project, registry, name, expected_revision, change, json)
+        }
+        _ => Err(model_settings::failure(
+            "unsupported model settings operation",
+        )),
+    }
+}
+
+fn registry_mutation_output(
+    project: &Path,
+    registry: &Path,
+    name: &str,
+    expected_revision: &str,
+    change: model_settings::RegistryChange,
+    json: bool,
+) -> Result<CommandOutput> {
+    let report =
+        model_settings::mutate_registry(project, registry, name, expected_revision, change)?;
+    let command = match change {
+        model_settings::RegistryChange::Enable => "agent-enable",
+        model_settings::RegistryChange::Disable => "agent-disable",
+        model_settings::RegistryChange::Remove => "agent-remove",
+    };
+    if json {
+        Ok(CommandOutput::message(
+            serde_json::json!({
+                "status": "success", "command": command, "message": report.message,
+                "warnings": report.warnings, "mutation": report,
+            })
+            .to_string(),
+        ))
+    } else {
+        let warnings = report
+            .warnings
+            .iter()
+            .map(|warning| format!("- {warning}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(CommandOutput::message(format!(
+            "{}\n\nWarnings:\n{warnings}",
+            report.message
+        )))
+    }
+}
+
+fn remove_agent_models(
+    config_path: &Path,
+    project: &Path,
+    project_local: bool,
+    name: Option<&str>,
+    all: bool,
+    expected_revision: Option<&str>,
+) -> Result<String> {
+    if all {
+        // This intentionally resets this configuration's bindings, not every
+        // shared definition or another configuration's roles.
+        return wizard::remove_all_models(config_path, project, project_local);
+    }
+    let name = name.ok_or_else(|| {
+        model_settings::failure(
+            "specify a model name or use --all to clear this configuration's bindings",
+        )
+    })?;
+    let inspection = model_settings::inspect(project)?;
+    if let Some(expected_revision) = expected_revision {
+        let report = model_settings::remove_local_profile(
+            project,
+            config_path,
+            project_local,
+            name,
+            expected_revision,
+        )?;
+        return Ok(format!(
+            "{}\n\n{}",
+            report.message,
+            report.warnings.join("\n")
+        ));
+    }
+    if let Some(profile) = inspection
+        .profiles
+        .iter()
+        .find(|p| p.name == name && p.registry_backed)
+    {
+        return Err(model_settings::failure(format!(
+            "profile `{name}` is defined in registry `{}`, not a removable local alias. Inspect `kvist agent show {name}` then explicitly acknowledge its source with --registry PATH --expected-revision DIGEST. Reassign or unassign project/user roles first. Unknown external consumers may be affected.",
+            profile.source.path.display(),
+        )));
+    }
+    if inspection
+        .profiles
+        .iter()
+        .any(|profile| profile.name == name && !profile.references.is_empty())
+    {
+        return Err(model_settings::failure(format!(
+            "profile `{name}` has project/user role references; reassign or unassign them with `agent role set` / `agent role clear` first (--global for user roles). No references were cleared."
+        )));
+    }
+    wizard::remove_model(config_path, project, project_local, name)
+}
+
 fn agent_scope() -> Result<(PathBuf, bool)> {
     match context::ProjectContext::resolve(None) {
         Ok(project) => Ok((project.project_dir, false)),
@@ -2344,6 +2621,20 @@ fn validate_component_documents(
 mod tests {
     use super::*;
     use clap::error::ErrorKind;
+
+    #[test]
+    fn bulk_agent_reset_cannot_silently_ignore_a_definition_revision_pin() {
+        let error = Cli::try_parse_from([
+            "kvist",
+            "agent",
+            "remove",
+            "--all",
+            "--expected-revision",
+            "sha256:pin",
+        ])
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
 
     #[test]
     fn decisions_require_visible_component_and_exact_application_approval() {

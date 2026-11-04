@@ -259,7 +259,10 @@ mod tests {
         );
 
         let colored = Theme::enabled();
-        assert!(status_bar_label(colored, &status).starts_with("\x1b[2m"));
+        assert_eq!(
+            status_bar_label(colored, &status),
+            colored.dim("[bubblewrap · ollama]")
+        );
     }
 
     fn lock(live: bool) -> LockEntry {

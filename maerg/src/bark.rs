@@ -2408,18 +2408,24 @@ mod tests {
             .lines()
             .find(|line| line.contains("completed"))
             .expect("completed row present");
-        assert!(a_row.contains("\x1b[32m"), "completed row should be green");
+        assert!(
+            a_row.contains(&format!("\x1b[{}m", colored.palette().green)),
+            "completed row should use the success palette"
+        );
         let b_row = styled_text
             .lines()
             .find(|line| line.contains("pending"))
             .expect("pending row present");
-        assert!(b_row.contains("\x1b[2m"), "pending row should be dim");
+        assert!(
+            b_row.contains(&format!("\x1b[{}m", colored.palette().dim)),
+            "pending row should use the secondary palette"
+        );
         let star_row = styled_text
             .lines()
             .find(|line| line.contains('★'))
             .expect("next-ready marker present");
         assert!(
-            star_row.contains("\x1b[33m"),
+            star_row.contains(&format!("\x1b[{}m", colored.palette().yellow)),
             "next-ready marker should be yellow"
         );
     }
@@ -2500,6 +2506,8 @@ mod tests {
                 name: None,
                 all: true,
                 global: false,
+                registry: None,
+                expected_revision: None,
             },
         };
         assert!(destructive_gate(&remove_all).is_some());
@@ -2557,8 +2565,9 @@ mod tests {
         assert!(text.contains("no stale locks to clean"));
 
         // Live and stale locks are color-coded when styling is enabled.
-        let text = render_locks(Theme::enabled(), &entries, &[], false);
-        assert!(text.contains("\x1b[32m[live]\x1b[0m"));
-        assert!(text.contains("\x1b[31m[stale]\x1b[0m"));
+        let theme = Theme::enabled();
+        let text = render_locks(theme, &entries, &[], false);
+        assert!(text.contains(&theme.green("[live]")));
+        assert!(text.contains(&theme.red("[stale]")));
     }
 }

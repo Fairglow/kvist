@@ -10,6 +10,84 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "workspace-settings-write-tests"
+    title: "write_tests: specify accessible hierarchical settings and model management"
+    description: "Pin RGB contrast, Esc/back/quit semantics, current markers, searchable component shortcuts, all-role assignment/effort inheritance and provenance-aware registry model lifecycle before implementation."
+    context: "Tests-first contrast/navigation/current-value, model lifecycle and actual-PTY regressions were demonstrated before their repairs. Final F2/confirmation and active-preference regressions also failed before fixes. Explicit advisory exception is recorded in REQ-MODEL-MANAGEMENT; no review receipt is implied."
+    purpose: "Make the refined interaction and persistence contracts executable."
+    expected_outcome: "Regressions fail against the flat developer-only menu and alias-only model removal."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-MODEL-MANAGEMENT"
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+      - "REQUIREMENTS.md#REQ-SHELL-THEME"
+    timestamps:
+      created_at: "2026-11-04T07:00:00Z"
+      updated_at: "2026-11-04T08:18:29Z"
+      completed_at: "2026-11-04T08:18:29Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "workspace-settings-implement-code"
+    title: "implement_code: refine workspace navigation and role/model settings"
+    description: "Implement the unified hierarchical menu, contrasting semantic palettes, current values, scalable component selector, typed role overview and safe shared-registry lifecycle with CLI parity."
+    context: "Final all-feature workspace run 4d20f182-7fb9-43d9-a043-4fb943c4e90e passed 2304 tests with 15 existing skips; concurrent Maerg library passed 652 with one existing ignore; 52 targeted tests, strict lint, formatting, release and smoke checks passed. Independent source-only and source-blind diagnostic records include corrections; protected audit/compliance gates and intent acceptance remain pending."
+    purpose: "Deliver useful, inspectable settings without hidden authority or registry side effects."
+    expected_outcome: "The settings regressions pass with bounded local inspection and explicit source/revision-aware writes."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "workspace-settings-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-MODEL-MANAGEMENT"
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+      - "REQUIREMENTS.md#REQ-SHELL-THEME"
+    timestamps:
+      created_at: "2026-11-04T07:00:00Z"
+      updated_at: "2026-11-04T08:18:29Z"
+      completed_at: "2026-11-04T08:18:29Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "workspace-settings-security-audit"
+    title: "security_audit: inspect settings persistence and authority boundaries"
+    description: "Independently inspect bounded input, source/revision pins, shared-profile effects, explicit host acknowledgement and unchanged task authority."
+    context: "Protected audit execution and certification are separate from implementation-agent validation."
+    purpose: "Retain independent assessment of registry and terminal boundaries."
+    expected_outcome: "Record findings or explicit blockers without inventing receipts or approvals."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "workspace-settings-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-MODEL-MANAGEMENT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-04T07:00:00Z"
+      updated_at: "2026-11-04T07:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "workspace-settings-compliance-review"
+    title: "compliance_review: compare settings intent with independent observations"
+    description: "Derive source-only observations in a clean-slate context, then separately compare requirements, contract and design with observed and executed evidence without source access."
+    context: "Discrepancies require human arbitration; diagnostic observations do not close protected gates or accept intent."
+    purpose: "Keep implementation evidence distinct from authored intent."
+    expected_outcome: "Persist a source-blind diagnostic comparison and its limits."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "workspace-settings-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-MODEL-MANAGEMENT"
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-04T07:00:00Z"
+      updated_at: "2026-11-04T07:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "capacity-fixtures-write-tests"
     title: "write_tests: reproduce provider fixture regressions"
     description: "Run startup and task-command tests before repairing metadata routing and generation accounting."

@@ -2,9 +2,8 @@
 //!
 //! A [`Theme`] is a cheap, copyable handle into a process-wide theme
 //! registry. Two built-in themes are always present — `dark` (the default;
-//! high-contrast light text on the terminal's background, with the agent
-//! result rendered on a true black surface) and `light` (dark text with a
-//! white agent-result surface). Users customize the palette through a TOML
+//! high-contrast light text on a deep near-black surface) and `light` (dark
+//! text on a clear white surface). Users customize the palette through a TOML
 //! spec (see [`parse_theme_spec`]) placed at `~/.config/kvist/theme.toml`
 //! (or `XDG_CONFIG_HOME/kvist/theme.toml`), referenced by name through the
 //! `KVIST_THEME` environment variable, `.kvist/theme`, or
@@ -66,36 +65,58 @@ pub struct Palette {
     pub agent_background: String,
     /// Foreground of the agent result surface.
     pub agent_foreground: String,
+    /// Raised surfaces: headings, popups, quoted text and code blocks.
+    pub panel_background: String,
+    /// Selected menu/completion entry background.
+    pub selection_background: String,
+    /// Selected menu/completion entry foreground.
+    pub selection_foreground: String,
 }
 
 impl Palette {
-    /// The default dark palette: bright text on the terminal background,
-    /// agent result on true black.
+    /// Explicit RGB defaults independent of terminal-remapped ANSI colors.
     pub fn dark() -> Self {
         Self {
-            prompt: "1;34".to_owned(),
-            component: "1;35".to_owned(),
-            failure: "1;31".to_owned(),
-            indicator: "1;32".to_owned(),
-            border: "2".to_owned(),
-            dim: "2".to_owned(),
-            red: "31".to_owned(),
-            green: "32".to_owned(),
-            yellow: "33".to_owned(),
-            blue: "34".to_owned(),
-            magenta: "35".to_owned(),
-            cyan: "36".to_owned(),
-            agent_background: "40".to_owned(),
-            agent_foreground: "37".to_owned(),
+            prompt: "1;38;2;125;183;255".into(),
+            component: "1;38;2;216;180;254".into(),
+            failure: "1;38;2;252;165;165".into(),
+            indicator: "1;38;2;134;239;172".into(),
+            border: "38;2;111;131;153".into(),
+            dim: "38;2;166;180;197".into(),
+            red: "38;2;252;165;165".into(),
+            green: "38;2;134;239;172".into(),
+            yellow: "38;2;253;224;71".into(),
+            blue: "38;2;125;183;255".into(),
+            magenta: "38;2;216;180;254".into(),
+            cyan: "38;2;103;232;249".into(),
+            agent_background: "48;2;9;13;18".into(),
+            agent_foreground: "38;2;241;245;249".into(),
+            panel_background: "48;2;24;33;43".into(),
+            selection_background: "48;2;49;85;129".into(),
+            selection_foreground: "38;2;241;245;249".into(),
         }
     }
 
-    /// The light palette: dark text, agent result on white.
+    /// Independent light defaults, including dark enough status/accent colors.
     pub fn light() -> Self {
         Self {
-            agent_background: "47".to_owned(),
-            agent_foreground: "30".to_owned(),
-            ..Self::dark()
+            prompt: "1;38;2;29;78;216".into(),
+            component: "1;38;2;126;34;206".into(),
+            failure: "1;38;2;185;28;28".into(),
+            indicator: "1;38;2;22;101;52".into(),
+            border: "38;2;100;116;139".into(),
+            dim: "38;2;71;85;105".into(),
+            red: "38;2;185;28;28".into(),
+            green: "38;2;22;101;52".into(),
+            yellow: "38;2;146;64;14".into(),
+            blue: "38;2;29;78;216".into(),
+            magenta: "38;2;126;34;206".into(),
+            cyan: "38;2;14;116;144".into(),
+            agent_background: "48;2;255;255;255".into(),
+            agent_foreground: "38;2;17;24;39".into(),
+            panel_background: "48;2;232;238;245".into(),
+            selection_background: "48;2;29;78;216".into(),
+            selection_foreground: "38;2;255;255;255".into(),
         }
     }
 
@@ -413,31 +434,26 @@ pub fn match_preference(value: &str) -> Preference {
     }
 }
 
-/// The user theme spec path: `$XDG_CONFIG_HOME/kvist/theme.toml`, defaulting
-/// to `~/.config/kvist/theme.toml`.
-pub fn user_theme_path() -> PathBuf {
+fn user_config_file(name: &str) -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
-        .map(|home| home.join(".config"));
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));
     match base {
-        Some(base) => base.join("kvist").join("theme.toml"),
-        None => PathBuf::from("theme.toml"),
+        Some(base) => base.join("kvist").join(name),
+        None => PathBuf::from(name),
     }
 }
 
-/// The user theme-preference file path (`~/.config/kvist/theme`).
+/// The user theme spec path: `$XDG_CONFIG_HOME/kvist/theme.toml`, defaulting
+/// to `~/.config/kvist/theme.toml`.
+pub fn user_theme_path() -> PathBuf {
+    user_config_file("theme.toml")
+}
+
+/// The user theme-preference file path (`$XDG_CONFIG_HOME/kvist/theme`).
 pub fn user_preference_path() -> PathBuf {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
-        .map(|home| home.join(".config"));
-    match base {
-        Some(base) => base.join("kvist").join("theme"),
-        None => PathBuf::from("theme"),
-    }
+    user_config_file("theme")
 }
 
 /// Reads a preference file (one line: a name or a path), tolerating absence.
@@ -612,7 +628,7 @@ pub fn parse_theme_spec(contents: &str) -> Result<ThemeSpec, KvistError> {
 }
 
 /// The color roles a theme spec may override.
-pub const KNOWN_ROLES: [&str; 14] = [
+pub const KNOWN_ROLES: [&str; 17] = [
     "prompt",
     "component",
     "failure",
@@ -627,6 +643,9 @@ pub const KNOWN_ROLES: [&str; 14] = [
     "cyan",
     "agent_background",
     "agent_foreground",
+    "panel_background",
+    "selection_background",
+    "selection_foreground",
 ];
 
 /// One parsed color: its foreground and background SGR encodings.
@@ -725,6 +744,9 @@ pub fn palette_for_spec(spec: &ThemeSpec) -> Palette {
             "cyan" => palette.cyan = color.foreground,
             "agent_background" => palette.agent_background = color.background,
             "agent_foreground" => palette.agent_foreground = color.foreground,
+            "panel_background" => palette.panel_background = color.background,
+            "selection_background" => palette.selection_background = color.background,
+            "selection_foreground" => palette.selection_foreground = color.foreground,
             _ => {}
         }
     }
@@ -760,7 +782,7 @@ pub fn render_theme_preview(theme: Theme, width: usize) -> String {
     ));
     rows.push(super::style::separator_rule(theme, width));
     rows.push(theme.agent_result(&super::style::pad_right(
-        "Agent result on the theme's black surface",
+        "Transcript on the theme's canvas",
         inner,
     )));
     rows.push(theme.dim("[bubblewrap · 🔒 1 · ollama]"));
@@ -939,11 +961,9 @@ mod tests {
     fn dark_and_light_palettes_differ_on_the_agent_surface() {
         let dark = Palette::dark();
         let light = Palette::light();
-        assert_eq!(dark.agent_background, "40");
-        assert_eq!(dark.agent_foreground, "37");
-        assert_eq!(light.agent_background, "47");
-        assert_eq!(light.agent_foreground, "30");
-        assert_eq!(dark.prompt, light.prompt);
+        assert_eq!(dark.agent_background, "48;2;9;13;18");
+        assert_eq!(light.agent_background, "48;2;255;255;255");
+        assert_ne!(dark.prompt, light.prompt);
     }
 
     #[test]
@@ -1010,7 +1030,7 @@ agent_background = "black"
         assert_eq!(palette.border, "90");
         assert_eq!(palette.agent_background, "40");
         // Unset roles keep the dark base.
-        assert_eq!(palette.indicator, "1;32");
+        assert_eq!(palette.indicator, Palette::dark().indicator);
     }
 
     #[test]
@@ -1026,15 +1046,15 @@ agent_background = "black"
         let spec = parse_theme_spec("name = \"paper\"").unwrap();
         assert_eq!(spec.mode, "dark");
         let palette = palette_for_spec(&spec);
-        assert_eq!(palette.agent_background, "40");
+        assert_eq!(palette.agent_background, Palette::dark().agent_background);
     }
 
     #[test]
     fn palette_for_spec_light_mode_uses_light_base() {
         let spec = parse_theme_spec("name = \"paper\"\nmode = \"light\"").unwrap();
         let palette = palette_for_spec(&spec);
-        assert_eq!(palette.agent_background, "47");
-        assert_eq!(palette.agent_foreground, "30");
+        assert_eq!(palette.agent_background, Palette::light().agent_background);
+        assert_eq!(palette.agent_foreground, Palette::light().agent_foreground);
     }
 
     #[test]
