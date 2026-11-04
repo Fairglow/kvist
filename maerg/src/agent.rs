@@ -1374,9 +1374,6 @@ fn execute_agent_inner(
 
         loop {
             if cancellation.is_cancelled() || controls.is_shutdown() {
-                if is_tty {
-                    eprintln!();
-                }
                 return Err(KvistError::Sav(ModelError::Cancelled));
             }
             if steering.deliver(&mut conversation)? {
@@ -1400,7 +1397,13 @@ fn execute_agent_inner(
                 live.record(&serde_json::json!({"type":"context_compaction","data":{"completed_groups":compaction.compacted_turns,"compactions":context.compactions(),"lossy":true,"canonical_evidence":false}}),true)?;
             }
             let est_input = sav::runtime::context::estimate_request(&model_request);
-            if is_tty {
+            // One rich status line, rewritten in place every turn so the
+            // output shows the latest turn count, reads, edits, files, elapsed
+            // and remaining time instead of a fresh "Starting inference" line
+            // per turn. A terminal gets a line-clear so a shorter update cannot
+            // leave stale characters; a piped stream gets a bare carriage
+            // return that the capturing workspace collapses to the final update.
+            {
                 let total_reads: usize = run_turns.iter().map(|t| t.reads.len()).sum();
                 let total_edits: usize = run_turns
                     .iter()
@@ -1415,8 +1418,8 @@ fn execute_agent_inner(
                 } else {
                     String::new()
                 };
-                eprint!(
-                    "\r\x1b[2K  ⟳ Turn {} │ ~{:.1}k in ({:.1}k rsv) │ reads: {} ({} files{}) · edits: {} │ last: {} │ {:.1}s ({:.0}s rem)",
+                let line = format!(
+                    "⟳ Turn {} │ ~{:.1}k in ({:.1}k rsv) │ reads: {} ({} files{}) · edits: {} │ last: {} │ {:.1}s ({:.0}s rem)",
                     generations,
                     est_input as f64 / 1000.0,
                     reserve as f64 / 1000.0,
@@ -1428,14 +1431,12 @@ fn execute_agent_inner(
                     elapsed,
                     rem,
                 );
+                if is_tty {
+                    eprint!("\r\x1b[2K  {line}");
+                } else {
+                    eprint!("\r{line}");
+                }
                 let _ = std::io::Write::flush(&mut std::io::stderr());
-            } else {
-                eprintln!(
-                    "Starting inference: approximately {} input tokens, {} output tokens reserved; {:.1}s approved task time remains.",
-                    est_input,
-                    reserve,
-                    budget.remaining().as_secs_f64(),
-                );
             }
             let generated = execute_host_turn(
                 &choice,
@@ -1773,9 +1774,10 @@ fn execute_agent_inner(
                     || repeated_text_streak >= 3
                     || read_only_turn_streak >= 30
                 {
-                    if is_tty {
-                        eprintln!();
-                    }
+                    // End the in-place progress line so the warning below starts
+                    // on its own line; the post-loop newline still terminates any
+                    // path that breaks or returns without doing this.
+                    eprintln!();
                     tracing::warn!(
                         task_id = %request.task_id,
                         duplicate_read_streak,
@@ -1806,9 +1808,6 @@ fn execute_agent_inner(
                 if !controls.finish_if_idle()? {
                     steering.skip_calls(turn.tool_intents.iter(), &[], &mut conversation)?;
                     continue;
-                }
-                if is_tty {
-                    eprintln!();
                 }
                 break;
             }
@@ -1906,6 +1905,11 @@ fn execute_agent_inner(
         }
         Ok(None)
     })();
+    // Terminate the in-place progress line on every exit path (completion,
+    // loop-break, cancellation, turn failure, surfaced decision) so that
+    // subsequent stderr output starts on a fresh line whether stderr is a
+    // terminal or a captured pipe.
+    eprintln!();
     let failure = match &outcome {
         Ok(failure) => failure.as_ref().map(|failure| TurnFailure {
             reason: failure.reason.clone(),

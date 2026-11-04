@@ -652,9 +652,12 @@ pub(super) fn prepare(
         .chain(baseline.keys())
         .chain(after.entries.keys())
     {
-        if changes.contains_key(path)
-            || (before.entries.get(path) == after.entries.get(path)
-                && baseline.get(path) == expected_baseline.get(path))
+        if changes.contains_key(path) {
+            continue;
+        }
+        // Fast path: unchanged since the run started and HEAD is consistent.
+        if before.entries.get(path) == after.entries.get(path)
+            && baseline.get(path) == expected_baseline.get(path)
         {
             continue;
         }
@@ -677,6 +680,14 @@ pub(super) fn prepare(
             }
             None => None,
         };
+        // The worktree can match HEAD even though it differed at the start of
+        // the run (a reverted edit, or a rewrite that lands on identical
+        // content). Such a path carries no delta, so it must not enter the
+        // prepared commit; validation would otherwise reject it as an invalid
+        // changed path.
+        if baseline.get(path) == post.as_ref() {
+            continue;
+        }
         changes.insert(
             path.clone(),
             Change {
@@ -746,22 +757,45 @@ impl PreparedCommit {
         let mut material = 0u64;
         for (path, change) in &self.changes {
             material = material.saturating_add(path.len() as u64);
-            reject(
-                !owned(path)
-                    || path.split('/').count() > MAX_SCOPE_DEPTH
-                    || change.before == change.after
-                    || change.after.as_ref().map(|e| e.mode)
-                        != self.after.entries.get(path).map(|s| s.mode)
-                    || material > MAX_SCOPE_TOTAL_BYTES,
-                "prepared checkpoint has an invalid changed path",
-            )?;
+            if !owned(path) {
+                return Err(fail(format!(
+                    "changed path `{path}` is outside checkpoint ownership (src/, tests/, TODOS.yaml, IMPL.md, .kvist/continuous-reviews/); the run wrote a file the component does not own"
+                )));
+            }
+            if path.split('/').count() > MAX_SCOPE_DEPTH {
+                return Err(fail(format!(
+                    "changed path `{path}` is deeper than {MAX_SCOPE_DEPTH} path components; flatten the layout or split the work"
+                )));
+            }
+            // A no-op change (byte-identical before and after) is harmless: the
+            // commit tree is built from the after snapshot, so publishing it
+            // writes content that already equals the parent commit. This occurs
+            // when the ledger baseline predates commits that already absorbed
+            // the worktree change; tolerate it so a retained checkpoint can
+            // still be finished rather than wedging the run.
+            if change.before == change.after {
+                continue;
+            }
+            if change.after.as_ref().map(|e| e.mode) != self.after.entries.get(path).map(|s| s.mode)
+            {
+                return Err(fail(format!(
+                    "changed path `{path}` has a file mode that disagrees with the captured worktree snapshot"
+                )));
+            }
+            if material > MAX_SCOPE_TOTAL_BYTES {
+                return Err(fail(format!(
+                    "changed paths exceed the {MAX_SCOPE_TOTAL_BYTES}-byte inventory bound; split the work explicitly"
+                )));
+            }
             for entry in [&change.before, &change.after].into_iter().flatten() {
-                reject(
-                    !valid_mode(entry.mode)
-                        || !valid_oid(&entry.oid)
-                        || entry.oid.len() != self.commit_id.len(),
-                    "prepared checkpoint has an invalid object ID or mode",
-                )?;
+                if !valid_mode(entry.mode)
+                    || !valid_oid(&entry.oid)
+                    || entry.oid.len() != self.commit_id.len()
+                {
+                    return Err(fail(format!(
+                        "changed path `{path}` has an invalid object ID or mode"
+                    )));
+                }
             }
         }
         Ok(())
@@ -889,7 +923,24 @@ impl Drop for IndexLock {
     }
 }
 
+/// Drop change records whose before and after entries are identical. Such a
+/// record carries no delta; it can appear in a checkpoint prepared by an
+/// older build (before preparation itself filtered them out), and it would
+/// otherwise fail validation and block recovery of an otherwise valid commit.
+fn without_noops(prepared: &PreparedCommit) -> PreparedCommit {
+    PreparedCommit {
+        changes: prepared
+            .changes
+            .iter()
+            .filter(|(_, change)| change.before != change.after)
+            .map(|(path, change)| (path.clone(), change.clone()))
+            .collect(),
+        ..prepared.clone()
+    }
+}
+
 pub(super) fn finish(context: &TaskContext, prepared: &PreparedCommit) -> Result<String> {
+    let prepared = without_noops(prepared);
     prepared.validate(context)?;
     let (head, branch) = head_branch(context)?;
     reject(
@@ -942,9 +993,12 @@ pub(super) fn finish(context: &TaskContext, prepared: &PreparedCommit) -> Result
             },
         );
     }
+    // `diff-tree` lists only paths whose content actually differs from the
+    // parent. `prepared` already had its no-op changes dropped by
+    // `without_noops`, so it matches the commit's real delta exactly.
     reject(
         actual != prepared.changes,
-        "prepared changes do not match their exact commit",
+        "prepared changes do not match their exact commit; the retained checkpoint lists changes the commit does not contain",
     )?;
     let index = index_path(context)?;
     let mut lock = IndexLock::acquire(&index, &prepared.commit_id)?;
@@ -982,7 +1036,7 @@ pub(super) fn finish(context: &TaskContext, prepared: &PreparedCommit) -> Result
         "worktree, branch or index lock changed before publication",
     )?;
     if head == prepared.expected_head {
-        advance(context, prepared)?;
+        advance(context, &prepared)?;
     }
     // HEAD may already have advanced on a prior attempt. Replacing only this
     // copied index's changed entries makes that recovery idempotent.

@@ -113,6 +113,33 @@ fn checkpoint_consecutive_commits_preserve_unrelated_staging_and_worktree() {
 }
 
 #[test]
+fn checkpoint_skips_paths_that_already_match_head_after_an_in_run_commit() {
+    let repo = Repo::new();
+    let before = capture(&repo.context).unwrap();
+    let head = ensure_clean(&repo.context, &before).unwrap();
+    // An in-run commit advances HEAD and brings the worktree with it. A file
+    // the run already committed now matches the new HEAD even though it
+    // differs from the run-start baseline. It must not reappear as a no-op
+    // change that validation rejects as an invalid changed path.
+    repo.write("component/TODOS.yaml", "queue2\n");
+    repo.git(&["add", "component/TODOS.yaml"]);
+    repo.git(&["commit", "-qm", "in-run commit"]);
+    // A genuine, still-uncommitted delta remains for the checkpoint.
+    repo.write("component/src/main.rs", "after\n");
+    let after = capture(&repo.context).unwrap();
+    let pending = prepare(&repo.context, &head, &before, &after, "checkpoint").unwrap();
+    assert!(
+        pending.changes.contains_key("src/main.rs"),
+        "the real delta must be kept"
+    );
+    assert!(
+        !pending.changes.contains_key("TODOS.yaml"),
+        "a path that already matches HEAD must not be a no-op change"
+    );
+    finish(&repo.context, &pending).unwrap();
+}
+
+#[test]
 fn checkpoint_preserves_executable_mode_and_deletion_and_literal_names() {
     let repo = Repo::new();
     let before = capture(&repo.context).unwrap();

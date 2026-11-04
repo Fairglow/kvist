@@ -150,6 +150,28 @@ fn run_locked(
                     "continuous-run files changed outside recorded execution; inspect retained effects before continuing; no task was replayed",
                 ));
             }
+            // Bounded re-baseline: when HEAD has advanced past the ledger's
+            // recorded expected_head (commits were made outside this run) and
+            // there is no pending checkpoint, a stale worktree baseline would
+            // otherwise diff against pre-HEAD state and mint no-op changes for
+            // every path that was committed in the interim. If the worktree is
+            // provably clean relative to the new HEAD (no orphaned uncommitted
+            // work, no staged overlap), refresh the baseline and expected_head
+            // so the ledger self-heals. When the worktree is dirty the stale
+            // baseline is left intact: the checkpoint's no-op tolerance then
+            // carries the genuine, still-uncommitted delta to publication.
+            // ensure_clean returns the HEAD only when the worktree and index
+            // are clean relative to it; a dirty worktree yields Err and the
+            // stale baseline is left intact for the no-op tolerance to carry.
+            if ledger.pending.is_none()
+                && let Some(expected) = ledger.expected_head.clone()
+                && let Ok(worktree) = checkpoint::capture(context)
+                && let Ok(head) = checkpoint::ensure_clean(context, &worktree)
+                && head != expected
+            {
+                ledger.baseline = worktree;
+                ledger.expected_head = Some(head);
+            }
             ledger
         }
         None => {

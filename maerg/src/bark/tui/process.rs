@@ -232,6 +232,41 @@ pub(super) struct Stream {
     redactor: crate::agent::redaction::StreamRedactor,
 }
 
+/// Render a captured line with terminal carriage-return semantics.
+///
+/// A `\r` returns the cursor to column zero and the following characters
+/// overwrite the line in place; the visible result is what a terminal would
+/// show. This collapses the agent's in-place progress updates (emitted as
+/// `\r`-prefixed rewrites) to their final state so the transcript records one
+/// clean line instead of every intermediate update. A bare `\r` immediately
+/// followed by a newline leaves the existing text untouched, matching a
+/// terminal.
+fn collapse_cr(line: &str) -> String {
+    let mut visible: Vec<char> = Vec::new();
+    let mut position = 0usize;
+    let mut newline = "";
+    for ch in line.chars() {
+        match ch {
+            '\r' => position = 0,
+            '\n' => {
+                newline = "\n";
+                break;
+            }
+            _ => {
+                if position == visible.len() {
+                    visible.push(ch);
+                } else {
+                    visible[position] = ch;
+                }
+                position += 1;
+            }
+        }
+    }
+    let mut rendered: String = visible.into_iter().collect();
+    rendered.push_str(newline);
+    rendered
+}
+
 impl Default for Stream {
     fn default() -> Self {
         Self::with_redactions(Vec::new())
@@ -280,7 +315,7 @@ impl Stream {
             };
             let line: String = self.pending.drain(..=end).collect();
             output.push_str(&crate::presentation::report_redacted(
-                &line,
+                &collapse_cr(&line),
                 &self.redactions,
             ));
         }
@@ -295,10 +330,8 @@ impl Stream {
         {
             return String::new();
         }
-        let output = crate::presentation::report_redacted(
-            &std::mem::take(&mut self.pending),
-            &self.redactions,
-        );
+        let pending = std::mem::take(&mut self.pending);
+        let output = crate::presentation::report_redacted(&collapse_cr(&pending), &self.redactions);
         let mut output = self.redactor.absorb(&output);
         if finished {
             output.push_str(&self.redactor.finish());
@@ -334,6 +367,21 @@ mod tests {
             output.push_str(&stream.flush(true));
             assert_eq!(output, source, "chunk size {size}");
         }
+    }
+
+    #[test]
+    fn carriage_return_progress_rewrites_collapse_to_the_final_update() {
+        // The agent rewrites one status line in place with a bare carriage
+        // return each turn. The transcript must record the final update, not
+        // every intermediate rewrite, and a bare \r before a newline must not
+        // erase the line that precedes it.
+        let mut stream = Stream::default();
+        let output = stream
+            .push("\r\u{27f3} Turn 1 \u{2502} reads: 0\r\u{27f3} Turn 2 \u{2502} reads: 5\n")
+            .unwrap();
+        assert_eq!(output, "\u{27f3} Turn 2 \u{2502} reads: 5\n");
+        let output = stream.push("plain line\r\n").unwrap();
+        assert_eq!(output, "plain line\n");
     }
 
     #[test]

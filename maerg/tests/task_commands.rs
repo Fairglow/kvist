@@ -991,7 +991,6 @@ command = "/usr/bin/echo 'mocking verify'"
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8(output.stderr.clone()).expect("diagnostic text");
-    assert_eq!(stderr.lines().count(), 7);
     assert_eq!(stderr.matches("Running protected task ").count(), 1);
     assert_eq!(
         stderr
@@ -1000,10 +999,11 @@ command = "/usr/bin/echo 'mocking verify'"
         1
     );
     assert_eq!(stderr.matches("Execution limits: ").count(), 1);
-    assert_eq!(
-        stderr.matches("Starting inference: approximately ").count(),
-        2
-    );
+    // The per-turn progress line is rewritten in place (carriage return +
+    // line clear) rather than emitted as a fresh "Starting inference" line,
+    // so it must appear for each model turn without spamming the transcript.
+    assert_eq!(stderr.matches("⟳ Turn ").count(), 2);
+    assert!(!stderr.contains("Starting inference"));
     assert!(stderr.contains("role `developer`, selected model"));
     assert!(
         stderr
