@@ -682,15 +682,15 @@ tasks:
     purpose: "Close the argv option-injection gap."
     expected_outcome: "bwrap argv boundary prevents option injection; cargo test --locked passes."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "bwrap-argv-boundary-write-tests"
     requirements:
       - "CONTRACT.md#Behavioral-guarantees"
     timestamps:
       created_at: "2026-11-02T22:11:51Z"
-      updated_at: "2026-11-03T19:16:49Z"
-      completed_at: null
+      updated_at: "2026-11-04T16:36:21Z"
+      completed_at: "2026-11-04T16:36:21Z"
     blocked_reason: null
     recovery_state: null
   - id: "enable-native-e2e-write-tests"
@@ -700,14 +700,14 @@ tasks:
     purpose: "Ensure the enabled native e2e tests work correctly and provide the enforcement evidence needed by the security audit."
     expected_outcome: "Tests pass, confirming the enabled native e2e tests execute correctly and provide enforcement evidence."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
     timestamps:
       created_at: "2026-11-03T18:40:59Z"
-      updated_at: "2026-11-03T18:40:59Z"
-      completed_at: null
+      updated_at: "2026-11-04T23:24:58Z"
+      completed_at: "2026-11-04T23:24:58Z"
     blocked_reason: null
     recovery_state: null
   - id: "enable-native-e2e-implement-code"
