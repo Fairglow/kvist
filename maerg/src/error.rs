@@ -692,14 +692,35 @@ impl KvistError {
     /// Writes this error using the parser's output policy when applicable.
     pub fn print(&self) -> io::Result<()> {
         match self {
-            Self::ArgumentParsing(error) => error.print(),
+            Self::ArgumentParsing(error) => {
+                if error.kind() == clap::error::ErrorKind::DisplayVersion {
+                    return error.print();
+                }
+                let text = crate::presentation::document(
+                    if error.exit_code() == 0 {
+                        "Kvist Help"
+                    } else {
+                        "Command error"
+                    },
+                    &crate::presentation::fence(&error.to_string(), "text"),
+                );
+                if error.use_stderr() {
+                    writeln!(io::stderr().lock(), "{text}")
+                } else {
+                    writeln!(io::stdout().lock(), "{text}")
+                }
+            }
             Self::JsonCommandFailure { output } => {
                 let mut stderr = io::stderr().lock();
                 writeln!(stderr, "{output}")
             }
             _ => {
                 let mut stderr = io::stderr().lock();
-                writeln!(stderr, "error: {self}")
+                writeln!(
+                    stderr,
+                    "{}",
+                    crate::presentation::document("Error", &format!("error: {self}"))
+                )
             }
         }
     }

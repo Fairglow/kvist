@@ -12,7 +12,7 @@ mod live;
 use live::{LiveRun, ObservedTransport};
 mod controls;
 use controls::RunControls;
-mod redaction;
+pub(crate) mod redaction;
 use redaction::StreamRedactor;
 mod accounting;
 mod cancellation;

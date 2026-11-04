@@ -190,7 +190,7 @@ fn invalid_discovery_configuration_propagates_to_tree_doctor_and_init() {
         .output()
         .expect("run doctor");
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("state: invalid"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("**State:** invalid"));
 }
 
 #[test]

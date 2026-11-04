@@ -62,7 +62,7 @@ cross-cutting concern. No aliases, no overlapping subgroups:
 
 | Concern             | Canonical command                                        |
 | ------------------- | -------------------------------------------------------- |
-| interactive work    | `kvist shell`                                            |
+| interactive work    | `kvist`                                                  |
 | inspect state       | `kvist status` (default view), `tree`, `doctor`          |
 | recover a project   | `kvist repair`                                           |
 | create component    | `kvist component new`                                    |
@@ -137,10 +137,11 @@ Guidance is part of the contract, not an afterthought:
   lists each changed document with expected vs. observed revision and a
   hint to diff the listed documents against the last accepted revision
   (e.g. `git diff HEAD -- <path>` under Git) to see _what_ changed.
-- **Bare `kvist`** (no arguments) inside a project prints the same overview
-  as `kvist status` plus a footer pointing at `kvist help` — so the answer
-  to "what do I do now?" is always one keystroke away. Outside a project it
-  prints the guided help.
+- **Bare `kvist`** (no arguments) opens the interactive workspace when
+  stdin/stdout are terminals, at the resolved project or current directory
+  before initialization. Redirected invocation remains a finite Markdown
+  overview, or guided help outside a project. Global `--json` never opens a
+  workspace.
 - **Success messages** for gating commands name the next stage: after
   `component accept`, the output reports whether the component is current or
   remains blocked and names `task next` or the blocked-task transition; after a run finishes, it points at `task log` and
@@ -183,8 +184,8 @@ script: no confirmation, no pager, no terminal.
 
 | Command                                                                                                       | Form                                                                                                               | Purpose (when to use)                                               |
 | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| `kvist`                                                                                                       | _(no args)_                                                                                                        | Inside a project: overview + what to do next. Outside: guided help. |
-| `kvist shell [PROJECT_DIR]`                                                                                   | start the interactive workspace shell (recommended entry point)                                                    |
+| `kvist`                                                                                                       | _(no args)_                                                                                                        | Open the workspace; redirected output is a finite overview. |
+| `kvist shell [PROJECT_DIR]`                                                                                   | explicit project selection for the same workspace                                                    |
 | `kvist status [PROJECT_DIR] [--format overview\|text\|json] [--only-documents] [--only-impls] [--unfinished]` | "where do I stand?" — overview by default; stable text/json for scripts                                            |
 | `kvist tree [PROJECT_DIR]`                                                                                    | browse the component hierarchy                                                                                     |
 | `kvist doctor [PROJECT_DIR]`                                                                                  | verify root artifacts, VCS, versions (read-only health check)                                                      |
@@ -240,7 +241,7 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
 
 ### 4.5 The interactive TUI and Markdown-first output
 
-The `kvist shell` is a full-screen terminal UI in the shape of the `skott`
+Bare `kvist` opens a full-screen terminal UI in the shape of the `skott`
 layout, not a line-oriented REPL:
 
 - **Status heading.** Shows the active component together with its state and
@@ -266,6 +267,40 @@ with the `blad` renderer so tables, diagrams, math, and code blocks display
 with full fidelity. The stable `status --format text` and `--format json`
 report forms are unchanged for non-interactive consumers, and the plain-text
 degradation contract still applies when the terminal cannot host the TUI.
+Global `--json`, generated completion scripts and internal effect protocols
+retain their native formats. Agent/tool JSON objects become readable metadata,
+tables and decoded Markdown report bodies in the transcript.
+
+The host owns terminal drawing; child commands use isolated pipes, never a
+nested terminal UI. Input while a command runs supplies its stdin; answers are
+masked and excluded from history. Ctrl+C cancels the owned command without
+claiming rollback. Ctrl+D on empty input closes a running command's stdin (EOF)
+or exits when idle. Ctrl+Q always quits, cancelling/reaping an active command.
+`exit` also quits when idle. Host-execution prompt opt-outs require the
+standalone interactive command, not the embedded workspace.
+
+| Key | Action |
+| --- | --- |
+| Tab / Shift+Tab | Open/cycle completions; Enter accepts a selection |
+| Up / Down | Command recall (or completion/menu selection) |
+| F1 / F2 | Scrollable Markdown shortcut help / settings |
+| PageUp / PageDown; mouse wheel | Browse transcript, including older segments |
+| Ctrl+Home / Ctrl+End | Oldest history / resume following latest output |
+| Alt+Left / Alt+Right | Horizontal transcript scrolling |
+| Escape | Close overlay or completion |
+| Ctrl+C / Ctrl+D / Ctrl+Q | Cancel or clear input / EOF (idle: exit) / quit and reap |
+
+History is private local diagnostic state at `.kvist/transcript/` for the
+project and each selected component. Numbered Markdown pages target 1 MiB,
+rotate between top-level blocks, and allow an individual block up to 16 MiB;
+larger blocks fail capture explicitly. No total retention limit deletes older
+pages. The global scrollbar allocates one band per segment, with local line
+precision. Only the current bounded page is rendered; cross-page reference
+links/footnotes are not a whole-history document. Command recall retains at
+most 500 entries. A competing writer, unsafe file or recording error fails
+explicitly. Do not treat transcript text as execution or compliance evidence.
+Unsupported/small terminals, `NO_COLOR`, `CLICOLOR=0` or `TERM=dumb` retain the
+line-oriented fallback.
 
 **Settings menu.** The TUI provides a settings menu (the `skott` overlay
 pattern) exposing model, reasoning effort, session history, component

@@ -9,6 +9,28 @@ use tempfile::NamedTempFile;
 
 use crate::{KvistError, Result};
 
+/// Reads the same nonfollowing regular descriptor with an inclusive byte bound.
+pub(crate) fn read_text_bounded(path: &Path, limit: usize) -> io::Result<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("expected a regular non-link file"));
+    }
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::FileTooLarge,
+            format!("{} exceeds the {limit}-byte limit", path.display()),
+        ));
+    }
+    String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
 /// Writes UTF-8 content through a same-directory temporary file without ever
 /// replacing an existing destination.
 pub(crate) fn write_new_file_atomically(destination: &Path, contents: &str) -> Result<()> {

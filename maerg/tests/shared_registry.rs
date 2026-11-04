@@ -126,7 +126,7 @@ fn shared_agent_list_renders_one_authoritative_catalogue_and_scoped_role_binding
         }
         let listing = agent_list(&root);
         for id in ["coder", "fallback", "external"] {
-            assert_eq!(listing.matches(&format!("• {id}:")).count(), 1, "{listing}");
+            assert_eq!(listing.matches(&format!("- {id}:")).count(), 1, "{listing}");
         }
         assert!(
             listing.contains(&format!(
@@ -177,7 +177,7 @@ fn agent_list_uses_the_selected_shared_user_source_without_legacy_empty_warning(
     );
     assert!(listing.contains("developer -> fallback"), "{listing}");
     assert!(!listing.contains("no models configured"), "{listing}");
-    assert_eq!(listing.matches("• coder:").count(), 1, "{listing}");
+    assert_eq!(listing.matches("- coder:").count(), 1, "{listing}");
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn agent_list_uses_the_selected_project_local_shared_source_instead_of_global_mo
     assert!(listing.contains("developer -> fallback"), "{listing}");
     assert!(!listing.contains("no models configured"), "{listing}");
     assert!(!listing.contains("global-unrelated"), "{listing}");
-    assert_eq!(listing.matches("• coder:").count(), 1, "{listing}");
+    assert_eq!(listing.matches("- coder:").count(), 1, "{listing}");
 }
 
 #[test]
@@ -247,15 +247,18 @@ fn legacy_agent_list_preserves_explicit_project_and_user_profile_scopes() {
     .unwrap();
     let listing = agent_list(&root);
     assert!(
-        listing.contains("Configured Models in Project:"),
+        listing.contains("### Configured Models in Project"),
         "{listing}"
     );
-    assert!(listing.contains("• project-local"), "{listing}");
+    assert!(listing.contains("- project-local"), "{listing}");
     assert!(
-        listing.contains(&format!("Global User Profiles ({}):", user_path.display())),
+        listing.contains(&format!(
+            "### Global User Profiles ({})",
+            user_path.display()
+        )),
         "{listing}"
     );
-    assert!(listing.contains("• global-unrelated"), "{listing}");
+    assert!(listing.contains("- global-unrelated"), "{listing}");
     assert!(
         !listing.contains("Shared profiles referenced by"),
         "{listing}"

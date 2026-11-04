@@ -8,8 +8,10 @@ development. The project is still a work in progress; [Status](#status)
 describes what is ready today. Its durable hierarchy is `VISION.md` ->
 `ARCHITECTURE.md` -> per-component `REQUIREMENTS.md` + `CONTRACT.md` +
 `DESIGN.md` -> `TODOS.yaml` -> `IMPL.md`. Its current interface is
-command-line based; graphical and editor integrations are planned without
-changing that model. Kvist currently builds and runs on Linux only. macOS and
+Markdown-first, with an interactive terminal workspace launched by bare
+`kvist` and the same commands available for headless use. Graphical and editor
+integrations are planned without changing that model. Kvist currently builds
+and runs on Linux only. macOS and
 Windows support is intentionally deferred until native maintainers and test
 environments can validate their execution boundaries.
 The product vision is defined in [`VISION.md`](VISION.md), the approved system

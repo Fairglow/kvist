@@ -100,7 +100,7 @@ impl ComponentPrefill {
         true
     }
 
-    fn insertion(&self, line: &str, cursor: usize) -> Option<String> {
+    pub(super) fn insertion(&self, line: &str, cursor: usize) -> Option<String> {
         let focus = self.quoted_focus()?;
         // Only a genuinely empty argument is filled. Never complete a partial
         // token or insert within a quoted word.

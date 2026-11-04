@@ -982,10 +982,11 @@ mod tests {
             "locks",
             "exit",
             "quit",
+            "settings",
         ] {
             assert!(got.contains(&name), "missing {name} in {got:?}");
         }
-        assert_eq!(got.len(), 17 + 11);
+        assert_eq!(got.len(), 17 + 12);
     }
 
     #[test]

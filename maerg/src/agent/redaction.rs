@@ -1,13 +1,13 @@
 use std::io::{self, Write};
 
 /// Streaming longest-match redaction at UTF-8 boundaries.
-pub(super) struct StreamRedactor {
+pub(crate) struct StreamRedactor {
     values: Vec<String>,
     carry: String,
 }
 
 impl StreamRedactor {
-    pub(super) fn new(values: &[String]) -> Self {
+    pub(crate) fn new(values: &[String]) -> Self {
         Self {
             values: values
                 .iter()
@@ -18,7 +18,7 @@ impl StreamRedactor {
         }
     }
 
-    pub(super) fn absorb(&mut self, delta: &str) -> String {
+    pub(crate) fn absorb(&mut self, delta: &str) -> String {
         self.carry.push_str(delta);
         self.scan(false)
     }
@@ -54,7 +54,7 @@ impl StreamRedactor {
         output
     }
 
-    pub(super) fn finish(&mut self) -> String {
+    pub(crate) fn finish(&mut self) -> String {
         self.scan(true)
     }
 

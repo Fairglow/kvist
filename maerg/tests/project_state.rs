@@ -39,8 +39,8 @@ fn doctor_reports_state_diagnostics_without_writing() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("state: partial"));
-    assert!(stdout.contains("ROOT_CONTRACT.md: missing"));
+    assert!(stdout.contains("**State:** partial"));
+    assert!(stdout.contains("| ROOT\\_CONTRACT.md | missing |"));
     assert!(stdout.contains("run `kvist repair --dry-run`"));
     assert!(stdout.contains("`kvist repair` applies lossless metadata repairs"));
     assert!(stdout.contains("Destructive recovery requires exact approval"));

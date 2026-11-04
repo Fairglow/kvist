@@ -787,6 +787,22 @@ executable tests.
 
 ### REQ-INTERACTIVE-TUI
 
+Bare `kvist` MUST open the workspace on capable interactive stdin/stdout.
+Redirected invocation MUST remain finite; `--json` MUST never enter a TUI.
+The explicit `shell` entry remains available for a project-directory argument
+and for the line-oriented degradation path. This human-requested transition
+has an explicit advisory exception while review receipts are unavailable.
+
+The terminal host MUST exclusively own drawing and keyboard input. Child
+commands MUST use argument-vector dispatch, isolated stdout/stderr and the
+existing cancellation/authority boundaries. Live output, errors, tool results
+and JSON `report` strings MUST become readable Markdown, not opaque escaped
+JSON. Structured report metadata MUST remain inspectable. Terminal controls
+from children MUST NOT execute in the host terminal. Execution MUST remain
+responsive to transcript navigation and cancellation; quitting MUST reap the
+owned command. Pasted multiline input MUST NOT execute multiple commands
+without individual submission.
+
 The interactive shell MUST be a full-screen terminal UI in the shape of the
 `skott` layout: a status heading, a scrollable main transcript area, and a
 command footer. The status heading MUST show the active component together with
@@ -803,6 +819,12 @@ project state) and MUST provide keyboard-shortcut help rendered the same way
 when the terminal cannot host it.
 
 ### REQ-TRANSCRIPT-PERSISTENCE
+
+Persistence MUST retain canonical Markdown, not terminal escape sequences.
+Memory and individual file reads MUST be bounded independently of total
+history size. Older segments MUST remain reachable without loading the entire
+history. Private history MUST reject symlinks/nonregular files, report
+recording failures, and never masquerade as canonical task evidence.
 
 The main transcript area MUST be a bounded on-screen window over a durable,
 per-component, disk-persisted record of every interaction with Kvist (commands

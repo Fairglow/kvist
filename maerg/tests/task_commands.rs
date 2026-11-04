@@ -472,7 +472,7 @@ fn task_next_selects_the_first_ready_task_without_writing_the_queue() {
 
     assert!(output.status.success());
     assert_eq!(output.stderr, b"");
-    assert_eq!(output.stdout, b"implement-code\n");
+    assert_eq!(output.stdout, b"# Task Result\n\nimplement-code\n");
     assert_eq!(fs::read(&queue_path).expect("read after"), before);
 }
 
@@ -506,7 +506,7 @@ fn task_transition_writes_auditable_atomic_state_change() {
     assert_eq!(output.stderr, b"");
     assert_eq!(
         output.stdout,
-        b"transitioned implement-code to in-progress\n"
+        b"# Task Result\n\ntransitioned implement-code to in-progress\n"
     );
     let queue = fs::read_to_string(&queue_path).expect("read updated queue");
     assert!(queue.contains("id: \"implement-code\""));

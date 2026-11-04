@@ -143,8 +143,9 @@ not certified or silently waived; explicit human `kvist vendor` is separate.
 The `kvist` executable provides (the authoritative design is
 [`docs/command-set.md`](../docs/command-set.md)):
 
-- _(no arguments)_: inside a project, the human-friendly project overview plus
-  a tip pointing at `kvist help`; outside a project, the guided top-level help
+- _(no arguments)_: on capable interactive stdin/stdout, open the workspace;
+  redirected invocation retains a finite project overview or top-level help.
+  Global `--json` always retains its finite machine-readable response.
 - `shell [PROJECT_DIR]`
 - `init [PROJECT_DIR]`
 - `convert PROJECT_DIR`
@@ -775,6 +776,37 @@ live locks from stale ones. Destructive operations (`task unlock --force`,
 require an explicit in-shell confirmation.
 
 ### Markdown-first output and the interactive TUI
+
+Bare `kvist` is the primary interactive entry. `shell [PROJECT_DIR]` remains
+an explicit entry and the Reedline degradation path. `NO_COLOR`, `CLICOLOR=0`,
+`TERM=dumb`, redirected stdout, and terminals too small for the layout select
+line-oriented presentation. Explicit JSON/text formats, generated completion
+scripts and internal effect-applier output retain their machine contracts.
+
+The workspace captures child stdout/stderr without a shell. Its command
+footer stays available during execution for interactive answers; Ctrl+C
+requests cancellation, not rollback or replay. PageUp/PageDown and mouse wheel
+browse output without editing input; Ctrl+Home/End reach history ends.
+Tab/Shift+Tab navigate completion, Enter accepts a visible candidate before
+submission, Up/Down recall command history, F1 opens help and F2 settings.
+Escape dismisses completion/overlays. Pasted newlines are input, never a batch
+execution request. Destructive confirmations remain explicit.
+
+Transcript segments live in private `.kvist/transcript/` directories (project
+scope) and component `.kvist/transcript/` directories (focused scope).
+Segments target 1 MiB at top-level Markdown block boundaries; an indivisible
+block is limited to 16 MiB. Oversized blocks produce an explicit capture error
+and cancellation rather than truncation or broken Markdown. The global
+scrollbar allocates equal bands to segments and tracks rendered lines within
+the selected segment; it does not pretend all historical line counts are
+loaded. There is no automatic history deletion.
+Ctrl+D with empty input closes child stdin (EOF), or exits when idle. Ctrl+Q
+quits and cancels/reaps any active command. Each bounded page is an independent
+Markdown document; reference links and footnotes do not resolve across pages.
+The viewport loads one bounded segment at a time and navigation crosses
+segment boundaries. History is local diagnostic
+state, not acceptance or compliance evidence. Recording failures are fatal to
+the workspace rather than silently losing interactions.
 
 Every command reports its result as a well-formed Markdown document that is the
 canonical description of that result. The interactive shell renders that

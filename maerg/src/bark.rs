@@ -53,6 +53,7 @@ mod stream;
 mod style;
 mod theme;
 mod tree;
+pub(crate) mod tui;
 
 use std::borrow::Cow;
 use std::io::{self, BufRead, IsTerminal, Write};
@@ -314,6 +315,14 @@ impl Shell {
         };
 
         match program.as_str() {
+            "settings" if arguments.is_empty() => {
+                display_output(
+                    "# Settings\n\nThe settings overlay requires the full-screen workspace. In this terminal use `theme`, `agent role`, and `cd` commands.",
+                );
+                self.journal
+                    .append(journal_entry(&line, "settings guidance"));
+                self.note(false);
+            }
             "journal" => {
                 display_session_status(self.theme, &self.journal);
                 self.journal.append(journal_entry(&line, "shown"));
@@ -1095,7 +1104,7 @@ struct TaskRow {
 }
 
 /// The CLI spelling of a durable task status.
-fn status_label(status: TaskStatus) -> &'static str {
+pub(crate) fn status_label(status: TaskStatus) -> &'static str {
     match status {
         TaskStatus::Pending => "pending",
         TaskStatus::InProgress => "in-progress",
@@ -1244,13 +1253,22 @@ fn status_style(theme: Theme, status: TaskStatus) -> String {
 /// The exact next command for a non-current task row, so a blocked or paused
 /// task never appears without the step that resolves it (same command logic
 /// as the status report).
-fn next_command_for(
+pub(crate) fn next_command_for(
     task: &task_queue::Task,
     tasks: &[task_queue::Task],
     component: &str,
 ) -> Option<String> {
     match task.status {
         TaskStatus::Blocked => {
+            let component = if component
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-'))
+                && !component.starts_with('-')
+            {
+                component.to_owned()
+            } else {
+                crate::task_commands::decisions::component_argument(std::path::Path::new(component))
+            };
             if task_queue::dependencies_completed(task, tasks) {
                 Some(format!(
                     "kvist task transition {component} {} pending",
@@ -1266,7 +1284,13 @@ fn next_command_for(
             }
         }
         TaskStatus::AwaitingDecision => {
-            Some("human decision needed; 'kvist help task-states' explains resuming".to_owned())
+            let component = crate::task_commands::decisions::component_argument(
+                std::path::Path::new(component),
+            );
+            Some(format!(
+                "human decision needed; kvist decision {component} show '{}' (see 'kvist help task-states')",
+                task.id.replace('\'', "'\\''")
+            ))
         }
         _ => None,
     }
@@ -1653,6 +1677,9 @@ const MAX_CONSECUTIVE_READ_FAILURES: u32 = 3;
 
 /// Launches and runs the persistent interactive workspace shell (REPL).
 pub fn run_shell(project_dir: &Path) -> Result<()> {
+    if tui::available() {
+        return tui::run(project_dir);
+    }
     // The line editor requires an interactive terminal; refuse early with an
     // actionable diagnostic instead of dying inside reedline's read loop.
     if !std::io::stdin().is_terminal() {

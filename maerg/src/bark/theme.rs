@@ -281,7 +281,7 @@ impl Theme {
                 Preference::Path(path) => match load_theme_file(&path) {
                     Ok(id) => id,
                     Err(error) => {
-                        eprintln!("warning: {error}; falling back to the detected theme");
+                        tracing::warn!(%error, "theme unavailable; falling back to the detected theme");
                         detect_id()
                     }
                 },
@@ -442,7 +442,14 @@ pub fn user_preference_path() -> PathBuf {
 
 /// Reads a preference file (one line: a name or a path), tolerating absence.
 fn read_preference_file(path: PathBuf) -> Option<String> {
-    let contents = std::fs::read_to_string(path).ok()?;
+    let contents = match crate::file_io::read_text_bounded(&path, 8192) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            tracing::warn!(%error, path = %path.display(), "cannot read theme preference; ignoring it");
+            return None;
+        }
+    };
     let line = contents.lines().next()?.trim().to_owned();
     (!line.is_empty()).then_some(line)
 }
@@ -467,54 +474,45 @@ pub fn save_preference(project_dir: &Path, value: &str) -> Result<(), KvistError
         source,
     })?;
     let path = kvist_dir.join("theme");
-    let tmp = kvist_dir.join(format!(".theme.tmp.{}", std::process::id()));
-    std::fs::write(&tmp, format!("{value}\n")).map_err(|source| KvistError::Io {
-        operation: "write the theme preference",
-        path: tmp.clone(),
-        source,
-    })?;
-    std::fs::rename(&tmp, &path).map_err(|source| KvistError::Io {
-        operation: "persist the theme preference",
-        path,
-        source,
-    })
+    crate::file_io::replace_file_atomically(&path, &format!("{value}\n"))
 }
 
-/// Loads and registers the user theme spec, once per process. A missing or
-/// unreadable file is silently ignored (it is optional); an invalid spec is
-/// reported once so a broken file does not silently vanish.
+/// Loads an optional user theme once; only absence is silently ignored.
 fn load_user_theme_file() {
     static LOADED: OnceLock<()> = OnceLock::new();
     if LOADED.get().is_some() {
         return;
     }
-    if let Err(error) = load_theme_file(&user_theme_path()) {
-        // Only report a file that exists: a missing user theme is normal.
-        if user_theme_path().exists() {
-            eprintln!("warning: {error}");
-        }
+    if let Err(error) = load_theme_file(&user_theme_path())
+        && !matches!(&error, KvistError::Io { source, .. } if source.kind() == io::ErrorKind::NotFound)
+    {
+        tracing::warn!(%error, "cannot load optional user theme");
     }
     let _ = LOADED.set(());
 }
 
 /// Loads one theme spec file, registers it, and returns its id.
 pub fn load_theme_file(path: &Path) -> Result<u16, KvistError> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|source| KvistError::Io {
-        operation: "inspect theme spec",
+    let canonical = path.canonicalize().map_err(|source| KvistError::Io {
+        operation: "resolve theme spec",
         path: path.to_path_buf(),
         source,
     })?;
-    if metadata.len() > MAX_THEME_SPEC_BYTES {
-        return Err(KvistError::ThemeSpecTooLarge {
-            path: path.to_path_buf(),
-            max_bytes: MAX_THEME_SPEC_BYTES,
-        });
-    }
-    let contents = std::fs::read_to_string(path).map_err(|source| KvistError::Io {
-        operation: "read theme spec",
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let contents = crate::file_io::read_text_bounded(&canonical, MAX_THEME_SPEC_BYTES as usize)
+        .map_err(|source| {
+            if source.kind() == io::ErrorKind::FileTooLarge {
+                KvistError::ThemeSpecTooLarge {
+                    path: path.to_path_buf(),
+                    max_bytes: MAX_THEME_SPEC_BYTES,
+                }
+            } else {
+                KvistError::Io {
+                    operation: "read bounded regular theme spec",
+                    path: path.to_path_buf(),
+                    source,
+                }
+            }
+        })?;
     let spec = parse_theme_spec(&contents)?;
     let id = register(ThemeDef {
         name: spec.name.clone(),
@@ -1052,6 +1050,32 @@ agent_background = "black"
         assert_eq!(Theme::by_id(id).name(), "test-custom-rt");
         assert_eq!(Theme::by_id(id).palette().prompt, "32");
         assert_eq!(match_preference("test-custom-rt"), Preference::Named(id));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn theme_and_preference_reads_reject_fifos_and_bound_link_targets() {
+        let directory = tempfile::tempdir().unwrap();
+        let fifo = directory.path().join("fifo");
+        nix::unistd::mkfifo(
+            &fifo,
+            nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+        )
+        .unwrap();
+        assert!(load_theme_file(&fifo).is_err());
+        assert!(read_preference_file(fifo).is_none());
+        let target = directory.path().join("large.toml");
+        std::fs::write(&target, "x".repeat(MAX_THEME_SPEC_BYTES as usize + 1)).unwrap();
+        let link = directory.path().join("linked.toml");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(matches!(
+            load_theme_file(&link),
+            Err(KvistError::ThemeSpecTooLarge { .. })
+        ));
+        std::fs::write(&target, "name = \"safe-linked-theme\"").unwrap();
+        assert!(load_theme_file(&link).is_ok());
+        std::fs::write(&target, "x".repeat(8193)).unwrap();
+        assert!(read_preference_file(target).is_none());
     }
 
     #[test]

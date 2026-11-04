@@ -1179,7 +1179,10 @@ dependencies = [
  "galla",
  "getrandom 0.4.3",
  "hex",
+ "kvist-blad",
  "nix 0.31.3",
+ "pulldown-cmark",
+ "ratatui",
  "reedline",
  "sav",
  "serde",
@@ -1193,6 +1196,9 @@ dependencies = [
  "toml_edit",
  "tracing",
  "tracing-subscriber",
+ "unicode-segmentation",
+ "unicode-width",
+ "vte 0.15.0",
 ]
 
 [[package]]

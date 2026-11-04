@@ -45,16 +45,33 @@ kvist --version
 kvist --help
 ```
 
-### 1.2 The Interactive Shell
+### 1.2 The Markdown Workspace
 
-For the best developer experience, launch Kvist's interactive shell:
+For the best developer experience, launch Kvist's workspace inside a project:
 
 ```bash
-kvist shell
+kvist
 ```
 
 The shell is a full-screen terminal UI in the shape of the `skott` layout, not a
 line-oriented REPL:
+
+Use F1 for Markdown shortcut help and F2 for settings. PageUp/PageDown and the
+mouse wheel browse the transcript; its scrollbar spans all history pages.
+Ctrl+Home jumps to the oldest page; Ctrl+End resumes following new output.
+Ctrl+C cancels the running command without rolling back effects; Ctrl+D on an
+empty input sends EOF to the command or exits when idle. Ctrl+Q always exits,
+cancelling and reaping any active command. While a command runs, footer
+input answers its stdin; answers are masked and never saved.
+
+History lives privately in `.kvist/transcript/` at project and component scope.
+Numbered Markdown pages target 1 MiB and rotate between complete top-level
+blocks (maximum indivisible block: 16 MiB). Older pages are not deleted.
+Each page renders independently; cross-page reference links/footnotes are not
+resolved as a single whole-history document. This diagnostic history is not
+compliance evidence. Model/effort settings still require normal policy review
+and reapproval when configuration changes. `kvist shell PATH` remains available
+for explicit project selection. Redirected bare invocation stays finite.
 
 - **Status Heading:** Shows the active component together with its state and
   task progress, plus the active VCS branch, the sandbox backend, the default
@@ -564,7 +581,7 @@ For detailed instructions on compliance reviews, refer to [`REVIEW_RUNBOOK.md`](
 | Command                     | Description                                                                                                                                                                                  |
 | :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kvist` _(no args)_         | Inside a project: the project overview and what to do next. Outside: the guided help.                                                                                                        |
-| `kvist shell`               | Start the interactive development shell with auto-completions.                                                                                                                               |
+| `kvist`                     | Open the Markdown workspace with command input and dynamic tab-completion. |
 | `kvist doctor [DIR]`        | Check project health, versions, and VCS configuration.                                                                                                                                       |
 | `kvist status [DIR]`        | "Where do I stand?" States, task progress, changed documents with expected/observed revisions, and the exact next action per component. `--format text\|json` for stable script forms.       |
 | `kvist tree [DIR]`          | Render an ASCII component tree.                                                                                                                                                              |

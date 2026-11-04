@@ -479,8 +479,8 @@ fn status_overview_reports_compact_docs_and_task_progress() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("UTF-8 status");
     assert!(stdout.contains("Project Status"));
-    assert!(stdout.contains("Documents: all valid (5/5)"));
-    assert!(stdout.contains("Progress:"));
+    assert!(stdout.contains("| IMPL.md | valid |"));
+    assert!(stdout.contains("**Task progress:** 0/0 completed"));
 
     // A bare `status` defaults to the same human-friendly view.
     let output2 = run_kvist(&[
@@ -490,7 +490,7 @@ fn status_overview_reports_compact_docs_and_task_progress() {
     assert!(output2.status.success());
     let stdout2 = String::from_utf8(output2.stdout).expect("UTF-8 status");
     assert!(stdout2.contains("Project Status"));
-    assert!(stdout2.contains("Documents: all valid (5/5)"));
+    assert_eq!(stdout2, stdout);
 }
 
 #[test]
@@ -511,12 +511,12 @@ fn status_overview_lists_changed_documents_with_revisions_and_diff_hint() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("UTF-8 overview");
     assert!(stdout.contains("Component: ."));
-    assert!(stdout.contains("State:     stale"));
-    assert!(stdout.contains("Changed:   DESIGN.md"));
-    assert!(stdout.contains("expected  sha256:"));
-    assert!(stdout.contains("observed  sha256:"));
+    assert!(stdout.contains("**State:** stale"));
+    assert!(stdout.contains("### Changed document: DESIGN.md"));
+    assert!(stdout.contains("| expected | sha256:"));
+    assert!(stdout.contains("| observed | sha256:"));
     assert!(stdout.contains("git diff HEAD -- src/DESIGN.md"));
-    assert!(stdout.contains("kvist component accept ."));
+    assert!(stdout.contains("kvist component accept '.'"));
 }
 
 /// A blocked component lists each blocked task with its reason and the exact
@@ -642,21 +642,19 @@ fn status_blocked_details_list_reasons_and_exact_next_commands() {
     assert!(overview.status.success());
     let stdout = String::from_utf8(overview.stdout).expect("UTF-8 overview output");
     assert!(stdout.contains("1 awaiting-decision"));
-    assert!(stdout.contains(
-        "Action:    Resolve the blocked tasks below; 'kvist help task-states' explains each state and its resolution."
-    ));
-    assert!(stdout.contains("Blocked:   blocked-ready"));
+    assert!(stdout.contains("kvist help task-states"));
+    assert!(stdout.contains("### blocked: blocked-ready"));
     // The reason is shown in full: no ellipsis truncation.
     assert!(stdout.contains(
-        "reason: missing test-command policy for component `x`. Please define a command for it in `kvist.toml` under `[test_policy]` and approve it"
+        "missing test-command policy for component `x`. Please define a command for it in `kvist.toml` under `[test_policy]` and approve it"
     ));
-    assert!(stdout.contains("next:   kvist task transition . blocked-ready pending"));
-    assert!(stdout.contains("Blocked:   blocked-waiting"));
+    assert!(stdout.contains("kvist task transition . blocked-ready pending"));
+    assert!(stdout.contains("### blocked: blocked-waiting"));
     assert!(stdout.contains(
-        "next:   kvist task transition . blocked-waiting pending (1 dependency task incomplete)"
+        "kvist task transition . blocked-waiting pending (1 dependency task incomplete)"
     ));
-    assert!(stdout.contains("Decisions: paused"));
-    assert!(stdout.contains("next:   human decision needed; kvist decision '.' show 'paused'"));
+    assert!(stdout.contains("### awaiting-decision: paused"));
+    assert!(stdout.contains("human decision needed; kvist decision '.' show 'paused'"));
 }
 
 /// The stable text report names a next step for unsupported-version components.
@@ -729,12 +727,12 @@ fn status_overview_names_invalid_queue_defect_and_repair_action() {
     ]);
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("UTF-8 overview");
-    assert!(stdout.contains("(invalid)"));
-    assert!(stdout.contains("Project issues:"));
+    assert!(stdout.contains("**State:** invalid"));
+    assert!(stdout.contains("## Project documents"));
     assert!(stdout.contains(
-        "src/TODOS.yaml: invalid (invalid TODO queue: `requirements` must be lexically sorted and duplicate-free)"
+        "| src/TODOS.yaml | invalid (invalid TODO queue: \\`requirements\\` must be lexically sorted and duplicate-free) |"
     ));
-    assert!(stdout.contains("Action:    Run 'kvist repair'"));
+    assert!(stdout.contains("**Next Step:** Run 'kvist repair'"));
 }
 
 /// An uninitialized project tells the user to initialize, with the missing
@@ -751,10 +749,12 @@ fn status_reports_uninitialized_project_action() {
     ]);
     assert!(overview.status.success());
     let stdout = String::from_utf8(overview.stdout).expect("UTF-8 overview");
-    assert!(stdout.contains("(uninitialized)"));
-    assert!(stdout.contains("Project issues:"));
-    assert!(stdout.contains("kvist.toml: missing"));
-    assert!(stdout.contains("Action:    Run 'kvist init' to create the Phase 1 root artifacts."));
+    assert!(stdout.contains("**State:** uninitialized"));
+    assert!(stdout.contains("## Project documents"));
+    assert!(stdout.contains("| kvist.toml | missing |"));
+    assert!(
+        stdout.contains("**Next Step:** Run 'kvist init' to create the Phase 1 root artifacts.")
+    );
 
     let text = run_kvist(&[
         "status",

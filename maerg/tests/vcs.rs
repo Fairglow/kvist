@@ -71,13 +71,13 @@ fn doctor_reports_git_tracked_and_ignored_durable_artifacts_without_mutation() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("vcs: required durable artifacts need attention"));
+    assert!(stdout.contains("**VCS:** required durable artifacts need attention"));
     // The machine-local configuration is not a durable VCS-tracked artifact.
     assert!(!stdout.contains("vcs kvist.toml"));
     let root_documentation = Path::new("src").join("IMPL.md");
-    assert!(stdout.contains(&format!("vcs {}: ignored", root_documentation.display())));
+    assert!(stdout.contains(&format!("| {} | ignored |", root_documentation.display())));
     let nested_contract = Path::new("src").join("child").join("CONTRACT.md");
-    assert!(stdout.contains(&format!("vcs {}: tracked", nested_contract.display())));
+    assert!(stdout.contains(&format!("| {} | tracked |", nested_contract.display())));
     assert_eq!(
         run("git", &["status", "--porcelain=v1"], project.path()).stdout,
         before
@@ -96,7 +96,7 @@ fn doctor_reports_when_no_supported_vcs_repository_contains_the_project() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("vcs: no supported VCS repository found"));
+    assert!(stdout.contains("**VCS:** no supported VCS repository found"));
 }
 
 #[test]
@@ -113,8 +113,8 @@ fn doctor_reports_a_malformed_git_repository_as_an_inspection_failure() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("vcs: inspection failed"));
-    assert!(stdout.contains("vcs diagnostic: cannot inspect Git"));
+    assert!(stdout.contains("**VCS:** inspection failed"));
+    assert!(stdout.contains("**VCS diagnostic:** cannot inspect Git"));
 }
 
 #[cfg(target_os = "linux")]
@@ -210,12 +210,14 @@ fn doctor_reports_jj_snapshot_tracking_when_jj_is_available() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("vcs: all required durable artifacts are tracked"),
+        stdout.contains("**VCS:** all required durable artifacts are tracked"),
         "{stdout}"
     );
     assert!(!stdout.contains("vcs src/REQUIREMENTS.md:"));
-    assert!(stdout.contains("vcs --components/REQUIREMENTS.md: tracked"));
-    assert!(stdout.contains("vcs diagnostic: jj inspection uses its saved working-copy snapshot"));
+    assert!(stdout.contains("| --components/REQUIREMENTS.md | tracked |"));
+    assert!(
+        stdout.contains("**VCS diagnostic:** jj inspection uses its saved working-copy snapshot")
+    );
     assert_eq!(
         run(
             "jj",

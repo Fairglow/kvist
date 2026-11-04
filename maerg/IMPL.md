@@ -5,6 +5,48 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped Markdown workspace observations - 2026-11-03
+
+The independent
+[`source-only workspace observation`](../docs/reviews/markdown-workspace-observation.md)
+and its correction and host-diagnostic addenda describe bare interactive entry,
+Markdown command presentation, recursive JSON report projection, Blad rendering, the editable
+completion footer, isolated child I/O/cancellation/EOF, settings, and private
+component-scoped history. The observer excluded intent, queues, prior records
+and Git history. Five concrete fidelity/I/O findings were corrected; the
+original findings remain historical, not descriptions of the corrected source.
+
+History uses a 1 MiB page target and 16 MiB individual-block ceiling, preserving
+top-level Markdown blocks rather than arbitrary byte slices. The global
+scrollbar uses segment bands, not an unbounded line index. Each page renders
+independently; cross-page reference links/footnotes are not a whole-history
+document. A failed/interrupted rotation can duplicate diagnostics. Filesystem
+checks do not isolate ancestor races or kernel stalls. Configured redaction is
+not general secret discovery, and a child may echo its stdin answers.
+
+Host-thread tracing uses the existing environment filter and a bounded,
+nonblocking diagnostic channel, then fenced Markdown rather than direct terminal
+writes. Fragment truncation preserves UTF-8 boundaries and saturation is
+reported explicitly. This is scoped thread-local capture, not interception of
+arbitrary background-thread logging or a final-drain guarantee on failure/exit.
+
+Implementation-agent evidence, separately attributed: the final all-feature
+workspace run passed 2251 tests with 15 existing skips at two-test concurrency.
+The preceding default-concurrency run passed 2249 tests but two unchanged Blad
+assertions exceeded their rendering deadlines. An earlier concurrent library
+run hit an unchanged checkpoint signer-start timing assertion. No root cause
+is established for those failures. The final concurrent single-process library
+rerun passed 625 tests with one existing ignore. Targeted logging/Markdown/PTY
+regressions, formatting, strict all-target Maerg Clippy and the release build
+also passed.
+
+The separate
+[`source-blind workspace comparison`](../docs/reviews/markdown-workspace-comparison.md)
+records scoped agreement and remaining evidence limits, including its disclosed
+initial overbroad document read. Protected audit/compliance queue gates remain
+pending; no native receipt, intent acceptance, policy approval or Git publication
+is implied.
+
 ## Scoped numbered decision observations - 2026-10-31
 
 The fresh

@@ -161,11 +161,12 @@ fn render_text(
 
 /// The concrete next action for a non-current project state, naming the
 /// repair command when the only defect is a canonicalizable TODO queue.
-fn project_action_line(inspection: &ProjectInspection) -> String {
+pub(crate) fn project_action_line(inspection: &ProjectInspection) -> String {
     match inspection.state {
         ProjectState::Uninitialized => {
             "Run 'kvist init' to create the Phase 1 root artifacts.".to_owned()
         }
+
         ProjectState::Partial => "Run 'kvist repair --dry-run'; use '--reset PATH' for missing artifacts or '--clean-slate' for fresh drafts. Destructive recovery requires the displayed approval token.".to_owned(),
         ProjectState::Invalid => {
             let repairable = inspection.artifacts.iter().any(|artifact| {
@@ -186,6 +187,16 @@ fn project_action_line(inspection: &ProjectInspection) -> String {
         ProjectState::Current => String::new(),
         ProjectState::Blocked => "Resolve the reported `kvist-recovery-blocker` placeholders in global intent; then review and accept affected components. The documents are structurally valid but not ready for execution.".to_owned(),
     }
+}
+
+/// Renders the canonical Markdown status document without changing native formats.
+pub fn render_markdown(
+    inspection: &ProjectInspection,
+    only_documents: bool,
+    only_impls: bool,
+    unfinished: bool,
+) -> String {
+    crate::status_markdown::render(inspection, only_documents, only_impls, unfinished)
 }
 
 /// A blocked or awaiting-decision task rendered for status guidance.

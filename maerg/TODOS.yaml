@@ -4677,11 +4677,11 @@ tasks:
   - id: "md-output-write-tests"
     title: "write_tests: pin command output as well-formed Markdown"
     description: "Write failing tests that every command's result is a well-formed Markdown document: the status overview, the tasks table, blocked/awaiting-decision reasons, and stale-document revision details render as Markdown headings, tables, lists, and fenced code rather than unstyled text, and the stable `status --format text` and `--format json` report forms are byte-for-byte unchanged so scripts are unaffected."
-    context: "The shell currently prints pre-formatted plain text that it soft-wraps and pages; the project already ships the `blad` Markdown renderer but the shell does not use it. The new `REQ-MARKDOWN-OUTPUT` makes Markdown the canonical command output while keeping the stable report forms for non-interactive consumers."
+    context: "The shell currently prints pre-formatted plain text that it soft-wraps and pages; the project already ships the `blad` Markdown renderer but the shell does not use it. The new `REQ-MARKDOWN-OUTPUT` makes Markdown the canonical command output while keeping the stable report forms for non-interactive consumers. Markdown command/report and exact native-format regressions pass; source-only observation and its correction addendum are in docs/reviews/markdown-workspace-observation.md. Human repair failures, plain streamed tables and multiline redaction are covered."
     purpose: "Establish executable evidence that commands report Markdown and that scripts are unaffected before the output layer is rebuilt."
     expected_outcome: "The new tests fail against the current plain-text output and pass after the Markdown output layer is implemented."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Provided-interfaces"
@@ -4689,18 +4689,18 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-28T08:23:13Z"
-      updated_at: "2026-10-28T08:23:13Z"
-      completed_at: null
+      updated_at: "2026-11-03T23:48:29Z"
+      completed_at: "2026-11-03T23:48:29Z"
     blocked_reason: null
     recovery_state: null
   - id: "md-output-implement-code"
     title: "implement_code: emit command results as Markdown"
     description: "Rebuild the command report builders to emit a well-formed Markdown document as the canonical result: the status overview, the tasks table, blocked/awaiting-decision reasons, and stale-document revision details as Markdown headings, tables, lists, and fenced code. Keep the stable `status --format text` and `--format json` report forms unchanged so non-interactive consumers are unaffected, and preserve the plain-text degradation contract when the terminal cannot host the TUI."
-    context: "The failing tests from md-output-write-tests define the expected Markdown output; the existing report builders are the source of the document's facts."
+    context: "The failing tests from md-output-write-tests define the expected Markdown output; the existing report builders are the source of the document's facts. Markdown command/report and exact native-format regressions pass; source-only observation and its correction addendum are in docs/reviews/markdown-workspace-observation.md. Human repair failures, plain streamed tables and multiline redaction are covered."
     purpose: "Make Markdown the single source of truth for what a command reports, without breaking scripts."
     expected_outcome: "All md-output-write-tests pass; every command reports a well-formed Markdown document and the stable text and JSON report forms are unchanged."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "md-output-write-tests"
     requirements:
@@ -4709,8 +4709,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-28T08:23:13Z"
-      updated_at: "2026-10-28T08:23:13Z"
-      completed_at: null
+      updated_at: "2026-11-03T23:48:29Z"
+      completed_at: "2026-11-03T23:48:29Z"
     blocked_reason: null
     recovery_state: null
   - id: "md-output-security-audit"
@@ -4756,11 +4756,11 @@ tasks:
   - id: "tui-layout-write-tests"
     title: "write_tests: pin the Skott-style TUI layout and transcript"
     description: "Write failing tests that the shell is a full-screen TUI with a one-row status heading, a stats bar, a Min(1) transcript panel with a proportional scrollbar, and a fixed-height command footer; that the heading shows the active component, state, task progress, VCS branch, sandbox backend, default model, and live/stale lock counts; that the transcript is a bounded window over a durable per-component disk-persisted record that splits into successive files when one grows too large; and that switching component clears the panel and restores that component's former transcript."
-    context: "The shell is currently a line-oriented reedline REPL whose output scrolls off-screen; the `skott` TUI already demonstrates the target layout. The new REQ-INTERACTIVE-TUI and REQ-TRANSCRIPT-PERSISTENCE make the TUI and the durable per-component transcript mandatory."
+    context: "The shell is currently a line-oriented reedline REPL whose output scrolls off-screen; the `skott` TUI already demonstrates the target layout. The new REQ-INTERACTIVE-TUI and REQ-TRANSCRIPT-PERSISTENCE make the TUI and the durable per-component transcript mandatory. Blad rendering, block-aligned private transcript rotation, global history navigation, scope restoration, isolated cancellation/EOF and real-terminal completion/report tests pass; source-only observation is in docs/reviews/markdown-workspace-observation.md."
     purpose: "Establish executable evidence for the TUI layout, the persistent split transcript, and component focus restoration before the shell is rebuilt."
     expected_outcome: "The new tests fail against the current line-oriented shell and pass after the TUI is implemented."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Provided-interfaces"
@@ -4769,18 +4769,18 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-28T08:23:13Z"
-      updated_at: "2026-10-28T08:23:13Z"
-      completed_at: null
+      updated_at: "2026-11-03T23:48:29Z"
+      completed_at: "2026-11-03T23:48:29Z"
     blocked_reason: null
     recovery_state: null
   - id: "tui-layout-implement-code"
     title: "implement_code: build the Blad-rendered TUI and persistent transcript"
     description: "Rebuild the shell as a full-screen TUI in the shape of the `skott` layout: a status heading, a stats bar, a transcript panel with a proportional scrollbar, and a command footer. Render every command's Markdown document with the `blad` MarkdownRenderer, supplying the renderer's theme, width, and panel background from the TUI so the output matches the theme. Persist the transcript per component under the component's `.kvist/` state directory, unlimited in size and splitting into successive numbered files when one grows past a bound. Auto-select the focused component as the default for every command that expects a component, and restore a component's former transcript when the operator returns to it. Degrade to the plain-text line-oriented shell when the terminal cannot host the TUI."
-    context: "The failing tests from tui-layout-write-tests define the expected layout and transcript behavior; the `blad` renderer and the `skott` TUI pattern are the reference."
+    context: "The failing tests from tui-layout-write-tests define the expected layout and transcript behavior; the `blad` renderer and the `skott` TUI pattern are the reference. Blad rendering, block-aligned private transcript rotation, global history navigation, scope restoration, isolated cancellation/EOF and real-terminal completion/report tests pass; source-only observation is in docs/reviews/markdown-workspace-observation.md."
     purpose: "Deliver a Markdown-first TUI with a durable, scrollable, per-component transcript."
     expected_outcome: "All tui-layout-write-tests pass; the shell is a Skott-style TUI that renders command Markdown with `blad` and persists a split, per-component transcript."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "md-output-implement-code"
       - "tui-layout-write-tests"
@@ -4791,8 +4791,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-28T08:23:13Z"
-      updated_at: "2026-10-28T08:23:13Z"
-      completed_at: null
+      updated_at: "2026-11-03T23:48:29Z"
+      completed_at: "2026-11-03T23:48:29Z"
     blocked_reason: null
     recovery_state: null
   - id: "tui-layout-security-audit"
@@ -4840,11 +4840,11 @@ tasks:
   - id: "settings-menu-write-tests"
     title: "write_tests: pin the settings menu and component auto-selection"
     description: "Write failing tests that the settings menu exposes model, reasoning effort, session history, component selection, theme, and other settings; that selecting a component from the menu is the same focus change as the `cd` builtin and pre-fills the component for subsequent commands; and that theme, model, and effort selections persist the preference and apply immediately to the session."
-    context: "The TUI needs a settings menu in the `skott` overlay pattern; the new REQ-SETTINGS-MENU makes it mandatory. Component auto-selection is the same focus change as `cd`, so the operator is never asked for the component."
+    context: "The TUI needs a settings menu in the `skott` overlay pattern; the new REQ-SETTINGS-MENU makes it mandatory. Component auto-selection is the same focus change as `cd`, so the operator is never asked for the component. Real-terminal F2 selections persist theme, developer model and effort; unit coverage includes failure preservation, custom palette projection and component/history restoration. Role edits retain normal policy reapproval."
     purpose: "Establish executable evidence for the settings menu and component auto-selection before implementation."
     expected_outcome: "The new tests fail against the current shell (no settings menu, no auto-selection) and pass after the menu is implemented."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Provided-interfaces"
@@ -4852,18 +4852,18 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-28T08:23:13Z"
-      updated_at: "2026-10-28T08:23:13Z"
-      completed_at: null
+      updated_at: "2026-11-03T23:48:29Z"
+      completed_at: "2026-11-03T23:48:29Z"
     blocked_reason: null
     recovery_state: null
   - id: "settings-menu-implement-code"
     title: "implement_code: add the settings menu and component auto-selection"
     description: "Add a settings menu in the `skott` overlay pattern exposing model, reasoning effort, session history, component selection, theme, and other settings. Selecting a component from the menu performs the same focus change as the `cd` builtin and pre-fills the component for subsequent commands. Theme, model, and effort selections persist the preference and apply immediately to the session. The menu is a pure function of the session state and is testable without a terminal."
-    context: "The failing tests from settings-menu-write-tests define the expected menu and auto-selection behavior; the `skott` overlay pattern is the reference."
+    context: "The failing tests from settings-menu-write-tests define the expected menu and auto-selection behavior; the `skott` overlay pattern is the reference. Real-terminal F2 selections persist theme, developer model and effort; unit coverage includes failure preservation, custom palette projection and component/history restoration. Role edits retain normal policy reapproval."
     purpose: "Deliver a settings menu and component auto-selection so the operator is never asked for the component."
     expected_outcome: "All settings-menu-write-tests pass; the settings menu exposes the major choices and component selection pre-fills subsequent commands."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "settings-menu-write-tests"
       - "tui-layout-implement-code"
@@ -4873,8 +4873,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-28T08:23:13Z"
-      updated_at: "2026-10-28T08:23:13Z"
-      completed_at: null
+      updated_at: "2026-11-03T23:48:29Z"
+      completed_at: "2026-11-03T23:48:29Z"
     blocked_reason: null
     recovery_state: null
   - id: "settings-menu-security-audit"

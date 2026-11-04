@@ -25,7 +25,7 @@ Kvist manages filesystem-native requirements, contracts, designs, task queues, \
 and compliance evidence.\n\
 \
 Typical flow:\n\
-  1. kvist shell                start the interactive workspace shell (recommended)\n\
+  1. kvist                      start the interactive workspace (recommended)\n\
   2. kvist status               where does the project stand, and what is next?\n\
   3. kvist task run             execute the next ready task with a supervised agent\n\
   4. kvist task log / finalize  inspect the run and record your decision\n\
@@ -39,12 +39,12 @@ the core concepts, the lifecycle, and the task states with their legal \
 transitions."
 )]
 pub struct Cli {
-    /// Output structured JSON instead of plain text.
+    /// Output structured JSON instead of Markdown.
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Command to execute. Omit it inside a project for a status overview,
-    /// outside a project for this help.
+    /// Command to execute. Omit it for the interactive workspace; redirected
+    /// invocation produces a finite overview or help.
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -52,7 +52,7 @@ pub struct Cli {
 /// Commands that form Kvist's public CLI contract.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Start the interactive workspace shell (the recommended way to work).
+    /// Open a workspace for an explicit project (bare `kvist` uses this project).
     Shell {
         /// Project directory; defaults to the nearest Kvist project at or
         /// above the current directory.
@@ -653,6 +653,44 @@ impl std::fmt::Display for CommandOutput {
 /// This dispatch layer deliberately contains no process handling; callers can
 /// test command behavior and choose how errors are presented.
 pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
+    let native = json
+        || matches!(
+            &command,
+            Some(Command::Completions { .. } | Command::AuthoringApply { .. })
+                | Some(Command::Status {
+                    format: status::StatusFormat::Text | status::StatusFormat::Json,
+                    ..
+                })
+        );
+    let title = match &command {
+        Some(Command::Status { .. }) | None => "Project Status",
+        Some(Command::Doctor { .. }) => "Project Inspection",
+        Some(Command::Tree { .. }) => "Component Tree",
+        Some(Command::Help { .. }) => "Kvist Help",
+        Some(Command::Task { .. }) => "Task Result",
+        Some(Command::Component { .. }) => "Component Result",
+        Some(Command::Decision { .. }) => "Decision",
+        Some(Command::Repair { .. }) => "Artifact Recovery",
+        Some(Command::Agent { .. }) => "Agent Configuration",
+        _ => "Kvist",
+    };
+    let tree_output = matches!(&command, Some(Command::Tree { .. }));
+    let output = execute_raw(command, json)?;
+    if native || output.is_empty() || output.0.starts_with("# ") {
+        Ok(output)
+    } else {
+        let body = if tree_output {
+            crate::presentation::fence(&output.0, "text")
+        } else {
+            crate::presentation::legacy_report(&output.0)
+        };
+        Ok(CommandOutput::message(crate::presentation::document(
+            title, &body,
+        )))
+    }
+}
+
+fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
     let Some(command) = command else {
         return bare_invocation(json);
     };
@@ -770,6 +808,7 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     model.as_deref(),
                     reasoning_effort.map(Into::into),
                     allow_host_execution,
+                    true,
                 )?;
                 Ok(CommandOutput::none())
             },
@@ -1403,6 +1442,7 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                         model.as_deref(),
                         reasoning_effort.map(Into::into),
                         allow_host_execution,
+                        false,
                     )?;
                 }
                 Ok(CommandOutput::none())
@@ -1527,8 +1567,14 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             }
             Command::Doctor { path } => {
                 let project = context::ProjectContext::resolve(path.as_deref())?;
-                project_state::inspect(&project.project_dir)
-                    .map(|inspection| CommandOutput::message(inspection.to_string()))
+                project_state::inspect(&project.project_dir).map(|inspection| {
+                    CommandOutput::message(status::render_markdown(
+                        &inspection,
+                        false,
+                        false,
+                        false,
+                    ))
+                })
             }
             Command::Repair {
                 path,
@@ -1561,7 +1607,10 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     Ok(CommandOutput::message(report.to_string()))
                 } else {
                     Err(KvistError::JsonCommandFailure {
-                        output: report.to_string(),
+                        output: crate::presentation::document(
+                            "Artifact Recovery",
+                            &crate::presentation::legacy_report(&report.to_string()),
+                        ),
                     })
                 }
             }
@@ -1574,13 +1623,11 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             } => {
                 let project = context::ProjectContext::resolve(path.as_deref())?;
                 project_state::inspect(&project.project_dir).map(|inspection| {
-                    CommandOutput::message(status::render(
-                        &inspection,
-                        format,
-                        only_documents,
-                        only_impls,
-                        unfinished,
-                    ))
+                    CommandOutput::message(if format == status::StatusFormat::Overview {
+                        status::render_markdown(&inspection, only_documents, only_impls, unfinished)
+                    } else {
+                        status::render(&inspection, format, only_documents, only_impls, unfinished)
+                    })
                 })
             }
             Command::Task {
@@ -1867,7 +1914,7 @@ fn disposition_argument_from(value: String) -> Result<FinalizeDispositionArgumen
 /// one. They therefore parse into a raw argument vector and this function
 /// completes the parse immediately after argument parsing, keeping the
 /// dispatch surface uniform.
-fn normalize_task_positionals(command: Command) -> Result<Command> {
+pub(crate) fn normalize_task_positionals(command: Command) -> Result<Command> {
     let Command::Task { command: task } = command else {
         return Ok(command);
     };
@@ -1936,6 +1983,23 @@ fn normalize_task_positionals(command: Command) -> Result<Command> {
 fn bare_invocation(json: bool) -> Result<CommandOutput> {
     use clap::CommandFactory;
 
+    if !json && std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        let directory = context::ProjectContext::resolve(None)
+            .map(|project| project.project_dir)
+            .or_else(|error| {
+                if matches!(error, KvistError::NotInProject { .. }) {
+                    std::env::current_dir().map_err(|source| KvistError::Io {
+                        operation: "resolve workspace directory",
+                        path: PathBuf::from("."),
+                        source,
+                    })
+                } else {
+                    Err(error)
+                }
+            })?;
+        crate::bark::run_shell(&directory)?;
+        return Ok(CommandOutput::none());
+    }
     match context::ProjectContext::resolve(None) {
         Ok(project) => {
             let inspection = project_state::inspect(&project.project_dir)?;
@@ -1946,13 +2010,7 @@ fn bare_invocation(json: bool) -> Result<CommandOutput> {
                     r#"{{"status":"success","command":"status","report":{report}}}"#,
                 )))
             } else {
-                let mut text = status::render(
-                    &inspection,
-                    status::StatusFormat::Overview,
-                    false,
-                    false,
-                    false,
-                );
+                let mut text = status::render_markdown(&inspection, false, false, false);
                 text.push_str("\n\ntip: run `kvist help` for all commands");
                 Ok(CommandOutput::message(text))
             }
@@ -1963,14 +2021,13 @@ fn bare_invocation(json: bool) -> Result<CommandOutput> {
                     r#"{"status":"error","reason":"not-in-project","hint":"run `kvist init <DIR>` to create a project, or pass an explicit PROJECT_DIR"}"#.to_owned(),
                 ))
             } else {
-                Cli::command()
-                    .print_long_help()
-                    .map_err(|source| KvistError::Io {
-                        operation: "render command-line help",
-                        path: PathBuf::new(),
-                        source,
-                    })?;
-                Ok(CommandOutput::none())
+                Ok(CommandOutput::message(crate::presentation::document(
+                    "Kvist",
+                    &crate::presentation::fence(
+                        &Cli::command().render_long_help().to_string(),
+                        "text",
+                    ),
+                )))
             }
         }
     }
@@ -2168,6 +2225,7 @@ fn run_headless_prompt(
     model: Option<&str>,
     effort: Option<sav::ReasoningEffort>,
     allow_host_execution: bool,
+    json_output: bool,
 ) -> Result<()> {
     if allow_host_execution {
         return Err(KvistError::AgentSetupFailed {
@@ -2201,8 +2259,10 @@ fn run_headless_prompt(
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .current_dir(&current_dir)
-        .arg("--headless")
-        .arg("--json");
+        .arg("--headless");
+    if json_output {
+        command.arg("--json");
+    }
     if let Some(model) = model {
         command.arg("--model").arg(model);
     }

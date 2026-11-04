@@ -48,11 +48,14 @@ Bubblewrap backend (see the sandboxed task execution section below).
 `kvist` resolves its context from the working directory: the project root is
 found by walking upward to the nearest `kvist.toml` (like `git`), and component
 commands act on the component containing the current directory unless a
-`COMPONENT_DIR` argument is given. Bare `kvist` (no arguments) shows the project
-overview inside a project and guided help outside one.
+`COMPONENT_DIR` argument is given. Bare `kvist` opens the Markdown workspace
+at the resolved project (or current directory before initialization).
+With redirected input/output it prints a finite project overview or guided
+help outside a project.
 
 ```bash
 kvist init                 # create the root artifacts in the current directory
+kvist                      # Markdown TUI, with command input and tab-completion
 kvist status               # "where do I stand?" — states, progress, next action
 kvist tree                 # render the component hierarchy
 kvist doctor               # read-only inspection and recovery guidance
@@ -65,18 +68,47 @@ kvist help                 # guided tour and topics
 The complete, authoritative command set is documented in
 [`docs/command-set.md`](../docs/command-set.md).
 
+### Markdown workspace
+
+The transcript renders command, agent and tool Markdown through Blad, including
+decoded JSON `report` bodies, tables, highlighted code and Blad's supported math
+and diagrams. The input footer retains the CLI grammar and dynamic Tab
+completion. Use `cd COMPONENT` or F2 to focus a component; its argument is
+inserted into the editable command rather than hidden from you.
+
+F1 opens shortcut help; F2 opens component/model/effort/theme/history settings.
+PageUp/PageDown and the mouse wheel browse history; Ctrl+Home reaches the oldest
+page and Ctrl+End resumes following. The scrollbar navigates all pages.
+Ctrl+C cancels the owned command, preserving observed effects for normal
+review/recovery. Ctrl+D with empty input sends EOF to a command (exits when idle);
+Ctrl+Q always quits and reaps active commands. During commands, input answers
+stdin and is masked, never retained.
+
+Canonical Markdown history is private local diagnostic state under each scope's
+`.kvist/transcript/`, with numbered block-aligned pages (1 MiB target, 16 MiB
+maximum individual block) and bounded command recall. Older pages are not
+deleted automatically. Switching focus restores that scope's history.
+An individual page is a Markdown document; cross-page reference links and
+footnotes do not resolve across the complete history. History is not workflow
+evidence. Model/effort settings use normal role configuration and do not approve
+changed execution policy.
+
+Small/unsupported terminals and disabled styling use the line-oriented
+fallback. Explicit `--json`, `status --format text|json`, completion scripts
+and internal effect protocols retain their native formats.
+
 ## CLI contract
 
 Commands resolve their context from the working directory: the project root
 is found by walking upward to the nearest `kvist.toml` (like `git`), and
 component commands act on the component containing the current directory
-unless a `COMPONENT_DIR` argument is given. Bare `kvist` (no arguments) shows
-the project overview inside a project and guided help outside one. The full
+unless a `COMPONENT_DIR` argument is given. Bare `kvist` opens the workspace on
+an interactive terminal and remains finite when redirected. The full
 design lives in [`docs/command-set.md`](../docs/command-set.md).
 
 | Command                                                      | Contract                                                                                                                                                                                                                |
 | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kvist shell [PROJECT_DIR]`                                  | Start the interactive workspace shell (the recommended way to work).                                                                                                                                                    |
+| `kvist` / `kvist shell [PROJECT_DIR]`                         | Open the Markdown workspace; the explicit form selects another project. |
 | `kvist status [PROJECT_DIR] [--format overview\|text\|json]` | "Where do I stand?": states, progress, next ready tasks, changed documents with revisions, and the exact next action for anything non-current. The overview is the default; `text`/`json` are stable forms for scripts. |
 | `kvist init [PROJECT_DIR]`                                   | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.                                                                                                                              |
 | `kvist convert <PROJECT_DIR>`                                | Generate no-clobber draft onboarding artifacts for an existing Rust project.                                                                                                                                            |
@@ -93,7 +125,7 @@ design lives in [`docs/command-set.md`](../docs/command-set.md).
 | `kvist decision COMPONENT_DIR [show\|options\|discuss\|plan\|apply\|actions\|do]` | Inspect/discuss a pause, stage changes, then use tab-completable numbered responses for exact choice/approval without copying hashes. |
 | `kvist task log [COMPONENT_DIR] TASK_ID`                     | Print the most recent bounded, redacted agent log for a task.                                                                                                                                                           |
 | `kvist task approve-policy [PROJECT_DIR]`                    | Record approval of the complete effective execution policy.                                                                                                                                                             |
-| `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a prompt in the interactive skott shell (sandboxed and multi-turn by default); without a terminal it runs the same shell headless (`--headless --json`), sandbox-only.                                       |
+| `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a sandboxed prompt; the workspace embeds headless Markdown, while standalone terminal invocation opens Skott. Global `--json` selects headless NDJSON. |
 | `kvist agent setup [--force]`                                | Discover or reuse a shared profile, qualify new profiles, and persist a role/profile reference. |
 | `kvist agent list`                                           | List all configured and standalone model profiles with their active role assignments.                                                                                                                                   |
 | `kvist agent remove <MODEL_NAME> [--all]`                    | Remove local definitions/bindings or clear agent configuration; shared registry definitions are not deleted. |
@@ -236,9 +268,9 @@ printf '%s\n' "Review this component contract" | kvist prompt
 `kvist prompt` always runs the standalone `skott` shell: at an
 interactive terminal Kvist opens the shell and prefills the model, thinking
 effort, and prompt; the agent does real work under Kvist's supervision. Without
-a terminal the same shell runs headless (`skott --headless --json`),
-inheriting the NDJSON event stream on standard output. Work is sandboxed
-(Bubblewrap-protected) and multi-turn by default; `--allow-host-execution`
+a terminal the same shell runs headless (`skott --headless`) with Markdown
+output; explicit `kvist --json prompt ...` retains the NDJSON event stream.
+Work is sandboxed (Bubblewrap-protected) and multi-turn by default; `--allow-host-execution`
 opts out of the sandbox so the agent runs with the invoking user's host
 privileges, and is then single-turn unless `--multi-turn` allows more turns.
 The host-execution opt-out is interactive only: headless execution is

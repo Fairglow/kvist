@@ -171,6 +171,13 @@ pub fn inject_shell_builtins(root: &mut CommandNode) {
 
     let builtins = [
         CommandNode {
+            name: "settings".to_owned(),
+            help: Some("Open workspace settings (F2 in the TUI)".to_owned()),
+            subcommands: Vec::new(),
+            flags: Vec::new(),
+            positionals: Vec::new(),
+        },
+        CommandNode {
             name: "cd".to_owned(),
             help: Some("Set the current component for builtins and completion".to_owned()),
             subcommands: Vec::new(),
@@ -511,7 +518,7 @@ mod tests {
         ] {
             assert!(root.find_subcommand(name).is_some(), "missing {name}");
         }
-        assert_eq!(root.subcommands.len(), 17 + 11);
+        assert_eq!(root.subcommands.len(), 17 + 12);
     }
 
     #[test]

@@ -57,10 +57,12 @@ fn cli_renders_a_stable_ascii_tree_with_component_statuses() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("tree output is UTF-8"),
         concat!(
+            "# Component Tree\n\n```text\n",
             "component root: src\n",
             ". [complete]\n",
             "  alpha [incomplete: missing CONTRACT.md; missing DESIGN.md; missing TODOS.yaml; missing IMPL.md]\n",
             "  zebra [complete]\n",
+            "```\n",
         )
     );
 }

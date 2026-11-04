@@ -1019,6 +1019,44 @@ times before reporting it.
 
 ### Markdown-first output and the Blad-rendered TUI
 
+The full-screen host is separate from the Reedline degradation host. It reuses
+the clap-derived completion tree and component-prefill resolver, with a
+grapheme-aware editable input buffer. Commands execute as owned process groups
+using this executable and an argument vector; bounded reader channels provide
+backpressure and the UI alone writes the terminal. Child stdin carries explicit
+wizard answers. SIGINT reaches the owned group, with bounded escalation/reaping
+on quit. No workspace executor or task authority is introduced.
+While the workspace is active, a scoped tracing subscriber applies the existing
+log filter and sends host diagnostics through a bounded nonblocking channel
+into fenced Markdown in the transcript (32 fragments, 16 KiB per fragment,
+explicit truncation notices). Saturation is reported with an explicit
+dropped-event count; logging cannot block or draw over the terminal. Theme
+warnings use that same diagnostic route.
+
+Markdown presentation wraps command dispatch, preserving explicit machine
+routes. Status uses structured inspection/queue facts rather than parsing its
+legacy box drawing. JSON reports project recursively into headings, tables,
+lists and decoded Markdown report bodies; unknown metadata is retained.
+Blad receives the complete bounded viewport document and host width/theme.
+Only renderer-produced SGR is decoded into ratatui styles; child terminal
+controls are made inert before persistence/rendering.
+
+Each scope owns numbered, size-bounded Markdown segments. Opening finds the
+latest sequence with constant retained metadata; browsing loads one segment,
+not the entire transcript. Appends use nonfollowing regular descriptors,
+private permissions, exclusive advisory file locking and synchronized writes.
+Rotation preserves all prior segments. Segments target 1 MiB and rotate only
+between top-level Markdown blocks, never through a fence, table, list or
+paragraph. An individual block may grow to the explicit 16 MiB source ceiling;
+larger blocks fail capture explicitly, cancel the child and retain the prior
+diagnostic history. Partial streamed documents may reflow as they complete.
+The scrollbar uses equal-sized segment bands with local rendered-line
+precision, so the complete disk history is reachable without an unbounded
+in-memory line index. Command history and presentation
+preferences are bounded, private and separate from authoritative configuration;
+model/effort settings use existing role-configuration operations, so changing
+protected execution configuration still requires ordinary policy reapproval.
+
 The shell's presentation is rebuilt around a Skott-style layout. A vertical
 layout splits the terminal into a one-row **status heading**, a one-row stats
 bar, a `Min(1)` **transcript** panel, and a fixed-height **command footer**.

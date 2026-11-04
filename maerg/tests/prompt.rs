@@ -86,7 +86,6 @@ fn prompt_headless_delegates_to_skott() {
         lines,
         vec![
             "--headless",
-            "--json",
             "--model",
             "capture",
             "Prompt loaded from a file"
@@ -129,7 +128,6 @@ fn prompt_headless_uses_explicit_model_and_effort() {
         lines,
         vec![
             "--headless",
-            "--json",
             "--model",
             "capture",
             "--effort",
@@ -137,6 +135,27 @@ fn prompt_headless_uses_explicit_model_and_effort() {
             "a prompt"
         ]
     );
+}
+
+#[test]
+fn prompt_explicit_json_retains_the_ndjson_delegation_contract() {
+    let project = configured_project();
+    let log = project.path().join("stub-args.txt");
+    let stub = install_stub_skott(project.path(), &log);
+    let output = run_kvist_in(
+        project.path(),
+        &["--json", "prompt", "fixture"],
+        Some(&stub),
+    );
+    assert!(output.status.success());
+    assert!(
+        fs::read_to_string(log)
+            .unwrap()
+            .lines()
+            .any(|line| line == "--json")
+    );
+    let event: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(event["event"], "run-summary");
 }
 
 #[test]
