@@ -135,6 +135,11 @@ Kvist component lifecycle
   Component implementation approval has no dedicated command yet.
   An exact `task run DIR TASK` stops after one task; explicit implementation
   attempts retain `task finalize DIR TASK ATTEMPT accept|block`.
+  The shell `tasks` builtin lists only ready (schedulable) tasks, numbered in
+  queue order so row 1 is the next task, with the full count always shown;
+  `tasks --all` (or an explicit `--status`) lists every task with its state.
+  `run N` (or `task run DIR N`) executes the Nth ready task; an exact task ID
+  always wins over a number.
 
   Intent changed after accept -> the component is STALE:
   review the diff (git diff HEAD -- <DOC>), then `kvist component accept [DIR]`.

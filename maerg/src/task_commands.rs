@@ -5350,19 +5350,37 @@ pub fn run_task_or_item_with_controls(
     allow_control: bool,
 ) -> Result<String> {
     match task_spec {
-        Some(task_id) => {
+        Some(spec) => {
             let context = validate_context(project_dir, component_path)?;
             let queue = read_queue(&context.component_dir)?;
-            if task_by_id(&queue.tasks, task_id).is_none() {
-                return Err(KvistError::TaskNotFound {
-                    component: context.component_path,
-                    task_id: task_id.to_owned(),
-                });
-            }
-            run_task_with_controls(project_dir, component_path, task_id, stream, allow_control)
+            let task_id =
+                resolve_task_spec(&queue.tasks, spec).ok_or_else(|| KvistError::TaskNotFound {
+                    component: context.component_path.clone(),
+                    task_id: spec.to_owned(),
+                })?;
+            run_task_with_controls(project_dir, component_path, &task_id, stream, allow_control)
         }
         None => continuous::run(project_dir, component_path, stream, allow_control),
     }
+}
+
+/// Resolves a `task run` target against the queue. An exact task ID always wins
+/// (task IDs may legally be all digits, so a real ID is never mistaken for a
+/// position). Otherwise a bare positive integer is a 1-based position in the
+/// ready-task list, matching the numbering the `tasks` listing displays. Returns
+/// `None` when neither matches so the caller reports the exact unresolved spec.
+fn resolve_task_spec(tasks: &[Task], spec: &str) -> Option<String> {
+    if let Some(task) = task_by_id(tasks, spec) {
+        return Some(task.id.clone());
+    }
+    spec.parse::<usize>()
+        .ok()
+        .filter(|position| *position >= 1)
+        .and_then(|position| {
+            crate::task_queue::ready_task_ids(tasks)
+                .into_iter()
+                .nth(position - 1)
+        })
 }
 
 fn select_runnable_task(context: &TaskContext, requested: Option<&str>) -> Result<String> {
@@ -6742,8 +6760,56 @@ mod tests {
     use super::{
         MAX_ATTEMPT_JOURNAL_BYTES, MAX_SCOPE_DEPTH, MAX_SCOPE_ENTRIES, MAX_SCOPE_FILE_BYTES,
         TaskLock, Timestamp, append_encoded_attempt, digest, digest_path_tree,
-        is_rust_verification, read_attempt_journal,
+        is_rust_verification, read_attempt_journal, resolve_task_spec,
     };
+    use crate::task_queue::{Task, TaskKind, TaskStatus, TaskTimestamps};
+
+    fn task(id: &str, status: TaskStatus, deps: &[&str]) -> Task {
+        Task {
+            id: id.to_owned(),
+            title: id.to_owned(),
+            description: String::new(),
+            context: String::new(),
+            purpose: String::new(),
+            expected_outcome: String::new(),
+            kind: TaskKind::Implementation,
+            status,
+            depends_on: deps.iter().map(|dep| (*dep).to_owned()).collect(),
+            requirements: Vec::new(),
+            timestamps: TaskTimestamps {
+                created_at: Timestamp::default(),
+                updated_at: Timestamp::default(),
+                completed_at: None,
+                recovered: false,
+            },
+            blocked_reason: None,
+            recovery_state: None,
+            acceptance_id: None,
+            disposition: None,
+        }
+    }
+
+    #[test]
+    fn resolve_task_spec_prefers_exact_ids_then_ready_positions() {
+        let tasks = vec![
+            task("a", TaskStatus::Completed, &[]),
+            task("b", TaskStatus::Pending, &[]),
+            task("c", TaskStatus::Pending, &["a"]),
+            task("d", TaskStatus::Pending, &["b"]),
+        ];
+        // An exact task ID always wins, even when it looks like a number.
+        assert_eq!(resolve_task_spec(&tasks, "b"), Some("b".to_owned()));
+        // A bare positive integer is a 1-based position in the ready list.
+        assert_eq!(resolve_task_spec(&tasks, "1"), Some("b".to_owned()));
+        assert_eq!(resolve_task_spec(&tasks, "2"), Some("c".to_owned()));
+        // Out-of-range, zero, and non-numeric specs do not resolve.
+        assert_eq!(resolve_task_spec(&tasks, "3"), None);
+        assert_eq!(resolve_task_spec(&tasks, "0"), None);
+        assert_eq!(resolve_task_spec(&tasks, "nope"), None);
+        // A numeric task ID is still matched exactly, not treated as a position.
+        let numeric = vec![task("7", TaskStatus::Pending, &[])];
+        assert_eq!(resolve_task_spec(&numeric, "7"), Some("7".to_owned()));
+    }
 
     #[test]
     fn scope_hash_distinguishes_types_and_enforces_file_and_depth_bounds() {

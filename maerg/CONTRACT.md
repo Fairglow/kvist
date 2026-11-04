@@ -153,10 +153,10 @@ The `kvist` executable provides (the authoritative design is
 - `reverse-discover PATH`
 - `doctor [PROJECT_DIR]`
 - `repair [PROJECT_DIR] [--dry-run] [--salvage] [--reset PATH]...
-  [--clean-slate] [--component-root PATH] [--backup-dir PATH] [--approve SHA256]
-  [--ai PROFILE] [--proposal PATH]`
+[--clean-slate] [--component-root PATH] [--backup-dir PATH] [--approve SHA256]
+[--ai PROFILE] [--proposal PATH]`
 - `status [COMPONENT_DIR|PROJECT_DIR] [--project PROJECT_DIR] [--details]
-  [--format overview|text|json] [--only-documents] [--only-impls] [--unfinished]`;
+[--format overview|text|json] [--only-documents] [--only-impls] [--unfinished]`;
   default human output is one compact table row per component. A component
   argument selects exact-component details; `--details` shows all details in
   project scope and never overrides an explicit component filter. Artifact-only
@@ -172,10 +172,12 @@ The `kvist` executable provides (the authoritative design is
 - `component commit ACCEPTANCE_ID`
 - `task next [COMPONENT_DIR]`
 - `task transition [COMPONENT_DIR] TASK_ID STATUS [--reason TEXT]`
-- `task run COMPONENT_DIR [TASK_ID] [--stream] [--allow-control]`: an exact
-  TASK_ID runs only that task. Without it, execute ready tasks continuously in
-  queue order, without confirmation. There is no `all`, prefix selector, or
-  separate whole-component command.
+- `task run COMPONENT_DIR [TASK_ID|N] [--stream] [--allow-control]`: an exact
+  TASK_ID runs only that task. A bare positive integer N runs the Nth ready
+  task (1-based, the same ordering the `tasks` listing numbers). Without a
+  target, execute ready tasks continuously in queue order, without
+  confirmation. There is no `all`, prefix selector, or separate
+  whole-component command.
 - `task log [COMPONENT_DIR] TASK_ID`
 - `task replay SESSION_JSONL [--max-turns N]`
 - `task approve-policy [PROJECT_DIR]`
@@ -194,7 +196,7 @@ The `kvist` executable provides (the authoritative design is
 - `agent enable MODEL_NAME --registry PATH --expected-revision DIGEST [--global]`
 - `agent disable MODEL_NAME --registry PATH --expected-revision DIGEST [--global]`
 - `agent remove MODEL_NAME [--global] [--registry PATH]
-  [--expected-revision DIGEST]`, or `agent remove --all [--global]`
+[--expected-revision DIGEST]`, or `agent remove --all [--global]`
 - `agent role list`, `agent role set ROLE MODEL_NAME
 [--thinking-effort EFFORT | --inherit-effort]
 [--expected-revision DIGEST] [--profile-source PATH --profile-revision DIGEST]
@@ -213,6 +215,7 @@ available profiles in the selected project/user scope; user edits never assign
 a project-only definition. Outside an initialized project, role pages start in
 user scope, matching the CLI's agent-command fallback. Known unsupported non-`none` reasoning overrides
 refuse without writing; unknown capability support remains explicitly unknown.
+
 - `completions SHELL`
 - `help [TOPIC]` with TOPIC one of `concepts`, `lifecycle`, `task-states`
   (tab-completable); no topic renders the guided tour listing the available
@@ -332,7 +335,7 @@ Subcommands follow the component:
 - `discuss MESSAGE [--task TASK_ID]`: append a bounded decision-scoped question
   and agent answer without changing intent, grants, approval or task state.
 - `plan [--task TASK_ID] [--option OPTION_ID] [--guidance TEXT]
-  [--import PATH] [--review-exception TEXT]`: prepare an agent-assisted or manual
+[--import PATH] [--review-exception TEXT]`: prepare an agent-assisted or manual
   typed plan, validate it and display the complete changes plus approval token.
 - `apply PLAN_ID --approve SHA256 [--continue]`: apply the frozen, authenticated
   plan without inference, acknowledge its review or explicit exception, record
@@ -717,9 +720,13 @@ closed value sets for `help [TOPIC]`) and dynamic completion covers component
 paths, task IDs, attempt IDs, model profile names, and the active VCS branch; dynamic sets are refreshed after
 every executed command and each source degrades independently without aborting
 the session. The shell builtins are `cd [COMPONENT_DIR]`,
-`tasks [COMPONENT_DIR] [--status STATUS]`, `run COMPONENT_DIR [TASK_ID]`,
-`help [TOPIC]`, `last [COUNT]`, `history [COUNT]`, `journal`, `locks
-[clean]`, `theme [set <NAME|PATH>]`, and `exit`/`quit`. `help` with no topic lists the builtins and the
+`tasks [COMPONENT_DIR] [--status STATUS] [--all]`, `run COMPONENT_DIR
+[TASK_ID|N]`, `help [TOPIC]`, `last [COUNT]`, `history [COUNT]`, `journal`,
+`locks [clean]`, `theme [set <NAME|PATH>]`, and `exit`/`quit`. `tasks` lists
+only ready (schedulable) tasks by default, numbered in queue order so row 1 is
+the next task, with the full count always shown; `--all` (or an explicit
+`--status`) lists every task with its state. `run N` executes the Nth ready
+task; an exact task ID always wins over a number. `help` with no topic lists the builtins and the
 available help topics; with a topic it renders that topic, exactly as
 `kvist help [TOPIC]` does. The `tasks` table lists each blocked and
 awaiting-decision task with its truncated reason first line and the exact next

@@ -1188,6 +1188,18 @@ leaving durable task state for explicit finalize or recovery. The loop is a
 pure function of the queue state and the per-task run result, so the stop
 conditions are unit-testable without a terminal.
 
+**Ready work and numbered runs.** `task_queue::ready_task_ids` returns every
+ready task — `pending` with every recorded dependency `completed` — in declared
+queue order; its first element is exactly `next_ready_task_id`. The `tasks`
+builtin (shell and TUI) lists only those tasks by default, numbered, with the
+full count always shown so hidden work is never silently dropped; `--all` (or an
+explicit `--status`) lists every task with its state. `resolve_task_spec` maps a
+`task run` target to a task ID: an exact task ID always wins (task IDs may
+legally be all digits), otherwise a bare positive integer is a 1-based position
+in the ready list, so `run N` executes the Nth row the listing shows. The number
+is derived fresh from queue state each time — unlike decision response numbers,
+which are durable and content-bound — so no registry is needed.
+
 Continuous execution uses one component operation lock across scheduling,
 task execution and checkpoint recording. The task executor accepts this owned
 lock rather than reacquiring it. Explicit task execution remains single-task.

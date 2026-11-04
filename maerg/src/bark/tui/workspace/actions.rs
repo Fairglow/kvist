@@ -65,16 +65,53 @@ impl Workspace {
                 let parsed = bark::parse_tasks_args(&arguments).map_err(io::Error::other)?;
                 let component = parsed.component.or_else(|| self.focus()).unwrap_or_else(|| ".".into());
                 let scope = self.state.scopes.get(&component).ok_or_else(|| io::Error::other(format!("no readable queue for `{component}`; run doctor")))?;
-                let mut markdown = format!("# Tasks in {}\n\n| Task | State | Kind | Title |\n| --- | --- | --- | --- |\n", presentation::literal(&component));
-                for task in scope.tasks.iter().filter(|task| parsed.status.is_none_or(|status| status == task.status)) {
-                    markdown.push_str(&format!("| {} | {} | {} | {} |\n", presentation::literal(&task.id), bark::status_label(task.status), bark::kind_label(task.kind), presentation::literal(&task.title)));
-                }
-                for task in scope.tasks.iter().filter(|task| parsed.status.is_none_or(|status| status == task.status)) {
-                    if let Some(reason) = &task.blocked_reason {
-                        markdown.push_str(&format!("\n## {}\n\n{}\n\n", presentation::literal(&task.id), presentation::fence(reason, "text")));
+                let total = scope.tasks.len();
+                let ready_ids = crate::task_queue::ready_task_ids(&scope.tasks);
+                // Ready tasks are the default view; `--all` or an explicit
+                // `--status` lists the rest. The full count is always reported.
+                let ready_only = !parsed.all && parsed.status.is_none();
+                let rows: Vec<&crate::task_queue::Task> = scope
+                    .tasks
+                    .iter()
+                    .filter(|task| {
+                        if ready_only {
+                            ready_ids.iter().any(|id| id == &task.id)
+                        } else {
+                            parsed.status.is_none_or(|status| status == task.status)
+                        }
+                    })
+                    .collect();
+                let mut markdown = format!("# Tasks in {}\n\n", presentation::literal(&component));
+                if ready_only {
+                    if rows.is_empty() {
+                        markdown.push_str(&format!(
+                            "No ready tasks ({} task{} total). `tasks --all` lists them all.\n",
+                            total,
+                            if total == 1 { "" } else { "s" }
+                        ));
+                    } else {
+                        markdown.push_str(&format!(
+                            "**{} of {} ready.** `run N` executes the Nth row; `tasks --all` lists the other {}.\n\n| # | Task | Kind | Title |\n| --- | --- | --- | --- |\n",
+                            rows.len(),
+                            total,
+                            total - rows.len()
+                        ));
+                        for (index, task) in rows.iter().enumerate() {
+                            markdown.push_str(&format!("| {} | {} | {} | {} |\n", index + 1, presentation::literal(&task.id), bark::kind_label(task.kind), presentation::literal(&task.title)));
+                        }
                     }
-                    if let Some(next) = bark::next_command_for(task, &scope.tasks, &component) {
-                        markdown.push_str(&format!("\n**Next for {}:** {}\n", presentation::literal(&task.id), presentation::fence(&next, "text")));
+                } else {
+                    markdown.push_str("| Task | State | Kind | Title |\n| --- | --- | --- | --- |\n");
+                    for task in rows.iter() {
+                        markdown.push_str(&format!("| {} | {} | {} | {} |\n", presentation::literal(&task.id), bark::status_label(task.status), bark::kind_label(task.kind), presentation::literal(&task.title)));
+                    }
+                    for task in rows.iter() {
+                        if let Some(reason) = &task.blocked_reason {
+                            markdown.push_str(&format!("\n## {}\n\n{}\n\n", presentation::literal(&task.id), presentation::fence(reason, "text")));
+                        }
+                        if let Some(next) = bark::next_command_for(task, &scope.tasks, &component) {
+                            markdown.push_str(&format!("\n**Next for {}:** {}\n", presentation::literal(&task.id), presentation::fence(&next, "text")));
+                        }
                     }
                 }
                 self.append(&markdown)?;

@@ -599,10 +599,22 @@ impl Shell {
             return LoopAction::Continue;
         };
         let next_ready = task_queue::next_ready_task_id(&scope.tasks);
+        let total = scope.tasks.len();
+        let ready_ids = task_queue::ready_task_ids(&scope.tasks);
+        // Ready tasks are the default view; `--all` or an explicit `--status`
+        // lists the rest. The full count is always reported so hidden tasks are
+        // never silently dropped.
+        let ready_only = !parsed.all && parsed.status.is_none();
         let rows: Vec<TaskRow> = scope
             .tasks
             .iter()
-            .filter(|task| parsed.status.is_none_or(|s| s == task.status))
+            .filter(|task| {
+                if ready_only {
+                    ready_ids.iter().any(|id| id == &task.id)
+                } else {
+                    parsed.status.is_none_or(|s| s == task.status)
+                }
+            })
             .map(|task| TaskRow {
                 id: task.id.clone(),
                 status: task.status,
@@ -617,6 +629,8 @@ impl Shell {
             &component,
             &rows,
             next_ready.as_deref(),
+            total,
+            ready_only,
         ));
         self.journal
             .append(journal_entry(line, &format!("{} tasks", rows.len())));
@@ -1140,12 +1154,19 @@ fn parse_task_status(value: &str) -> std::result::Result<TaskStatus, String> {
 struct TasksArgs {
     component: Option<String>,
     status: Option<TaskStatus>,
+    /// List every task rather than only the ready (schedulable) ones.
+    all: bool,
 }
 
-/// Parses `tasks [COMPONENT_DIR] [--status STATUS]` (pure).
+/// Parses `tasks [COMPONENT_DIR] [--status STATUS] [--all]` (pure).
+///
+/// By default only ready tasks are shown; `--all` (or an explicit `--status`)
+/// lists the rest. The full count is always reported so hidden tasks are never
+/// silently dropped.
 fn parse_tasks_args(args: &[String]) -> std::result::Result<TasksArgs, String> {
     let mut component = None;
     let mut status = None;
+    let mut all = false;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -1161,15 +1182,22 @@ fn parse_tasks_args(args: &[String]) -> std::result::Result<TasksArgs, String> {
         } else if let Some(value) = arg.strip_prefix("--status=") {
             status = Some(parse_task_status(value)?);
             i += 1;
+        } else if arg == "--all" {
+            all = true;
+            i += 1;
         } else {
             if component.is_some() {
-                return Err("usage: tasks [COMPONENT_DIR] [--status STATUS]".to_owned());
+                return Err("usage: tasks [COMPONENT_DIR] [--status STATUS] [--all]".to_owned());
             }
             component = Some(arg.clone());
             i += 1;
         }
     }
-    Ok(TasksArgs { component, status })
+    Ok(TasksArgs {
+        component,
+        status,
+        all,
+    })
 }
 
 /// Parsed `run` builtin arguments: the required component and optional task.
@@ -1302,12 +1330,54 @@ fn first_nonblank_line(value: &str) -> &str {
 }
 
 /// Renders the `tasks` table (pure, so it is testable without a terminal).
+///
+/// In `ready_only` mode the rows are the schedulable tasks, numbered in queue
+/// order so the first row is the next task and `run N` executes row N. The full
+/// count is always shown so hidden tasks are never silently dropped. In `--all`
+/// mode every task is listed with its status.
 fn render_tasks(
     theme: Theme,
     component: &str,
     rows: &[TaskRow],
     next_ready: Option<&str>,
+    total: usize,
+    ready_only: bool,
 ) -> String {
+    if ready_only {
+        if rows.is_empty() {
+            return format!(
+                "No ready tasks in `{component}` ({} task{} total). `tasks --all` lists them all.",
+                total,
+                if total == 1 { "" } else { "s" }
+            );
+        }
+        let hidden = total - rows.len();
+        let mut text = format!(
+            "{}\n",
+            theme.bold(&format!(
+                "Tasks in `{component}` — {} of {} ready:",
+                rows.len(),
+                total
+            ))
+        );
+        text.push_str(&format!(
+            "{}\n",
+            theme.dim(&format!(
+                "run N executes the Nth row; tasks --all lists the other {}.",
+                hidden
+            ))
+        ));
+        for (index, row) in rows.iter().enumerate() {
+            text.push_str(&format!(
+                "{:>4}  {:<28} {:<16} {}\n",
+                theme.bold(&format!("{}", index + 1)),
+                truncate(&row.id, 28),
+                kind_label(row.kind),
+                truncate(&row.title, 60)
+            ));
+        }
+        return text;
+    }
     if rows.is_empty() {
         return format!("No tasks in `{component}` match the filter.");
     }
@@ -2171,6 +2241,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_tasks_args_defaults_to_ready_only_and_accepts_all() {
+        // No flags: ready-only is the default (all is false).
+        let args = parse_tasks_args(&[]).expect("no args");
+        assert!(!args.all);
+        assert!(args.status.is_none());
+        // --all lists every task.
+        let args = parse_tasks_args(&["--all".to_owned()]).expect("--all");
+        assert!(args.all);
+        // --all composes with an explicit component and status.
+        let args = parse_tasks_args(&[
+            "maerg".to_owned(),
+            "--all".to_owned(),
+            "--status".to_owned(),
+            "blocked".to_owned(),
+        ])
+        .expect("--all with component and status");
+        assert!(args.all);
+        assert_eq!(args.component.as_deref(), Some("maerg"));
+        assert_eq!(args.status, Some(TaskStatus::Blocked));
+    }
+
+    #[test]
     fn parse_run_args_requires_component_and_accepts_optional_task() {
         assert!(parse_run_args(&[]).is_err());
         assert_eq!(
@@ -2368,7 +2460,7 @@ mod tests {
             row("a", TaskStatus::Completed),
             row("b", TaskStatus::Pending),
         ];
-        let text = render_tasks(Theme::plain(), "maerg", &rows, Some("b"));
+        let text = render_tasks(Theme::plain(), "maerg", &rows, Some("b"), rows.len(), false);
         assert!(text.starts_with("Tasks in `maerg` (2 shown):\n"));
         assert!(text.contains("★ b"));
         assert!(text.contains("next ready: b"));
@@ -2381,7 +2473,7 @@ mod tests {
             blocked_reason: Some("waiting on x".to_owned()),
             next: Some("kvist task run . c".to_owned()),
         }];
-        let text = render_tasks(Theme::plain(), ".", &blocked, None);
+        let text = render_tasks(Theme::plain(), ".", &blocked, None, blocked.len(), false);
         assert!(text.contains("implementation"));
         assert!(text.contains("blocked: waiting on x"));
         assert!(text.contains("next:    kvist task run . c"));
@@ -2396,16 +2488,25 @@ mod tests {
                 "kvist task transition . d pending (1 dependency task incomplete)".to_owned(),
             ),
         }];
-        let text = render_tasks(Theme::plain(), ".", &multiline, None);
+        let text = render_tasks(
+            Theme::plain(),
+            ".",
+            &multiline,
+            None,
+            multiline.len(),
+            false,
+        );
         assert!(text.contains("blocked: first line"));
         assert!(!text.contains("second line"));
-        assert!(render_tasks(Theme::plain(), "maerg", &[], None).contains("match the filter"));
+        assert!(
+            render_tasks(Theme::plain(), "maerg", &[], None, 0, false).contains("match the filter")
+        );
 
         // A colored theme keeps every line at the same visible width as the
         // plain rendering, so styled cells never drift out of their columns.
         let colored = Theme::enabled();
-        let plain_text = render_tasks(Theme::plain(), "maerg", &rows, Some("b"));
-        let styled_text = render_tasks(colored, "maerg", &rows, Some("b"));
+        let plain_text = render_tasks(Theme::plain(), "maerg", &rows, Some("b"), rows.len(), false);
+        let styled_text = render_tasks(colored, "maerg", &rows, Some("b"), rows.len(), false);
         for (plain, styled) in plain_text.lines().zip(styled_text.lines()) {
             assert_eq!(
                 style::visible_len(styled),

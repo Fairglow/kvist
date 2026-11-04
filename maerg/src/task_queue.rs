@@ -461,9 +461,18 @@ pub fn serialize(queue: &TaskQueue) -> std::result::Result<String, TaskQueueErro
 /// This is the single definition of "next task" shared by the project
 /// overview, the shell's runnable-task ordering, and task selection.
 pub fn next_ready_task_id(tasks: &[Task]) -> Option<String> {
+    ready_task_ids(tasks).into_iter().next()
+}
+
+/// Returns the IDs of every ready task in declared queue order: `pending` with
+/// every recorded dependency `completed`. The first element, when present, is
+/// exactly [`next_ready_task_id`]. This is the single ordering that the `tasks`
+/// listing numbers and that a bare positive integer passed to `task run`
+/// indexes, so the first listed task is always the next task.
+pub fn ready_task_ids(tasks: &[Task]) -> Vec<String> {
     tasks
         .iter()
-        .find(|task| {
+        .filter(|task| {
             task.status == TaskStatus::Pending
                 && task.depends_on.iter().all(|dependency| {
                     tasks.iter().any(|other| {
@@ -472,6 +481,7 @@ pub fn next_ready_task_id(tasks: &[Task]) -> Option<String> {
                 })
         })
         .map(|task| task.id.clone())
+        .collect()
 }
 
 /// Returns whether every direct and transitive dependency of `task` exists and
@@ -1309,6 +1319,33 @@ mod tests {
         // A dependency missing from the queue is never satisfied.
         let tasks = vec![task("a", TaskStatus::Pending, &["missing"])];
         assert_eq!(next_ready_task_id(&tasks), None);
+    }
+
+    #[test]
+    fn ready_task_ids_lists_every_ready_task_in_queue_order() {
+        // The first ready task is exactly the next task.
+        let tasks = vec![
+            task("a", TaskStatus::Completed, &[]),
+            task("b", TaskStatus::Pending, &[]),
+            task("c", TaskStatus::Pending, &["a"]),
+            task("d", TaskStatus::Pending, &["b"]),
+        ];
+        assert_eq!(ready_task_ids(&tasks), vec!["b".to_owned(), "c".to_owned()]);
+        assert_eq!(
+            ready_task_ids(&tasks).into_iter().next(),
+            next_ready_task_id(&tasks)
+        );
+        // A pending task whose dependency is not complete is excluded, and the
+        // list stays in declared queue order.
+        let tasks = vec![
+            task("a", TaskStatus::Pending, &["b"]),
+            task("b", TaskStatus::Pending, &[]),
+            task("c", TaskStatus::Completed, &[]),
+        ];
+        assert_eq!(ready_task_ids(&tasks), vec!["b".to_owned()]);
+        // No ready tasks yields an empty list.
+        let tasks = vec![task("a", TaskStatus::InProgress, &[])];
+        assert!(ready_task_ids(&tasks).is_empty());
     }
 
     #[test]

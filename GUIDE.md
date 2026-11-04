@@ -480,6 +480,52 @@ to preserve clean-slate review boundaries.
 After manual edits during a pause, inspect verification and review freshness:
 completed reviews are not automatically invalidated or rerun.
 
+### 5.4 Task lifecycle and ready work
+
+Every requirement carries its own four-stage lifecycle, in this order:
+
+```
+*-write-tests  ->  *-implement-code  ->  *-security-audit  ->  *-compliance-review
+```
+
+The compliance review is the last stage of **that requirement's** chain, not a
+single gate at the end of the whole queue. A requirement's review runs as soon
+as its own tests, implementation, and security audit are complete — even while
+other requirements still have pending work. This is why the _next_ task can be a
+`compliance-review` while many other tasks remain: the reviewed requirement is
+otherwise finished, and the review is simply the first ready task in queue
+order. New work introduced by a design change or a decision is inserted **before**
+the affected requirement's compliance review, so the review always sees the
+final implementation.
+
+**Ready work and the numbered shortcut.** `tasks` lists only the _ready_ tasks —
+`pending` tasks whose recorded dependencies are all `completed` — numbered in
+queue order, so row 1 is always the next task. The full count is always shown,
+so hidden work is never silently dropped; `tasks --all` (or an explicit
+`--status`) lists every task with its state. Because the listing is numbered,
+you can run a task by its row number without typing its ID:
+
+```bash
+tasks            # ready tasks, numbered; row 1 is the next task
+tasks --all      # every task with its state
+run 1            # run the next task (row 1)
+run 3            # run the third ready task
+```
+
+In the shell the component comes from focus, so `run 3` targets the focused
+component. On the command line the component is explicit: `kvist task run
+<component> 3`. A bare positive integer is a 1-based ready position; an exact
+task ID always wins, so a real ID that happens to be all digits is never
+mistaken for a position.
+
+**Already-implemented work.** When a task's work already exists — because it was
+done outside Kvist, or a previous run finished it — the supervised agent verifies
+the existing code and tests satisfy the task and closes it with a plain summary
+and no further edits; it does not redo the work. A routine `propose_decision`
+that carries no real alternatives is auto-resolved rather than surfaced, so an
+"already done" task does not produce an empty decision. A decision pauses the run
+only when it presents a genuine contradiction with alternatives for arbitration.
+
 ### Decisions and blockers
 
 When work needs your attention, Kvist prints a specific `.md` brief under the
@@ -547,7 +593,13 @@ Manual/offline plans use the same strict native JSON version-1 draft format as
 agent plans, documented in [maerg/CONTRACT.md](maerg/CONTRACT.md):
 
 ```json
-{"schema_version":1,"rationale":"The environment is repaired; retry with guarantees unchanged.","documents":{},"tasks":[],"disposition":"resolve"}
+{
+  "schema_version": 1,
+  "rationale": "The environment is repaired; retry with guarantees unchanged.",
+  "documents": {},
+  "tasks": [],
+  "disposition": "resolve"
+}
 ```
 
 ```bash
@@ -569,7 +621,7 @@ For large intent documents, prefer `document_edits` with exact unique
 materializes and validates complete files for the same exact approval preview;
 ambiguous or missing anchors fail rather than guessing.
 
-### 5.4 Replaying Execution Trajectories
+### 5.5 Replaying Execution Trajectories
 
 Every execution turn, tool call, and token metric is journaled into `.kvist/runs/`. You can replay historical trajectories offline:
 
@@ -595,15 +647,15 @@ For detailed instructions on compliance reviews, refer to [`REVIEW_RUNBOOK.md`](
 
 ### Shell & Diagnostics
 
-| Command                     | Description                                                                                                                                                                                  |
-| :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kvist` _(no args)_         | Inside a project: the project overview and what to do next. Outside: the guided help.                                                                                                        |
-| `kvist`                     | Open the Markdown workspace with command input and dynamic tab-completion. |
-| `kvist doctor [DIR]`        | Check project health, versions, and VCS configuration.                                                                                                                                       |
-| `kvist status [COMPONENT] [--details] [--project DIR]` | Compact project table by default; name a component for its details, or use `--details` for all details. `--format text\|json` retains native script forms. |
-| `kvist tree [DIR]`          | Render an ASCII component tree.                                                                                                                                                              |
-| `kvist help [TOPIC]`        | Guided help: the 30-second tour, or a topic — `concepts`, `lifecycle`, `task-states` (states, legal transitions, and the command that achieves each). Tab-completable; also a shell builtin. |
-| `kvist completions <SHELL>` | Generate shell auto-completion scripts (`bash`, `zsh`, `fish`, `powershell`).                                                                                                                |
+| Command                                                | Description                                                                                                                                                                                  |
+| :----------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kvist` _(no args)_                                    | Inside a project: the project overview and what to do next. Outside: the guided help.                                                                                                        |
+| `kvist`                                                | Open the Markdown workspace with command input and dynamic tab-completion.                                                                                                                   |
+| `kvist doctor [DIR]`                                   | Check project health, versions, and VCS configuration.                                                                                                                                       |
+| `kvist status [COMPONENT] [--details] [--project DIR]` | Compact project table by default; name a component for its details, or use `--details` for all details. `--format text\|json` retains native script forms.                                   |
+| `kvist tree [DIR]`                                     | Render an ASCII component tree.                                                                                                                                                              |
+| `kvist help [TOPIC]`                                   | Guided help: the 30-second tour, or a topic — `concepts`, `lifecycle`, `task-states` (states, legal transitions, and the command that achieves each). Tab-completable; also a shell builtin. |
+| `kvist completions <SHELL>`                            | Generate shell auto-completion scripts (`bash`, `zsh`, `fish`, `powershell`).                                                                                                                |
 
 Every command resolves the project by walking upward from the current
 directory to the nearest `kvist.toml`, and component commands act on the
@@ -614,17 +666,17 @@ works without repeating the component. An explicit path argument always wins.
 
 Type these directly at the `kvist` prompt (no `kvist` prefix needed):
 
-| Command                          | Description                                                                                                                         |
-| :------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------- |
-| `cd [COMPONENT]`                 | Select a component for `status`, `run`, `tasks` and completion. Never prefills a destination; bare `cd` (or `cd -`) returns to project scope and its history. |
-| `tasks [COMPONENT] [--status S]` | List tasks with status; filter by `pending`, `in-progress`, `blocked`, `awaiting-decision`, `completed`.                            |
-| `run COMPONENT [TASK]`         | Run an exact task, or continuous component work when TASK is omitted. |
-| `last [COUNT]`                   | Show recent agent runs with tokens and log links.                                                                                   |
-| `history [COUNT]`                | Show recent editor history lines.                                                                                                   |
-| `journal`                        | Show the append-only session journal.                                                                                               |
-| `locks [clean]`                  | Inspect live/stale task locks; `clean` removes stale ones.                                                                          |
-| `help [TOPIC]`                   | List builtins and workflow commands, or show a help topic: `concepts`, `lifecycle`, `task-states` (same content as `kvist help`).   |
-| `exit` / `quit`                  | Leave the shell.                                                                                                                    |
+| Command                                  | Description                                                                                                                                                                                |
+| :--------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cd [COMPONENT]`                         | Select a component for `status`, `run`, `tasks` and completion. Never prefills a destination; bare `cd` (or `cd -`) returns to project scope and its history.                              |
+| `tasks [COMPONENT] [--status S] [--all]` | List the **ready** (schedulable) tasks numbered in queue order — row 1 is always the next task — with the full count. `--all` (or an explicit `--status`) lists every task with its state. |
+| `run COMPONENT [TASK\|N]`                | Run an exact task, the Nth ready task by number, or continuous component work when the target is omitted.                                                                                  |
+| `last [COUNT]`                           | Show recent agent runs with tokens and log links.                                                                                                                                          |
+| `history [COUNT]`                        | Show recent editor history lines.                                                                                                                                                          |
+| `journal`                                | Show the append-only session journal.                                                                                                                                                      |
+| `locks [clean]`                          | Inspect live/stale task locks; `clean` removes stale ones.                                                                                                                                 |
+| `help [TOPIC]`                           | List builtins and workflow commands, or show a help topic: `concepts`, `lifecycle`, `task-states` (same content as `kvist help`).                                                          |
+| `exit` / `quit`                          | Leave the shell.                                                                                                                                                                           |
 
 Key bindings: `<TAB>`/`<S-TAB>` complete and cycle, arrows navigate the menu,
 `<ESC>` closes it, `<CTRL+C>` cancels a running command, `<CTRL+L>` clears the
@@ -656,14 +708,14 @@ containing the current directory.
 `<DIR>` is optional everywhere: it defaults to the component containing the
 current directory.
 
-| Command                                                    | Description                                                                                                                                                               |
-| :--------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `kvist task next [DIR]`                                    | Print the next ready task ID.                                                                                                                                             |
-| `kvist task approve-policy [DIR]`                          | Cryptographically approve the sandbox test-execution policy.                                                                                                              |
-| `kvist task run DIR [TASK]`                              | Run an exact task, or omit TASK for continuous dependency-ready work and complete-item checkpoint commits; stop for approval, decisions or blockers. |
-| `kvist task log <DIR> <TASK>`                              | Display the execution log of a completed or failed task.                                                                                                                  |
-| `kvist task replay <SESSION>`                              | Step through a structured execution trajectory journal.                                                                                                                   |
-| `kvist task unlock [DIR]`                                  | Release stale or orphaned component execution locks.                                                                                                                      |
-| `kvist task recover <DIR> <TASK> <ATTEMPT>`                | Reconcile a fenced attempt that verifiably never started (`--disposition execution-did-not-start`).                                                                       |
-| `kvist task finalize <DIR> <TASK> <ATTEMPT> accept\|block` | Record the human disposition of a completed attempt.                                                                                                                      |
-| `kvist task transition <DIR> <TASK> <STATUS>`              | Perform an audited task state transition (`pending`, `in-progress`, `blocked`, `awaiting-decision`, `completed`). See `kvist help task-states` for the legal transitions. |
+| Command                                                    | Description                                                                                                                                                                                                          |
+| :--------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kvist task next [DIR]`                                    | Print the next ready task ID.                                                                                                                                                                                        |
+| `kvist task approve-policy [DIR]`                          | Cryptographically approve the sandbox test-execution policy.                                                                                                                                                         |
+| `kvist task run DIR [TASK\|N]`                             | Run an exact task, the Nth ready task by number (1-based, matching `tasks`), or omit the target for continuous dependency-ready work and complete-item checkpoint commits; stop for approval, decisions or blockers. |
+| `kvist task log <DIR> <TASK>`                              | Display the execution log of a completed or failed task.                                                                                                                                                             |
+| `kvist task replay <SESSION>`                              | Step through a structured execution trajectory journal.                                                                                                                                                              |
+| `kvist task unlock [DIR]`                                  | Release stale or orphaned component execution locks.                                                                                                                                                                 |
+| `kvist task recover <DIR> <TASK> <ATTEMPT>`                | Reconcile a fenced attempt that verifiably never started (`--disposition execution-did-not-start`).                                                                                                                  |
+| `kvist task finalize <DIR> <TASK> <ATTEMPT> accept\|block` | Record the human disposition of a completed attempt.                                                                                                                                                                 |
+| `kvist task transition <DIR> <TASK> <STATUS>`              | Perform an audited task state transition (`pending`, `in-progress`, `blocked`, `awaiting-decision`, `completed`). See `kvist help task-states` for the legal transitions.                                            |
