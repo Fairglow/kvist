@@ -1431,12 +1431,14 @@ fn ensure_component_attempts_recovered_except(
             (task.id == recovery_task).then_some(attempt_id)
         });
         let attempt_path = existing_attempt_path(component_dir, &task.id);
-        if task
-            .recovery_state
-            .as_ref()
-            .is_some_and(|state| Some(state.attempt_id.as_str()) != permitted_attempt)
+        if let Some(state) = task.recovery_state.as_ref()
+            && Some(state.attempt_id.as_str()) != permitted_attempt
         {
-            return Err(unresolved_attempt_error(&attempt_path));
+            return Err(unresolved_attempt_error(
+                &attempt_path,
+                &task.id,
+                std::slice::from_ref(&state.attempt_id),
+            ));
         }
         ensure_task_attempt_recovered(component_dir, &task.id, task.status, permitted_attempt)?;
     }
@@ -1450,11 +1452,12 @@ fn ensure_other_task_attempts_recovered(
 ) -> Result<()> {
     decisions::ensure_no_pending(component_dir)?;
     for other in queue.tasks.iter().filter(|task| task.id != task_id) {
-        if other.recovery_state.is_some() {
-            return Err(unresolved_attempt_error(&existing_attempt_path(
-                component_dir,
+        if let Some(state) = other.recovery_state.as_ref() {
+            return Err(unresolved_attempt_error(
+                &existing_attempt_path(component_dir, &other.id),
                 &other.id,
-            )));
+                std::slice::from_ref(&state.attempt_id),
+            ));
         }
         ensure_task_attempt_recovered(component_dir, &other.id, other.status, None)?;
     }
@@ -1488,19 +1491,47 @@ fn ensure_task_attempt_recovered(
     }
     let secret = load_existing_recovery_secret()?;
     let assessed = assess_attempt_journal(&path, journal, task_id, &secret)?;
-    if assessed.attempts.iter().any(|(attempt_id, attempt)| {
-        !attempt.is_fully_recovered(status) && Some(attempt_id.as_str()) != permitted_attempt
-    }) {
-        return Err(unresolved_attempt_error(&path));
+    let unresolved: Vec<String> = assessed
+        .attempts
+        .iter()
+        .filter(|(attempt_id, attempt)| {
+            !attempt.is_fully_recovered(status) && Some(attempt_id.as_str()) != permitted_attempt
+        })
+        .map(|(attempt_id, _)| attempt_id.clone())
+        .collect();
+    if !unresolved.is_empty() {
+        return Err(unresolved_attempt_error(&path, task_id, &unresolved));
     }
     Ok(())
 }
 
-fn unresolved_attempt_error(path: &Path) -> KvistError {
+fn unresolved_attempt_error(path: &Path, task_id: &str, attempt_ids: &[String]) -> KvistError {
+    // The journal lives at `<component>/.kvist-attempts/<task>.jsonl`, so the
+    // component name is two parents up. Deriving it here keeps the suggested
+    // command copy-pasteable without threading the display path through every
+    // caller; the project-root component is the only case this approximates.
+    let component = path
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "<component>".to_owned());
+    let attempts = attempt_ids.join(", ");
+    let command = if attempt_ids.len() == 1 {
+        format!(
+            "kvist task finalize {component} {task_id} {} block --reason \"<why you are abandoning it>\"",
+            attempt_ids[0]
+        )
+    } else {
+        format!(
+            "kvist task finalize {component} {task_id} <ATTEMPT_ID> block --reason \"...\" (one command per attempt: {attempts})"
+        )
+    };
     KvistError::TaskQueueUnavailable {
         path: path.to_path_buf(),
-        reason: "a fenced or unresolved authenticated task attempt requires inspection before another transition. Inspect the retained attempt journal and effects; explicitly abandon it with `kvist task finalize ... block --reason ...` if appropriate. `kvist task recover` applies only when authenticated host evidence proves execution did not start. Do not delete evidence or blindly replay the task"
-            .to_owned(),
+        reason: format!(
+            "task `{task_id}` has an unresolved authenticated attempt ({attempts}) in its journal that must be dispositioned before another transition. Abandon it with: {command}. `kvist task recover {component} {task_id} <ATTEMPT_ID> --disposition execution-did-not-start` applies only with authenticated no-launch evidence. Do not delete evidence or blindly replay the task"
+        ),
     }
 }
 
@@ -6760,7 +6791,7 @@ mod tests {
     use super::{
         MAX_ATTEMPT_JOURNAL_BYTES, MAX_SCOPE_DEPTH, MAX_SCOPE_ENTRIES, MAX_SCOPE_FILE_BYTES,
         TaskLock, Timestamp, append_encoded_attempt, digest, digest_path_tree,
-        is_rust_verification, read_attempt_journal, resolve_task_spec,
+        is_rust_verification, read_attempt_journal, resolve_task_spec, unresolved_attempt_error,
     };
     use crate::task_queue::{Task, TaskKind, TaskStatus, TaskTimestamps};
 
@@ -6809,6 +6840,58 @@ mod tests {
         // A numeric task ID is still matched exactly, not treated as a position.
         let numeric = vec![task("7", TaskStatus::Pending, &[])];
         assert_eq!(resolve_task_spec(&numeric, "7"), Some("7".to_owned()));
+    }
+
+    #[test]
+    fn unresolved_attempt_error_names_the_exact_task_attempt_and_command() {
+        let path =
+            std::path::Path::new("maerg/.kvist-attempts/decision-shortcuts-security-audit.jsonl");
+        let message = unresolved_attempt_error(
+            path,
+            "decision-shortcuts-security-audit",
+            &["attempt-0003".to_owned()],
+        )
+        .to_string();
+        // The component is derived from the journal path (two parents up).
+        assert!(
+            message.contains("maerg"),
+            "component must be derived from the journal path: {message}"
+        );
+        // The exact task and attempt are named, not left as placeholders.
+        assert!(
+            message.contains("decision-shortcuts-security-audit"),
+            "task id must be named: {message}"
+        );
+        assert!(
+            message.contains("attempt-0003"),
+            "attempt id must be named: {message}"
+        );
+        // A copy-pasteable finalize command is provided.
+        assert!(
+            message.contains(
+                "kvist task finalize maerg decision-shortcuts-security-audit attempt-0003 block --reason"
+            ),
+            "exact finalize command must be provided: {message}"
+        );
+    }
+
+    #[test]
+    fn unresolved_attempt_error_lists_each_attempt_when_several_are_unresolved() {
+        let path = std::path::Path::new("maerg/.kvist-attempts/some-task.jsonl");
+        let message = unresolved_attempt_error(
+            path,
+            "some-task",
+            &["attempt-0001".to_owned(), "attempt-0002".to_owned()],
+        )
+        .to_string();
+        assert!(
+            message.contains("attempt-0001, attempt-0002"),
+            "all unresolved attempts must be listed: {message}"
+        );
+        assert!(
+            message.contains("one command per attempt"),
+            "multiple attempts must not be collapsed into one command: {message}"
+        );
     }
 
     #[test]
