@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:77d80b898c21e0575ae3181a224fa3c7e6a6b0670f0463eaa02f00f9550ba765"
+  requirements_revision: "sha256:3086d1bd8a18b675b1468721f662518abda2fa56473e02eaa032b4cc61d3fda4"
   contract_revision: "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03"
-  design_revision: "sha256:1f3428305bba6a9f7f46152d7fc0fb3df5cf5e8c71298d83c97ca1c65950ea6a"
+  design_revision: "sha256:0c1cfae82b7f2f6819b5a1898fc15a1608e08b91c738fb405507e0b2b458f9fb"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-29T22:50:41Z"
+    checked_at: "2026-11-03T22:56:28Z"
     stale_since: null
     causes: []
 tasks:
@@ -36,7 +36,8 @@ tasks:
     expected_outcome: "Headless and lifecycle tests pass without weaker assertions or lint warnings."
     kind: implementation
     status: completed
-    depends_on: ["capacity-fixtures-write-tests"]
+    depends_on:
+      - "capacity-fixtures-write-tests"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
       - "REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"
@@ -54,7 +55,8 @@ tasks:
     expected_outcome: "Persist a scoped source-derived IMPL supplement."
     kind: security-audit
     status: completed
-    depends_on: ["capacity-fixtures-implement-code"]
+    depends_on:
+      - "capacity-fixtures-implement-code"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
     timestamps:
@@ -71,7 +73,8 @@ tasks:
     expected_outcome: "Record a separate scoped comparison and its limitations."
     kind: compliance-review
     status: completed
-    depends_on: ["capacity-fixtures-security-audit"]
+    depends_on:
+      - "capacity-fixtures-security-audit"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
     timestamps:

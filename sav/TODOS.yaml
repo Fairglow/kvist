@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:b701fc0047bb37c2427b685ecaf0f17fb3cbe9e480d104bd8f812d3fa001255c"
-  contract_revision: "sha256:093f70aff0bce3366a4fb4cacacd0fb6617b044de3218d397145109638cdfa9d"
-  design_revision: "sha256:17f02a4be8fa77b42befbff75c2841eb5b5e6c78914f4aaf39fe56c55ab32209"
+  requirements_revision: "sha256:cd06c5851d83e39b324a929430af4d57a7549670f1ca827eb389c8dd2827e5df"
+  contract_revision: "sha256:390728e5867a1a299a56bec93b20373262c46d91339a42eb7f8981570e05c259"
+  design_revision: "sha256:7417b300a66353d6feef525d90339a0701247dffc56b790d9115ca8cc9fc74b2"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-30T07:36:17Z"
+    checked_at: "2026-11-03T22:56:22Z"
     stale_since: null
     causes: []
 tasks:
@@ -35,7 +35,8 @@ tasks:
     expected_outcome: "Capacity and transport tests pass without weaker assertions."
     kind: implementation
     status: completed
-    depends_on: ["capacity-fixtures-write-tests"]
+    depends_on:
+      - "capacity-fixtures-write-tests"
     requirements:
       - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
     timestamps:
@@ -52,7 +53,8 @@ tasks:
     expected_outcome: "Persist a scoped source-derived IMPL supplement."
     kind: security-audit
     status: completed
-    depends_on: ["capacity-fixtures-implement-code"]
+    depends_on:
+      - "capacity-fixtures-implement-code"
     requirements:
       - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
     timestamps:
@@ -69,7 +71,8 @@ tasks:
     expected_outcome: "Record a separate scoped comparison and its limitations."
     kind: compliance-review
     status: completed
-    depends_on: ["capacity-fixtures-security-audit"]
+    depends_on:
+      - "capacity-fixtures-security-audit"
     requirements:
       - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
     timestamps:
