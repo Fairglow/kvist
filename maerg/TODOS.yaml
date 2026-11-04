@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:4e1b156b7a8a8b9665304618bb6b0918115a41f43d55cb67d6ffd77df80050b4"
-  contract_revision: "sha256:995cd970c55fc203bd2cd560bdd920fdbaeb9d36fd3ab048d04d2192ab6c6842"
-  design_revision: "sha256:3ef8f2cfb2ec37b8b46211d5bda0124af46ec326c15455f39678b184d989dc64"
+  requirements_revision: "sha256:1339c23f9bfbeacaf136e951c4f62ecec394c932101691fdc241a19402cc62c5"
+  contract_revision: "sha256:2bceb93227d8669a775839cc66a3551913d53273c8917973b2fe447399bbd300"
+  design_revision: "sha256:e18eae35428b3e86a5aed9f4feaff20b3d7aff10c1bdb652f5d23b25f0fe4206"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-10-31T12:44:11Z"
+    checked_at: "2026-11-04T16:07:24Z"
     stale_since: null
     causes: []
 tasks:
@@ -188,7 +188,8 @@ tasks:
     expected_outcome: "Startup and task-command tests pass with exact generation counts."
     kind: implementation
     status: completed
-    depends_on: ["capacity-fixtures-write-tests"]
+    depends_on:
+      - "capacity-fixtures-write-tests"
     requirements:
       - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
     timestamps:
@@ -205,7 +206,8 @@ tasks:
     expected_outcome: "Persist a scoped source-derived IMPL supplement."
     kind: security-audit
     status: completed
-    depends_on: ["capacity-fixtures-implement-code"]
+    depends_on:
+      - "capacity-fixtures-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
     timestamps:
@@ -222,7 +224,8 @@ tasks:
     expected_outcome: "Record a separate scoped comparison and its limitations."
     kind: compliance-review
     status: completed
-    depends_on: ["capacity-fixtures-security-audit"]
+    depends_on:
+      - "capacity-fixtures-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
     timestamps:
@@ -273,17 +276,18 @@ tasks:
     purpose: "Retain independent authority findings."
     expected_outcome: "Shortcut controls and limitations remain inspectable."
     kind: security-audit
-    status: in-progress
+    status: pending
     depends_on:
       - "decision-shortcuts-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
     timestamps:
       created_at: "2026-10-31T12:05:00Z"
-      updated_at: "2026-11-03T14:39:05Z"
+      updated_at: "2026-11-04T16:07:34Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null
+    disposition: block
   - id: "decision-shortcuts-compliance-review"
     title: "compliance_review: compare shortcut evidence"
     description: "Derive a clean-slate source record and separate source-blind intent comparison with actual test evidence."
