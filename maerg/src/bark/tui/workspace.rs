@@ -689,5 +689,8 @@ impl Workspace {
                 .map(|i| self.history[i].as_str())
                 .unwrap_or(&self.history_draft),
         );
+        if self.running.is_none() {
+            self.input.prefill(&self.prefill);
+        }
     }
 }

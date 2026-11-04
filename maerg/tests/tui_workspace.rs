@@ -243,9 +243,26 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
             .unwrap()
             .contains("stdin prompt body")
     );
-    write(&pty.master, b"cd \x17-\r").unwrap();
+    write(&pty.master, b"status\r").unwrap();
+    wait_for(&pty.master, &mut output, || {
+        transcript(&component).matches("Command finished").count() >= 6
+    });
+    assert!(transcript(&component).contains("## Component: .\n"));
+    assert!(
+        std::fs::read_to_string(component.join(".kvist/transcript/commands.json"))
+            .unwrap()
+            .contains("\"status .\"")
+    );
+    write(&pty.master, b"cd\r").unwrap();
     wait_for(&pty.master, &mut output, || {
         transcript(dir.path()).contains("# Focus: (project)")
+    });
+    write(&pty.master, b"status\r").unwrap();
+    wait_for(&pty.master, &mut output, || {
+        transcript(dir.path()).contains("| Component | State | Artifacts | Tasks | Next action |")
+    });
+    wait_for(&pty.master, &mut output, || {
+        transcript(dir.path()).contains("Command finished")
     });
     write(&pty.master, b"cd .\r").unwrap();
     wait_for(&pty.master, &mut output, || {

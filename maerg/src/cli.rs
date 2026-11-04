@@ -13,6 +13,65 @@ use crate::{
     task_commands, task_queue::TaskStatus, toolchain, tree, vendor_command, wizard,
 };
 
+fn inspect_status(
+    target: Option<&Path>,
+    project: Option<&Path>,
+) -> Result<(project_state::ProjectInspection, bool)> {
+    let (project, component) = context::ProjectContext::resolve_status(target, project)?;
+    let mut inspection = project_state::inspect(&project.project_dir)?;
+    let Some(component) = component else {
+        return Ok((inspection, false));
+    };
+    let component = project.resolve_component(Some(&component))?;
+    if inspection.component_root.is_none() {
+        let (root, components, error) = project_state::inspect_components(&project.project_dir)?;
+        inspection.component_root = root;
+        inspection.components = components;
+        inspection.discovery_error = error;
+    }
+    if let Some(error) = &inspection.discovery_error {
+        return Err(KvistError::TaskComponentNotCurrent {
+            component,
+            state: format!("unavailable because component discovery failed: {error}"),
+            hint: "run `kvist doctor` to inspect project and discovery diagnostics".to_owned(),
+        });
+    }
+    if !inspection
+        .components
+        .iter()
+        .any(|entry| entry.path == component)
+    {
+        return Err(KvistError::TaskComponentNotCurrent {
+            hint: context::component_not_found_hint(&component),
+            component,
+            state: "not discovered".to_owned(),
+        });
+    }
+    inspection
+        .components
+        .retain(|entry| entry.path == component);
+    let directory = inspection
+        .component_root
+        .as_deref()
+        .unwrap_or(Path::new("."))
+        .join(&component)
+        .components()
+        .filter(|part| *part != std::path::Component::CurDir)
+        .collect::<PathBuf>();
+    inspection.artifacts.retain(|artifact| {
+        matches!(
+            artifact.path.as_str(),
+            "kvist.toml" | "VISION.md" | "ARCHITECTURE.md" | "ROOT_CONTRACT.md"
+        ) || !artifact.is_valid()
+            || Path::new(&artifact.path).parent() == Some(directory.as_path())
+    });
+    inspection
+        .vcs
+        .artifacts
+        .retain(|artifact| artifact.path.parent() == Some(directory.as_path()));
+    Ok((inspection, true))
+}
+
 /// Kvist's top-level command-line interface.
 #[derive(Debug, Parser)]
 #[command(
@@ -198,10 +257,16 @@ pub enum Command {
     /// Defaults to the human-friendly report; `--format text|json` gives
     /// the stable report forms for scripts.
     Status {
-        /// Project directory; defaults to the nearest Kvist project at or
-        /// above the current directory.
-        #[arg(value_name = "PROJECT_DIR")]
+        /// Component to inspect in detail, or a project directory to inspect.
+        /// Literal `.` selects the root component.
+        #[arg(value_name = "COMPONENT_DIR")]
         path: Option<PathBuf>,
+        /// Explicit project directory; otherwise find the nearest Kvist project.
+        #[arg(long, value_name = "PROJECT_DIR")]
+        project: Option<PathBuf>,
+        /// Show full details instead of the compact project table.
+        #[arg(long)]
+        details: bool,
         /// Report representation: human overview (default), stable text, or JSON.
         #[arg(long, value_enum, default_value_t = status::StatusFormat::Overview)]
         format: status::StatusFormat,
@@ -1137,13 +1202,14 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             }
             Command::Status {
                 path,
+                project,
                 format: _,
                 only_documents,
                 only_impls,
                 unfinished,
+                ..
             } => {
-                let project = context::ProjectContext::resolve(path.as_deref())?;
-                let inspection = project_state::inspect(&project.project_dir)?;
+                let (inspection, _) = inspect_status(path.as_deref(), project.as_deref())?;
                 Ok(CommandOutput::message(status::render(
                     &inspection,
                     status::StatusFormat::Json,
@@ -1748,19 +1814,38 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             }
             Command::Status {
                 path,
+                project,
+                details,
                 format,
                 only_documents,
                 only_impls,
                 unfinished,
             } => {
-                let project = context::ProjectContext::resolve(path.as_deref())?;
-                project_state::inspect(&project.project_dir).map(|inspection| {
-                    CommandOutput::message(if format == status::StatusFormat::Overview {
-                        status::render_markdown(&inspection, only_documents, only_impls, unfinished)
+                let (inspection, component_selected) =
+                    inspect_status(path.as_deref(), project.as_deref())?;
+                Ok(CommandOutput::message(
+                    if format == status::StatusFormat::Overview {
+                        if component_selected {
+                            status::render_component_markdown(
+                                &inspection,
+                                only_documents,
+                                only_impls,
+                                unfinished,
+                            )
+                        } else if details || only_documents || only_impls {
+                            status::render_markdown(
+                                &inspection,
+                                only_documents,
+                                only_impls,
+                                unfinished,
+                            )
+                        } else {
+                            status::render_summary_markdown(&inspection, unfinished)
+                        }
                     } else {
                         status::render(&inspection, format, only_documents, only_impls, unfinished)
-                    })
-                })
+                    },
+                ))
             }
             Command::Task {
                 command: TaskCommand::Next { component_dir },
@@ -2142,7 +2227,7 @@ fn bare_invocation(json: bool) -> Result<CommandOutput> {
                     r#"{{"status":"success","command":"status","report":{report}}}"#,
                 )))
             } else {
-                let mut text = status::render_markdown(&inspection, false, false, false);
+                let mut text = status::render_summary_markdown(&inspection, false);
                 text.push_str("\n\ntip: run `kvist help` for all commands");
                 Ok(CommandOutput::message(text))
             }

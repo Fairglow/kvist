@@ -5,6 +5,42 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Scoped status and component navigation observations - 2026-11-04
+
+The independent
+[`source-only scoped-status observation`](../docs/reviews/scoped-status-observation.md)
+and its separate clean-slate correction observation describe the current
+implementation. Project status defaults to a compact Markdown table; exact
+component selection uses details, and `--details` expands only the chosen scope.
+Native version-one text/JSON report shapes and positional project targeting
+remain, with `--project` separating a project from a component argument.
+Component filtering removes healthy peer/descendant artifact and VCS detail
+without recomputing away global diagnostics. Queue reads are bounded and
+failures remain explicit rather than becoming zero-task progress.
+
+Both editors visibly insert selected focus for bare `status`, including idle
+TUI history recall, and preserve explicit values/deletion. `cd` remains
+tab-completable but never prefills a destination; bare `cd` and `cd -` clear
+focus, with TUI project transcript/history restoration. Current project and
+component states gate displayed execution advice in both Markdown projections.
+
+Observed limits: `--unfinished` preserves the existing non-current-state
+filter rather than selecting all incomplete task queues; exact output
+filtering does not isolate filesystem inspection from peer/global failures.
+The source observation distinguishes test-source assertions from executed
+evidence. Protected audit/compliance gates and intent acceptance remain pending.
+
+Implementation-agent execution, separately attributed: all-feature Maerg
+Nextest run `4dc3a369-acbe-4159-ac10-5d1ee25b2c00` passed 1083 tests with
+7 existing skips. Seven targeted integration suites passed 107 tests, the
+bark library selector passed 271, and the corrected explicit-project namespace
+fixture passed. Formatting, strict all-target/all-feature Maerg Clippy, release
+build, component structural validation and release scoped-JSON smoke passed.
+The separate
+[`source-blind comparison`](../docs/reviews/scoped-status-comparison.md)
+records the bounded agreement and remaining evidence limits, not protected
+review completion or intent acceptance.
+
 ## Scoped workspace settings observations - 2026-11-04
 
 The fresh

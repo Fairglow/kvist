@@ -488,7 +488,7 @@ fn explicitly_resumed_decision_attempt_retains_valid_evidence_for_later_disposit
 fn blocked_guidance_names_a_permitted_nonexecuting_transition() {
     let project = create_target_project("pending");
     set_status(project.path(), TaskStatus::Blocked, true);
-    let status = run_kvist(project.path(), &["status"]);
+    let status = run_kvist(project.path(), &["status", "--details"]);
     assert_success(&status, "inspect blocked guidance");
     assert!(
         output_text(&status).contains(&format!("kvist task transition . {TASK_ID} pending")),

@@ -132,7 +132,7 @@ design lives in [`docs/command-set.md`](../docs/command-set.md).
 | Command                                                      | Contract                                                                                                                                                                                                                |
 | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kvist` / `kvist shell [PROJECT_DIR]`                         | Open the Markdown workspace; the explicit form selects another project. |
-| `kvist status [PROJECT_DIR] [--format overview\|text\|json]` | "Where do I stand?": states, progress, next ready tasks, changed documents with revisions, and the exact next action for anything non-current. The overview is the default; `text`/`json` are stable forms for scripts. |
+| `kvist status [COMPONENT_DIR] [--project PROJECT_DIR] [--details] [--format overview\|text\|json]` | One compact row per component by default; a component argument shows its details, and `--details` expands project scope. `text`/`json` are stable script forms. |
 | `kvist init [PROJECT_DIR]`                                   | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.                                                                                                                              |
 | `kvist convert <PROJECT_DIR>`                                | Generate no-clobber draft onboarding artifacts for an existing Rust project.                                                                                                                                            |
 | `kvist doctor [PROJECT_DIR]`                                 | Read-only inspection of the root artifact state and recovery guidance.                                                                                                                                                  |
@@ -824,8 +824,27 @@ inspect it, and update the project explicitly to the current model.
 
 ## Project status reports
 
-`kvist status [PROJECT_DIR] [--format text|json] [--only-documents]` inspects
-the current root project and every discovered component without writing files.
+`kvist status` displays a compact Markdown table: one row per component with
+state, artifact health, task progress and a next command. Use `kvist status
+COMPONENT_DIR` for that exact component's details, or `kvist status --details`
+for every component's artifacts, revisions and complete blocker reasons.
+`--only-documents` and `--only-impls` imply details; `--unfinished` filters
+non-current components. Component selection remains effective with these flags
+and native `--format text|json` or global `--json`.
+
+The nearest `kvist.toml` identifies the project. Positional project directories
+remain supported; literal `.` selects the root component. Use `--project DIR`
+to select a project explicitly or combine it with a component argument.
+Unknown components fail instead of silently displaying the project.
+Global project problems remain visible in component-scoped output.
+Inspection never writes files.
+
+In the workspace, `status` visibly prefills the selected component, even
+without a trailing space. Edit or delete it to override the scope. `cd` never
+prefills its destination: `cd COMPONENT` changes focus, and bare `cd` (or
+`cd -`) returns to project-level status and transcript/history. `--details`
+expands the chosen scope; return to project scope for all-component details.
+
 It reports
 `unsupported-version`, `invalid`, `missing`, `stale`, `blocked`, and `current`
 component states in precedence order. `--only-documents` filters the report to

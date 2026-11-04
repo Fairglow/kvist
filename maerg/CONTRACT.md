@@ -155,9 +155,16 @@ The `kvist` executable provides (the authoritative design is
 - `repair [PROJECT_DIR] [--dry-run] [--salvage] [--reset PATH]...
   [--clean-slate] [--component-root PATH] [--backup-dir PATH] [--approve SHA256]
   [--ai PROFILE] [--proposal PATH]`
-- `status [PROJECT_DIR] [--format overview|text|json] [--only-documents]
-[--only-impls] [--unfinished]`; the default format is the human-friendly
-  overview, and `text`/`json` are the stable report forms for scripts
+- `status [COMPONENT_DIR|PROJECT_DIR] [--project PROJECT_DIR] [--details]
+  [--format overview|text|json] [--only-documents] [--only-impls] [--unfinished]`;
+  default human output is one compact table row per component. A component
+  argument selects exact-component details; `--details` shows all details in
+  project scope and never overrides an explicit component filter. Artifact-only
+  filters imply details. Native `text`/`json` retain their version-one shapes.
+  `--project` separates project selection from component selection; positional
+  project directories remain supported, while literal `.` selects the root
+  component. Unknown component arguments fail explicitly. Global project
+  problems remain visible even in a component-scoped report.
 - `tree [PROJECT_DIR]`
 - `component new COMPONENT_DIR`
 - `component validate [COMPONENT_DIR]`
@@ -717,10 +724,15 @@ available help topics; with a topic it renders that topic, exactly as
 `kvist help [TOPIC]` does. The `tasks` table lists each blocked and
 awaiting-decision task with its truncated reason first line and the exact next
 command (the same run/transition logic as the status report), so no non-current
-task is shown without the step that resolves it. `cd` remembers a default component for the builtins and for
+task is shown without the step that resolves it. `cd COMPONENT` remembers a
+default component for the builtins and for
 completion ordering; when `tasks` or `run` names a component different from the
 current focus, the shell prints a hint to switch and leaves the focus
-unchanged. `run` without a task ID starts continuous component work without
+unchanged. Bare `cd` (or `cd -`) clears focus and returns to project scope.
+`cd` never prefills a destination. `status` visibly prefills the selected
+component even when entered without trailing whitespace; deletion remains
+effective, and `--details` expands only the chosen scope.
+`run` without a task ID starts continuous component work without
 confirmation. `prompt TASK_ID` opens the external
 editor seeded with
 the task context and submits only after explicit confirmation. `theme`

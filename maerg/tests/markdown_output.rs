@@ -57,7 +57,7 @@ fn ordinary_commands_emit_markdown_but_machine_routes_remain_native() {
 fn status_markdown_has_structured_document_and_task_facts() {
     let dir = tempfile::tempdir().unwrap();
     assert!(run(dir.path(), &["init"]).status.success());
-    let status = run(dir.path(), &["status"]);
+    let status = run(dir.path(), &["status", "--details"]);
     let text = String::from_utf8(status.stdout).unwrap();
     assert!(text.contains("| Artifact | State |"), "{text}");
     assert!(text.contains("Task progress"), "{text}");

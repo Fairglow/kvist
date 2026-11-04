@@ -673,6 +673,26 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
                     queues.child_before
                 );
                 assert!(!fresh.contains("[Y/n]"), "{fresh}");
+                Some(b"status")
+            }
+            35 if fresh.contains("status ./-component ") => Some(b"\r"),
+            36 if commands.contains(&"status ./-component") => Some(b"cd "),
+            37 if phase_time.elapsed() >= Duration::from_millis(200) => {
+                assert!(!fresh.contains("cd ./-component"), "{fresh}");
+                Some(b"\r")
+            }
+            38 if commands.contains(&"cd") => {
+                assert!(
+                    entries
+                        .iter()
+                        .any(|entry| entry["command"] == "cd" && entry["result"] == "(project)")
+                );
+                Some(b"status\r")
+            }
+            39 if commands.contains(&"status")
+                && fresh.contains("Artifacts")
+                && fresh.contains("Next action") =>
+            {
                 Some(b"exit\r")
             }
             _ => None,
@@ -686,7 +706,7 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
     }
 
     assert!(
-        phase == 35,
+        phase == 40,
         "all editor phases must complete (stopped at {phase}); output so far:\n{}",
         utf8_prefix(&bytes)
     );

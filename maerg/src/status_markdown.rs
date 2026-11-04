@@ -4,7 +4,10 @@ use std::fmt::Write;
 use std::path::Path;
 
 use crate::presentation::{fence, literal};
-use crate::project_state::{ComponentState, ProjectInspection, ProjectState};
+use crate::project_state::{
+    ComponentArtifactState, ComponentInspection, ComponentState, ProjectInspection, ProjectState,
+};
+use crate::task_queue::{TaskQueue, TaskStatus};
 
 /// Presents inspection and bounded queue facts as Markdown.
 pub fn render(
@@ -13,19 +16,45 @@ pub fn render(
     only_impls: bool,
     unfinished: bool,
 ) -> String {
+    render_details(inspection, only_documents, only_impls, unfinished, true)
+}
+
+pub(super) fn render_component(
+    inspection: &ProjectInspection,
+    only_documents: bool,
+    only_impls: bool,
+    unfinished: bool,
+) -> String {
+    render_details(inspection, only_documents, only_impls, unfinished, false)
+}
+
+fn render_context(
+    inspection: &ProjectInspection,
+    project_details: bool,
+    vcs_details: bool,
+) -> String {
     let mut output = format!(
         "# Project Status\n\n**Project:** {}  \n**State:** {}\n\n",
         literal(&inspection.project_dir.display().to_string()),
         inspection.state.name()
     );
-    output.push_str("## Project documents\n\n| Artifact | State |\n| --- | --- |\n");
-    for artifact in &inspection.artifacts {
-        let _ = writeln!(
-            output,
-            "| {} | {} |",
-            literal(&artifact.path),
-            literal(&artifact.status)
-        );
+    if project_details
+        || inspection
+            .artifacts
+            .iter()
+            .any(|artifact| !artifact.is_valid())
+    {
+        output.push_str("## Project documents\n\n| Artifact | State |\n| --- | --- |\n");
+        for artifact in &inspection.artifacts {
+            if project_details || !artifact.is_valid() {
+                let _ = writeln!(
+                    output,
+                    "| {} | {} |",
+                    literal(&artifact.path),
+                    literal(&artifact.status)
+                );
+            }
+        }
     }
     for diagnostic in [&inspection.root_diagnostic, &inspection.discovery_error]
         .into_iter()
@@ -49,7 +78,7 @@ pub fn render(
     if let Some(diagnostic) = &inspection.vcs.diagnostic {
         let _ = writeln!(output, "\n**VCS diagnostic:** {}", literal(diagnostic));
     }
-    if !inspection.vcs.artifacts.is_empty() {
+    if vcs_details && !inspection.vcs.artifacts.is_empty() {
         output.push_str("\n| VCS artifact | Tracking |\n| --- | --- |\n");
         for artifact in &inspection.vcs.artifacts {
             let _ = writeln!(
@@ -75,6 +104,17 @@ pub fn render(
             );
         }
     }
+    output
+}
+
+fn render_details(
+    inspection: &ProjectInspection,
+    only_documents: bool,
+    only_impls: bool,
+    unfinished: bool,
+    project_details: bool,
+) -> String {
+    let mut output = render_context(inspection, project_details, true);
     for component in &inspection.components {
         if unfinished && component.state == ComponentState::Current {
             continue;
@@ -142,19 +182,7 @@ pub fn render(
                 );
             }
         }
-        let directory = inspection
-            .project_dir
-            .join(
-                inspection
-                    .component_root
-                    .as_deref()
-                    .unwrap_or(Path::new(".")),
-            )
-            .join(&component.path);
-        match crate::file_io::read_text_bounded(&directory.join("TODOS.yaml"), 1_048_576)
-            .map_err(|error| error.to_string())
-            .and_then(|text| crate::task_queue::parse(&text).map_err(|error| error.to_string()))
-        {
+        match read_queue(inspection, component) {
             Ok(queue) => {
                 let done = queue
                     .tasks
@@ -182,13 +210,19 @@ pub fn render(
                     }
                 }
                 if let Some(next) = crate::task_queue::next_ready_task_id(&queue.tasks) {
-                    let _ = write!(
-                        output,
-                        "\n**Next ready:** {}  \n**Next command:** `kvist task run {} {}`\n",
-                        literal(&next),
-                        crate::task_commands::decisions::component_argument(&component.path),
-                        next
-                    );
+                    let _ = writeln!(output, "\n**Next ready:** {}", literal(&next));
+                    if inspection.state == ProjectState::Current
+                        && component.state == ComponentState::Current
+                    {
+                        let _ = writeln!(
+                            output,
+                            "\n**Next command:** `kvist task run {} {}`",
+                            crate::task_commands::decisions::component_argument(&component.path),
+                            next
+                        );
+                    } else {
+                        output.push_str("\n**Execution unavailable:** resolve the project/component state before running queued work.\n");
+                    }
                 } else {
                     output.push_str("\n**Next ready:** no ready task; inspect blockers/dependencies or review completed work.\n");
                 }
@@ -232,4 +266,89 @@ pub fn render(
         }
     }
     output
+}
+
+pub(super) fn render_summary(inspection: &ProjectInspection, unfinished: bool) -> String {
+    let mut output = render_context(inspection, false, false);
+    output.push_str(
+        "\n## Components\n\n| Component | State | Artifacts | Tasks | Next action |\n| --- | --- | --- | --- | --- |\n",
+    );
+    let mut count = 0;
+    for component in &inspection.components {
+        if unfinished && component.state == ComponentState::Current {
+            continue;
+        }
+        count += 1;
+        let valid = component
+            .artifacts
+            .iter()
+            .filter(|artifact| artifact.state == ComponentArtifactState::Valid)
+            .count();
+        let argument = crate::task_commands::decisions::component_argument(&component.path);
+        let mut next = format!("kvist status {argument}");
+        let progress = match read_queue(inspection, component) {
+            Ok(queue) => {
+                let completed = queue
+                    .tasks
+                    .iter()
+                    .filter(|task| task.status == TaskStatus::Completed)
+                    .count();
+                let mut progress = format!("{completed}/{} completed", queue.tasks.len());
+                for status in [
+                    TaskStatus::InProgress,
+                    TaskStatus::Blocked,
+                    TaskStatus::AwaitingDecision,
+                ] {
+                    let count = queue
+                        .tasks
+                        .iter()
+                        .filter(|task| task.status == status)
+                        .count();
+                    if count > 0 {
+                        let _ = write!(progress, "; {count} {}", super::bark::status_label(status));
+                    }
+                }
+                if inspection.state == ProjectState::Current
+                    && component.state == ComponentState::Current
+                    && let Some(task) = crate::task_queue::next_ready_task_id(&queue.tasks)
+                {
+                    next = format!("kvist task run {argument} {task}");
+                }
+                progress
+            }
+            Err(error) => format!("unavailable: {error}"),
+        };
+        let _ = writeln!(
+            output,
+            "| {} | {} | {valid}/{} valid | {} | {} |",
+            literal(&component.path.display().to_string()),
+            component.state.name(),
+            component.artifacts.len(),
+            literal(&progress),
+            literal(&next),
+        );
+    }
+    if count == 0 {
+        output.push_str("\nNo components match this report's filters or project discovery.\n");
+    }
+    output.push_str("\nUse `kvist status COMPONENT` for component details or `kvist status --details` for all component details.\n");
+    output
+}
+
+fn read_queue(
+    inspection: &ProjectInspection,
+    component: &ComponentInspection,
+) -> Result<TaskQueue, String> {
+    let directory = inspection
+        .project_dir
+        .join(
+            inspection
+                .component_root
+                .as_deref()
+                .unwrap_or(Path::new(".")),
+        )
+        .join(&component.path);
+    crate::file_io::read_text_bounded(&directory.join("TODOS.yaml"), 1_048_576)
+        .map_err(|error| error.to_string())
+        .and_then(|text| crate::task_queue::parse(&text).map_err(|error| error.to_string()))
 }

@@ -501,7 +501,12 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         .map(|artifact| inspect_artifact(project_dir, artifact))
         .collect::<Result<Vec<_>>>()?;
     let state = classify(&artifacts);
-    let (component_root, components, discovery_error) = inspect_components(project_dir, state)?;
+    let (component_root, components, discovery_error) =
+        if matches!(state, ProjectState::Current | ProjectState::Blocked) {
+            inspect_components(project_dir)?
+        } else {
+            (None, Vec::new(), None)
+        };
     let toolchain = inspect_toolchain(project_dir);
     tracing::debug!(
         project_dir = %project_dir.display(),
@@ -653,14 +658,9 @@ fn invalid_root_inspection(project_dir: &Path) -> ProjectInspection {
     }
 }
 
-fn inspect_components(
+pub(crate) fn inspect_components(
     project_dir: &Path,
-    project_state: ProjectState,
 ) -> Result<(Option<PathBuf>, Vec<ComponentInspection>, Option<String>)> {
-    if !matches!(project_state, ProjectState::Current | ProjectState::Blocked) {
-        return Ok((None, Vec::new(), None));
-    }
-
     let config = match config::load(project_dir) {
         Ok(config) => config,
         Err(error) => return Ok((None, Vec::new(), Some(error.to_string()))),

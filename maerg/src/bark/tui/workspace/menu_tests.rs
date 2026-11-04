@@ -13,6 +13,25 @@ fn menu(workspace: &Workspace) -> &Menu {
 }
 
 #[test]
+fn recalled_status_prefills_focus_and_observes_explicit_values_before_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::new(dir.path()).unwrap();
+    *workspace.focus.lock().unwrap() = Some("maerg".into());
+    workspace.history = vec!["status".into()];
+    workspace.recall(true);
+    assert_eq!(workspace.input.text, "status maerg ");
+
+    workspace.prefill.begin_submission();
+    workspace.history_index = None;
+    workspace.history = vec!["status beta".into()];
+    workspace.recall(true);
+    assert_eq!(workspace.input.text, "status beta");
+    workspace.input.set("status");
+    workspace.input.prefill(&workspace.prefill);
+    assert_eq!(workspace.input.text, "status");
+}
+
+#[test]
 fn escape_dismisses_completion_before_opening_the_menu_and_preserves_input() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::new(dir.path()).unwrap();

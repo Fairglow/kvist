@@ -48,7 +48,7 @@ impl Workspace {
             "settings" if arguments.is_empty() => self.open_menu(Page::Root)?,
             "cd" => {
                 let focus = match arguments.as_slice() {
-                    [] => return self.append(&format!("**Component:** {}\n", presentation::literal(self.focus().as_deref().unwrap_or("(project)")))),
+                    [] => None,
                     [component] if component == "-" => None,
                     [component] => {
                         let normalized = component.strip_prefix("./").unwrap_or(component);
@@ -91,7 +91,7 @@ impl Workspace {
                 for command in &self.tree.subcommands {
                     rows.push_str(&format!("| {} | {} |\n", presentation::literal(&command.name), presentation::literal(command.help.as_deref().unwrap_or(""))));
                 }
-                let header = "Commands use the same grammar as `kvist COMMAND`. Component focus is inserted into the editable buffer, never hidden for required arguments. `cd -` returns to the project.\n\n| Command | Purpose |\n| --- | --- |\n";
+                let header = "Commands use the same grammar as `kvist COMMAND`. Component focus is inserted into the editable buffer, including `status`, but never `cd`. Bare `cd` (or `cd -`) returns to the project.\n\n| Command | Purpose |\n| --- | --- |\n";
                 self.append(&format!("{markdown}{header}{rows}\n\n{}", view_help()))?;
             }
             "history" => {

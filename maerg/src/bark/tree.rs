@@ -179,7 +179,7 @@ pub fn inject_shell_builtins(root: &mut CommandNode) {
         },
         CommandNode {
             name: "cd".to_owned(),
-            help: Some("Set the current component for builtins and completion".to_owned()),
+            help: Some("Select a component; no argument returns to project scope".to_owned()),
             subcommands: Vec::new(),
             flags: Vec::new(),
             positionals: vec![positional("COMPONENT_DIR", &component_help)],

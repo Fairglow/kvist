@@ -1117,6 +1117,26 @@ styled and plain output remain unit-testable without a terminal. The stable
 `status --format text` and `--format json` report forms are unchanged, so
 scripts are unaffected.
 
+**Scoped status.** Resolve one project and optional exact component before
+rendering, using existing project/context normalization and discovery. Keep
+positional project-directory inspection and add explicit `--project` for
+project/component combinations; literal `.` is a root-component selection.
+Filter the inspection's component collection once for human and native routes,
+without recomputing away global diagnostics. Unknown selections are errors.
+When global intent is unhealthy but configuration and discovery remain usable,
+selected status may still inspect components without changing project
+classification or any execution gate.
+Default human status uses a shared compact Markdown projection: project identity,
+non-valid global artifacts/diagnostics and one component row containing artifact
+health, bounded parsed task progress and an actionable details/next command.
+Keep queue-read/parse failures visible. `--details`, component selection and
+artifact-only filters use the detailed projection; `doctor` remains detailed.
+Keep queue-ready facts distinct from executable next commands: suggest execution
+only when project and component are current. Apply shared prefill after TUI
+history recall while idle, including explicit-value observation, not to child
+stdin while running.
+Native text/JSON serialization stays unchanged apart from deliberate filtering.
+
 **Transcript persistence and splitting.** The transcript is a bounded on-screen
 window over a durable, per-component, disk-persisted record under the
 component's `.kvist/` state directory. Each command and its rendered Markdown
@@ -1133,9 +1153,15 @@ component together with its state and task progress, plus the VCS branch,
 sandbox backend, default model, and live/stale lock counts. When no component
 is selected the heading shows the whole project and commands operate on the
 project. When a component is selected (via `cd` or the settings menu) it is
-auto-selected as the default for every command that expects a component, so the
+auto-selected as the default for every command that expects a component except
+`cd`, so the
 operator is never asked for it and it is pre-filled. The same focus value is
 shared with the completer for ordering.
+Treat a complete bare `status` token as a prefill boundary in both editors,
+without a hidden dispatch fallback; the existing per-submission insertion guard
+preserves deliberate deletion. Keep `cd` in the component completion domain but
+exclude it from prefill. Bare `cd` clears focus through the same transition as
+`cd -`, restoring project transcript/history instead of printing current focus.
 
 **Settings menu.** The shell provides a settings menu in the `skott` overlay
 pattern: model, reasoning effort, session history, component selection, theme,

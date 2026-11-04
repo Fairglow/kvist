@@ -82,6 +82,9 @@ impl ComponentPrefill {
         let Some(position) = component_position(&self.root, line, cursor) else {
             return false;
         };
+        if position.command == ["cd"] {
+            return false;
+        }
         let Ok(mut inserted) = self.inserted.lock() else {
             return false;
         };
@@ -104,7 +107,8 @@ impl ComponentPrefill {
         let focus = self.quoted_focus()?;
         // Only a genuinely empty argument is filled. Never complete a partial
         // token or insert within a quoted word.
-        if !line.get(..cursor)?.ends_with(char::is_whitespace)
+        let trailing_space = line.get(..cursor)?.ends_with(char::is_whitespace);
+        if !trailing_space && !bare_status(line, cursor)
             || line
                 .get(cursor..)?
                 .chars()
@@ -115,7 +119,7 @@ impl ComponentPrefill {
             return None;
         }
         self.available(line, cursor, true)
-            .then(|| format!("{focus} "))
+            .then(|| format!("{}{focus} ", if trailing_space { "" } else { " " }))
     }
 
     pub(super) fn apply(&self, editor: &mut Reedline) {
@@ -132,9 +136,9 @@ impl Highlighter for ComponentPrefill {
     fn highlight(&self, line: &str, cursor: usize) -> StyledText {
         let available = self.quoted_focus().is_some() && self.available(line, cursor, false);
         if available
-            && line
-                .get(..cursor)
-                .is_some_and(|prefix| prefix.ends_with(char::is_whitespace))
+            && line.get(..cursor).is_some_and(|prefix| {
+                prefix.ends_with(char::is_whitespace) || bare_status(line, cursor)
+            })
         {
             // Paste, completion acceptance and history can insert whole strings
             // without Reedline's space-abbreviation hook. Suspend in place and
@@ -161,6 +165,10 @@ impl Highlighter for ComponentPrefill {
             && self.quoted_focus().is_some()
             && self.available(line, word_start + length, true)
     }
+}
+
+fn bare_status(line: &str, cursor: usize) -> bool {
+    cursor == line.len() && line.trim() == "status"
 }
 
 fn collect_words(node: &CommandNode, words: &mut BTreeSet<String>) {
@@ -240,7 +248,7 @@ mod tests {
             "component new ",
             "tasks ",
             "run ",
-            "cd ",
+            "status ",
         ] {
             assert_eq!(
                 prefill(Some("maerg")).insertion(line, line.len()),
@@ -252,7 +260,7 @@ mod tests {
             "",
             "task ",
             "component ",
-            "status ",
+            "cd ",
             "task approve-policy ",
             "component commit ",
             "prompt ",
@@ -265,6 +273,35 @@ mod tests {
                 "{line}"
             );
         }
+    }
+
+    #[test]
+    fn focused_bare_status_is_visible_and_deliberate_deletion_stays_effective() {
+        let prefill = prefill(Some("maerg"));
+        let line = "status";
+        prefill.highlight(line, line.len());
+        assert!(prefill.break_signal().swap(false, Ordering::Relaxed));
+        let mut editor = editor(line);
+        prefill.apply(&mut editor);
+        assert_eq!(editor.current_buffer_contents(), "status maerg ");
+        assert_eq!(prefill.insertion("status", 6), None);
+        assert_eq!(prefill.insertion("status ", 7), None);
+        prefill.begin_submission();
+        assert_eq!(prefill.insertion("status", 6), Some(" maerg ".to_owned()));
+        prefill.begin_submission();
+        assert_eq!(prefill.insertion("status beta", 11), None);
+        assert_eq!(prefill.insertion("status ", 7), None);
+    }
+
+    #[test]
+    fn cd_never_prefills_including_reedline_abbreviation_and_highlight_hooks() {
+        let prefill = prefill(Some("maerg"));
+        for line in ["cd", "cd ", "cd -", "cd beta "] {
+            prefill.highlight(line, line.len());
+            assert!(!prefill.break_signal().load(Ordering::Relaxed), "{line}");
+            assert_eq!(prefill.insertion(line, line.len()), None, "{line}");
+        }
+        assert!(!prefill.should_expand_abbr("cd ", 0, AbbrExpandContext::WordAbbreviation));
     }
 
     #[test]

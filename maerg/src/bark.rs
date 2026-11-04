@@ -436,13 +436,7 @@ impl Shell {
     fn handle_overview(&mut self, line: &str) {
         let result = (|| {
             let inspection = crate::project_state::inspect(&self.project_dir)?;
-            Ok::<String, KvistError>(crate::status::render(
-                &inspection,
-                crate::status::StatusFormat::Overview,
-                false,
-                false,
-                false,
-            ))
+            Ok::<String, KvistError>(crate::status::render_summary_markdown(&inspection, false))
         })();
         match result {
             Ok(text) => {
@@ -509,13 +503,12 @@ impl Shell {
     fn handle_cd(&mut self, args: &[String], line: &str) -> LoopAction {
         let known = DynamicState::load(&self.project_dir).components().to_vec();
         match resolve_cd(args, &known) {
-            CdOutcome::Show => {
-                let current = self
-                    .current_component()
-                    .filter(|c| !c.is_empty() && c != ".")
-                    .unwrap_or_else(|| ". (root)".to_owned());
-                println!("Component: {}", self.theme.bold(&current));
-                self.journal.append(journal_entry(line, "show"));
+            CdOutcome::Project => {
+                if let Ok(mut guard) = self.focus.lock() {
+                    *guard = None;
+                }
+                println!("Component: {}", self.theme.bold("(project)"));
+                self.journal.append(journal_entry(line, "(project)"));
                 self.note(false);
             }
             CdOutcome::Set(component) => {
@@ -1051,8 +1044,8 @@ fn render_locks(
 
 /// The outcome of resolving the `cd` builtin arguments.
 enum CdOutcome {
-    /// No argument: show the current component.
-    Show,
+    /// No argument or `-`: clear component focus.
+    Project,
     /// A discovered component to make current.
     Set(String),
     /// The argument is not a discovered component.
@@ -1072,21 +1065,25 @@ fn resolve_cd(args: &[String], known: &[String]) -> CdOutcome {
         return CdOutcome::Usage;
     }
     let Some(arg) = args.first() else {
-        return CdOutcome::Show;
+        return CdOutcome::Project;
     };
+    if arg == "-" {
+        return CdOutcome::Project;
+    }
+    let arg = arg.strip_prefix("./").unwrap_or(arg);
     if arg != "."
         && (Path::new(arg).is_absolute()
             || Path::new(arg)
                 .components()
                 .any(|c| matches!(c, PathComponent::ParentDir | PathComponent::CurDir)))
     {
-        return CdOutcome::Invalid(arg.clone());
+        return CdOutcome::Invalid(arg.to_owned());
     }
     if known.iter().any(|c| c == arg) {
-        CdOutcome::Set(arg.clone())
+        CdOutcome::Set(arg.to_owned())
     } else {
         CdOutcome::Unknown {
-            requested: arg.clone(),
+            requested: arg.to_owned(),
             known: known.to_vec(),
         }
     }
@@ -1405,7 +1402,7 @@ fn render_help(theme: Theme) -> String {
     let mut text = String::new();
     text.push_str(&format!("{}\n", theme.bold("Kvist shell — builtins:")));
     text.push_str(
-        "  cd [COMPONENT]                 set the current component for builtins and completion\n",
+        "  cd [COMPONENT]                 select a component; no argument returns to project scope\n",
     );
     text.push_str(
         "  tasks [COMPONENT] [--status S] list tasks; S: pending, in-progress, blocked, awaiting-decision, completed\n",
@@ -2112,12 +2109,24 @@ mod tests {
         assert_eq!(shell.journal.entries()[0].result, "unknown component");
     }
 
+    #[test]
+    fn bare_cd_and_dash_clear_degraded_shell_component_focus() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        for line in ["cd", "cd -"] {
+            *shell.focus.lock().unwrap() = Some("maerg".into());
+            assert_eq!(shell.handle_line(line, &history), LoopAction::Continue);
+            assert_eq!(shell.current_component(), None, "{line}");
+            assert!(!shell.last_failed, "{line}");
+        }
+    }
+
     // ---- Pure builtin logic -------------------------------------------------
 
     #[test]
-    fn resolve_cd_handles_show_set_unknown_and_invalid() {
+    fn resolve_cd_handles_project_set_unknown_and_invalid() {
         let known = vec![".".to_owned(), "maerg".to_owned()];
-        assert!(matches!(resolve_cd(&[], &known), CdOutcome::Show));
+        assert!(matches!(resolve_cd(&[], &known), CdOutcome::Project));
         assert!(matches!(
             resolve_cd(&["maerg".to_owned()], &known),
             CdOutcome::Set(c) if c == "maerg"

@@ -48,6 +48,48 @@ impl ProjectContext {
         }
     }
 
+    /// Resolves status's project target and optional component argument.
+    ///
+    /// A positional project root remains usable; literal `.` selects a
+    /// component. `project` makes the positional argument unambiguously a
+    /// component, including when inspecting another project.
+    pub fn resolve_status(
+        target: Option<&Path>,
+        project: Option<&Path>,
+    ) -> Result<(Self, Option<PathBuf>)> {
+        if project.is_some() {
+            return Ok((Self::resolve(project)?, target.map(Path::to_path_buf)));
+        }
+        let Some(target) = target else {
+            return Ok((Self::resolve(None)?, None));
+        };
+        if target == Path::new(".") {
+            return Ok((Self::resolve(None)?, Some(target.to_path_buf())));
+        }
+        if target.components().any(|part| part == Component::ParentDir) {
+            return Err(KvistError::TaskComponentPathInvalid {
+                path: target.to_path_buf(),
+            });
+        }
+        let explicit = Self::resolve(Some(target))?;
+        match Self::find_root(&explicit.project_dir) {
+            Ok(root) if root == explicit.project_dir => return Ok((explicit, None)),
+            Ok(root) if target.is_absolute() => {
+                return Ok((Self { project_dir: root }, Some(target.to_path_buf())));
+            }
+            Err(KvistError::NotInProject { .. }) if target.is_absolute() => {
+                return Ok((explicit, None));
+            }
+            Err(error) if !matches!(error, KvistError::NotInProject { .. }) => return Err(error),
+            _ => {}
+        }
+        match Self::resolve(None) {
+            Ok(project) => Ok((project, Some(target.to_path_buf()))),
+            Err(KvistError::NotInProject { .. }) => Ok((explicit, None)),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Walks upward from `start` for the nearest directory containing a
     /// regular (non-symlink) `kvist.toml`, bounded by [`MAX_PROJECT_SEARCH_DEPTH`].
     pub fn find_root(start: &Path) -> Result<PathBuf> {

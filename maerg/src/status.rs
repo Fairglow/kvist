@@ -199,6 +199,21 @@ pub fn render_markdown(
     crate::status_markdown::render(inspection, only_documents, only_impls, unfinished)
 }
 
+/// Renders one component's details with only actionable global context.
+pub fn render_component_markdown(
+    inspection: &ProjectInspection,
+    only_documents: bool,
+    only_impls: bool,
+    unfinished: bool,
+) -> String {
+    crate::status_markdown::render_component(inspection, only_documents, only_impls, unfinished)
+}
+
+/// Renders one compact Markdown row per component with bounded queue facts.
+pub fn render_summary_markdown(inspection: &ProjectInspection, unfinished: bool) -> String {
+    crate::status_markdown::render_summary(inspection, unfinished)
+}
+
 /// A blocked or awaiting-decision task rendered for status guidance.
 struct GuidanceEntry {
     id: String,

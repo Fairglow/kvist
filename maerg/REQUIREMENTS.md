@@ -155,12 +155,41 @@ concrete next action that names the unblocking command (`kvist init` for
 uninitialized projects, `kvist repair` when the only defect is an unsorted or
 duplicated TODO-queue set list or missing timestamp metadata).
 
-The overview report MUST keep its layout aligned: the per-document
+Detailed reports MUST keep their layout aligned: the per-document
 `expected`/`observed` revision lines under a changed document MUST carry the
 same left border as the surrounding overview lines, aligned under the changed
 document's name. A blocked task's `blocked_reason` first line MUST be shown
 in full — the queue's own text bound and soft wrapping bound the display,
-never a renderer-side truncation with ellipsis.
+never a renderer-side truncation with ellipsis. Compact project summaries MAY
+show blocker counts and a command for component details instead of full reasons.
+
+### REQ-SCOPED-STATUS
+
+Human-readable `status` MUST default to a compact project overview with exactly
+one table row per matching component, including state, artifact health, task
+progress and a concrete next action. It MUST NOT repeat per-component artifact
+tables, revision digests or full task reasons in this overview. Non-current
+global project diagnostics and actionable failures MUST remain visible.
+Execution suggestions MUST require both a current project and a current
+component, in compact and detailed Markdown alike.
+
+An optional component argument MUST restrict every report format to that exact
+discovered component, not its siblings or descendants, and human output MUST
+show its full details. `--details` MUST expand project scope to the existing
+detailed view; with an explicit component it MUST retain that component filter.
+Existing artifact/state filters MUST remain effective. Explicit project
+selection and the version-one native text/JSON report shapes MUST remain usable.
+Invalid or undiscovered component selections MUST fail clearly, never silently
+fall back to project output. Inspection MUST remain read-only.
+
+In both interactive hosts, selected-component focus MUST visibly prefill
+`status`, including submission without a trailing space. Explicit selection and
+manual deletion MUST remain effective. History recall MUST use the same visible
+insertion/deletion rules as typing. `cd` MUST never prefill its destination;
+bare `cd` MUST clear focus and restore project-level operation/history, while
+explicit `cd COMPONENT` changes focus and `cd -` remains a project-level shortcut.
+This human-requested bundle has an explicit advisory exception while native
+intent-review receipts are unavailable; no acceptance or review receipt is implied.
 
 ### REQ-PROJECT-REPAIR
 
@@ -810,7 +839,8 @@ its state and task progress, plus the VCS branch, sandbox backend, default
 model, and live/stale lock counts. When no component is selected the heading
 MUST show the whole project and the shell MUST operate on the project; when a
 component is selected it MUST be inserted visibly into the editable command buffer as soon as the next
-argument expects a component. This is actual prefill, not an omitted-argument
+argument expects a component, except `cd`, whose destination is never prefilled.
+Bare `cd` returns to project scope. This is actual prefill, not an omitted-argument
 fallback or a completion suggestion. Manual deletion MUST remain effective
 and permit another component; ordinary task arguments MUST retain their order. The command footer MUST expose the same command surface as the CLI
 with full tab-completion (static from the clap surface, dynamic from the

@@ -136,7 +136,9 @@ for explicit project selection. Redirected bare invocation stays finite.
 - **Audit Journaling & History:** An append-only session journal
   (`.kvist/session.log`, inspect with `journal`) and persistent editor history
   (`.kvist/history`, inspect with `history`).
-- **Workflow Builtins:** `cd [COMPONENT]` sets the current component, `tasks`
+- **Workflow Builtins:** `cd COMPONENT` selects a component; bare `cd` returns
+  to the project. Its destination is never prefilled. `status` uses the selected
+  component, `tasks`
   lists task status, `run` executes ready work continuously, `last` shows recent
   agent runs, `locks [clean]` inspects or removes stale locks, and `help` lists
   everything.
@@ -598,7 +600,7 @@ For detailed instructions on compliance reviews, refer to [`REVIEW_RUNBOOK.md`](
 | `kvist` _(no args)_         | Inside a project: the project overview and what to do next. Outside: the guided help.                                                                                                        |
 | `kvist`                     | Open the Markdown workspace with command input and dynamic tab-completion. |
 | `kvist doctor [DIR]`        | Check project health, versions, and VCS configuration.                                                                                                                                       |
-| `kvist status [DIR]`        | "Where do I stand?" States, task progress, changed documents with expected/observed revisions, and the exact next action per component. `--format text\|json` for stable script forms.       |
+| `kvist status [COMPONENT] [--details] [--project DIR]` | Compact project table by default; name a component for its details, or use `--details` for all details. `--format text\|json` retains native script forms. |
 | `kvist tree [DIR]`          | Render an ASCII component tree.                                                                                                                                                              |
 | `kvist help [TOPIC]`        | Guided help: the 30-second tour, or a topic — `concepts`, `lifecycle`, `task-states` (states, legal transitions, and the command that achieves each). Tab-completable; also a shell builtin. |
 | `kvist completions <SHELL>` | Generate shell auto-completion scripts (`bash`, `zsh`, `fish`, `powershell`).                                                                                                                |
@@ -614,7 +616,7 @@ Type these directly at the `kvist` prompt (no `kvist` prefix needed):
 
 | Command                          | Description                                                                                                                         |
 | :------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------- |
-| `cd [COMPONENT]`                 | Set the current component: `run`, `tasks`, completion, and dispatched commands like `task next` / `component accept` all target it. |
+| `cd [COMPONENT]`                 | Select a component for `status`, `run`, `tasks` and completion. Never prefills a destination; bare `cd` (or `cd -`) returns to project scope and its history. |
 | `tasks [COMPONENT] [--status S]` | List tasks with status; filter by `pending`, `in-progress`, `blocked`, `awaiting-decision`, `completed`.                            |
 | `run COMPONENT [TASK]`         | Run an exact task, or continuous component work when TASK is omitted. |
 | `last [COUNT]`                   | Show recent agent runs with tokens and log links.                                                                                   |

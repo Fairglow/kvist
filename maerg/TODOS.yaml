@@ -10,6 +10,81 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "scoped-status-write-tests"
+    title: "write_tests: specify compact and component-scoped status"
+    description: "Pin compact project tables, exact component filtering, details/native formats, invalid targets, visible focused status and unfilled bare-cd navigation in both hosts."
+    context: "Status/CD regressions failed before implementation; run-advice and recalled-status regressions also failed before their repairs. Both actual terminal hosts and the targeted 107 integration tests plus 271 bark tests passed. REQ-SCOPED-STATUS records the advisory exception."
+    purpose: "Specify scope and navigation behavior before implementation."
+    expected_outcome: "Regressions expose project-wide detailed defaults and current-component cd prefill."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
+      - "REQUIREMENTS.md#REQ-SCOPED-STATUS"
+    timestamps:
+      created_at: "2026-11-04T08:48:00Z"
+      updated_at: "2026-11-04T09:17:11Z"
+      completed_at: "2026-11-04T09:17:11Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "scoped-status-implement-code"
+    title: "implement_code: align status scope and component navigation"
+    description: "Wire CLI scope/details, compact Markdown, native filtering, completion/prefill and both shell cd transitions without changing task authority."
+    context: "Final all-feature Maerg Nextest run 4dc3a369-acbe-4159-ac10-5d1ee25b2c00 passed 1083 tests with 7 existing skips. Targeted integration and bark tests, strict lint, formatting, release build, structural validation and scoped-JSON smoke passed. Independent source-only observations and a separate source-blind comparison retain explicit limits; protected gates and acceptance remain pending."
+    purpose: "Make status useful at project and selected-component levels."
+    expected_outcome: "Scoped-status regressions pass with read-only deterministic inspection."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "scoped-status-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
+      - "REQUIREMENTS.md#REQ-SCOPED-STATUS"
+    timestamps:
+      created_at: "2026-11-04T08:48:00Z"
+      updated_at: "2026-11-04T09:26:13Z"
+      completed_at: "2026-11-04T09:26:13Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "scoped-status-security-audit"
+    title: "security_audit: inspect scoped status path and terminal boundaries"
+    description: "Independently assess path validation, malformed artifacts, read-only rendering and scope isolation."
+    context: "Protected audit execution is separate from implementation validation."
+    purpose: "Retain an independent path/input assessment."
+    expected_outcome: "Record findings without fabricating protected execution or acceptance."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "scoped-status-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SCOPED-STATUS"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-04T08:48:00Z"
+      updated_at: "2026-11-04T08:48:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "scoped-status-compliance-review"
+    title: "compliance_review: compare scoped status with independent observations"
+    description: "Derive source-only observations and separately compare local intent with observed and executed evidence."
+    context: "Diagnostic records do not close protected gates or accept intent."
+    purpose: "Keep implementation observation independent from authored intent."
+    expected_outcome: "Persist a source-blind diagnostic comparison and explicit limits."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "scoped-status-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SCOPED-STATUS"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-04T08:48:00Z"
+      updated_at: "2026-11-04T08:48:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "workspace-settings-write-tests"
     title: "write_tests: specify accessible hierarchical settings and model management"
     description: "Pin RGB contrast, Esc/back/quit semantics, current markers, searchable component shortcuts, all-role assignment/effort inheritance and provenance-aware registry model lifecycle before implementation."

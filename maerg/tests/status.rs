@@ -479,8 +479,8 @@ fn status_overview_reports_compact_docs_and_task_progress() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("UTF-8 status");
     assert!(stdout.contains("Project Status"));
-    assert!(stdout.contains("| IMPL.md | valid |"));
-    assert!(stdout.contains("**Task progress:** 0/0 completed"));
+    assert!(stdout.contains("| Component | State | Artifacts | Tasks | Next action |"));
+    assert!(stdout.contains("| . | current | 5/5 valid | 0/0 completed |"));
 
     // A bare `status` defaults to the same human-friendly view.
     let output2 = run_kvist(&[
@@ -504,6 +504,7 @@ fn status_overview_lists_changed_documents_with_revisions_and_diff_hint() {
 
     let output = run_kvist(&[
         "status",
+        "--details",
         "--format",
         "overview",
         project.path().to_str().expect("UTF-8 project path"),
@@ -635,6 +636,7 @@ fn status_blocked_details_list_reasons_and_exact_next_commands() {
 
     let overview = run_kvist(&[
         "status",
+        "--details",
         "--format",
         "overview",
         project.path().to_str().expect("UTF-8 project path"),

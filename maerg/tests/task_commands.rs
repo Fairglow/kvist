@@ -921,7 +921,7 @@ tasks: []
     fs::write(child_dir.join("TODOS.yaml"), child_queue).expect("write child queue");
     track_project(&project);
 
-    let status = run_kvist(&project, &["status", "--format", "text", "."]);
+    let status = run_kvist(&project, &["status", "--format", "text", "--project", "."]);
     assert!(
         String::from_utf8_lossy(&status.stdout)
             .contains("component: ordinary/component state: invalid")
