@@ -31,7 +31,7 @@
 compile_error!("galla-runner currently supports Linux only");
 
 pub mod cache;
-mod context;
+pub mod context;
 pub mod enforcement;
 pub mod origin;
 pub mod probe;

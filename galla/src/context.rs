@@ -1,7 +1,7 @@
 use std::io;
 use std::path::Path;
 
-pub(crate) const SANDBOX_MARKER: &str = "/.galla-sandbox";
+pub const SANDBOX_MARKER: &str = "/.galla-sandbox";
 
 pub(crate) fn require_host() -> Result<(), String> {
     check_marker(Path::new(SANDBOX_MARKER))

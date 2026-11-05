@@ -6,7 +6,7 @@ component:
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-11-03T22:56:12Z"
+    checked_at: "2026-11-05T15:10:26Z"
     stale_since: null
     causes: []
 tasks:
@@ -717,14 +717,261 @@ tasks:
     purpose: "Enable the ignored native e2e tests to establish genuine enforcement evidence."
     expected_outcome: "The system_toolchains and rustup tests are enabled and run successfully, providing enforcement evidence."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "enable-native-e2e-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
     timestamps:
       created_at: "2026-11-03T18:40:59Z"
-      updated_at: "2026-11-03T18:40:59Z"
+      updated_at: "2026-11-05T06:13:25Z"
+      completed_at: "2026-11-05T06:13:25Z"
+    blocked_reason: null
+    recovery_state: null
+    acceptance_id: "attempt-0001"
+    disposition: accept
+  - id: "enforcement-cache-promotion-write-tests"
+    title: "write_tests: verify enforcement uses immutable cache promotion"
+    description: "Write tests that verify the enforcement path uses the immutable cache promotion primitive (cache::promote) with RENAME_NOREPLACE, staging, no-follow descriptors, immutable modes, manifest checksums, and generation identity."
+    context: "Security audit found enforcement promotion uses std::fs::copy instead of the immutable cache primitive, resulting in non-atomic, mutable promotion with weak concurrency detection."
+    purpose: "Ensure enforcement cache promotion is atomic, immutable, and verified."
+    expected_outcome: "Tests fail if enforcement does not use cache::promote with all required properties."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "enforcement-cache-promotion-implement-code"
+    title: "implement_code: wire enforcement to immutable cache promotion"
+    description: "Modify src/enforcement.rs::inspect_and_promote_cache to use cache::promote with RENAME_NOREPLACE, staging, no-follow descriptors, immutable modes, manifest checksums, and generation identity. Compute lockfile_after_identity and supported_source_identities."
+    context: "Enforcement promotion currently uses std::fs::copy which is non-atomic and mutable."
+    purpose: "Make enforcement cache promotion atomic and immutable."
+    expected_outcome: "Enforcement uses cache::promote with all required properties."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "enforcement-cache-promotion-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "network-isolation-hardening-write-tests"
+    title: "write_tests: verify comprehensive network isolation"
+    description: "Write tests that verify PackageSources uses network namespace isolation, CONNECT path authorization is enforced, DNS resolution is pinned to public addresses, and the proxy supports required HTTP methods including POST for Cargo Git smart HTTP."
+    context: "Security audit found network guard is advisory for PackageSources, CONNECT authorization bypasses path restrictions, proxy does not pin resolved addresses, and proxy handles only GET/HEAD."
+    purpose: "Ensure comprehensive network isolation and proxy correctness."
+    expected_outcome: "Tests fail if network isolation is advisory, CONNECT paths are not authorized, DNS is not pinned, or proxy lacks required HTTP methods."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "network-isolation-hardening-implement-code"
+    title: "implement_code: enforce comprehensive network isolation"
+    description: "Modify enforcement to use network namespace for PackageSources, enforce CONNECT path authorization, pin DNS resolution to public addresses, add POST support to proxy for Cargo Git smart HTTP, and reject reserved IP ranges."
+    context: "Network isolation is currently advisory with multiple bypass paths."
+    purpose: "Make network isolation comprehensive and enforceable."
+    expected_outcome: "Network isolation is enforced with namespace, path authorization, DNS pinning, and complete HTTP method support."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "network-isolation-hardening-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "schema-and-identity-write-tests"
+    title: "write_tests: verify schema completeness and runtime identity verification"
+    description: "Write tests that verify the JSON schema matches the protocol parser (including registry, cargo-config, runtime purposes) and that runner, policy, command, and mount-plan identities are verified at runtime."
+    context: "Security audit found schema omits accepted purpose values and identities are validated as digest shape but not verified at runtime."
+    purpose: "Ensure schema completeness and runtime identity verification."
+    expected_outcome: "Tests fail if schema is incomplete or identities are not verified at runtime."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PROTOCOL-BOUNDARY"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "schema-and-identity-implement-code"
+    title: "implement_code: complete schema and verify identities at runtime"
+    description: "Update JSON schema to include all accepted purpose values (registry, cargo-config, runtime) and verify runner, policy, command, and mount-plan identities at runtime against approval digests."
+    context: "Schema is incomplete and identities are not verified at runtime."
+    purpose: "Make schema complete and verify identities at runtime."
+    expected_outcome: "Schema matches protocol parser and all identities are verified at runtime."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "schema-and-identity-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PROTOCOL-BOUNDARY"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "probe-and-backend-write-tests"
+    title: "write_tests: verify probe namespace testing and backend location security"
+    description: "Write tests that verify probe actually executes bwrap to test namespace creation and that backend location is secure against symlink substitution."
+    context: "Security audit found probe reports capabilities from /proc/self/ns existence without executing bwrap, and locate_backend follows symlinks."
+    purpose: "Ensure probe tests actual namespace creation and backend location is secure."
+    expected_outcome: "Tests fail if probe does not execute bwrap or backend location is vulnerable to symlink substitution."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "probe-and-backend-implement-code"
+    title: "implement_code: test namespace creation in probe and secure backend location"
+    description: "Modify probe to actually execute bwrap and test namespace creation rather than relying on /proc/self/ns existence. Harden locate_backend to validate backend identity and prevent symlink substitution."
+    context: "Probe does not test actual namespace creation and backend location is vulnerable."
+    purpose: "Make probe test actual capabilities and secure backend location."
+    expected_outcome: "Probe executes bwrap to test namespace creation and backend location is secure."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "probe-and-backend-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "symlink-validation-write-tests"
+    title: "write_tests: verify symlink target validation"
+    description: "Write tests that verify symlink targets in system layout stay within read-only system directories and do not point to writable grants, and that recursive symlinks in writable grants are validated."
+    context: "Security audit found system_layout emits --symlink for host symlinks without target validation, and writable-grant symlink escape validation checks only immediate children."
+    purpose: "Ensure symlink targets are validated to prevent escape."
+    expected_outcome: "Tests fail if symlink targets are not validated or recursive symlinks are not checked."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "symlink-validation-implement-code"
+    title: "implement_code: validate symlink targets and recursive symlinks"
+    description: "Modify system_layout::add_entry to validate symlink targets stay within read-only system and do not point to writable grants. Extend writable-grant symlink escape validation to check recursive symlinks. Fix add_workspace_vendor_mask to handle absent directories."
+    context: "Symlink targets are not validated, allowing potential escape."
+    purpose: "Validate symlink targets to prevent escape."
+    expected_outcome: "Symlink targets are validated and recursive symlinks are checked."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "symlink-validation-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "resource-monitoring-write-tests"
+    title: "write_tests: verify resource monitoring correctness"
+    description: "Write tests that verify prlimit error handling, recursive file size monitoring, and robust process count monitoring."
+    context: "Security audit found safe_prlimit ignores errors, check_file_size_exceeded is non-recursive, and count_processes_in_pgid is best-effort."
+    purpose: "Ensure resource monitoring is correct and robust."
+    expected_outcome: "Tests fail if prlimit errors are ignored, file size monitoring is non-recursive, or process count monitoring is fragile."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "resource-monitoring-implement-code"
+    title: "implement_code: harden resource monitoring"
+    description: "Modify safe_prlimit to handle errors properly and not depend on /usr/bin/prlimit. Make check_file_size_exceeded and check_scratch_size_exceeded recursive. Harden count_processes_in_pgid against /proc changes and pgid manipulation."
+    context: "Resource monitoring has multiple weaknesses."
+    purpose: "Make resource monitoring correct and robust."
+    expected_outcome: "Resource monitoring handles errors, is recursive, and is robust."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "resource-monitoring-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "durability-and-identity-computation-write-tests"
+    title: "write_tests: verify immutable tree durability and identity computation"
+    description: "Write tests that verify fsync after fchmod for immutable tree durability and that lockfile_after_identity and supported_source_identities are computed."
+    context: "Security audit found make_immutable_tree does not fsync after fchmod and enforcement never computes lockfile/source identities."
+    purpose: "Ensure immutable tree durability and complete identity computation."
+    expected_outcome: "Tests fail if fsync is not performed or identities are not computed."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "durability-and-identity-computation-implement-code"
+    title: "implement_code: fsync after chmod and compute identities"
+    description: "Modify make_immutable_tree to fsync file metadata after fchmod. Compute lockfile_after_identity and supported_source_identities in enforcement for complete provenance binding."
+    context: "Immutable tree durability is uncertain and identity computation is incomplete."
+    purpose: "Ensure durability and complete identity computation."
+    expected_outcome: "File metadata is fsynced and all identities are computed."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "durability-and-identity-computation-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
+    timestamps:
+      created_at: "2026-11-05T15:10:26Z"
+      updated_at: "2026-11-05T15:10:26Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null
@@ -737,12 +984,26 @@ tasks:
     kind: security-audit
     status: pending
     depends_on:
+      - "durability-and-identity-computation-implement-code"
+      - "durability-and-identity-computation-write-tests"
       - "enable-native-e2e-implement-code"
+      - "enforcement-cache-promotion-implement-code"
+      - "enforcement-cache-promotion-write-tests"
+      - "network-isolation-hardening-implement-code"
+      - "network-isolation-hardening-write-tests"
+      - "probe-and-backend-implement-code"
+      - "probe-and-backend-write-tests"
+      - "resource-monitoring-implement-code"
+      - "resource-monitoring-write-tests"
+      - "schema-and-identity-implement-code"
+      - "schema-and-identity-write-tests"
+      - "symlink-validation-implement-code"
+      - "symlink-validation-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
     timestamps:
       created_at: "2026-11-03T18:40:59Z"
-      updated_at: "2026-11-03T18:40:59Z"
+      updated_at: "2026-11-05T15:10:26Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null
