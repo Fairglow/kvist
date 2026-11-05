@@ -138,9 +138,7 @@ impl Sandbox {
         // fallback.
         let manifest = std::env::var("CARGO_MANIFEST_DIR")
             .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
-        let repository = Path::new(&manifest)
-            .canonicalize()
-            .unwrap();
+        let repository = Path::new(&manifest).canonicalize().unwrap();
         assert!(
             !runner.starts_with(repository),
             "runner must be outside the worktree"

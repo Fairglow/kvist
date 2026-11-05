@@ -626,6 +626,15 @@ together, then re-tests the dogfood boundary suite. See
 
 ### Pinned Rust toolchains and host provisioning (ADR-0012)
 
+Stage acquisition/verification runtime-bin symlinks in a uniquely named private
+temporary directory beside the canonical project root, using the existing
+authoring-resource staging pattern. Return its owning `TempDir`, not a detached
+path. Each caller retains that owner through synchronous runner execution and
+borrows its path for the existing read-only runtime grant. Drop cleans partial
+provisioning and completed operations; simultaneous operations never recreate
+one shared directory. Keep sandbox destinations, PATH and executable selection
+unchanged. Do not retain runtime shims under the writable project's `.kvist`.
+
 Prepared authoring PATH is `/rust/runtime/bin:/usr/bin:/bin:/usr/local/bin`,
 without sbin directories. Language verification rejects standard
 administrative path aliases before and after canonicalization and uses

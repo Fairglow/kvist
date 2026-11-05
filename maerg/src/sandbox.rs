@@ -2324,40 +2324,39 @@ fn provision_cargo_home(project_root: &Path) -> Result<PathBuf> {
 /// directory, this creates a small Kvist-owned directory of symlinks exposing
 /// exactly those executables: the toolchain binaries at their fixed sandbox
 /// toolchain destination, and the system binutils at their host path (which the
-/// runner binds read-only into the sandbox). It is regenerated on every run
-/// under the Kvist-owned `.kvist/` directory.
-pub(crate) fn provision_toolchain_bin(project_root: &Path, runner: &str) -> Result<PathBuf> {
-    let bin_dir = project_root.join(".kvist").join("toolchain-bin");
-    // Recreate from scratch so a stale set of symlinks from a previous run (or a
-    // different toolchain) never leaks into the grant.
-    match std::fs::remove_dir_all(&bin_dir) {
-        Ok(()) => {}
-        Err(source) if source.kind() == io::ErrorKind::NotFound => {}
-        Err(source) => {
-            return Err(KvistError::Io {
-                operation: "reset provisioned runtime bin for offline cargo verification",
-                path: bin_dir.clone(),
-                source,
-            });
-        }
-    }
-    std::fs::create_dir_all(&bin_dir).map_err(|source| KvistError::Io {
-        operation: "create provisioned runtime bin for offline cargo verification",
-        path: bin_dir.clone(),
-        source,
-    })?;
+/// runner binds read-only into the sandbox). The returned owner keeps these
+/// sandbox-only links outside the project and removes them after execution.
+pub(crate) fn provision_toolchain_bin(
+    project_root: &Path,
+    runner: &str,
+) -> Result<tempfile::TempDir> {
+    let parent = project_root
+        .parent()
+        .ok_or_else(|| KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: "runtime bin staging needs a project parent outside the writable scope"
+                .to_owned(),
+        })?;
+    let bin_dir = tempfile::Builder::new()
+        .prefix(".kvist-runtime-bin-")
+        .tempdir_in(parent)
+        .map_err(|source| KvistError::Io {
+            operation: "stage private runtime bin outside the project",
+            path: parent.to_owned(),
+            source,
+        })?;
 
     // Toolchain binaries resolve at their fixed sandbox toolchain destination.
     for name in ["rustc", "rustdoc"] {
         let target = format!("{CARGO_TOOLCHAIN_DEST}/bin/{name}");
-        link_runtime_entry(&bin_dir, name, &target, runner)?;
+        link_runtime_entry(bin_dir.path(), name, &target, runner)?;
     }
 
     // System binutils resolve at their host path, which the runner binds
     // read-only into the sandbox (`/usr`, `/bin`, ...).
     for name in ["cc", "ar", "as"] {
         let host_path = locate_system_binary(name, runner)?;
-        link_runtime_entry(&bin_dir, name, &host_path.to_string_lossy(), runner)?;
+        link_runtime_entry(bin_dir.path(), name, &host_path.to_string_lossy(), runner)?;
     }
 
     Ok(bin_dir)
@@ -2503,7 +2502,7 @@ pub fn run_offline_cargo_verification(
         cargo_home: &cargo_home,
         vendored_registry: &vendored_registry,
         cargo_config: &cargo_config,
-        runtime_bin: &runtime_bin,
+        runtime_bin: runtime_bin.path(),
         scratch_host_dir: scratch.path(),
         component_dir: effective_component_dir,
         lockfile_digest: enforcement.lockfile_digest,
@@ -3470,6 +3469,42 @@ mod tests {
             path: "/usr/bin/bwrap".to_owned(),
             digest: format!("sha256:{}", "a".repeat(64)),
         }
+    }
+
+    #[test]
+    fn runtime_bin_is_external_independent_and_removed_with_its_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let first = provision_toolchain_bin(&project, "test runner").unwrap();
+        let first_path: &Path = first.as_ref();
+        assert!(!first_path.starts_with(&project), "{first_path:?}");
+        assert!(!project.join(".kvist/toolchain-bin").exists());
+        let second = provision_toolchain_bin(&project, "test runner").unwrap();
+        let second_path: &Path = second.as_ref();
+        assert_ne!(first_path, second_path);
+        for directory in [first_path, second_path] {
+            for name in ["rustc", "rustdoc"] {
+                assert_eq!(
+                    fs::read_link(directory.join(name)).unwrap(),
+                    PathBuf::from(format!("{CARGO_TOOLCHAIN_DEST}/bin/{name}"))
+                );
+            }
+            for name in ["cc", "ar", "as"] {
+                assert_eq!(
+                    fs::read_link(directory.join(name)).unwrap(),
+                    locate_system_binary(name, "test runner").unwrap()
+                );
+            }
+            assert_eq!(fs::read_dir(directory).unwrap().count(), 5);
+        }
+        let first_path = first_path.to_owned();
+        let second_path = second_path.to_owned();
+        drop(first);
+        assert!(!first_path.exists());
+        assert!(second_path.is_dir());
+        drop(second);
+        assert!(!second_path.exists());
     }
 
     fn build_request(phase: ExecutionPhase, argv: &[String], grants: Vec<SandboxGrant>) -> Vec<u8> {

@@ -284,6 +284,11 @@ source-blind comparison follow implementation; neither constitutes acceptance.
 
 ### Simplified viewer keybindings (2026-10-25)
 
+PTY file-follow and back assertions wait for a complete synchronized frame,
+not an optional idle poll. A stopped-child regression delays both actions
+beyond that poll interval and joins the resumer before cleanup, while retaining
+the existing frame deadline and exact destination/title assertions.
+
 The user's README changes supersede the earlier backward-search, `p`, `f`
 link-mode and explicit-reload key decisions. Route normal-mode `?` to the
 existing help overlay with h/F1; `/` opens only forward search and N/< retain

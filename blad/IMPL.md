@@ -4,6 +4,42 @@
 
 Date: 2026-10-12
 
+## Delayed file-link test synchronization - 2026-11-05
+
+Independent clean-slate `repair-source-observer` read only bounded source/test
+ranges, excluding intent, queues, prior records/reviews, chat and Git history.
+It edited nothing and executed no checks.
+
+The PTY reader updates parsed screen state and detects synchronized-frame end
+markers among newly received bytes. Optional reads may return after a 100 ms
+idle poll; required reads assert frame completion within their existing bound.
+The file-link test now stops the viewer before both Enter-follow and Back,
+resumes it from a scoped thread after 300 ms, and uses required-frame input
+before asserting each destination header and title. Initial source and link
+selection assertions remain. These are source assertions, not observed runs.
+Frame-end detection is not command-specific acknowledgement. Viewer drop
+attempts child kill/wait while ignoring errors, without an explicit wait timeout.
+
+Attributed implementer evidence: the delayed Enter assertion failed with the
+old optional reader, showing the stale source header. Required-frame input
+repairs that race without changing runtime rendering or navigation. All 202
+selected sandbox/vendor, dogfood, viewer and terminal-host tests passed.
+
+Separate source-blind `repair-intent-comparator` found the required-frame waits
+and delayed navigation assertions consistent with the synchronization intent,
+without establishing full Unicode/release-hardening obligations or runtime
+changes. Frame completion remains distinct from command acknowledgement.
+The comparator disclosed incidental prior-record snippets from a text lookup,
+excluded them, and read no source/tests. Execution remains implementer-attributed;
+this diagnostic comparison is not acceptance or certification.
+
+Final implementer verification: all-feature workspace Nextest run
+`e88356b1-350a-460b-8410-a15d620d2c2c` passed all 2,330 tests with 13 existing
+skips, including the delayed navigation regression. Strict workspace Clippy,
+formatting, doctests and structural component validation passed. Exploratory
+runs also encountered cold-process Mermaid deadline failures; those tests
+passed in the final complete run without changing deadlines or scheduling.
+
 ## HTML and inherited-descriptor source observations (2026-10-29)
 
 Independent clean-slate `blad-source-observer` read Rust source and test source

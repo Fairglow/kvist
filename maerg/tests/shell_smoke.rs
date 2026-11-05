@@ -76,6 +76,14 @@ fn add_editor_task(dir: &tempfile::TempDir) -> EditorQueues {
                 .success()
         );
     }
+    // `component new` normalizes whitespace to underscores so component names
+    // are whitespace-free by construction. Restore the space-containing name so
+    // the shell still exercises quoted-path completion, `cd`, and validation.
+    std::fs::rename(
+        dir.path().join("src/other_folder"),
+        dir.path().join("src/other folder"),
+    )
+    .expect("restore the space-containing component name");
     for (path, task_id) in [
         ("src/other folder", None),
         ("src/-component", Some("dash-prefill-test")),

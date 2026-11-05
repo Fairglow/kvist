@@ -530,6 +530,14 @@ working directory and ambient rustup overrides) and MUST fail closed with an
 actionable message when the pinned toolchain is absent or the recorded manifest
 no longer matches the on-disk toolchain.
 
+Runtime shim directories used by dependency acquisition and offline verification
+MUST be private, per-operation, outside the project, and retained until the
+runner returns. They MUST be removed when their owner is released, including
+on failure, without replacing another operation's shims or leaving escaping
+symlinks in the writable checkout. Scope validation MUST NOT exempt `.kvist`.
+This user-requested repair has an explicit advisory exception while review
+receipts are unavailable; it does not accept intent or certify compliance.
+
 Current implementation status: implemented. Pin parsing, channel validation,
 the host provisioning step (`kvist toolchain`), the durable manifest,
 and channel-explicit, fail-closed enforcement on use are implemented and

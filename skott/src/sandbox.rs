@@ -943,16 +943,19 @@ mod preflight_tests {
 
     #[test]
     fn scope_inspection_keeps_hidden_directory_escape_checks() {
-        let root = tempfile::tempdir().unwrap();
-        let work = root.path().join("work");
-        std::fs::create_dir_all(work.join(".generated/deep")).unwrap();
-        std::os::unix::fs::symlink(root.path(), work.join(".generated/deep/escape")).unwrap();
-        let token = CancellationToken::new();
-        let preflight = Preflight::new(&token).stage("workspace_scope");
-        let error = check_writable_scope(&work, &preflight).unwrap_err();
-        assert!(
-            error.to_string().contains("escapes the writable scope"),
-            "{error}"
-        );
+        for directory in [".generated/deep", ".kvist/deep"] {
+            let root = tempfile::tempdir().unwrap();
+            let work = root.path().join("work");
+            let hidden = work.join(directory);
+            std::fs::create_dir_all(&hidden).unwrap();
+            std::os::unix::fs::symlink(root.path(), hidden.join("escape")).unwrap();
+            let token = CancellationToken::new();
+            let preflight = Preflight::new(&token).stage("workspace_scope");
+            let error = check_writable_scope(&work, &preflight).unwrap_err();
+            assert!(
+                error.to_string().contains("escapes the writable scope"),
+                "{directory}: {error}"
+            );
+        }
     }
 }

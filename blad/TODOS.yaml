@@ -1406,7 +1406,7 @@ tasks:
   - id: "blad-package-pty-tests"
     title: "write_tests: delayed PTY input processing"
     description: "Reproduce the idle-poll race with a temporarily stopped viewer before changing frame synchronization."
-    context: "Delayed viewer input reproduced the false completion deterministically: the old optional helper returned after 100 ms with the stale footer."
+    context: "Delayed viewer input reproduced the false completion deterministically: the old optional helper returned after 100 ms with the stale footer. The 2026-11-05 follow-up reproduces the same race for file-link Enter, and delays both Enter and Back while retaining exact header/title assertions."
     purpose: "Reproduce the idle-poll race with a temporarily stopped viewer before changing frame synchronization."
     expected_outcome: "Reproduce the idle-poll race with a temporarily stopped viewer before changing frame synchronization."
     kind: test
@@ -1423,7 +1423,7 @@ tasks:
   - id: "blad-package-pty-code"
     title: "implement_code: explicit redraw synchronization"
     description: "Wait for a complete bounded frame for redraw actions; observe each themed tab switch independently."
-    context: "Added required-frame input for successful editor/theme actions; tab switches are asserted independently. Both toolchains pass all 44 PTY tests and both extracted feature suites/install checks."
+    context: "Added required-frame input for successful editor/theme actions; tab switches are asserted independently. Both toolchains pass all 44 PTY tests and both extracted feature suites/install checks. The 2026-11-05 follow-up uses the same required-frame helper for file-follow and Back; all 202 selected coupled regressions pass. Independent source-only observations are retained in IMPL; acceptance remains separate."
     purpose: "Wait for a complete bounded frame for redraw actions; observe each themed tab switch independently."
     expected_outcome: "Wait for a complete bounded frame for redraw actions; observe each themed tab switch independently."
     kind: implementation

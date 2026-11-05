@@ -10,6 +10,77 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "runtime-shim-lifetime-write-tests"
+    title: "write_tests: reproduce persistent runtime shim scope escape"
+    description: "Pin external staging, exact runtime links, independent concurrent owners and cleanup without weakening scope checks."
+    context: "The native repository trial rejects stale .kvist/toolchain-bin links; the uncommitted .kvist scan exemption violates complete scope inspection. Advisory exception is recorded in REQ-RUST-TOOLCHAIN."
+    purpose: "Expose shared persistent runtime links before changing provisioning."
+    expected_outcome: "The regression fails against project-local persistent staging."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
+    timestamps:
+      created_at: "2026-11-05T22:43:00Z"
+      updated_at: "2026-11-05T22:43:00Z"
+      completed_at: "2026-11-05T22:43:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runtime-shim-lifetime-implement-code"
+    title: "implement_code: own runtime shims outside the project"
+    description: "Use private external TempDir ownership in both acquisition and verification, preserving sandbox paths and grants."
+    context: "Both callers retain a unique external TempDir through synchronous execution. The placement/lifetime regression failed first, then all 202 selected coupled tests passed. Final all-feature workspace Nextest e88356b1-350a-460b-8410-a15d620d2c2c passed 2330 tests with 13 existing skips, including the actual repository trial. Strict workspace lint, formatting, doctests and structural validation passed. Investigation-only terminal debug output and the .kvist scan exemption were removed; quoted-path coverage remains. Original acceptance failures were unreproduced across 25 repeated runs each before this repair; assertions and limits remain intact. Accepted revision hashes are unchanged."
+    purpose: "Prevent persistent escaping links and cross-operation replacement."
+    expected_outcome: "Runtime staging and the actual repository trial pass with complete scope checks."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "runtime-shim-lifetime-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
+    timestamps:
+      created_at: "2026-11-05T22:43:00Z"
+      updated_at: "2026-11-05T22:43:00Z"
+      completed_at: "2026-11-05T22:43:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runtime-shim-lifetime-security-audit"
+    title: "security_audit: independently observe runtime shim ownership"
+    description: "Derive source-only observations excluding intent, queues, prior records and history."
+    context: "Independent clean-slate repair-source-observer inspected bounded source/tests only, excluding intent, queues, prior records/reviews and chat/Git history; it ran no checks and edited nothing. IMPL records observed ownership, link assertions and limits, including remaining shared acquisition/Cargo-home state and no forced-termination cleanup guarantee."
+    purpose: "Retain observed lifetime and authority boundaries."
+    expected_outcome: "Persist a scoped source-derived IMPL supplement and limitations."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "runtime-shim-lifetime-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
+    timestamps:
+      created_at: "2026-11-05T22:43:00Z"
+      updated_at: "2026-11-05T22:43:00Z"
+      completed_at: "2026-11-05T22:43:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runtime-shim-lifetime-compliance-review"
+    title: "compliance_review: compare runtime shim intent and observations"
+    description: "Compare local intent with independently derived observations and attributed execution without source access."
+    context: "Separate source-blind repair-intent-comparator found no concrete narrow mismatch, retained broader obligations and pending full/native verification, and disclosed incidental prior-record snippets excluded from its comparison. No source/tests were read. IMPL records this diagnostic comparison and limits, not protected execution, acceptance, a receipt or certification."
+    purpose: "Keep implementation and compliance evidence independent."
+    expected_outcome: "Persist discrepancies and evidence limits for human arbitration."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "runtime-shim-lifetime-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
+    timestamps:
+      created_at: "2026-11-05T22:43:00Z"
+      updated_at: "2026-11-05T22:43:00Z"
+      completed_at: "2026-11-05T22:47:15Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "scoped-status-write-tests"
     title: "write_tests: specify compact and component-scoped status"
     description: "Pin compact project tables, exact component filtering, details/native formats, invalid targets, visible focused status and unfilled bare-cd navigation in both hosts."

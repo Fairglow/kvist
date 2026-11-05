@@ -2427,22 +2427,27 @@ fn following_a_file_link_opens_the_target_and_back_returns() {
         "link selection not shown: {}",
         viewer.screen.line(23)
     );
-    // Follow the link; the viewer must open the linked file.
-    viewer.keys(b"\r");
-    assert!(
-        viewer.screen.line(0).contains("linked.md"),
-        "expected the linked file header, got: {}",
-        viewer.screen.line(0)
-    );
-    assert_eq!(viewer.screen.line(1), "# Linked Title");
-    // Back navigation must return to the original document.
-    viewer.keys(b"b");
-    assert!(
-        viewer.screen.line(0).contains("source.md"),
-        "expected the source file header, got: {}",
-        viewer.screen.line(0)
-    );
-    assert_eq!(viewer.screen.line(1), "# Source Title");
+    // Both navigation redraws must survive delays beyond the optional idle poll.
+    for (keys, file, title) in [
+        (b"\r", "linked.md", "# Linked Title"),
+        (b"b", "source.md", "# Source Title"),
+    ] {
+        let pid = Pid::from_raw(viewer.child.id().try_into().unwrap());
+        kill(pid, Signal::SIGSTOP).unwrap();
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                kill(pid, Signal::SIGCONT).unwrap();
+            });
+            viewer.keys_with_frame(keys);
+        });
+        assert!(
+            viewer.screen.line(0).contains(file),
+            "expected {file} in the header, got: {}",
+            viewer.screen.line(0)
+        );
+        assert_eq!(viewer.screen.line(1), title);
+    }
     viewer.quit();
 }
 

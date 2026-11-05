@@ -157,7 +157,7 @@ tasks:
   - id: "scope-preflight-write-tests"
     title: "write_tests: reproduce serial scope inspection"
     description: "Pin concurrent directory visitation, aggregate bounds, link/cycle coverage, cancellation and stage diagnostics."
-    context: "Both regressions failed in nextest b7db785b-dc0e-4cce-9fed-4efdb56d78d8: serialized directory visitation and missing preflight stage diagnostics. Final affected coverage passes."
+    context: "Both regressions failed in nextest b7db785b-dc0e-4cce-9fed-4efdb56d78d8: serialized directory visitation and missing preflight stage diagnostics. Final affected coverage passes. The 2026-11-05 follow-up extends hidden-directory escape coverage to .kvist and fails against the uncommitted scan exemption before its removal."
     purpose: "Expose cold-filesystem serialization without a timing benchmark."
     expected_outcome: "The overlap and diagnostic regressions fail before the repair."
     kind: test
@@ -174,7 +174,7 @@ tasks:
   - id: "scope-preflight-implement-code"
     title: "implement_code: bound concurrent preflight inspection"
     description: "Use owned, joined directory workers and stage-aware diagnostics without raising quotas or the deadline."
-    context: "Nextest 833bcc4d-ca9e-49cf-87e0-05734be821ce passed all 290 affected unit/integration tests; adf80568-4b51-40d9-8d1c-28ddd13f596e passed 36 native file-tool callers. Five stress iterations 5d42873c-9a00-4b97-bb48-c81f1f53314b each passed the actual repository trial plus six worker regressions. Complete checkout counts independently matched: 200568 entries, 8826 directories; scope 44-68ms, total preflight 56-76ms. Strict scoped Clippy, formatting and whitespace checks passed. Original timeout not reproduced; no controlled cold-cache/endurance claim."
+    context: "Nextest 833bcc4d-ca9e-49cf-87e0-05734be821ce passed all 290 affected unit/integration tests; adf80568-4b51-40d9-8d1c-28ddd13f596e passed 36 native file-tool callers. Five stress iterations 5d42873c-9a00-4b97-bb48-c81f1f53314b each passed the actual repository trial plus six worker regressions. Complete checkout counts independently matched: 200568 entries, 8826 directories; scope 44-68ms, total preflight 56-76ms. Strict scoped Clippy, formatting and whitespace checks passed. Original timeout not reproduced; no controlled cold-cache/endurance claim. The 2026-11-05 follow-up removes an uncommitted .kvist scan exemption and retains complete hidden-state inspection; Maerg owns the external runtime-staging repair. All 202 selected coupled regressions pass; bounded independent observations/comparison and their limits are retained in IMPL."
     purpose: "Reduce independent directory I/O latency while retaining complete inspection."
     expected_outcome: "Focused regressions and the real native repository trial pass."
     kind: implementation

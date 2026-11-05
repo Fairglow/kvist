@@ -638,6 +638,12 @@ never runs inside a sandbox. Builds and verification never install, upgrade,
 or modify a toolchain; they consume the provisioned one and fail closed when
 it is absent or has drifted from the recorded manifest.
 
+Acquisition and offline verification stage their runtime shims in private
+per-operation directories outside the project. Those directories survive the
+runner invocation and are then cleaned up, including on failure. They do not
+leave runtime symlinks under `.kvist` or exempt project state from writable-scope
+validation.
+
 Commands are non-interactive unless their contract explicitly obtains terminal
 input; `prompt` (with a terminal), `shell`, the agent setup/configuration flows,
 are the interactive exceptions. `prompt` obtains a terminal to open the standalone

@@ -1,6 +1,43 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Hidden runtime-state scope regression - 2026-11-05
+
+Independent clean-slate `repair-source-observer` read only bounded source/test
+ranges, excluding intent, queues, prior records/reviews, chat and Git history.
+It edited nothing and executed no checks.
+
+Eight joined scoped workers share directory scheduling, visited paths, quotas
+and stop state. Directory I/O occurs outside the queue lock. Spawn failures,
+panics and poisoned state become errors; preflight checks recur while scanning.
+Traversal has no hidden-name exemption: it schedules ordinary directories,
+checks lexical and canonical link confinement, and schedules directory targets.
+The hidden-directory test asserts rejection of escaping links beneath both
+`.generated/deep` and `.kvist/deep`. These are inspected assertions, not executed
+evidence. Scheduling is nondeterministic, and pathname inspection does not
+freeze concurrent filesystem mutations.
+
+Attributed implementer evidence: the strengthened regression failed against the
+uncommitted `.kvist` exemption and passed after its removal. All 202 selected
+sandbox/vendor, dogfood, viewer and terminal-host tests passed. The checkout's
+stale generated toolchain links were preserved outside the workspace; Maerg's
+separate runtime-staging repair prevents persistent recreation, rather than
+relaxing this component's traversal.
+
+Separate source-blind `repair-intent-comparator` found the observed traversal
+and hidden-path assertions consistent with scope intent. Actual-checkout success
+and scheduling remained unverified at comparison time. It disclosed incidental
+prior-record snippets from a text lookup, excluded them, and read no source/tests.
+Execution remains implementer-attributed; this diagnostic comparison is not
+acceptance or certification.
+
+Final implementer verification: all-feature workspace Nextest run
+`e88356b1-350a-460b-8410-a15d620d2c2c` passed all 2,330 tests with 13 existing
+skips. The actual-checkout native sandbox trial passed in 85.810 seconds with
+complete `.kvist` inspection restored. Strict workspace Clippy, formatting,
+doctests and structural component validation passed; scope quotas, production
+deadlines and scheduling were unchanged.
+
 ## External CLI fixture isolation (2026-10-29)
 
 Independent clean-slate `external-fixture-observer` read only the external-only

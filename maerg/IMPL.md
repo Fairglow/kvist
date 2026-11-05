@@ -5,6 +5,54 @@ Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.
 
+## Runtime shim ownership observations - 2026-11-05
+
+Independent clean-slate `repair-source-observer` read only bounded source/test
+ranges, excluding intent, queues, prior records/reviews, chat and Git history.
+It edited nothing and executed no checks.
+
+`provision_toolchain_bin` returns a `TempDir` under the project's parent,
+containing sandbox-target `rustc`/`rustdoc` links and standard-host `cc`/`ar`/`as`
+links. Provisioning errors propagate. Acquisition and offline-verification
+callers retain that owner while passing its path to synchronous sandbox
+execution. The unit test asserts external placement, no project-local runtime
+bin, distinct simultaneous owners, exact links, five entries and independent
+drop cleanup. These are inspected assertions, not independently run tests.
+Shared acquisition/Cargo-home paths remain; this is not whole-operation
+concurrency isolation or a forced-termination cleanup guarantee.
+
+The shell fixture restores a space-containing child directory after component
+creation, retains dash-prefixed path coverage, configures inert executables,
+and asserts successful acceptance and current project/component states before
+capturing queue snapshots.
+
+Attributed implementer evidence: the runtime-bin regression failed first on
+project-local placement. A separate hidden-directory regression exposed the
+uncommitted `.kvist` scan exemption, which was removed. The actual checkout
+then failed scope inspection on five previously generated toolchain links;
+those links were moved intact to private session storage outside the checkout.
+Both investigation-only terminal debug statements were removed. All 202
+selected sandbox/vendor, dogfood, viewer and terminal-host tests subsequently
+passed. The two reported acceptance tests also passed 25 repeated runs each
+before the runtime-staging change; their original failures were not reproduced,
+and neither their assertions nor execution limits were relaxed.
+
+Separate source-blind `repair-intent-comparator` found no concrete narrow
+intent/observation mismatch in external staging, owner lifetime and cleanup.
+Broader toolchain obligations were outside its scope; full workspace/native
+verification was pending. It disclosed incidental prior-record snippets from a
+text lookup and excluded them from its comparison. It read no source/tests;
+this is a bounded diagnostic comparison, not acceptance or certification.
+
+Final implementer verification: all-feature workspace Nextest run
+`e88356b1-350a-460b-8410-a15d620d2c2c` passed all 2,330 tests with 13 existing
+skips, including the actual-checkout native sandbox trial (85.810 seconds).
+Strict all-target/all-feature workspace Clippy, formatting, doctests and
+structural validation of the three changed component bundles passed.
+Earlier exploratory runs encountered existing cold-process Mermaid deadline
+failures; production deadlines and test scheduling were unchanged, and the
+final complete run passed those tests too. Accepted revisions remain unchanged.
+
 ## Scoped status and component navigation observations - 2026-11-04
 
 The independent
