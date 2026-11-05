@@ -73,7 +73,7 @@ fn project_status_is_one_row_per_component_and_details_are_explicit() {
         "{overview}"
     );
     assert!(overview.contains("| alpha | current |"), "{overview}");
-    assert!(overview.contains("kvist status 'alpha'"), "{overview}");
+    assert!(overview.contains("kvist status alpha"), "{overview}");
     assert!(
         overview.contains("| pipe\\|child | current |"),
         "{overview}"
@@ -247,7 +247,7 @@ fn compact_task_progress_counts_states_and_only_suggests_ready_current_work() {
     queue.tasks = vec![template];
     fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
     let ready = text(run(project.path(), &["status"]));
-    assert!(ready.contains("kvist task run '.' pending-work"), "{ready}");
+    assert!(ready.contains("kvist task run . pending-work"), "{ready}");
     fs::write(project.path().join("VISION.md"), "# Invalid vision\n").unwrap();
     let unavailable = text(run(project.path(), &["status", "."]));
     assert!(!unavailable.contains("kvist task run"), "{unavailable}");

@@ -654,9 +654,12 @@ impl Shell {
         if let Some(hint) = hint {
             println!("{}", self.theme.dim(&hint));
         }
-        let component = format!("'{}'", component.replace('\'', "'\\''"));
+        let component = crate::task_commands::decisions::shell_token(&component);
         let command = match task {
-            Some(task) => format!("task run {component} '{}'", task.replace('\'', "'\\''")),
+            Some(task) => format!(
+                "task run {component} {}",
+                crate::task_commands::decisions::shell_token(&task)
+            ),
             None => format!("task run {component}"),
         };
         self.dispatch_labeled(&command, line);
@@ -1313,8 +1316,8 @@ pub(crate) fn next_command_for(
                 std::path::Path::new(component),
             );
             Some(format!(
-                "human decision needed; kvist decision {component} show '{}' (see 'kvist help task-states')",
-                task.id.replace('\'', "'\\''")
+                "human decision needed; kvist decision {component} show {} (see 'kvist help task-states')",
+                crate::task_commands::decisions::shell_token(&task.id)
             ))
         }
         _ => None,

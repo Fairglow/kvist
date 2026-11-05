@@ -70,9 +70,9 @@ struct Change {
 #[serde(deny_unknown_fields)]
 pub(super) struct PreparedCommit {
     pub(super) commit_id: String,
-    expected_head: String,
-    branch: String,
-    after: Snapshot,
+    pub(super) expected_head: String,
+    pub(super) branch: String,
+    pub(super) after: Snapshot,
     changes: BTreeMap<String, Change>,
 }
 
@@ -376,7 +376,7 @@ fn git_text(context: &TaskContext, index: Option<&Path>, args: &[&str]) -> Resul
     text(git(context, index, args, &[], MAX_GIT_OUTPUT)?)
 }
 
-fn head_branch(context: &TaskContext) -> Result<(String, String)> {
+pub(super) fn head_branch(context: &TaskContext) -> Result<(String, String)> {
     let project = open_dir(&context.project_dir)?;
     let marker = open_child(&project, ".git")?.ok_or_else(|| fail("Git metadata is missing"))?;
     let metadata = io(marker.metadata())?;
@@ -937,6 +937,118 @@ fn without_noops(prepared: &PreparedCommit) -> PreparedCommit {
             .collect(),
         ..prepared.clone()
     }
+}
+
+/// Re-create an orphaned checkpoint against the current HEAD. A prepared
+/// checkpoint that was never published (its commit is not an ancestor of HEAD)
+/// while HEAD advanced past its parent cannot be finished as-is: `finish`
+/// rejects because HEAD is neither the expected parent nor the commit. When
+/// the worktree still matches the checkpoint's after-snapshot, the retained
+/// delta is re-prepared against the current HEAD so the run can publish it and
+/// continue. The orphaned commit is discarded; its content is carried forward.
+pub(super) fn reprepare(
+    context: &TaskContext,
+    prepared: &PreparedCommit,
+    message: &str,
+) -> Result<PreparedCommit> {
+    prepared.after.validate(context)?;
+    reject(
+        message.trim().is_empty() || message.len() > 16384 || message.contains('\0'),
+        "invalid checkpoint message",
+    )?;
+    let (head, branch) = head_branch(context)?;
+    reject(
+        branch != prepared.branch,
+        "branch changed; the orphaned checkpoint cannot be re-prepared on a different branch",
+    )?;
+    // The worktree must still match the checkpoint's after-snapshot; otherwise
+    // the retained delta was altered and must be inspected, not replayed.
+    reject(
+        capture(context)? != prepared.after,
+        "worktree no longer matches the orphaned checkpoint's after-snapshot; inspect retained effects before re-preparing",
+    )?;
+    let real_index = index_path(context)?;
+    let baseline = entries(context, &prepared.after, Some(&head), None)?;
+    let mut changes = BTreeMap::new();
+    for path in baseline.keys().chain(prepared.after.entries.keys()) {
+        if changes.contains_key(path) {
+            continue;
+        }
+        let post = match prepared.after.entries.get(path) {
+            Some(expected) => {
+                let (actual, bytes) = read_local(context, path)?;
+                reject(actual != *expected, "content changed during re-preparation")?;
+                let oid = text(git(
+                    context,
+                    None,
+                    &["hash-object", "-w", "--no-filters", "--stdin"],
+                    &bytes,
+                    128,
+                )?)?;
+                reject(!valid_oid(&oid), "Git produced an invalid blob ID")?;
+                Some(GitEntry {
+                    mode: actual.mode,
+                    oid,
+                })
+            }
+            None => None,
+        };
+        if baseline.get(path) == post.as_ref() {
+            continue;
+        }
+        changes.insert(
+            path.clone(),
+            Change {
+                before: baseline.get(path).cloned(),
+                after: post,
+            },
+        );
+    }
+    reject(
+        changes.is_empty(),
+        "orphaned checkpoint has no inventory changes against the current HEAD",
+    )?;
+    reject(
+        changes.len() > MAX_SCOPE_ENTRIES
+            || changes.keys().map(|p| p.len() as u64).sum::<u64>() > MAX_SCOPE_TOTAL_BYTES,
+        "changed paths exceed checkpoint entry or byte bounds; split the work explicitly",
+    )?;
+    let index = isolated_index(parent_dir(&real_index)?)?;
+    git(
+        context,
+        Some(&index),
+        &["read-tree", &head],
+        &[],
+        MAX_GIT_OUTPUT,
+    )?;
+    write_entries(context, &index, &prepared.after, &changes)?;
+    let tree = git_text(context, Some(&index), &["write-tree"])?;
+    reject(!valid_oid(&tree), "Git produced an invalid tree ID")?;
+    let mut args = vec!["commit-tree", &tree, "-p", &head];
+    if signing_policy(context)? {
+        args.push("-S");
+    }
+    let message = format!("{}\n\n{COAUTHOR}\n", message.trim_end());
+    let commit_id = text(git(
+        context,
+        Some(&index),
+        &args,
+        message.as_bytes(),
+        MAX_GIT_OUTPUT,
+    )?)?;
+    reject(!valid_oid(&commit_id), "Git produced an invalid commit ID")?;
+    reject(
+        head_branch(context)? != (head.clone(), branch.clone())
+            || capture(context)? != prepared.after,
+        "HEAD, branch, worktree or staged overlap changed during re-preparation",
+    )?;
+    Ok(PreparedCommit {
+        commit_id,
+        expected_head: head,
+        branch,
+        after: prepared.after.clone(),
+        changes,
+    })
 }
 
 pub(super) fn finish(context: &TaskContext, prepared: &PreparedCommit) -> Result<String> {

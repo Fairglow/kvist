@@ -83,7 +83,7 @@ fn expansion(component: &Path, command: &Command) -> String {
             ..
         } => format!(
             "kvist decision {component} plan --task {} --option {} --catalog {}",
-            quote(task),
+            crate::task_commands::decisions::shell_token(task),
             quote(option),
             quote(catalog_digest),
         ),

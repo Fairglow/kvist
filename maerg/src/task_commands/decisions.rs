@@ -381,7 +381,7 @@ fn support_index(context: &TaskContext, task: &str) -> Result<String> {
 
 fn instructions(component: &Path, task: &str) -> String {
     let component = component_argument(component);
-    let task = quote(task);
+    let task = shell_token(task);
     format!(
         "## Discuss, choose, redirect or withdraw\n\n\
          - Ask/clarify: `kvist decision {component} discuss 'Your question' --task {task}`.\n\
@@ -861,6 +861,44 @@ fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// Emit a value as a shell token: unquoted when it is a safe, whitespace-free
+/// token (no metacharacters, not empty, not dash-prefixed), quoted otherwise.
+/// Component and task names are required to be whitespace-free, so quoting is
+/// unnecessary in practice; the quoted fallback keeps any legacy or unusual
+/// name safe without changing its value.
+pub(crate) fn shell_token(value: &str) -> String {
+    let safe = !value.is_empty()
+        && !value.starts_with('-')
+        && value.chars().all(|ch| {
+            !ch.is_whitespace()
+                && !matches!(
+                    ch,
+                    '\'' | '"'
+                        | '\\'
+                        | '$'
+                        | '`'
+                        | ';'
+                        | '|'
+                        | '&'
+                        | '<'
+                        | '>'
+                        | '('
+                        | ')'
+                        | '{'
+                        | '}'
+                        | '*'
+                        | '?'
+                        | '['
+                        | ']'
+                        | '~'
+                        | '!'
+                        | '#'
+                        | '^'
+                )
+        });
+    if safe { value.to_owned() } else { quote(value) }
+}
+
 pub(crate) fn component_argument(component: &Path) -> String {
     let text = component.to_string_lossy();
     let mut command =
@@ -871,9 +909,9 @@ pub(crate) fn component_argument(component: &Path) -> String {
             .get_subcommands()
             .any(|command| command.get_name() == text)
     {
-        quote(&format!("./{text}"))
+        shell_token(&format!("./{text}"))
     } else {
-        quote(&text)
+        shell_token(&text)
     }
 }
 fn encode<T: Serialize>(value: &T) -> Result<String> {

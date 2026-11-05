@@ -2918,9 +2918,9 @@ fn continuous_run_pauses_on_review_decision_without_running_later_items() {
         "## Choose or approve",
         "## Ask for clarification",
         "## Reject or redirect",
-        "kvist decision '.' options --task 'one-compliance-review'",
+        "kvist decision . options --task one-compliance-review",
         "apply PLAN_ID --approve SHA256",
-        "kvist task run '.' 'one-compliance-review'",
+        "kvist task run . one-compliance-review",
         "not human acceptance",
     ] {
         assert!(markdown.contains(text), "{text}: {markdown}");
@@ -3262,7 +3262,7 @@ fn continuous_run_rejects_malformed_reviews_and_forged_ledger_state() {
     .expect("malformed-response blocker brief");
     assert!(brief.contains("Host diagnostic"));
     assert!(brief.contains("invalid report JSON"));
-    assert!(brief.contains("task transition '.' 'one-security-audit' pending"));
+    assert!(brief.contains("task transition . one-security-audit pending"));
     let path = project.path().join("src/TODOS.yaml");
     let tasks = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(

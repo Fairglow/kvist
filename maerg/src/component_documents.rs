@@ -317,8 +317,12 @@ pub struct GeneratedComponentDocuments {
 }
 
 /// Creates all three validated component intent documents without overwriting.
+/// Component names must be whitespace-free so that quoting is never required
+/// when naming the component in a command; any whitespace in the requested
+/// path is normalized to underscores before the directory is created.
 pub fn create(component_dir: &Path) -> Result<GeneratedComponentDocuments> {
-    ensure_component_directory(component_dir)?;
+    let component_dir = normalize_component_whitespace(component_dir);
+    ensure_component_directory(&component_dir)?;
     let kinds = [
         DocumentKind::Requirements,
         DocumentKind::Contract,
@@ -551,6 +555,22 @@ fn diagnostic_message(kind: &DocumentDiagnosticKind) -> String {
     }
 }
 
+/// Normalizes whitespace in each path component to underscores so that
+/// component names are whitespace-free and never require quoting.
+fn normalize_component_whitespace(component_dir: &Path) -> PathBuf {
+    component_dir
+        .components()
+        .map(|component| {
+            component
+                .as_os_str()
+                .to_string_lossy()
+                .chars()
+                .map(|ch| if ch.is_whitespace() { '_' } else { ch })
+                .collect::<String>()
+        })
+        .collect()
+}
+
 fn ensure_component_directory(component_dir: &Path) -> Result<()> {
     match fs::symlink_metadata(component_dir) {
         Ok(metadata) if is_link_like(&metadata) => {
@@ -578,4 +598,25 @@ fn ensure_component_directory(component_dir: &Path) -> Result<()> {
         path: component_dir.to_path_buf(),
         source,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_component_whitespace_replaces_whitespace_with_underscores() {
+        assert_eq!(
+            normalize_component_whitespace(Path::new("my component")),
+            PathBuf::from("my_component")
+        );
+        assert_eq!(
+            normalize_component_whitespace(Path::new("a/b c")),
+            PathBuf::from("a/b_c")
+        );
+        assert_eq!(
+            normalize_component_whitespace(Path::new("already-fine")),
+            PathBuf::from("already-fine")
+        );
+    }
 }

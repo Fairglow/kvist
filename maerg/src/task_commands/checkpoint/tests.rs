@@ -882,3 +882,55 @@ fn checkpoint_signer_deadline_preserves_head_index_and_retries_without_replay() 
     finish(&repo.context, &prepared).unwrap();
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2");
 }
+
+#[test]
+fn checkpoint_reprepare_recovers_orphaned_checkpoint_after_external_commit() {
+    let repo = Repo::new();
+    // Prepare a checkpoint against the current HEAD but do not finish it.
+    let before = capture(&repo.context).unwrap();
+    let head = ensure_clean(&repo.context, &before).unwrap();
+    repo.write("component/src/main.rs", "orphaned delta\n");
+    let after = capture(&repo.context).unwrap();
+    let orphaned = prepare(&repo.context, &head, &before, &after, "orphaned item").unwrap();
+    // A fresh prepared checkpoint is not yet an ancestor of HEAD; the
+    // discriminator is that HEAD equals the expected parent (not orphaned).
+    let (current_head, _) = head_branch(&repo.context).unwrap();
+    assert_eq!(current_head, orphaned.expected_head);
+    // External commits advance HEAD past the orphaned checkpoint's parent.
+    repo.write("unrelated", "external\n");
+    repo.git(&["add", "unrelated"]);
+    repo.git(&["commit", "-qm", "external work"]);
+    // Now HEAD is neither the expected parent nor the commit: orphaned.
+    let (current_head, _) = head_branch(&repo.context).unwrap();
+    assert_ne!(current_head, orphaned.expected_head);
+    assert_ne!(current_head, orphaned.commit_id);
+    // The worktree still matches the orphaned after-snapshot, so the retained
+    // delta is re-prepared against the current HEAD and published.
+    let reprepared = reprepare(&repo.context, &orphaned, "re-prepared item").unwrap();
+    assert_ne!(reprepared.commit_id, orphaned.commit_id);
+    assert_eq!(reprepared.expected_head, repo.git(&["rev-parse", "HEAD"]));
+    assert!(reprepared.changes.contains_key("src/main.rs"));
+    finish(&repo.context, &reprepared).unwrap();
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "3");
+    // The re-prepared commit carries the retained delta on top of the external
+    // commits; the worktree is clean relative to the new HEAD.
+    assert_eq!(
+        repo.git(&["show", "HEAD:component/src/main.rs"]),
+        "orphaned delta"
+    );
+    ensure_clean(&repo.context, &capture(&repo.context).unwrap()).unwrap();
+}
+
+#[test]
+fn checkpoint_reprepare_refuses_when_worktree_no_longer_matches() {
+    let repo = Repo::new();
+    let before = capture(&repo.context).unwrap();
+    let head = ensure_clean(&repo.context, &before).unwrap();
+    repo.write("component/src/main.rs", "orphaned delta\n");
+    let after = capture(&repo.context).unwrap();
+    let orphaned = prepare(&repo.context, &head, &before, &after, "orphaned item").unwrap();
+    // The retained after-content is altered before re-preparation.
+    repo.write("component/src/main.rs", "tampered\n");
+    let error = reprepare(&repo.context, &orphaned, "re-prepared item").unwrap_err();
+    assert!(error.to_string().contains("no longer matches"), "{error}");
+}

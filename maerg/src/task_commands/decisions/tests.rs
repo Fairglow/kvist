@@ -104,3 +104,19 @@ fn bounded_decision_input_rejects_links_and_invalid_utf8() {
         assert!(bounded_read(&symlink).is_err());
     }
 }
+
+#[test]
+fn shell_token_emits_whitespace_free_names_unquoted_and_quotes_unsafe_values() {
+    // Whitespace-free names are emitted unquoted, so quoting is unnecessary.
+    assert_eq!(shell_token("galla"), "galla");
+    assert_eq!(
+        shell_token("enable-native-e2e-security-audit"),
+        "enable-native-e2e-security-audit"
+    );
+    assert_eq!(shell_token("./galla"), "./galla");
+    // Unsafe values (whitespace, metacharacters, dash-prefixed) stay quoted.
+    assert_eq!(shell_token("-child's name"), "'-child'\\''s name'");
+    assert_eq!(shell_token("a b"), "'a b'");
+    assert_eq!(shell_token("a;b"), "'a;b'");
+    assert_eq!(shell_token(""), "''");
+}

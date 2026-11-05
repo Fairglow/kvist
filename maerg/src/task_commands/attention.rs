@@ -62,7 +62,7 @@ pub(super) fn resolution(component: &Path, task: Option<&str>, decision: bool) -
 }
 
 fn argument(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+    decisions::shell_token(value)
 }
 
 pub(super) fn decision(
@@ -472,7 +472,7 @@ mod tests {
     fn resolution_disambiguates_command_named_components() {
         for name in ["show", "plan", "apply", "help"] {
             let instructions = resolution(Path::new(name), None, true);
-            assert!(instructions.contains(&format!("kvist decision './{name}' options")));
+            assert!(instructions.contains(&format!("kvist decision ./{name} options")));
         }
     }
 
@@ -486,7 +486,9 @@ mod tests {
         );
         context.component_path = PathBuf::from("-child's name");
         let instructions = resolution(&context.component_path, Some("task"), true);
-        assert!(instructions.contains("kvist task run './-child'\\''s name' 'task'"));
+        // The component name contains whitespace and a quote, so it is quoted;
+        // the task name is whitespace-free, so it is emitted unquoted.
+        assert!(instructions.contains("kvist task run './-child'\\''s name' task"));
         assert!(!instructions.contains("task transition"));
     }
 

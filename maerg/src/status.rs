@@ -289,11 +289,11 @@ fn guidance_entries(
             id: task.id.clone(),
             reason: first_line(task.blocked_reason.as_deref().unwrap_or("")),
             next: format!(
-                "human decision needed; kvist decision {} show '{}' (see 'kvist help task-states')",
+                "human decision needed; kvist decision {} show {} (see 'kvist help task-states')",
                 crate::task_commands::decisions::component_argument(std::path::Path::new(
                     component_path
                 )),
-                task.id.replace('\'', "'\\''"),
+                crate::task_commands::decisions::shell_token(&task.id),
             ),
         });
     }

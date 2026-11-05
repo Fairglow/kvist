@@ -517,7 +517,7 @@ fn status_overview_lists_changed_documents_with_revisions_and_diff_hint() {
     assert!(stdout.contains("| expected | sha256:"));
     assert!(stdout.contains("| observed | sha256:"));
     assert!(stdout.contains("git diff HEAD -- src/DESIGN.md"));
-    assert!(stdout.contains("kvist component accept '.'"));
+    assert!(stdout.contains("kvist component accept ."));
 }
 
 /// A blocked component lists each blocked task with its reason and the exact
@@ -632,7 +632,7 @@ fn status_blocked_details_list_reasons_and_exact_next_commands() {
     ));
     assert!(stdout.contains("decision: paused"));
     assert!(stdout.contains("reason: Awaiting decision on product direction."));
-    assert!(stdout.contains("next: human decision needed; kvist decision '.' show 'paused'"));
+    assert!(stdout.contains("next: human decision needed; kvist decision . show paused"));
 
     let overview = run_kvist(&[
         "status",
@@ -656,7 +656,7 @@ fn status_blocked_details_list_reasons_and_exact_next_commands() {
         "kvist task transition . blocked-waiting pending (1 dependency task incomplete)"
     ));
     assert!(stdout.contains("### awaiting-decision: paused"));
-    assert!(stdout.contains("human decision needed; kvist decision '.' show 'paused'"));
+    assert!(stdout.contains("human decision needed; kvist decision . show paused"));
 }
 
 /// The stable text report names a next step for unsupported-version components.

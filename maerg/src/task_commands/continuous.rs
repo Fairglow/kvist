@@ -144,6 +144,12 @@ fn run_locked(
                 }
                 ledger.policy_identity = approval.approval_digest.clone();
             }
+            // Orphaned checkpoint: HEAD advanced past the checkpoint's parent
+            // (external commits) while it was retained, so `finish` would
+            // reject because HEAD is neither the expected parent nor the
+            // commit. Recover it before the effect-digest check so the run
+            // continues instead of wedging. No task is replayed.
+            recover_orphaned_checkpoint(context, &mut ledger, secret)?;
             if ledger.phase != Phase::Paused && ledger.expected_effects != effect_digest(context)? {
                 return Err(error(
                     context,
@@ -435,6 +441,34 @@ fn finish_checkpoint(
         .pending
         .as_ref()
         .ok_or_else(|| error(context, "no prepared checkpoint"))?;
+    // A prepared checkpoint whose commit is not an ancestor of HEAD was never
+    // published: HEAD advanced past its parent (external commits) while the
+    // checkpoint was retained. `finish` would reject because HEAD is neither
+    // the expected parent nor the commit. When the worktree still matches the
+    // checkpoint's after-snapshot, re-prepare it against the current HEAD so
+    // the retained delta is published and the run continues. No task is
+    // replayed; only the unaccepted checkpoint is re-based.
+    let (head, _branch) = checkpoint::head_branch(context)?;
+    if head != prepared.expected_head && head != prepared.commit_id {
+        eprintln!(
+            "Retained checkpoint was orphaned by external commits; re-preparing it against the current HEAD."
+        );
+        let reprepared = checkpoint::reprepare(
+            context,
+            prepared,
+            &format!(
+                "checkpoint({}): re-prepare orphaned {} execution (unaccepted)",
+                context.component_path.display(),
+                ledger.active_item.as_deref().unwrap_or("component")
+            ),
+        )?;
+        ledger.pending = Some(reprepared);
+        save(context, ledger, secret)?;
+    }
+    let prepared = ledger
+        .pending
+        .as_ref()
+        .ok_or_else(|| error(context, "no prepared checkpoint"))?;
     let commit = checkpoint::finish(context, prepared)?;
     eprintln!("Local unaccepted checkpoint: {commit}");
     ledger.expected_head = Some(commit);
@@ -452,14 +486,78 @@ fn finish_checkpoint(
 }
 
 pub(super) fn decision_preflight(context: &TaskContext, secret: &[u8]) -> Result<()> {
-    if let Some(ledger) = load(context, secret)?
+    if let Some(mut ledger) = load(context, secret)?
         && (ledger.pending.is_some()
             || !matches!(ledger.phase, Phase::Paused | Phase::AwaitingApproval))
     {
+        // A retained checkpoint may be orphaned by external commits; recover
+        // it so the decision command sees a clean, paused ledger.
+        recover_orphaned_checkpoint(context, &mut ledger, secret)?;
+        if ledger.pending.is_some()
+            || !matches!(ledger.phase, Phase::Paused | Phase::AwaitingApproval)
+        {
+            return Err(error(
+                context,
+                "decision changes require a paused continuous run with no pending checkpoint; finish or inspect retained work first",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Recover an orphaned pending checkpoint so the run can resume. A prepared
+/// checkpoint whose commit is not an ancestor of HEAD was never published:
+/// HEAD advanced past its parent (external commits) while it was retained, so
+/// `finish` would reject because HEAD is neither the expected parent nor the
+/// commit. When the worktree still matches the checkpoint's after-snapshot,
+/// re-prepare it against the current HEAD so the retained delta is published.
+/// When the worktree has moved on (later tasks ran and were not checkpointed),
+/// the retained delta is superseded; discard the checkpoint, pause the run,
+/// and re-baseline. Either way the ledger is re-baselined so the run
+/// continues. No task is replayed.
+fn recover_orphaned_checkpoint(
+    context: &TaskContext,
+    ledger: &mut Ledger,
+    secret: &[u8],
+) -> Result<()> {
+    let Some(prepared) = ledger.pending.as_ref() else {
+        return Ok(());
+    };
+    let Ok((head, branch)) = checkpoint::head_branch(context) else {
+        return Ok(());
+    };
+    if head == prepared.expected_head || head == prepared.commit_id {
+        return Ok(());
+    }
+    if branch != prepared.branch {
         return Err(error(
             context,
-            "decision changes require a paused continuous run with no pending checkpoint; finish or inspect retained work first",
+            "branch changed while the checkpoint was retained; switch back to the recorded branch before resuming",
         ));
+    }
+    if checkpoint::capture(context)? == prepared.after {
+        eprintln!(
+            "Retained checkpoint was orphaned by external commits; re-preparing it against the current HEAD."
+        );
+        ledger.pending = Some(checkpoint::reprepare(
+            context,
+            prepared,
+            &format!(
+                "checkpoint({}): re-prepare orphaned {} execution (unaccepted)",
+                context.component_path.display(),
+                ledger.active_item.as_deref().unwrap_or("component")
+            ),
+        )?);
+        save(context, ledger, secret)?;
+    } else {
+        eprintln!(
+            "Retained checkpoint was superseded by later work; discarding the orphaned checkpoint and re-baselining."
+        );
+        ledger.pending = None;
+        ledger.phase = Phase::Paused;
+        ledger.baseline = checkpoint::capture(context)?;
+        ledger.expected_effects = effect_digest(context)?;
+        save(context, ledger, secret)?;
     }
     Ok(())
 }
