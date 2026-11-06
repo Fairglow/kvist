@@ -2,6 +2,45 @@
 
 # Sav Design
 
+## Resilience realization
+
+Deliver four independently checked phases: outcome correctness; streamed
+repetition/recovery; progress-aware action/observation protection; and typed
+diagnostics/resource support. Host authority remains outside these mechanisms.
+
+Keep stream detection incremental and deterministic, with bounded normalized
+word fingerprints, separate answer/reasoning state and exact/near periodic
+suffix comparisons. Three substantial repeated periods are strong evidence;
+short phrases need additional repetitions. Bound token length/history and
+candidate work, and retain structural distinctions rather than deleting code
+or numbers. Inspect before presentation and before accepting unary results. Retain at most
+2,048 word fingerprints per channel and at most 256 characters of one word.
+Inspect periods up to 512 words; substantial periods (50+) require three
+copies, shorter periods require at least six and 48 total words. Near matches
+require at least 94 percent token identity and sufficient token diversity.
+Apply near matching only to prose, not fenced code, quoted/list/table/heading
+structure; exact matching still inspects structured content. Preserve numeric
+distinctions. Inspect on a fixed word cadence plus terminal flush, independent
+of chunk boundaries. Bound near candidates to 16 per inspection.
+Bound action/outcome history to 128 proposals and cycles to 32 actions.
+These are tested heuristic windows, not universal semantic detection.
+
+Retain the prompt's two corrections outside compactable messages. Progress
+clears streaks but never replenishes spent corrections; only a new human prompt
+does. Record
+correction before adding bounded host-authored guidance. A batch produces one
+intervention, complete skipped-result pairing and one response opportunity.
+Track proposals even when rendering/policy rejects them. Observe typed status
+and bounded content fingerprints, not claims of filesystem mutation from stdout.
+State revisions and new observation ranges permit useful repeated actions;
+unchanged observations and repeated failure/cycle signatures remain evidence
+of stagnation. No-op success cannot clear that evidence.
+
+Latch the first observed stopping cause before fallible/slow cleanup. A
+deadline expiring during cancelled-run cleanup cannot relabel earlier user
+cancellation. Diagnostics identify explicit wall/token/turn allowance rather
+than guessing OOM or provider slot state from a signal or missing exit code.
+
 ## Long-running conversations
 
 Represent absent run caps with `Option`, not magic zero values. A prompt

@@ -28,6 +28,7 @@ use crate::{
     vcs::VcsArtifactState,
 };
 
+mod agent_outcome;
 mod attention;
 mod checkpoint;
 mod continuous;
@@ -1663,7 +1664,10 @@ fn assess_attempt_journal(
             "pending-human-disposition" | "human-finalized" => {
                 attempt.lifecycle_advanced = true;
             }
-            "execution-finished" | "verification-finished" | "agent-execution" => {
+            "execution-finished"
+            | "verification-finished"
+            | "agent-execution"
+            | "verification-repair" => {
                 attempt.execution_observed = true;
             }
             "pre-spawn-failure" => {
@@ -4177,7 +4181,7 @@ fn approved_write_scope(
                 .filter(|c| !matches!(c, std::path::Component::CurDir))
                 .collect();
             if let Some(path_str) = normalized.to_str() {
-                let digest = digest_path_tree(&scope).unwrap_or_else(|_| "sha256:0".to_owned());
+                let digest = digest_path_tree(&scope)?;
                 scopes.push(AttemptWriteScope {
                     path: path_str.to_owned(),
                     pre_digest: digest,
@@ -4791,153 +4795,21 @@ fn execute_task_under_lock(
                 allow_control,
             )
         };
-        let run_result = match execution {
-            Ok(result) => result,
-            Err(error) => {
-                let reason = redact_bounded(
-                    error.to_string(),
-                    &evidence_redactions(&config),
-                    MAX_VERIFICATION_EVIDENCE_BYTES,
-                );
-                let transition_at =
-                    Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-                let model_error = match &error {
-                    KvistError::Sav(source)
-                    | KvistError::AgentModelRequestFailed { source, .. } => Some(source),
-                    _ => None,
-                };
-                append_agent_execution(
-                    &agent_attempt_path,
-                    AgentExecutionRecord {
-                        schema_version: ATTEMPT_SCHEMA_VERSION,
-                        attempt_id: &attempt_id,
-                        phase: "agent-execution",
-                        task_id,
-                        timestamp: &transition_at,
-                        success: false,
-                        timed_out: model_error.is_some_and(|source| {
-                            matches!(
-                                source,
-                                sav::Error::ModelTransportTimedOut
-                                    | sav::Error::SlotAllocationTimedOut { .. }
-                                    | sav::Error::TtftTimedOut { .. }
-                                    | sav::Error::InterTokenCadenceTimedOut { .. }
-                            )
-                        }),
-                        output_limit_exceeded: model_error.is_some_and(|source| {
-                            matches!(source, sav::Error::ModelResponseLimitExceeded { .. })
-                        }),
-                        stdout: "",
-                        stderr: &reason,
-                    },
-                )
-                .map_err(|recording| {
-                    unresolved_run_error(&context, task_id, &attempt_id, &reason, &recording)
-                })?;
-                let _ = transition_locked(
-                    &context,
-                    lock,
-                    task_id,
-                    TaskStatus::Blocked,
-                    Some(&reason),
-                    &transition_at,
-                    Some(&attempt_id),
-                )
-                .map_err(|recording| {
-                    unresolved_run_error(&context, task_id, &attempt_id, &reason, &recording)
-                })?;
-                return Err(blocked_run_error(
-                    &context,
-                    task_id,
-                    &attempt_id,
-                    &reason,
-                    None,
-                ));
-            }
+        let redactions = evidence_redactions(&config);
+        let attempt = agent_outcome::AgentAttempt {
+            context: &context,
+            lock,
+            task_id,
+            attempt_id: &attempt_id,
+            journal: &agent_attempt_path,
+            redactions: &redactions,
         };
+        let run_result = attempt.record("agent-execution", execution, None)?;
         *explanation = Some(run_result.stdout.clone());
-        let agent_timestamp =
-            Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-        append_agent_execution(
-            &agent_attempt_path,
-            AgentExecutionRecord {
-                schema_version: ATTEMPT_SCHEMA_VERSION,
-                attempt_id: &attempt_id,
-                phase: "agent-execution",
-                task_id,
-                timestamp: &agent_timestamp,
-                success: run_result.success,
-                timed_out: run_result.timed_out,
-                output_limit_exceeded: run_result.output_limit_exceeded,
-                stdout: &run_result.stdout,
-                stderr: &run_result.stderr,
-            },
-        )
-        .map_err(|recording| {
-            unresolved_run_error(
-                &context,
-                task_id,
-                &attempt_id,
-                &run_result.stderr,
-                &recording,
-            )
-        })?;
 
         // 7. Transition task status depending on outcome
         if run_result.surfaced_decision {
-            // An impactful, uncovered decision pauses the run for the human.
-            // It is a controlled pause, not a failure: the task awaits a
-            // decision and a subsequent re-review of the updated intent rather
-            // than completing or being blocked.
-            let evidence_dir = if matches!(
-                task.kind,
-                TaskKind::SecurityAudit | TaskKind::ComplianceReview
-            ) {
-                context.component_dir.join(".kvist/continuous-reviews")
-            } else {
-                context
-                    .component_dir
-                    .join(".kvist")
-                    .join("authoring")
-                    .join("proposals")
-            };
-            let summary = attention::decision(
-                &context,
-                task_id,
-                &attempt_id,
-                &run_result.stdout,
-                &evidence_dir,
-                &evidence_redactions(&config),
-                lock,
-            )?;
-            let decision_reason = format!(
-                "one or more impactful, uncovered decisions surfaced and require a human decision before implementation continues. Human-readable summary: {}. Raw proposal evidence: {}.",
-                summary.display(),
-                evidence_dir.display()
-            );
-            tracing::info!(
-                task_id = %task_id,
-                evidence_dir = %evidence_dir.display(),
-                "surfaced a decision worthy of intervention; transitioning task to awaiting-decision"
-            );
-            let transition_at =
-                Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-            let _ = transition_locked(
-                &context,
-                lock,
-                task_id,
-                TaskStatus::AwaitingDecision,
-                Some(&decision_reason),
-                &transition_at,
-                Some(&attempt_id),
-            )?;
-            let component = decisions::component_argument(&context.component_path);
-            Ok(format!(
-                "# Decision required\n\ntask `{task_id}` paused and transitioned to awaiting-decision. A decision is required before implementation continues.\n\nHuman-readable summary: {}\n\nOpen this Markdown file for alternatives, recommendations and response instructions.\nRaw proposal evidence: {}.\nLogs written to: {}\nNext Step: use `kvist decision {component} show {task_id}` to discuss and stage the complete resolution; inspect its exact approval command before applying.",
-                summary.display(),
-                evidence_dir.display(),
-                run_result.log_path.display(),
-            ))
+            attempt.decision(&run_result, task.kind)
         } else if run_result.success {
             if task.kind == TaskKind::Implementation {
                 const MAX_VERIFICATION_REPAIR_ROUNDS: usize = 4;
@@ -4960,11 +4832,8 @@ fn execute_task_under_lock(
                     let Ok(verify_res) = res else {
                         break res;
                     };
-                    if verify_res.success
-                        || verify_res.timed_out
+                    if !agent_outcome::repairable(&verify_res)
                         || repair_round >= MAX_VERIFICATION_REPAIR_ROUNDS
-                        || (verify_res.stdout.trim().is_empty()
-                            && verify_res.stderr.trim().is_empty())
                     {
                         break Ok(verify_res);
                     }
@@ -4972,8 +4841,8 @@ fn execute_task_under_lock(
                     eprintln!(
                         "Verification failed (repair round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS}); feeding test failure diagnostics back to the agent to investigate and fix..."
                     );
-                    let pre_src = digest_path_tree(&context.component_dir.join("src")).ok();
-                    let pre_tests = digest_path_tree(&context.component_dir.join("tests")).ok();
+                    let verification_cause = agent_outcome::verification_cause(&verify_res);
+                    let pre_digests = attempt.digests(&verification_cause, &run_result.log_path)?;
                     let stdout_tail = redact_bounded(
                         verify_res.stdout.clone(),
                         &evidence_redactions(&config),
@@ -4995,7 +4864,7 @@ fn execute_task_under_lock(
                          --- Verification Stderr ---\n{stderr_tail}\n",
                         verify_res.command, verify_res.exit_code
                     );
-                    let Ok(repair_run) = crate::agent::execute_agent_with_controls(
+                    let repair_execution = crate::agent::execute_agent_with_controls(
                         agent_profile,
                         sandbox_config,
                         Some(&approved_runner),
@@ -5013,17 +4882,28 @@ fn execute_task_under_lock(
                             policy_identity: &policy_identity,
                         },
                         allow_control,
-                    ) else {
-                        break Ok(verify_res);
-                    };
-                    if !repair_run.success || repair_run.surfaced_decision {
-                        break Ok(verify_res);
-                    }
+                    );
+                    let repair_run = attempt.record(
+                        "verification-repair",
+                        repair_execution,
+                        Some(&verification_cause),
+                    )?;
                     *explanation = Some(repair_run.stdout.clone());
-                    let post_src = digest_path_tree(&context.component_dir.join("src")).ok();
-                    let post_tests = digest_path_tree(&context.component_dir.join("tests")).ok();
-                    if pre_src == post_src && pre_tests == post_tests {
-                        break Ok(verify_res);
+                    if repair_run.surfaced_decision {
+                        return attempt.decision(&repair_run, task.kind);
+                    }
+                    if !repair_run.success {
+                        let reason = attempt.cause(Some(&verification_cause), &repair_run.stderr);
+                        return Err(attempt.block(&reason, Some(&repair_run.log_path))?);
+                    }
+                    let post_digests =
+                        attempt.digests(&verification_cause, &repair_run.log_path)?;
+                    if pre_digests == post_digests {
+                        let reason = attempt.cause(
+                            Some(&verification_cause),
+                            "no source/test progress; verification remains failed",
+                        );
+                        return Err(attempt.block(&reason, Some(&repair_run.log_path))?);
                     }
                 };
                 match verify_outcome {
@@ -6264,6 +6144,10 @@ pub struct VerificationResult {
     pub exit_code: Option<i32>,
     /// True if the subprocess was killed due to exceeding the timeout limit.
     pub timed_out: bool,
+    /// True if verification exceeded its approved capture bound.
+    pub output_limit_exceeded: bool,
+    /// True if verification was cancelled; cancellation never authorizes repair.
+    pub cancelled: bool,
     /// Captured stdout bytes up to max_output_bytes converted to string.
     pub stdout: String,
     /// Captured stderr bytes up to max_output_bytes converted to string.
@@ -6279,6 +6163,8 @@ struct VerificationRecord<'a> {
     success: bool,
     exit_code: Option<i32>,
     timed_out: bool,
+    output_limit_exceeded: bool,
+    cancelled: bool,
     stdout: &'a str,
     stderr: &'a str,
 }
@@ -6768,6 +6654,8 @@ fn finalize_verification(
             success,
             exit_code,
             timed_out: *timed_out,
+            output_limit_exceeded: *output_limit_exceeded,
+            cancelled: *cancelled,
             stdout: &stdout,
             stderr: &stderr,
         },
@@ -6777,6 +6665,8 @@ fn finalize_verification(
         command,
         exit_code,
         timed_out: *timed_out,
+        output_limit_exceeded: *output_limit_exceeded,
+        cancelled: *cancelled,
         stdout,
         stderr,
     })

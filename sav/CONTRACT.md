@@ -2,6 +2,27 @@
 
 # Sav Contract
 
+## Resilience delivery
+
+The native runtime provides shared, bounded stream/action/observation resilience.
+Detection is operational advice, never tool authorization or task acceptance.
+Two autonomous corrections are permitted per native prompt, or per protected
+authoring-and-repair sequence; the next detected stall ends explicitly.
+Guidance cannot replenish corrections.
+Duplicate proposals in one assistant batch consume at most one correction.
+Observed relevant progress clears local streaks, not spent corrections;
+successful no-op output does not. A new human prompt starts a fresh allowance.
+Hosts retain their broker, effect execution and canonical evidence ownership.
+
+Streaming detection checks answer and supplied reasoning separately. A
+repetitive attempt remains provisional, contributes to resource accounting and
+cannot execute tools. Correction preserves the original goal and completed
+results without increasing output allowance or changing sampling parameters.
+Diagnostics state what was detected, what remains known and the next safe
+action; uncertain effects require reconciliation rather than automatic replay.
+Opaque external-agent output is not native tool evidence, and unsupported
+steering/replay capabilities are disclosed rather than emulated.
+
 ## Shared native runtime API (ADR 0015)
 
 `sav::runtime` exposes `AgentSession`, `ModelIdentity { id, model }`,

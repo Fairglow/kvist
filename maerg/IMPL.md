@@ -1,6 +1,107 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Final scoped resilience observations - phase 1
+
+Clean-slate `maerg-p1-final-observer` inspected only bounded current agent/broker
+source and the `resilience_review_*` integration fixtures. It read no intent,
+queue, prior record/review, root/architecture, peer implementation or chat/Git
+history, made no edits, ran no checks and did not delegate. A separate narrow
+clean-slate `maerg-p1-patch-observer` subsequently inspected proposal screening
+and its contradictory-patch fixture after the final patch-field correction.
+Together their current factual observations supersede affected initial details:
+
+- Failed virtual observations map to exit 1; inspection/advisory/completion
+  observations map to 0. Model and legacy trajectory use the same mapping,
+  and read trajectory records report no mutation. This is virtual outcome
+  evidence, not proof that an external process ran.
+- Effect success requires an uninterrupted successful exit. Otherwise applied
+  is false and mutation may remain uncertain; trajectory mutation conservatively
+  means applied or uncertain. Finalization retains completed turns/effects and
+  does not permit automatic replay.
+- Recognized alternatives are inspected in summary, rationale and optional
+  patch. Markdown alternatives headings and labeled option/alternative tokens
+  cover later letters/numbers as well as the first label. They prevent completion
+  and routine-note demotion. Every broker-retained decision pauses before
+  same-turn effects, including after the first turn, without rolling back earlier
+  effects.
+- Final no-effect termination rejects recognized current incomplete/blocker
+  declarations. Blockquotes, fenced code, closed inline quotations and immediate
+  negation are excluded; unclosed inline quotes remain inspectable.
+- Proposal completion combines summary, rationale and optional patch before
+  screening. A contradictory unfinished-work patch cannot be discarded as a
+  completion summary. Proposal screening also rejects raw conditional/partial
+  substrings and is stricter than ordinary final-report screening.
+- Failed-read/edit fixtures assert trajectory exits 1, 1, 0, unchanged source
+  and no mutation. Decision fixtures assert two requests, unsuccessful paused
+  results, unchanged destinations and actual write/edit `tool_dispatch` absence.
+  Legitimate completion, quoted/negated reports and patch-blocker fixtures retain
+  exact answer/call-count or decision-disposition assertions.
+
+These are lexical operational checks, not exhaustive natural-language
+recognition or semantic task certification. Stream/progress/aggregate-budget
+work is outside this phase's observation scope. Initial source observations
+still supply the unchanged repair/digest/recording facts below.
+
+Final runner evidence, not independently executed by the observers: initial
+review tests failed 3/passed 1, then all four passed; final-blocker,
+summary-alternative, inline-quote, Option B and contradictory-patch cases each
+reproduced before their fixes. Seven review functions and all 16 live-runtime +
+5 task-command resilience cases now pass. Whole affected integrations passed
+8 agent / 26 live runtime / 81 task commands before the last one-line patch
+screening addition; the complete live-runtime target then passed all 27 cases
+after it. Libraries passed 61 agent / 53 authoring / 92 task-command cases;
+strict targeted Clippy and formatting passed.
+
+No acceptance, compliance certification or Kvist receipt is claimed.
+
+## Initial scoped resilience observations - phase 1
+
+Clean-slate `maerg-p1-observer` inspected only local agent, broker, task runner,
+repair-outcome helper and two integration test files. It excluded intent,
+queues, prior records/reviews, chat/Git history and peer implementations. It
+edited nothing and executed no checks. Observations at that inspection:
+
+- Four duplicate observation increments or three repeated nonempty assistant
+  text increments fail as `authoring stalled`; no synthetic loop-completion
+  answer is produced. Novel successful reads reset streaks and can continue
+  beyond 30 turns. Warnings permit justified alternative inspection, supported
+  completion or a blocker report rather than requiring unnecessary edits.
+- Suppression hashes tool, normalized path and the complete bounded observation
+  content before delivery redaction/truncation. Range coverage alone cannot
+  suppress changed content; confirmed destination writes invalidate read cache
+  entries. This does not prove unobserved file bytes are unchanged.
+- Failed inspections/guarded edits carry `ReadOutcome::Failed`, do not count as
+  useful observation progress and return model-facing status 1 with live
+  `applied:false`. Completion notes are heuristic classifications of validated
+  proposals; mixed notes/inspections continue.
+- Repairs have at most four executions and require a known completed
+  verification failure with diagnostics and no cancellation, timeout or output
+  overflow. Shared outcome mapping preserves preceding verification cause,
+  repair errors, surfaced decisions and cancellation. Source/test digests are
+  fallible and unchanged scope explicitly blocks no-progress repair.
+- Source/test hashing distinguishes absent/file/directory, sorts names,
+  bounds material and rejects unsupported/link-like objects. A changed digest
+  does not prove semantic improvement. Recording failures do not establish
+  completion or permit replay of uncertain effects.
+
+The initial observer identified three discrepancies requiring corrective work:
+legacy failed-read trajectory events hard-coded exit zero; later-turn
+alternatives could be downgraded despite broker retention; explicit unfinished
+work could match completion phrases. These are review findings, not certification
+or an accepted implementation claim. Corrective observations supersede affected
+details when recorded below.
+
+Runner-provided evidence at the initial inspection: new cases first failed
+5 live-runtime + 4 task-command regressions, plus later completion/feedback
+cases. After the initial changes, 9 + 5 resilience cases and library counts
+61 agent / 53 authoring / 92 task commands passed. Affected integration counts
+were 8 agent / 20 live runtime / 81 task commands. Strict targeted Clippy and
+formatting passed. The observer did not independently execute those commands.
+
+This is scoped factual evidence with disclosed unresolved discrepancies, not
+compliance certification, acceptance or a Kvist receipt.
+
 Bounded observation of current `maerg` source and test source. This record
 describes implemented behavior and its limits; it is not a compliance
 determination, approval, certification, or review receipt.

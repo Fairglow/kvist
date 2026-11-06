@@ -413,8 +413,36 @@ intent plan's filesystem authority.
 Nonstreamed execution progress is diagnostic stderr; final results remain stdout,
 so `--json decision ... apply ... --continue` retains one valid JSON result.
 
-Protected inference calls use automatic transient retries:
-the selected native profile's `max_attempts` (1-32, default 3), exponential
+## Protected resilience
+
+Protected resilience retains the selected model, approved grant and original
+task throughout at most two autonomous corrections for the entire authoring
+and repair sequence. Progress clears streaks but cannot replenish corrections;
+guidance and compaction retain spent allowance. Detection uses bounded
+deterministic heuristics, not semantic certification.
+Repeated generation/proposals/observations may terminate authoring as stalled,
+never as synthesized completion. Novel read-only inspection has no turn cap.
+Read suppression requires the same observed content revision; a covered range
+alone cannot hide changed bytes. Failed inspections/edits are failed results,
+not successful process observations.
+Explicit incomplete/blocker final reports fail authoring rather than becoming
+successful answers. Alternatives in summary, rationale or patch retain human
+arbitration; an internal-note phrase cannot override that classification.
+These conservative report checks do not certify semantic task completion.
+
+Verification repair retains both verification and repair evidence. Repair
+errors propagate, cancellation stops scheduling, and decisions use the same
+awaiting-decision disposition as initial authoring. Source/test digest failures
+are fatal evidence failures. Initial authoring and all repairs share the
+approved role's model wall/token accounting rather than fresh per-repair
+allowances. Verification retains its separately approved enforcement limits
+and does not debit the model token allowance; elapsed sequence time still
+consumes the aggregate deadline. There are at most four repair rounds.
+Only a known completed verification failure is automatically repairable;
+unknown effects, cancellation, timeout and output overflow fence recovery.
+
+Protected inference calls use automatic transient retries: the selected native
+profile's `max_attempts` (1-32, default 3), exponential
 backoff capped by `retry_max_delay_secs`, and jitter between half and all of
 each scheduled delay. Explicit command-endpoint profiles use three attempts
 with 2-second base and 30-second cap. All waits and requests consume the same

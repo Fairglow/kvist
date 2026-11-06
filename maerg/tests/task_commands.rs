@@ -4655,6 +4655,206 @@ command = "/usr/bin/false"
     assert!(queue_contents.contains("test-command verification failed"));
 }
 
+#[cfg(target_os = "linux")]
+fn resilience_repair_fixture(mode: &'static str) -> (TempDir, MockGateway) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let project = tempfile::tempdir_in(".").expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("queue");
+    let root = project.path().canonicalize().expect("root");
+    let calls = AtomicUsize::new(0);
+    let gateway = MockGateway::serve(
+        move |_| {
+            let index = calls.fetch_add(1, Ordering::SeqCst);
+            if index == 0 {
+                if mode == "digest" {
+                    fs::File::create(root.join("src/tests/oversized"))
+                        .expect("bad scope")
+                        .set_len(1_048_577)
+                        .expect("oversized scope");
+                }
+                return gateway_text_body("Initial authoring complete.");
+            }
+            match mode {
+            "cancelled" => {
+                fs::write(root.join("repair-started"), "").expect("repair marker");
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                gateway_text_body("This answer must not complete a cancelled repair.")
+            }
+            "error" => "{}".to_owned(),
+            "decision" => serde_json::json!({
+                "model":"fixture","choices":[{"finish_reason":"tool_calls","index":0,
+                "message":{"role":"assistant","content":"","tool_calls":[{
+                    "id":"decision","type":"function","function":{
+                        "name":"propose_decision","arguments":serde_json::json!({
+                            "summary":"Verification requires an uncovered architecture choice",
+                            "why":"## Alternatives\nA: change public API.\nB: change approved requirement.\nNeither is covered by the current task."
+                        }).to_string()
+                    }
+                }]}}]
+            }).to_string(),
+            "failed" => serde_json::json!({
+                "model":"fixture","choices":[{"finish_reason":"tool_calls","index":0,
+                "message":{"role":"assistant","content":"","tool_calls":[{
+                    "id":"refused","type":"function","function":{"name":"shell","arguments":"{}"}
+                }]}}]
+            }).to_string(),
+            _ => gateway_text_body("Repair complete without changing source."),
+        }
+        },
+        std::time::Duration::ZERO,
+    );
+    fs::write(project.path().join("kvist.toml"), format!(
+        "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = '{}'\n\
+         [test_policy]\nschema_version = 1\nworking_directory = \"component\"\nenvironment_allowlist = [\"PATH\"]\n\
+         timeout_seconds = 5\nmax_output_bytes = 1000\n[[test_policy.commands]]\ncomponent = \".\"\ncommand = \"/usr/bin/echo repair-verification\"\n",
+        gateway_command(&gateway.endpoint)
+    )).expect("config");
+    track_project(&project);
+    let runner = fake_galla_path(&project);
+    let source = fs::read_to_string(&runner).expect("runner");
+    fs::write(&runner, source.replace(
+        "case \"$request\" in",
+        "case \"$request\" in\n  *'repair-verification'*) printf 'original verification failure'; exit 1 ;;"
+    )).expect("failing verifier");
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+    (project, gateway)
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn resilience_repair_execution_errors_and_failed_outcomes_preserve_both_causes() {
+    for mode in ["error", "failed"] {
+        let (project, _gateway) = resilience_repair_fixture(mode);
+        let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+        assert!(!output.status.success());
+        let diagnostic = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            diagnostic.contains("original verification failure"),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("repair"), "{diagnostic}");
+        let evidence = fs::read_to_string(
+            project
+                .path()
+                .join("src/.kvist-attempts/implement-code.jsonl"),
+        )
+        .expect("evidence");
+        assert!(
+            evidence.contains("\"phase\":\"verification-repair\""),
+            "{evidence}"
+        );
+        assert!(evidence.contains("\"success\":false"), "{evidence}");
+        fs::remove_file(fake_galla_path(&project)).expect("clean runner");
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn resilience_repair_decision_uses_the_initial_awaiting_decision_disposition() {
+    let (project, _gateway) = resilience_repair_fixture("decision");
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("awaiting-decision"));
+    let queue = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("queue");
+    assert!(queue.contains("status: awaiting-decision"), "{queue}");
+    fs::remove_file(fake_galla_path(&project)).expect("clean runner");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn resilience_repair_no_progress_is_an_explicit_recorded_failure() {
+    let (project, _gateway) = resilience_repair_fixture("no-progress");
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(!output.status.success());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        diagnostic.contains("no source/test progress"),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("original verification failure"),
+        "{diagnostic}"
+    );
+    let evidence = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl"),
+    )
+    .expect("evidence");
+    assert!(evidence.contains("\"phase\":\"verification-repair\""));
+    fs::remove_file(fake_galla_path(&project)).expect("clean runner");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn resilience_repair_digest_errors_are_explicit_evidence_failures() {
+    let (project, _gateway) = resilience_repair_fixture("digest");
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(!output.status.success());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("per-file byte limit"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("original verification failure"),
+        "{diagnostic}"
+    );
+    fs::remove_file(fake_galla_path(&project)).expect("clean runner");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn resilience_repair_cancellation_stops_without_another_verification() {
+    use std::{
+        process::Stdio,
+        time::{Duration, Instant},
+    };
+    let (project, _gateway) = resilience_repair_fixture("cancelled");
+    let child = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["task", "run", ".", "implement-code"])
+        .current_dir(project.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !project.path().join("repair-started").exists() {
+        assert!(Instant::now() < deadline, "repair did not start");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(i32::try_from(child.id()).expect("pid")),
+        nix::sys::signal::Signal::SIGINT,
+    )
+    .expect("cancel repair");
+    let output = child.wait_with_output().expect("cancelled outcome");
+    assert!(!output.status.success());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("cancelled"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("original verification failure"),
+        "{diagnostic}"
+    );
+    let evidence = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl"),
+    )
+    .expect("evidence");
+    assert!(evidence.contains("\"phase\":\"verification-repair\""));
+    let queue = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("queue");
+    assert!(queue.contains("status: blocked"), "{queue}");
+    assert_eq!(evidence.matches("\"phase\":\"verification\"").count(), 1);
+    fs::remove_file(fake_galla_path(&project)).expect("clean runner");
+}
+
 #[test]
 #[cfg(target_os = "linux")]
 fn task_run_handles_test_command_timeout() {

@@ -97,6 +97,23 @@ recording and application error adaptation remain Skott-owned.
 
 ## Run reliability extension
 
+Native repetition detection and two-correction-per-prompt recovery are shared
+Sav mechanisms. Progress clears streaks but cannot replenish corrections;
+guidance/compaction retain spent allowance. A stalled prompt fails explicitly
+without an invented answer. Detection has Sav's bounded heuristic windows,
+not universal semantic guarantees.
+Repeatable file/discovery tools remain observable but are not exempt from
+unchanged-result detection. Fresh native page metadata and digest-bound
+mutations provide progress evidence; arbitrary shell output never proves a
+filesystem mutation. Reverification after relevant changes is allowed.
+
+Interactive/headless events and private records expose recovery, categorized
+tool failure, effect certainty and resource-specific termination. The operator
+receives the failure cause and safe next action without needing a journal
+first. Cancellation can wake a full worker event channel. External-agent
+execution reports that its internal loop is opaque, native steering/detection
+are unsupported and completed effects are not rolled back or replayed.
+
 Models may declare `context_limit` and `response_reserve`. CLI values take
 precedence; otherwise context is discovered for the selected provider/model,
 and generation reserves up to 8192 tokens, at most one quarter of a small

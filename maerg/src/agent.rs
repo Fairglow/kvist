@@ -38,7 +38,7 @@ use crate::{
     KvistError, Result,
     authoring::{
         self, AuthoringPlan, BrokerPolicy, CheckedIntent, DependencyRequest, DroppedIntent,
-        ProposedDecision, ReadRecord,
+        ProposedDecision, ReadOutcome, ReadRecord,
     },
     config::{AgentProfile, SandboxConfig, VcsSelection},
     sandbox,
@@ -535,37 +535,6 @@ fn parse_read_line_range(content: &str) -> Option<(usize, usize)> {
     let (range_part, _) = after.split_once(" of ")?;
     let (from_str, to_str) = range_part.split_once("..=")?;
     Some((from_str.parse().ok()?, to_str.parse().ok()?))
-}
-
-fn is_range_covered(ranges: &[(usize, usize)], from: usize, to: usize) -> bool {
-    let mut cursor = from;
-    let mut sorted = ranges.to_vec();
-    sorted.sort_unstable_by_key(|&(start, _)| start);
-    for (start, end) in sorted {
-        if start <= cursor && end >= cursor {
-            if end >= to {
-                return true;
-            }
-            cursor = end + 1;
-        }
-    }
-    false
-}
-
-fn record_covered_range(ranges: &mut Vec<(usize, usize)>, from: usize, to: usize) {
-    ranges.push((from, to));
-    ranges.sort_unstable_by_key(|&(start, _)| start);
-    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
-    for (start, end) in ranges.drain(..) {
-        if let Some(last) = merged.last_mut()
-            && start <= last.1.saturating_add(1)
-        {
-            last.1 = last.1.max(end);
-        } else {
-            merged.push((start, end));
-        }
-    }
-    *ranges = merged;
 }
 
 /// Performs one model turn, retrying transient gateway-availability failures
@@ -1360,13 +1329,11 @@ fn execute_agent_inner(
 
         let mut generations = 0u64;
         let mut model_attempts = 0;
-        let mut covered_ranges: std::collections::BTreeMap<String, Vec<(usize, usize)>> =
-            std::collections::BTreeMap::new();
+        let mut observed_paths = std::collections::BTreeSet::new();
         let mut seen_read_hashes: std::collections::BTreeMap<String, usize> =
             std::collections::BTreeMap::new();
         let mut duplicate_read_streak = 0usize;
         let mut total_duplicate_reads = 0usize;
-        let mut read_only_turn_streak = 0usize;
         let mut repeated_text_streak = 0usize;
         let mut last_assistant_text: Option<String> = None;
         let mut last_action_label = "init".to_owned();
@@ -1410,7 +1377,7 @@ fn execute_agent_inner(
                     .flat_map(|t| t.effects.iter())
                     .filter(|e| e.applied)
                     .count();
-                let unique_files = covered_ranges.len();
+                let unique_files = observed_paths.len();
                 let elapsed = budget.started.elapsed().as_secs_f64();
                 let rem = budget.remaining().as_secs_f64();
                 let dup_info = if total_duplicate_reads > 0 {
@@ -1510,38 +1477,8 @@ fn execute_agent_inner(
             }
 
             // 2. Broker: reduce untrusted intents to capability-bound effects.
-            let mut plan =
+            let plan =
                 authoring::authorize_turn(request.target_dir, &turn, &BrokerPolicy::default());
-            if run_turns.len() > 1 && !plan.decisions.is_empty() {
-                let has_applied_effect = run_turns
-                    .iter()
-                    .any(|prior| prior.effects.iter().any(|effect| effect.applied));
-                let mut genuine_decisions = Vec::new();
-                for decision in plan.decisions.drain(..) {
-                    let is_system_decision = decision.summary
-                        == "Proposed modification to component Cargo.toml"
-                        || decision.summary.starts_with("dependency `");
-                    let why_lower = decision.why.to_ascii_lowercase();
-                    let has_structured_alternatives = why_lower.contains("## alternatives")
-                        && !authoring::is_routine_internal_proposal(&decision);
-                    if is_system_decision || has_structured_alternatives {
-                        genuine_decisions.push(decision);
-                    } else {
-                        let path = if has_applied_effect {
-                            "completion-note"
-                        } else {
-                            "auto-resolved-decision"
-                        };
-                        plan.reads.push(authoring::ReadRecord {
-                            call_id: decision.call_id,
-                            tool: "propose_decision".to_owned(),
-                            path: path.to_owned(),
-                            content: "Auto-resolved without pausing: this task is already approved by the user, and routine implementation/test notes do NOT require `propose_decision`. Make any needed edits to `src/` or `tests/` directly using `edit_file` or `write_file`, or if your changes are complete, reply now with a plain-text summary and NO tool calls.".to_owned(),
-                        });
-                    }
-                }
-                plan.decisions = genuine_decisions;
-            }
             run_turns[turn_index].drops = plan.dropped.clone();
             live.record(&serde_json::json!({"type":"broker_decision","data":{
             "reads":plan.reads.len(),
@@ -1666,7 +1603,7 @@ fn execute_agent_inner(
                     }}),
                     true,
                 )?;
-                let is_real_file_read = matches!(read.tool.as_str(), "read_file" | "list_files");
+                let is_real_file_read = read.outcome == ReadOutcome::Inspection;
                 let range_opt = if read.tool == "read_file" {
                     parse_read_line_range(&read.content)
                 } else {
@@ -1680,13 +1617,9 @@ fn execute_agent_inner(
                         read.content.as_bytes()
                     ))
                 );
-                let already_covered = is_real_file_read
-                    && (seen_read_hashes.contains_key(&sig)
-                        || range_opt.is_some_and(|(from, to)| {
-                            covered_ranges
-                                .get(&read.path)
-                                .is_some_and(|ranges| is_range_covered(ranges, from, to))
-                        }));
+                // Ranges alone cannot prove that externally editable bytes are
+                // unchanged. Suppress only an exactly identical observation.
+                let already_covered = is_real_file_read && seen_read_hashes.contains_key(&sig);
                 let delivered_content = if already_covered {
                     let count = seen_read_hashes
                         .entry(sig)
@@ -1696,18 +1629,14 @@ fn execute_agent_inner(
                     total_duplicate_reads += 1;
                     last_action_label = format!("dup-read {}", read.path);
                     format!(
-                        "[Duplicate read suppressed — repeat #{count}] You ALREADY read `{}` earlier in this session and its contents have NOT changed. Do NOT call `{}` on `{}` again. Either call `edit_file` / `write_file` to make required changes, inspect a different unread file, or if the existing code and tests already satisfy the task requirements, reply now with a plain-text summary and NO tool calls.",
-                        read.path, read.tool, read.path
+                        "[Duplicate observation suppressed — repeat #{count}] This bounded `{}` observation of `{}` exactly matches one already delivered. Unobserved bytes or other state may have changed. Choose a novel inspection or a justified alternate strategy, explicitly report completion with no tool calls if the task is complete, or report a blocker. Do not invent progress or make unnecessary edits.",
+                        read.tool, read.path
                     )
                 } else {
                     if is_real_file_read {
                         seen_read_hashes.insert(sig, 1);
+                        observed_paths.insert(read.path.clone());
                         if let Some((from, to)) = range_opt {
-                            record_covered_range(
-                                covered_ranges.entry(read.path.clone()).or_default(),
-                                from,
-                                to,
-                            );
                             last_action_label = format!("read {}:{from}..{to}", read.path);
                         } else {
                             last_action_label = format!("{} {}", read.tool, read.path);
@@ -1726,7 +1655,7 @@ fn execute_agent_inner(
                     &read.tool,
                     &sav::runtime::ToolOutcome {
                         exited: true,
-                        status: Some(0),
+                        status: Some(read.outcome.exit_code()),
                         stdout: redacted_content.into_bytes(),
                         stderr: vec![],
                         timed_out: false,
@@ -1738,7 +1667,8 @@ fn execute_agent_inner(
                 run_turns[turn_index].reads.push(read.clone());
                 live.record(
                     &serde_json::json!({"type":"tool_result","data":{
-                        "call_id":read.call_id,"name":read.tool,"applied":true,
+                        "call_id":read.call_id,"name":read.tool,
+                        "applied":read.outcome != ReadOutcome::Failed,
                         "uncertain":false,"timed_out":false,"output_limit_exceeded":false
                     }}),
                     true,
@@ -1749,30 +1679,23 @@ fn execute_agent_inner(
             // the conversation so the model can act on those results; otherwise
             // the model produced a final answer and the run completes.
             if plan.effects.is_empty() {
-                if !plan.reads.is_empty() {
-                    read_only_turn_streak += 1;
-                }
-                let has_applied_effect = run_turns
-                    .iter()
-                    .any(|prior| prior.effects.iter().any(|effect| effect.applied));
-                let prior_completion_notes = run_turns[..turn_index]
-                    .iter()
-                    .flat_map(|prior| prior.reads.iter())
-                    .filter(|read| {
-                        read.path == "completion-note" || read.path == "auto-resolved-decision"
-                    })
-                    .count();
                 let only_completion_note = !plan.reads.is_empty()
-                    && plan.reads.iter().all(|read| read.path == "completion-note")
-                    && (!turn.text.trim().is_empty()
-                        || (has_applied_effect && prior_completion_notes >= 1));
+                    && plan
+                        .reads
+                        .iter()
+                        .all(|read| read.outcome == ReadOutcome::Completion)
+                    && accepted_requests.is_empty();
                 if only_completion_note && turn.text.trim().is_empty() {
-                    run_turns[turn_index].turn.text =
-                        "Completed task changes and ready for verification.".to_owned();
+                    run_turns[turn_index].turn.text = plan
+                        .reads
+                        .iter()
+                        .map(|read| read.content.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
                 }
-                if duplicate_read_streak >= 4
-                    || repeated_text_streak >= 3
-                    || read_only_turn_streak >= 30
+                if !only_completion_note
+                    && !plan.reads.is_empty()
+                    && (duplicate_read_streak >= 4 || repeated_text_streak >= 3)
                 {
                     // End the in-place progress line so the warning below starts
                     // on its own line; the post-loop newline still terminates any
@@ -1782,22 +1705,18 @@ fn execute_agent_inner(
                         task_id = %request.task_id,
                         duplicate_read_streak,
                         repeated_text_streak,
-                        read_only_turn_streak,
-                        "breaking repeated read-only loop in authoring session and proceeding to verification"
+                        "stalled authoring; repeated observations are not completion"
                     );
-                    if run_turns[turn_index].turn.text.trim().is_empty() {
-                        run_turns[turn_index].turn.text =
-                            "Completed code inspection; proceeding to verification.".to_owned();
-                    }
-                    break;
+                    return Ok(Some(TurnFailure {
+                        reason: "authoring stalled: repeated reads or assistant text without useful observation progress; task completion was not reported".into(),
+                        timed_out: false,
+                        output_limit_exceeded: false,
+                        cancelled: false,
+                    }));
                 }
-                if (duplicate_read_streak == 2
-                    || repeated_text_streak == 2
-                    || read_only_turn_streak == 20)
-                    && !turn_had_new_read
-                {
+                if (duplicate_read_streak == 2 || repeated_text_streak == 2) && !turn_had_new_read {
                     conversation.push_user(
-                        "SYSTEM LOOP WARNING: You are repeating read calls on files that are already in your context or repeating the same assistant text without modifying any files. Stop calling `read_file` and `list_files`. On your very next turn, you MUST either call `edit_file` / `write_file` to make the required changes, or reply with a plain-text summary and NO tool calls if the existing implementation already satisfies the task.",
+                        "SYSTEM LOOP WARNING: Repeated observations or assistant text have not produced useful progress. Choose a novel inspection or a justified alternate strategy, explicitly report completion with no tool calls only if the task is complete, or report a blocker. No edit is required merely to escape a loop.",
                     );
                 }
                 if (!plan.reads.is_empty() && !only_completion_note)
@@ -1808,6 +1727,18 @@ fn execute_agent_inner(
                 if !controls.finish_if_idle()? {
                     steering.skip_calls(turn.tool_intents.iter(), &[], &mut conversation)?;
                     continue;
+                }
+                let final_text = &run_turns[turn_index].turn.text;
+                if crate::authoring::explicit_incomplete_report(final_text) {
+                    return Ok(Some(TurnFailure {
+                        reason: format!(
+                            "agent reported incomplete or blocked work instead of completion: {}",
+                            redact_bounded(final_text, &redactions, 4096),
+                        ),
+                        timed_out: false,
+                        output_limit_exceeded: false,
+                        cancelled: false,
+                    }));
                 }
                 break;
             }
@@ -1852,11 +1783,10 @@ fn execute_agent_inner(
             // can react to a failed or skipped write on a later turn.
             for record in effects {
                 if record.applied {
-                    covered_ranges.remove(&record.destination);
+                    observed_paths.remove(&record.destination);
                     let prefix = format!("read_file:{}:", record.destination);
                     seen_read_hashes.retain(|k, _| !k.starts_with(&prefix));
                     duplicate_read_streak = 0;
-                    read_only_turn_streak = 0;
                     last_action_label = format!("{} {}", record.tool, record.destination);
                 }
                 let content = if record.applied {
@@ -2220,7 +2150,7 @@ fn record_turn_outcome(
                 tool,
                 stdout: redact_bounded(&read.content, redactions, profile.max_output_bytes),
                 stderr: String::new(),
-                exit_code: 0,
+                exit_code: read.outcome.exit_code(),
                 bytes: read.content.len(),
                 state_mutated: false,
             })?;

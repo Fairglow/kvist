@@ -53,6 +53,14 @@ existing startup and cancellation deadlines and production rendering unchanged.
 
 ## Prompt steering design
 
+Resilience uses Sav's detector/recovery state via the existing static bridges,
+not a second workspace loop. Supply validated native page/digest observations
+and distinguish repeatable reads from observed progress. Retain stderr and
+classified process outcomes in diagnostic events and transcripts. Failed tools
+render as failures with a bounded cause; recovery and resource notices explain
+preserved work and the safe next action. A full channel checks cancellation as
+well as shutdown rather than holding provider callbacks indefinitely.
+
 When a prompt arrives while a task is active, it is treated as steering rather
 than a replacement task. The steering message is queued and delivered at the
 next safe interruption point during generation, backoff waits, or between tool

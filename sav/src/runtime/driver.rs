@@ -567,12 +567,12 @@ impl NativeRuntime {
                     }
                     break;
                 }
+                if !native_read {
+                    actions.record_action(hash, intent.name.clone());
+                }
                 let outcome = match executor.execute(intent, cancellation) {
                     Ok(outcome) => {
                         summary.tools_executed += 1;
-                        if !native_read {
-                            actions.record_action(hash, intent.name.clone());
-                        }
                         if !outcome.failed() {
                             actions.reset_stalls();
                         }

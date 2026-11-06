@@ -43,6 +43,37 @@ authority through narrow interfaces.
 
 ## Functional requirements
 
+### AR-REQ-RESILIENCE
+
+Within its documented bounded detection windows, native resilience MUST
+distinguish useful progress from token production,
+successful no-op commands and cosmetic argument changes. Rejected proposals,
+repeatable observations, recurring failures and bounded multi-action cycles
+MUST participate in detection. Legitimate rereads, advancing pagination,
+changed-state verification and long investigations MUST remain usable.
+Recovery allowances MUST count opportunities to respond, not duplicate calls
+within one batch, and MUST survive guidance and lossy context compaction.
+
+Streamed answer and provider-supplied reasoning MUST be inspected independently
+for exact and near-repeated passages across arbitrary chunk boundaries,
+including 100-, 150- and 200-word periods. Detection MUST have bounded retained
+state and work, preserve UTF-8, and avoid treating distinct code/table/list
+items or quotations as loops solely because their structure repeats.
+Strong repetition MUST interrupt only the provider operation, discard
+incomplete proposals and receive bounded autonomous correction before an
+honest stalled outcome. Length recovery MUST NOT enlarge repetitive output.
+Cancellation, recording failure, explicit budgets and tool authority remain
+binding; recovery MUST NOT replay effects or change model sampling silently.
+
+Structured diagnostics MUST identify detection, recovery, failure category,
+effect certainty and stopping resource. Required diagnostic recording MUST
+precede further effects. Productive native runs retain uncapped defaults.
+These deterministic heuristics do not certify semantic task progress or detect
+every loop. Tests MUST cover malformed input, unsuccessful recovery, false positives,
+batch fairness, state changes, compaction, cancellation and resource exhaustion.
+This human-directed change receives ordinary advisory intent review; no
+implemented Kvist receipt or component acceptance is claimed.
+
 The following stable identifiers define the reusable runtime's mandatory
 behavior. Host-specific policy may impose stricter execution constraints.
 

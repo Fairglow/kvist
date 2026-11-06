@@ -683,6 +683,31 @@ implementation until resolved, as defined by `REQ-DECISION-SURFACING`.
 
 ### REQ-MULTI-TURN-EXECUTION
 
+#### REQ-AGENT-RESILIENCE
+
+Protected authoring MUST use Sav's bounded shared streamed-repetition and
+progress mechanisms without importing workspace tool authority. Loop
+termination MUST NOT synthesize completion or report authoring success.
+Legitimate novel read-only investigation MUST NOT have a fixed turn ceiling.
+Read coverage MUST bind the observed content revision; changed content must
+reach the model rather than be suppressed as unchanged. Error observations
+MUST retain failure semantics and MUST NOT count as useful reads.
+Clear explicit incomplete/blocker final reports MUST NOT count as authoring
+completion. Genuine alternatives in any proposal field MUST preserve the
+decision pause before same-turn effects. Quoted prior errors are not themselves
+declarations that current work is blocked.
+
+Verification repair MUST preserve original and repair causes, effect
+uncertainty, cancellation and surfaced decisions. All authoring and repair
+rounds MUST consume one aggregate approved model wall/token budget and retain
+recurring-failure/progress history. Digest/evidence failures MUST be explicit.
+Repair rounds remain finite and cannot advance work without observed progress
+or an explicit complete response and clean verification.
+Tests MUST exercise false completion, changed reads, novel investigations,
+streamed loops, repair failures/decisions, finite recovery and aggregate bounds.
+Advisory intent review and scoped independent evidence do not mint receipts
+or record human implementation acceptance.
+
 A supervised task run MAY execute the agent across multiple model turns on the
 host until the agent reports completion, a decision requires human input, a fatal
 failure occurs, or the shared wall-clock budget is exhausted. The user's intent

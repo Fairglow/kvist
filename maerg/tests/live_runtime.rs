@@ -399,8 +399,18 @@ fn respond_with_tools(
     output: u64,
     tools: serde_json::Value,
 ) {
+    respond_with_tools_and_text(stream, input, output, tools, "observed answer");
+}
+
+fn respond_with_tools_and_text(
+    stream: &mut std::net::TcpStream,
+    input: u64,
+    output: u64,
+    tools: serde_json::Value,
+    text: &str,
+) {
     let body = serde_json::json!({
-        "model":"fixture","message":{"role":"assistant","content":"observed answer","tool_calls":tools},
+        "model":"fixture","message":{"role":"assistant","content":text,"tool_calls":tools},
         "done":true,"done_reason":"stop","prompt_eval_count":input,"eval_count":output
     })
     .to_string();
@@ -422,6 +432,16 @@ struct EffectGate {
 
 impl EffectGate {
     fn new(workdir: &Path) -> Self {
+        // Keep the synthetic installed runner outside the selected worktree,
+        // including when test scratch is deliberately placed inside the repo.
+        assert!(
+            std::process::Command::new("git")
+                .args(["init", "--quiet"])
+                .current_dir(workdir)
+                .status()
+                .expect("isolated fixture worktree")
+                .success()
+        );
         fs::create_dir(workdir.join("src")).expect("authoring root");
         for artifact in [
             "REQUIREMENTS.md",
@@ -516,6 +536,528 @@ fn shared_profile(endpoint: &str, context_limit: usize) -> AgentProfile {
         digest: format!("sha256:{}", "0".repeat(64)),
     });
     selected
+}
+
+fn resilience_run(
+    workdir: &Path,
+    answer: impl FnMut(usize, &serde_json::Value) -> serde_json::Value + Send,
+) -> (kvist::agent::AgentRunResult, usize) {
+    resilience_run_with_text(workdir, "observed answer", answer)
+}
+
+fn resilience_run_with_text(
+    workdir: &Path,
+    text: &str,
+    answer: impl FnMut(usize, &serde_json::Value) -> serde_json::Value + Send,
+) -> (kvist::agent::AgentRunResult, usize) {
+    resilience_run_with_authority(workdir, text, answer, None)
+}
+
+fn resilience_run_with_authority(
+    workdir: &Path,
+    text: &str,
+    mut answer: impl FnMut(usize, &serde_json::Value) -> serde_json::Value + Send,
+    gate: Option<&EffectGate>,
+) -> (kvist::agent::AgentRunResult, usize) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let endpoint = format!("http://{}", listener.local_addr().expect("address"));
+    let stopped = AtomicBool::new(false);
+    thread::scope(|scope| {
+        let stopped_ref = &stopped;
+        let provider = scope.spawn(move || {
+            let mut calls = 0;
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !stopped_ref.load(Ordering::SeqCst) {
+                assert!(Instant::now() < deadline, "missing inference");
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let Some(request) = read_request(&mut stream) else {
+                            continue;
+                        };
+                        calls += 1;
+                        let tools = answer(calls, &request);
+                        respond_with_tools_and_text(&mut stream, 10, 4, tools, text);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("accept: {error}"),
+                }
+            }
+            calls
+        });
+        let mut selected = shared_profile(&endpoint, 32768);
+        selected.timeout_seconds = 30;
+        let no_effect_config = SandboxConfig {
+            runner: "/usr/bin/true".into(),
+            backend: "/usr/bin/true".into(),
+            environment_allowlist: vec![],
+            acquisition: Default::default(),
+        };
+        let result = execute_agent(
+            &selected,
+            gate.map_or(&no_effect_config, |gate| &gate.config),
+            gate.map(|gate| &gate.identity),
+            gate.map(|gate| &gate.probe),
+            AgentExecutionRequest {
+                project_root: workdir,
+                vcs_selection: VcsSelection::Git,
+                prompt: "finish the required implementation, not merely inspection",
+                context_paths: &[],
+                read_only_mounts: &[],
+                target_dir: workdir,
+                task_id: "resilience-task",
+                stream_output: false,
+                role: Role::Developer,
+                policy_identity: "fixture",
+            },
+        )
+        .expect("recorded outcome");
+        stopped.store(true, Ordering::SeqCst);
+        (result, provider.join().expect("provider"))
+    })
+}
+
+fn read_call(path: &str) -> serde_json::Value {
+    serde_json::json!([{"function":{"name":"read_file","arguments":{"path":path}}}])
+}
+
+#[test]
+fn resilience_repeated_reads_are_stalled_not_completed() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    fs::create_dir(dir.path().join("src")).expect("src");
+    fs::write(dir.path().join("src/file.rs"), "pub fn incomplete() {}\n").expect("file");
+    let (result, calls) = resilience_run(dir.path(), |_, _| read_call("src/file.rs"));
+    assert!(!result.success, "a read loop is not completion");
+    assert!(result.stderr.contains("stalled"), "{}", result.stderr);
+    assert!(calls <= 6, "duplicate reads must terminate promptly");
+}
+
+#[test]
+fn resilience_tool_only_repeated_reads_never_synthesize_an_answer() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    fs::create_dir(dir.path().join("src")).expect("src");
+    fs::write(dir.path().join("src/file.rs"), "// inspect only\n").expect("file");
+    let (result, calls) = resilience_run_with_text(dir.path(), "", |_, _| read_call("src/file.rs"));
+    assert!(!result.success);
+    assert!(result.stderr.contains("stalled"), "{}", result.stderr);
+    assert!(!result.stdout.contains("Completed"), "{}", result.stdout);
+    assert!(calls <= 6);
+}
+
+#[test]
+fn resilience_explicit_tool_only_completion_preserves_the_models_report() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    let report = "Implementation complete: the approved task has been completed.";
+    let (result, calls) = resilience_run_with_text(dir.path(), "", |_, _| {
+        serde_json::json!([{
+            "function":{"name":"propose_decision","arguments":{
+                "summary":report,
+                "why":"All required work is complete."
+            }}
+        }])
+    });
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(result.stdout, report);
+    assert_eq!(calls, 1);
+}
+
+#[test]
+fn resilience_more_than_30_productive_reads_reach_explicit_completion() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    fs::create_dir(dir.path().join("src")).expect("src");
+    for index in 1..=35 {
+        fs::write(
+            dir.path().join(format!("src/file{index}.rs")),
+            format!("// {index}\n"),
+        )
+        .expect("file");
+    }
+    let (result, calls) = resilience_run(dir.path(), |index, _| {
+        if index <= 35 {
+            read_call(&format!("src/file{index}.rs"))
+        } else {
+            serde_json::json!([])
+        }
+    });
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 36, "novel inspection must not hit a turn ceiling");
+}
+
+#[test]
+fn resilience_external_change_reaches_the_model_in_a_covered_range() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    fs::create_dir(dir.path().join("src")).expect("src");
+    let path = dir.path().join("src/file.rs");
+    fs::write(&path, "// old revision\n").expect("old file");
+    let (result, calls) = resilience_run(dir.path(), |index, request| {
+        if index == 2 {
+            assert!(request.to_string().contains("old revision"));
+            fs::write(&path, "// externally changed revision\n").expect("external edit");
+        }
+        if index == 3 {
+            assert!(
+                request.to_string().contains("externally changed revision"),
+                "covered range hid new bytes: {request}"
+            );
+        }
+        if index <= 2 {
+            read_call("src/file.rs")
+        } else {
+            serde_json::json!([])
+        }
+    });
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 3);
+}
+
+#[test]
+fn resilience_pseudo_read_errors_have_failed_outcomes_and_no_progress() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    let (result, _) = resilience_run(dir.path(), |index, request| {
+        if index > 1 {
+            let content = request["messages"]
+                .as_array()
+                .expect("messages")
+                .iter()
+                .rev()
+                .find(|message| message["role"] == "tool")
+                .and_then(|message| message["content"].as_str())
+                .expect("tool outcome");
+            assert!(content.contains("status=Some(1)"), "{content}");
+        }
+        if index <= 6 {
+            read_call(&format!("src/missing{index}.rs"))
+        } else {
+            serde_json::json!([])
+        }
+    });
+    assert!(!result.success, "novel errors are not observation progress");
+    let journal = fs::read_dir(dir.path().join(".kvist/runs"))
+        .expect("runs")
+        .map(|entry| entry.expect("entry").path())
+        .find(|path| path.to_string_lossy().ends_with(".events.jsonl"))
+        .expect("journal");
+    let records = fs::read_to_string(journal).expect("events");
+    let results: Vec<serde_json::Value> = records
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("event"))
+        .filter(|record: &serde_json::Value| record["event"]["type"] == "tool_result")
+        .collect();
+    assert!(!results.is_empty());
+    assert!(
+        results
+            .iter()
+            .all(|record| record["event"]["data"]["applied"] == false)
+    );
+}
+
+#[test]
+fn resilience_malformed_decision_is_not_an_explicit_completion_note() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    let (result, _) = resilience_run(dir.path(), |_, _| {
+        serde_json::json!([{
+            "function":{"name":"propose_decision","arguments":{
+                "_malformed_arguments_error":"truncated",
+                "_malformed_arguments_preview":"unfinished"
+            }}
+        }])
+    });
+    assert!(!result.success, "malformed calls cannot certify completion");
+    assert!(result.stderr.contains("stalled"), "{}", result.stderr);
+}
+
+#[test]
+fn resilience_duplicate_feedback_describes_only_observed_bytes_without_forcing_writes() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    fs::create_dir(dir.path().join("src")).expect("src");
+    fs::write(dir.path().join("src/file.rs"), "// unchanged page\n").expect("file");
+    let (result, calls) = resilience_run(dir.path(), |index, request| {
+        if index == 3 {
+            let content = request["messages"]
+                .as_array()
+                .expect("messages")
+                .iter()
+                .rev()
+                .find(|message| message["role"] == "tool")
+                .and_then(|message| message["content"].as_str())
+                .expect("tool result");
+            assert!(content.contains("observation"), "{content}");
+            assert!(!content.contains("contents have NOT changed"), "{content}");
+            assert!(!content.contains("make required changes"), "{content}");
+            serde_json::json!([])
+        } else {
+            read_call("src/file.rs")
+        }
+    });
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 3);
+}
+
+#[test]
+fn resilience_conditional_completion_proposal_does_not_finish_authoring() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    let (result, _) = resilience_run(dir.path(), |_, _| {
+        serde_json::json!([{
+            "function":{"name":"propose_decision","arguments":{
+                "summary":"Need to verify before implementation complete",
+                "why":"If tests have been added, I still need to inspect src and finish implementation."
+            }}
+        }])
+    });
+    assert!(
+        !result.success,
+        "a conditional completion phrase is not completion"
+    );
+}
+
+#[test]
+fn resilience_review_failed_read_and_edit_trajectory_results_are_faithful() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    fs::create_dir(dir.path().join("src")).expect("src");
+    let contents = "pub fn kept() {}\n";
+    fs::write(dir.path().join("src/file.rs"), contents).expect("file");
+    let (result, calls) = resilience_run(dir.path(), |index, _| match index {
+        1 => read_call("src/missing.rs"),
+        2 => serde_json::json!([{"function":{"name":"edit_file","arguments":{
+            "destination":"src/file.rs", "replace":"absent excerpt", "content":"changed"
+        }}}]),
+        3 => read_call("src/file.rs"),
+        _ => serde_json::json!([]),
+    });
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 4);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/file.rs")).expect("unchanged"),
+        contents
+    );
+    let trajectory = fs::read_dir(dir.path().join(".kvist/runs"))
+        .expect("runs")
+        .map(|entry| entry.expect("entry").path())
+        .find(|path| path.to_string_lossy().ends_with(".trajectory.jsonl"))
+        .expect("trajectory");
+    let records = fs::read_to_string(trajectory).expect("trajectory records");
+    let results: Vec<serde_json::Value> = records
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("record"))
+        .filter(|record: &serde_json::Value| record["event"] == "tool_result")
+        .collect();
+    assert_eq!(results.len(), 3, "{records}");
+    assert_eq!(results[0]["tool"], "read_file");
+    assert_eq!(results[1]["tool"], "edit_file");
+    assert_eq!(results[0]["exit_code"], 1, "{records}");
+    assert_eq!(results[1]["exit_code"], 1, "{records}");
+    assert_eq!(results[2]["exit_code"], 0, "{records}");
+    assert!(
+        results
+            .iter()
+            .all(|record| record["state_mutated"] == false)
+    );
+}
+
+#[test]
+fn resilience_review_later_turn_choices_without_a_heading_stop_before_effects() {
+    for alternative in ["Option A", "Option 1", "Alternative 1"] {
+        let dir = tempfile::tempdir_in(".").expect("workspace");
+        let gate = EffectGate::new(dir.path());
+        fs::write(dir.path().join("src/file.rs"), "// unchanged\n").expect("file");
+        let (result, calls) = resilience_run_with_authority(
+            dir.path(),
+            "observed answer",
+            |index, _| {
+                if index == 1 {
+                    return read_call("src/file.rs");
+                }
+                serde_json::json!([
+                    {"function":{"name":"propose_decision","arguments":{
+                        "summary":"An uncovered API choice requires human arbitration",
+                        "why":format!("{alternative}: change the public API. Another choice: change the requirement. Neither is authorized.")
+                    }}},
+                    {"function":{"name":"write_file","arguments":{
+                        "destination":"src/unauthorized.rs", "content":"pub fn forbidden() {}\n"
+                    }}}
+                ])
+            },
+            Some(&gate),
+        );
+        assert!(result.surfaced_decision, "{alternative}: {}", result.stderr);
+        assert!(!result.success);
+        assert_eq!(calls, 2);
+        assert!(!dir.path().join("src/unauthorized.rs").exists());
+        let journal = fs::read_dir(dir.path().join(".kvist/runs"))
+            .expect("runs")
+            .map(|entry| entry.expect("entry").path())
+            .find(|path| path.to_string_lossy().ends_with(".events.jsonl"))
+            .expect("journal");
+        let records = fs::read_to_string(journal).expect("records");
+        assert!(
+            !records.lines().any(|line| {
+                let record = serde_json::from_str::<serde_json::Value>(line).expect("event");
+                let event = &record["event"];
+                event["type"] == "tool_dispatch"
+                    && matches!(
+                        event["data"]["name"].as_str().expect("dispatch name"),
+                        "write_file" | "edit_file"
+                    )
+            }),
+            "{records}"
+        );
+    }
+}
+
+#[test]
+fn resilience_review_partial_or_blocked_reports_are_not_completion() {
+    for (summary, why) in [
+        (
+            "Tests have been added; implementation remains unfinished",
+            "Source implementation remains absent",
+        ),
+        (
+            "Tests implemented; the overall task is only partially complete",
+            "Source implementation is still missing",
+        ),
+        (
+            "Implementation complete except for an unresolved blocker",
+            "Blocked on the remaining required behavior",
+        ),
+        (
+            "Task has been completed except for required source work",
+            "Required implementation remains outstanding",
+        ),
+    ] {
+        let dir = tempfile::tempdir_in(".").expect("workspace");
+        let (result, _) = resilience_run_with_text(dir.path(), "", |_, _| {
+            serde_json::json!([{
+                "function":{"name":"propose_decision","arguments":{"summary":summary,"why":why}}
+            }])
+        });
+        assert!(
+            !result.success,
+            "partial report completed authoring: {summary}"
+        );
+    }
+}
+
+#[test]
+fn resilience_review_legitimate_whole_task_and_test_task_reports_still_complete() {
+    for (summary, why) in [
+        (
+            "Implementation complete",
+            "The approved task has been completed.",
+        ),
+        (
+            "Tests have been added",
+            "The approved write-tests task has been completed using the existing test framework.",
+        ),
+    ] {
+        let dir = tempfile::tempdir_in(".").expect("workspace");
+        let (result, calls) = resilience_run_with_text(dir.path(), "", |_, _| {
+            serde_json::json!([{
+                "function":{"name":"propose_decision","arguments":{"summary":summary,"why":why}}
+            }])
+        });
+        assert!(result.success, "{}", result.stderr);
+        assert!(!result.surfaced_decision);
+        assert_eq!(result.stdout, summary);
+        assert_eq!(calls, 1);
+    }
+}
+
+#[test]
+fn resilience_review_explicit_final_blockers_fail_but_quoted_prior_errors_do_not() {
+    for (text, expected_success) in [
+        (
+            "Implementation remains unfinished; required work is still missing.",
+            false,
+        ),
+        (
+            "Blocked on unavailable dependencies; unable to complete the task.",
+            false,
+        ),
+        (
+            "Task is incomplete; remaining work needs a resource.",
+            false,
+        ),
+        ("There is no remaining work; implementation complete.", true),
+        (
+            "Implemented the change.\n> Prior output: implementation remains unfinished\nAll checks pass.",
+            true,
+        ),
+        (
+            "Implemented the change.\n```text\nimplementation remains unfinished\n```\nAll checks pass.",
+            true,
+        ),
+        (
+            "Implemented the change; prior output was \"implementation remains unfinished\". All checks pass.",
+            true,
+        ),
+    ] {
+        let dir = tempfile::tempdir_in(".").expect("workspace");
+        let (result, calls) =
+            resilience_run_with_text(dir.path(), text, |_, _| serde_json::json!([]));
+        assert_eq!(
+            result.success, expected_success,
+            "{text}: {}",
+            result.stderr
+        );
+        assert_eq!(calls, 1);
+    }
+}
+
+#[test]
+fn resilience_review_summary_only_alternatives_retain_the_decision_pause() {
+    for alternative in [
+        "Option A",
+        "Option 1",
+        "Alternative 1",
+        "Option B",
+        "Option 2",
+        "Alternative 2",
+    ] {
+        let dir = tempfile::tempdir_in(".").expect("workspace");
+        let gate = EffectGate::new(dir.path());
+        fs::write(dir.path().join("src/file.rs"), "// unchanged\n").expect("file");
+        let (result, calls) = resilience_run_with_authority(
+            dir.path(),
+            "observed answer",
+            |index, _| {
+                if index == 1 {
+                    return read_call("src/file.rs");
+                }
+                serde_json::json!([
+                    {"function":{"name":"propose_decision","arguments":{
+                        "summary":format!("{alternative}: change the public API. Another choice: change the requirement."),
+                        "why":"Need to verify public API; neither alternative is authorized."
+                    }}},
+                    {"function":{"name":"write_file","arguments":{
+                        "destination":"src/unauthorized.rs", "content":"pub fn forbidden() {}\n"
+                    }}}
+                ])
+            },
+            Some(&gate),
+        );
+        assert!(result.surfaced_decision, "{alternative}: {}", result.stderr);
+        assert!(!result.success);
+        assert_eq!(calls, 2);
+        assert!(!dir.path().join("src/unauthorized.rs").exists());
+    }
+}
+
+#[test]
+fn resilience_review_patch_blockers_cannot_be_discarded_as_completion() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    let (result, calls) = resilience_run_with_text(dir.path(), "", |_, _| {
+        serde_json::json!([{"function":{"name":"propose_decision","arguments":{
+            "summary":"Implementation complete",
+            "why":"The approved task has been completed.",
+            "patch":"Implementation remains unfinished."
+        }}}])
+    });
+    assert!(!result.success, "{}", result.stderr);
+    assert!(result.surfaced_decision, "{}", result.stderr);
+    assert_eq!(calls, 1);
 }
 
 #[test]

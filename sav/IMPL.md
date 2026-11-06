@@ -1,6 +1,42 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped refused-proposal observations - resilience phase 1
+
+Independent clean-slate `sav-p1-observer` inspected local driver, session,
+outcome, error, loop detector and runtime-control test source only. It excluded
+intent, queues, prior records/reviews and chat/Git history, changed no files and
+ran no checks. Its factual observations:
+
+- Nonrepeatable attempted proposals enter the eight-entry action ring after
+  required dispatch recording and the final control check, before host
+  execution. Render/policy refusals therefore remain tracked even without
+  an executed outcome; changing provider call IDs does not alter action identity.
+- Only executor `Ok(outcome)` increments executed calls. Refusals normally
+  receive status-bearing synthetic failed results carrying the actual reason.
+  One initial refusal followed by four blocked identical proposals terminates
+  the current driver. This phase does not establish later finite-recovery,
+  stream-detection or progress-aware behavior.
+- Recording precedes effects/presentation; stale/cancelled proposals do not
+  dispatch. The native read repeat exemption and old observation heuristics
+  remain unchanged in this scoped phase.
+- Test source covers both render and policy refusal, zero executions, one
+  executor attempt, early failure and failed-result events.
+
+Runner-provided evidence: the new refusal regression first failed with an
+incorrect answer after 11 turns/10 refusals; after the change, 11 detector,
+18 control and 47 Skott integration cases passed. Sav all-target Clippy passed
+with warnings denied. These command results were not independently executed
+by the observer.
+
+The observer flagged fallible refusal notices preceding result pairing as a
+possible reuse hazard. Parent investigation found `ContextManager::prepare`
+calls `complete_groups` before any request dispatch and rejects unpaired
+history. A separate regression injects notice failure and asserts reuse fails
+before a second provider call. The forwarding claim is therefore not confirmed;
+the incomplete in-memory conversation remains explicitly fenced, not repaired
+or silently accepted. No compliance certification or Kvist receipt is claimed.
+
 ## Scoped native deadline observations - 2026-10-30
 
 Independent clean-slate `sav-budget-observer` read only scoped

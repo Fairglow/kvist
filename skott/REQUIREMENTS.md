@@ -259,6 +259,28 @@ rendering support for every Markdown extension.
 
 ## RUN-REQ-RELIABILITY
 
+### RUN-REQ-RESILIENCE
+
+The interactive and headless native paths MUST use Sav's shared bounded
+repetition and recovery mechanisms. Exact/near streamed cycles, including
+100-200-word cadence, repeated invalid/refused proposals, unchanged discovery
+and longer action cycles within documented heuristic bounds MUST NOT require
+resource exhaustion or user rescue. No universal semantic detection is claimed.
+Useful pagination, refreshed revisions, verification after edits and long
+investigations MUST remain possible without introducing default run caps.
+Recovery MUST preserve authority, goals, completed effects and resource charges,
+pair skipped calls, count one intervention per batch and terminate honestly
+after finite unsuccessful correction.
+
+Tool failures MUST expose useful bounded diagnostics, a stable category and
+effect certainty, not a success checkmark. Budget termination MUST identify the
+resource and safe next step. Built-in event backpressure MUST not prevent
+cancellation/shutdown. Opaque external backends MUST disclose unsupported native
+detection/steering and MUST NOT automatically replay possibly effectful runs.
+Tests MUST cover actual shared-runtime adapters, terminal/headless presentation,
+recording failure, repeated failures, false positives and safe teardown.
+Advisory intent review is separate from receipts and implementation evidence.
+
 Capacity startup fixtures MUST retain the advertised selected-model capacity,
 output-reserve and provider-provenance assertions when adapting to router
 discovery. Cancellation fixtures MUST block the route actually requested.

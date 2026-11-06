@@ -4,6 +4,31 @@
 
 ## Shared registry realization (ADR 0015)
 
+Resilience delivery first repairs honest completion and read observations, then
+adds Sav's stream detector/recovery state, progress-aware tool recurrence and
+typed operator diagnostics. Keep protected authorization and independent review
+contexts local. A loop is never a completion shortcut, and new read-only
+observations cannot be penalized by a fixed inspection counter.
+
+Bind suppressed read coverage to the observed revision; retain actual failed
+read/edit semantics. The model must receive changed bytes, not an assertion that
+the environment remained unchanged. Verification repair uses explicit outcomes
+for success, failure, cancellation and decisions. Record repair execution into
+the same attempt before further verification; preserve both causes on failure.
+Use fallible source/test digests and aggregate model accounting shared across
+initial authoring and repair invocations. Sequence elapsed time includes
+verification, but verification retains its own approved enforcement ceiling
+and does not spend model tokens. Four repair rounds are the outer bound;
+unknown verification outcomes never authorize replay. Fresh review contexts
+remain separate.
+
+Share explicit incomplete-report and alternatives checks between completion
+and routine-note classification. Inspect all proposal fields for blockers and
+recognized alternatives rather than discarding a contradictory optional patch.
+On tool-free final output, reject clear current incomplete/blocker declarations
+while excluding fenced/quoted prior diagnostics. These bounded lexical checks
+are conservative operational evidence, not semantic completion certification.
+
 Mock gateways route capacity metadata before passing inference bodies to
 generation callbacks. Count generation callbacks, not metadata requests, when
 checking completed-task replay. Raw HTTP fixtures retain explicit route/status

@@ -183,7 +183,27 @@ pub struct DependencyRequest {
     pub reason: Option<String>,
 }
 
-/// A bounded, read-only file or directory inspection performed on the host.
+/// Semantics of a broker observation, independent of its human-readable content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadOutcome {
+    /// A successful file or directory inspection.
+    Inspection,
+    /// A failed inspection or a refused/unapplied proposal.
+    Failed,
+    /// An authorized no-op or routine status note, not inspection progress.
+    Advisory,
+    /// An explicit, valid completion report from the model.
+    Completion,
+}
+
+impl ReadOutcome {
+    pub(crate) fn exit_code(self) -> i32 {
+        if self == Self::Failed { 1 } else { 0 }
+    }
+}
+
+/// A bounded broker observation returned to the model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReadRecord {
     /// Turn-local call identity, echoed from the model intent.
@@ -194,6 +214,8 @@ pub struct ReadRecord {
     pub path: String,
     /// Bounded UTF-8 result returned to the model.
     pub content: String,
+    /// Actual result semantics; errors never count as successful inspections.
+    pub outcome: ReadOutcome,
 }
 
 /// The class of a brokered turn outcome. A single funnel routes every intent to
@@ -348,17 +370,19 @@ pub fn authorize_turn(
     for decision in plan.decisions.drain(..) {
         if is_completion_report_proposal(&decision) {
             plan.reads.push(ReadRecord {
+                outcome: ReadOutcome::Completion,
                 call_id: decision.call_id,
                 tool: "propose_decision".to_owned(),
                 path: "completion-note".to_owned(),
-                content: "Task completion noted (`propose_decision` is only for blocking contradictions that prevent implementation, never for reporting task completion or routine status). Reply now with your final plain-text summary and NO tool calls so Kvist can run `cargo test` and complete the task.".to_owned(),
+                content: decision.summary,
             });
         } else if is_routine_internal_proposal(&decision) {
             plan.reads.push(ReadRecord {
+                outcome: ReadOutcome::Advisory,
                 call_id: decision.call_id,
                 tool: "propose_decision".to_owned(),
                 path: "auto-resolved-decision".to_owned(),
-                content: "Auto-resolved without pausing: this task is already approved by the user, and routine implementation, test, or module-export checks do NOT require a human decision (everything is reviewed at the end). You have full authority to inspect files with `read_file` and modify `src/` and `tests/` directly with `edit_file` or `write_file`. Complete any remaining code/test edits now, or if your changes are complete, reply with a plain-text summary and NO tool calls.".to_owned(),
+                content: "This routine status note is not a blocking human decision. Within the approved task, choose a useful inspection or justified next step, make authorized edits only where needed, explicitly report completion with no tool calls only when all required work is complete, or describe a genuine blocker with concrete alternatives. No edit is required merely to continue.".to_owned(),
             });
         } else {
             retained_decisions.push(decision);
@@ -377,6 +401,7 @@ pub fn authorize_turn(
                 "edit-error"
             };
             plan.reads.push(ReadRecord {
+                outcome: ReadOutcome::Failed,
                 call_id: dropped.call_id,
                 tool: dropped.tool,
                 path: path.to_owned(),
@@ -466,15 +491,11 @@ fn classify_intent(
             .get("_malformed_arguments_preview")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        let path = if intent.name == "propose_decision" {
-            "completion-note"
-        } else {
-            "malformed-tool-arguments"
-        };
         return BrokerOutcome::Read(ReadRecord {
+            outcome: ReadOutcome::Failed,
             call_id: intent.id.clone(),
             tool: intent.name.clone(),
-            path: path.to_owned(),
+            path: "malformed-tool-arguments".to_owned(),
             content: format!(
                 "warning: tool call to `{}` had malformed or truncated JSON arguments ({err}; preview: `{preview}`) and was not applied. If you still need to call `{}`, resend it with valid, smaller JSON arguments; if your task changes are already complete, reply now with a plain-text summary and NO tool calls.",
                 intent.name, intent.name
@@ -1232,6 +1253,7 @@ fn check_manifest_decision(
     };
     if !existing.is_empty() && proposed.trim() == existing.trim() {
         return Some(BrokerOutcome::Read(ReadRecord {
+            outcome: ReadOutcome::Advisory,
             call_id: intent.id.clone(),
             tool: intent.name.clone(),
             path: "Cargo.toml".to_owned(),
@@ -1306,6 +1328,7 @@ fn check_write_noop_or_destructive_overwrite(
         let balance = rust_brace_balance(content);
         if balance != 0 {
             return Some(BrokerOutcome::Read(ReadRecord {
+                outcome: ReadOutcome::Failed,
                 call_id: intent.id.clone(),
                 tool: "write_file".to_owned(),
                 path: rel.clone(),
@@ -1318,6 +1341,7 @@ fn check_write_noop_or_destructive_overwrite(
     let existing = fs::read_to_string(&resolved).ok()?;
     if existing.trim() == content.trim() {
         return Some(BrokerOutcome::Read(ReadRecord {
+            outcome: ReadOutcome::Advisory,
             call_id: intent.id.clone(),
             tool: "write_file".to_owned(),
             path: rel.clone(),
@@ -1331,6 +1355,7 @@ fn check_write_noop_or_destructive_overwrite(
         && content.len().saturating_mul(2) < existing.len()
     {
         return Some(BrokerOutcome::Read(ReadRecord {
+            outcome: ReadOutcome::Failed,
             call_id: intent.id.clone(),
             tool: "write_file".to_owned(),
             path: rel.clone(),
@@ -1344,14 +1369,170 @@ fn check_write_noop_or_destructive_overwrite(
     None
 }
 
+/// Recognizes clear current blockers, excluding quoted/fenced or negated claims.
+/// This is operational evidence, not a semantic completion determination.
+pub(crate) fn explicit_incomplete_report(report: &str) -> bool {
+    let phrases = [
+        "remains unfinished",
+        "is unfinished",
+        "unfinished work",
+        "is incomplete",
+        "remains incomplete",
+        "is not complete",
+        "partially complete",
+        "only partial",
+        "partial completion",
+        "unable to complete",
+        "cannot complete",
+        "could not complete",
+        "remains absent",
+        "still absent",
+        "still missing",
+        "remains missing",
+        "unresolved blocker",
+        "blocked on",
+        "blocked by",
+        "blocked:",
+        "remains outstanding",
+        "still outstanding",
+        "remaining required",
+        "remaining work",
+        "remaining implementation",
+        "remains to",
+        "still requires",
+    ];
+    let mut fence = None;
+    for line in report.lines().map(str::trim_start) {
+        if line.starts_with('>') {
+            continue;
+        }
+        if let Some(marker) = fence {
+            if line.starts_with(marker) {
+                fence = None;
+            }
+            continue;
+        }
+        if let Some(marker) = ["```", "~~~"]
+            .into_iter()
+            .find(|marker| line.starts_with(marker))
+        {
+            fence = Some(marker);
+            continue;
+        }
+        let mut lower = String::with_capacity(line.len());
+        let mut quote = None;
+        let mut quote_start = None;
+        let mut escaped = false;
+        let mut previous = None;
+        for (index, ch) in line.char_indices() {
+            if let Some(end) = quote {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == end {
+                    quote = None;
+                    quote_start = None;
+                }
+            } else {
+                let end = match ch {
+                    '"' | '`' => Some(ch),
+                    '\'' | '\u{2018}' if !matches!(previous, Some(c) if char::is_alphanumeric(c)) => {
+                        Some(if ch == '\'' { '\'' } else { '\u{2019}' })
+                    }
+                    '\u{201c}' => Some('\u{201d}'),
+                    _ => None,
+                };
+                if let Some(end) = end {
+                    quote = Some(end);
+                    quote_start = Some(index + ch.len_utf8());
+                    lower.push(' ');
+                } else {
+                    lower.push(ch.to_ascii_lowercase());
+                }
+            }
+            previous = Some(ch);
+        }
+        if let Some(start) = quote_start {
+            lower.extend(line[start..].chars().map(|ch| ch.to_ascii_lowercase()));
+        }
+        if phrases.iter().any(|phrase| {
+            lower.match_indices(phrase).any(|(index, _)| {
+                let prefix = lower[..index].trim_end();
+                !matches!(
+                    prefix.split_whitespace().next_back(),
+                    Some("no" | "not" | "nothing")
+                ) && !prefix.ends_with("no longer")
+            })
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
+fn has_arbitration_alternatives(decision: &ProposedDecision) -> bool {
+    [decision.summary.as_str(), decision.why.as_str()]
+        .into_iter()
+        .chain(decision.patch.as_deref())
+        .any(|field| {
+            let lower = field.to_ascii_lowercase();
+            if lower.contains("# alternatives") {
+                return true;
+            }
+            let mut words = lower.split_whitespace().peekable();
+            while let Some(word) = words.next() {
+                if !matches!(
+                    word.trim_matches(|ch: char| ch.is_ascii_punctuation()),
+                    "option" | "alternative"
+                ) {
+                    continue;
+                }
+                if let Some(raw_label) = words.peek() {
+                    let label = raw_label.trim_matches(|ch: char| ch.is_ascii_punctuation());
+                    if !label.is_empty()
+                        && ((label.len() == 1 && label.as_bytes()[0].is_ascii_alphabetic())
+                            || label.bytes().all(|byte| byte.is_ascii_digit())
+                            || raw_label.ends_with(':'))
+                    {
+                        return true;
+                    }
+                }
+            }
+            false
+        })
+}
+
 fn is_completion_report_proposal(decision: &ProposedDecision) -> bool {
     let summary_lower = decision.summary.to_ascii_lowercase();
     let why_lower = decision.why.to_ascii_lowercase();
-    let patch_lower = decision
-        .patch
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let report = format!(
+        "{summary_lower}\n{why_lower}\n{}",
+        decision
+            .patch
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase(),
+    );
+    if explicit_incomplete_report(&report)
+        || [
+            "if ",
+            "when ",
+            "not ",
+            "incomplete",
+            "pending",
+            "still need",
+            "need to",
+            "must ",
+            "will ",
+            "unfinished",
+            "except for",
+        ]
+        .iter()
+        .any(|phrase| report.contains(phrase))
+    {
+        return false;
+    }
     let completion_phrases = [
         "task has been completed",
         "tests have been added",
@@ -1364,14 +1545,10 @@ fn is_completion_report_proposal(decision: &ProposedDecision) -> bool {
         "no changes needed",
         "all tests follow",
     ];
-    let has_completion_phrase = completion_phrases.iter().any(|phrase| {
-        summary_lower.contains(phrase) || why_lower.contains(phrase) || patch_lower.contains(phrase)
-    });
-    let has_alternatives = why_lower.contains("## alternatives")
-        || why_lower.contains("option a")
-        || why_lower.contains("option 1")
-        || why_lower.contains("alternative 1");
-    has_completion_phrase && !has_alternatives
+    let has_completion_phrase = completion_phrases
+        .iter()
+        .any(|phrase| summary_lower.contains(phrase) || why_lower.contains(phrase));
+    has_completion_phrase && !has_arbitration_alternatives(decision)
 }
 
 /// True when a `propose_decision` call is a routine internal developer note,
@@ -1390,11 +1567,7 @@ pub fn is_routine_internal_proposal(decision: &ProposedDecision) -> bool {
         .as_deref()
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let has_alternatives = why_lower.contains("## alternatives")
-        || why_lower.contains("option a")
-        || why_lower.contains("option 1")
-        || why_lower.contains("alternative 1");
-    if has_alternatives {
+    if has_arbitration_alternatives(decision) {
         return false;
     }
     let internal_phrases = [
@@ -1460,6 +1633,7 @@ fn check_edit_rust_brace_balance(
     let new_balance = rust_brace_balance(new_text);
     if old_balance == 0 && new_balance != 0 {
         return Some(BrokerOutcome::Read(ReadRecord {
+            outcome: ReadOutcome::Failed,
             call_id: intent.id.clone(),
             tool: "edit_file".to_owned(),
             path: rel.clone(),
@@ -1472,6 +1646,7 @@ fn check_edit_rust_brace_balance(
         find_duplicate_rust_top_level_symbol(&existing, replacement, content)
     {
         return Some(BrokerOutcome::Read(ReadRecord {
+            outcome: ReadOutcome::Failed,
             call_id: intent.id.clone(),
             tool: "edit_file".to_owned(),
             path: rel.clone(),
@@ -1687,6 +1862,7 @@ fn authorize_read_file(
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ReadRecord {
+                outcome: ReadOutcome::Failed,
                 call_id: intent.id.clone(),
                 tool: "read_file".to_owned(),
                 path: rel.clone(),
@@ -1704,6 +1880,7 @@ fn authorize_read_file(
     }
     if !metadata.is_file() {
         return Ok(ReadRecord {
+            outcome: ReadOutcome::Failed,
             call_id: intent.id.clone(),
             tool: "read_file".to_owned(),
             path: rel.clone(),
@@ -1723,6 +1900,7 @@ fn authorize_read_file(
     let total_lines = lines.len();
     if total_lines == 0 {
         return Ok(ReadRecord {
+            outcome: ReadOutcome::Inspection,
             call_id: intent.id.clone(),
             tool: "read_file".to_owned(),
             path: rel.clone(),
@@ -1743,6 +1921,7 @@ fn authorize_read_file(
         }
         if match_lines.is_empty() {
             return Ok(ReadRecord {
+                outcome: ReadOutcome::Inspection,
                 call_id: intent.id.clone(),
                 tool: "read_file".to_owned(),
                 path: rel.clone(),
@@ -1773,6 +1952,7 @@ fn authorize_read_file(
             }
         }
         return Ok(ReadRecord {
+            outcome: ReadOutcome::Inspection,
             call_id: intent.id.clone(),
             tool: "read_file".to_owned(),
             path: rel,
@@ -1802,6 +1982,7 @@ fn authorize_read_file(
     header.push('\n');
     header.push_str(&output);
     Ok(ReadRecord {
+        outcome: ReadOutcome::Inspection,
         call_id: intent.id.clone(),
         tool: "read_file".to_owned(),
         path: rel,
@@ -1824,6 +2005,7 @@ fn authorize_list_files(
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ReadRecord {
+                outcome: ReadOutcome::Failed,
                 call_id: intent.id.clone(),
                 tool: "list_files".to_owned(),
                 path: rel.clone(),
@@ -1837,6 +2019,7 @@ fn authorize_list_files(
     }
     if !metadata.is_dir() {
         return Ok(ReadRecord {
+            outcome: ReadOutcome::Failed,
             call_id: intent.id.clone(),
             tool: "list_files".to_owned(),
             path: rel.clone(),
@@ -1857,6 +2040,7 @@ fn authorize_list_files(
         output.push('\n');
     }
     Ok(ReadRecord {
+        outcome: ReadOutcome::Inspection,
         call_id: intent.id.clone(),
         tool: "list_files".to_owned(),
         path: rel,

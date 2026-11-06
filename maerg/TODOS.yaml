@@ -5,11 +5,271 @@ component:
   design_revision: "sha256:e18eae35428b3e86a5aed9f4feaff20b3d7aff10c1bdb652f5d23b25f0fe4206"
   parent_contract: null
   revalidation:
-    state: current
-    checked_at: "2026-11-04T16:07:24Z"
-    stale_since: null
-    causes: []
+    state: stale
+    checked_at: "2026-11-06T07:43:03Z"
+    stale_since: "2026-11-06T06:54:17Z"
+    causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:1339c23f9bfbeacaf136e951c4f62ecec394c932101691fdc241a19402cc62c5", "observed_revision": "sha256:91d5b83ce9c19639c2d381062413d6e60c4e6f06a3e889589e2d6661cf4dddd5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:2bceb93227d8669a775839cc66a3551913d53273c8917973b2fe447399bbd300", "observed_revision": "sha256:4f7b769eb9d2a863cda73fbec6af9382b7aa0c1d5dcfd79340224a8f7e67fd67"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:e18eae35428b3e86a5aed9f4feaff20b3d7aff10c1bdb652f5d23b25f0fe4206", "observed_revision": "sha256:5129908a22915bfb7578aa793cfaac8d0b2f610a2aaa0b10e0c5dd91d6765501"}]
 tasks:
+  - id: "resilience-p1-write-tests"
+    title: "write_tests: resilience phase 1"
+    description: "Write and execute regressions before production changes. Scope: honest outcomes, fresh reads, refused proposals and repair propagation."
+    context: "Protected resilience regressions failed before: 5 live_runtime and4 task_commands cases, plus later completion and feedback regressions. Independent main rerun of resilience_ verifies 9+5 passing cases."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Required behavioral regressions fail against the prior implementation."
+    kind: "test"
+    status: "completed"
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T07:09:49Z", "completed_at": "2026-11-06T07:09:49Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p1-implement-code"
+    title: "implement_code: resilience phase 1"
+    description: "Implement the approved local phase and validate the exact regressions. Scope: honest outcomes, fresh reads, refused proposals and repair propagation."
+    context: "Honest stalled outcomes, exact observation suppression, typed failed reads, explicit completion and shared repair-outcome mapping implemented. Focused and affected suites, strict clippy and formatting passed (runner evidence pending scoped independent review)."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
+    kind: "implementation"
+    status: "completed"
+    depends_on: ["resilience-p1-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T07:09:49Z", "completed_at": "2026-11-06T07:09:49Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p1-security-audit"
+    title: "security_audit: resilience phase 1"
+    description: "Independently inspect changed local source/tests and derive scoped observations. Scope: honest outcomes, fresh reads, refused proposals and repair propagation."
+    context: "Clean-slate maerg-p1-observer derived scoped source behavior and identified three coupled discrepancies: failed trajectory exit codes, later genuine-decision downgrade and partial-work completion. Disposition: explicit corrective tests/source/audit tasks before final comparison; no certification."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
+    kind: "security-audit"
+    status: "completed"
+    depends_on: ["resilience-p1-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T07:12:46Z", "completed_at": "2026-11-06T07:12:46Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p1-compliance-review"
+    title: "compliance_review: resilience phase 1"
+    description: "Compare scoped intent with source-only observations and executed test evidence. Scope: honest outcomes, fresh reads, refused proposals and repair propagation."
+    context: "Source-blind initial comparator confirms three disclosed discrepancies in initial observations; requires corrective red/green tests, final clean observations and separate final comparison before phase2. Completed means the comparison occurred, not acceptance."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
+    kind: "compliance-review"
+    status: "completed"
+    depends_on: ["resilience-p1-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T07:28:43Z", "completed_at": "2026-11-06T07:28:43Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p1-correction-write-tests"
+    title: "write_tests: resolve independent phase-one findings"
+    description: "Write and execute regressions before production changes. Preserve failed trajectory outcomes, later genuine decisions and partial-work completion refusal."
+    context: "Initial review regressions3fail/1pass became4pass. Two more false-completion/summary-choice regressions failed before correction; additional inline-quote and OptionB cases also reproduced before fixes. All6 review test functions now pass with quoted/negated success fixtures preserved."
+    purpose: "Resolve review findings transparently rather than self-certifying or hiding discrepancies."
+    expected_outcome: "Required behavioral regressions fail against the prior implementation."
+    kind: "test"
+    status: "completed"
+    depends_on: ["resilience-p1-compliance-review"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T07:12:46Z", "updated_at": "2026-11-06T07:37:31Z", "completed_at": "2026-11-06T07:37:31Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p1-correction-implement-code"
+    title: "implement_code: resolve independent phase-one findings"
+    description: "Implement the approved local phase and validate the exact regressions. Preserve failed trajectory outcomes, later genuine decisions and partial-work completion refusal."
+    context: "Faithful exit codes, no later broker decision downgrade, all-field labeled alternatives and clear final/proposal blocker handling implemented. Actual tool_dispatch fixture checks effect names. Full affected integrations8/26/81,53authoring/61agent units andstrict targetedclippy pass;92taskcommand units pass after queue canonicalization."
+    purpose: "Resolve review findings transparently rather than self-certifying or hiding discrepancies."
+    expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
+    kind: "implementation"
+    status: "completed"
+    depends_on: ["resilience-p1-correction-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T07:12:46Z", "updated_at": "2026-11-06T07:37:31Z", "completed_at": "2026-11-06T07:37:31Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p1-correction-security-audit"
+    title: "security_audit: resolve independent phase-one findings"
+    description: "Independently inspect changed local source/tests and derive scoped observations. Preserve failed trajectory outcomes, later genuine decisions and partial-work completion refusal."
+    context: "Final source-only maerg-p1-final-observer and narrower patch-observer derive current outcomes, all-field classification, pause ordering and fixtures. Last patch-field gap reproduced and fixed. Known scoped findings resolved; lexical/semantic and later-phase limits recorded."
+    purpose: "Resolve review findings transparently rather than self-certifying or hiding discrepancies."
+    expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
+    kind: "security-audit"
+    status: "completed"
+    depends_on: ["resilience-p1-correction-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T07:12:46Z", "updated_at": "2026-11-06T07:42:22Z", "completed_at": "2026-11-06T07:42:22Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p1-correction-compliance-review"
+    title: "compliance_review: resolve independent phase-one findings"
+    description: "Compare final scoped intent with clean source observations and corrective test evidence for all phase-one discrepancies."
+    context: "Independent final source-blind comparator reports no high-confidence scoped discrepancy. Supplied outputs and unchanged initial repair observations are explicit limits. Final full live27 and92taskcommand units independently passed after its report."
+    purpose: "Retain honest review history and the continuous-run four-stage item model."
+    expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
+    kind: "compliance-review"
+    status: "completed"
+    depends_on: ["resilience-p1-correction-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T07:27:10Z", "updated_at": "2026-11-06T07:43:03Z", "completed_at": "2026-11-06T07:43:03Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p2-write-tests"
+    title: "write_tests: resilience phase 2"
+    description: "Write and execute regressions before production changes. Scope: bounded streamed repetition and finite autonomous correction."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Required behavioral regressions fail against the prior implementation."
+    kind: "test"
+    status: "pending"
+    depends_on: ["resilience-p1-correction-compliance-review"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p2-implement-code"
+    title: "implement_code: resilience phase 2"
+    description: "Implement the approved local phase and validate the exact regressions. Scope: bounded streamed repetition and finite autonomous correction."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
+    kind: "implementation"
+    status: "pending"
+    depends_on: ["resilience-p2-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p2-security-audit"
+    title: "security_audit: resilience phase 2"
+    description: "Independently inspect changed local source/tests and derive scoped observations. Scope: bounded streamed repetition and finite autonomous correction."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
+    kind: "security-audit"
+    status: "pending"
+    depends_on: ["resilience-p2-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p2-compliance-review"
+    title: "compliance_review: resilience phase 2"
+    description: "Compare scoped intent with source-only observations and executed test evidence. Scope: bounded streamed repetition and finite autonomous correction."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
+    kind: "compliance-review"
+    status: "pending"
+    depends_on: ["resilience-p2-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p3-write-tests"
+    title: "write_tests: resilience phase 3"
+    description: "Write and execute regressions before production changes. Scope: progress-aware tools, recurring failures, cycles and fair batches."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Required behavioral regressions fail against the prior implementation."
+    kind: "test"
+    status: "pending"
+    depends_on: ["resilience-p2-compliance-review"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p3-implement-code"
+    title: "implement_code: resilience phase 3"
+    description: "Implement the approved local phase and validate the exact regressions. Scope: progress-aware tools, recurring failures, cycles and fair batches."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
+    kind: "implementation"
+    status: "pending"
+    depends_on: ["resilience-p3-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p3-security-audit"
+    title: "security_audit: resilience phase 3"
+    description: "Independently inspect changed local source/tests and derive scoped observations. Scope: progress-aware tools, recurring failures, cycles and fair batches."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
+    kind: "security-audit"
+    status: "pending"
+    depends_on: ["resilience-p3-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p3-compliance-review"
+    title: "compliance_review: resilience phase 3"
+    description: "Compare scoped intent with source-only observations and executed test evidence. Scope: progress-aware tools, recurring failures, cycles and fair batches."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
+    kind: "compliance-review"
+    status: "pending"
+    depends_on: ["resilience-p3-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p4-write-tests"
+    title: "write_tests: resilience phase 4"
+    description: "Write and execute regressions before production changes. Scope: typed diagnostics, aggregate repair budgets and safe operations."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Required behavioral regressions fail against the prior implementation."
+    kind: "test"
+    status: "pending"
+    depends_on: ["resilience-p3-compliance-review"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p4-implement-code"
+    title: "implement_code: resilience phase 4"
+    description: "Implement the approved local phase and validate the exact regressions. Scope: typed diagnostics, aggregate repair budgets and safe operations."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
+    kind: "implementation"
+    status: "pending"
+    depends_on: ["resilience-p4-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p4-security-audit"
+    title: "security_audit: resilience phase 4"
+    description: "Independently inspect changed local source/tests and derive scoped observations. Scope: typed diagnostics, aggregate repair budgets and safe operations."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
+    kind: "security-audit"
+    status: "pending"
+    depends_on: ["resilience-p4-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "resilience-p4-compliance-review"
+    title: "compliance_review: resilience phase 4"
+    description: "Compare scoped intent with source-only observations and executed test evidence. Scope: typed diagnostics, aggregate repair budgets and safe operations."
+    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
+    expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
+    kind: "compliance-review"
+    status: "pending"
+    depends_on: ["resilience-p4-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    blocked_reason: null
+    recovery_state: null
   - id: "runtime-shim-lifetime-write-tests"
     title: "write_tests: reproduce persistent runtime shim scope escape"
     description: "Pin external staging, exact runtime links, independent concurrent owners and cleanup without weakening scope checks."

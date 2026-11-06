@@ -191,6 +191,153 @@ struct ToolProvider {
 }
 
 #[test]
+fn repeated_render_and_policy_failures_stop_without_reporting_execution() {
+    struct RepeatingProvider(AtomicUsize);
+    impl ModelTransport for RepeatingProvider {
+        fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
+            let call = self.0.fetch_add(1, Ordering::SeqCst);
+            if call == 10 {
+                return Ok(answer());
+            }
+            let mut turn = answer();
+            turn.finish_reason = FinishReason::ToolCalls;
+            turn.tool_intents = vec![ToolIntent {
+                id: format!("invalid-{call}"),
+                provider_id: None,
+                name: "invalid".into(),
+                arguments: serde_json::json!({"malformed":true}),
+            }];
+            Ok(turn)
+        }
+        fn stream(
+            &self,
+            request: &ModelRequest,
+            token: &CancellationToken,
+            _: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+        ) -> sav::Result<ModelTurn> {
+            self.complete(request, token)
+        }
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(5)
+        }
+    }
+    struct RefusingExecutor {
+        policy: bool,
+        calls: AtomicUsize,
+    }
+    impl ToolExecutor for RefusingExecutor {
+        fn execute(
+            &self,
+            _: &ToolIntent,
+            _: &CancellationToken,
+        ) -> sav::runtime::Result<ToolOutcome> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let reason = "correct the malformed argument before retrying".into();
+            if self.policy {
+                Err(sav::runtime::Error::ToolPolicy {
+                    tool: "invalid".into(),
+                    reason,
+                })
+            } else {
+                Err(sav::runtime::Error::ToolRender {
+                    tool: "invalid".into(),
+                    reason,
+                })
+            }
+        }
+    }
+    for policy in [false, true] {
+        let provider = RepeatingProvider(AtomicUsize::new(0));
+        let executor = RefusingExecutor {
+            policy,
+            calls: AtomicUsize::new(0),
+        };
+        let sink = Sink::default();
+        let result = NativeRuntime::default()
+            .run(
+                &mut session(),
+                &provider,
+                &executor,
+                &sink,
+                &CancellationToken::new(),
+                &mut ContextManager::new(8192, 4),
+                None,
+            )
+            .unwrap();
+        assert!(!result.success(), "{result:?}");
+        assert!(result.failure.is_some(), "{result:?}");
+        assert_eq!(result.tools_executed, 0);
+        assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
+        assert!(provider.0.load(Ordering::SeqCst) < 10);
+        assert!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| matches!(event, Event::ToolResult { failed: true, .. }))
+        );
+    }
+}
+
+#[test]
+fn refusal_notice_failure_fences_unpaired_history_before_session_reuse() {
+    struct Refusal;
+    impl ToolExecutor for Refusal {
+        fn execute(
+            &self,
+            intent: &ToolIntent,
+            _: &CancellationToken,
+        ) -> sav::runtime::Result<ToolOutcome> {
+            Err(sav::runtime::Error::ToolRender {
+                tool: intent.name.clone(),
+                reason: "missing required argument".into(),
+            })
+        }
+    }
+    struct BrokenNoticeSink;
+    impl EventSink for BrokenNoticeSink {
+        fn send(&self, event: Event) -> sav::runtime::Result<()> {
+            if matches!(event, Event::Note(_)) {
+                Err(sav::runtime::Error::ChannelClosed)
+            } else {
+                Ok(())
+            }
+        }
+    }
+    let provider = ToolProvider {
+        calls: AtomicUsize::new(0),
+        requests: Mutex::new(vec![]),
+    };
+    let mut conversation = session();
+    let mut context = ContextManager::new(8192, 4);
+    let result = NativeRuntime::default().run(
+        &mut conversation,
+        &provider,
+        &Refusal,
+        &BrokenNoticeSink,
+        &CancellationToken::new(),
+        &mut context,
+        None,
+    );
+    assert!(matches!(result, Err(sav::runtime::Error::ChannelClosed)));
+    conversation.push_user("continue");
+    let reused = NativeRuntime::default().run(
+        &mut conversation,
+        &provider,
+        &NeverExecute,
+        &Sink::default(),
+        &CancellationToken::new(),
+        &mut context,
+        None,
+    );
+    assert!(matches!(
+        reused,
+        Err(sav::runtime::Error::InvalidModelTurn { .. })
+    ));
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn duplicate_read_notices_forget_old_observations_without_blocking_reads() {
     struct Reads(AtomicUsize);
     impl ModelTransport for Reads {
