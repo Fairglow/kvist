@@ -1,6 +1,140 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped standalone observations - 2026-11-06
+
+The independent `standalone-source-observer` security-review context read only
+the scoped current Skott source/tests. It excluded intent, queues, prior
+records/reviews, architecture/root/vision, history/diffs and peer
+implementations, made no edits and ran no tests. It established no
+high-confidence security vulnerability or must-fix bug in that scope.
+The following supplement is its source-derived observation, not certification.
+
+### Configuration initialization
+
+Sources: `src/config_init.rs:49-135`; `src/main.rs:28-54`.
+
+- `create(path, project, model, registry)` requires an existing project directory
+  and destination parent.
+- CLI initialization precedes normal configuration discovery; the default
+  destination is `skott.toml` under `--cwd` or the launch directory.
+- Without a selected model, output contains schema version 1, the default
+  provider and commented guidance; no workspace is pinned.
+- With a model, output references one native shared profile and its canonical
+  registry source, without copying model facts.
+- An explicit registry without a model is rejected before staging.
+- Publication uses a same-parent temporary file, file synchronization and
+  `persist_noclobber`; existing destinations are not replaced.
+- Directory synchronization follows publication: its failure returns an error
+  after the file has been created.
+
+### Discovery, loading and validation
+
+Sources: `src/cli.rs:182-278`; `src/config.rs:490-728,1027-1113`.
+
+- Discovery order is explicit path, launch-directory configuration, XDG user
+  configuration, then XDG system locations; no ancestor-directory search occurs.
+- Explicit paths are returned without existence checks. Discovery uses
+  `is_file`; loading performs separate descriptor checks.
+- Relative `XDG_CONFIG_HOME` falls back to `HOME/.config`; system-directory
+  entries are not similarly restricted to absolute paths.
+- Reads use `O_NOFOLLOW | O_NONBLOCK`, require a regular descriptor, enforce
+  64 KiB metadata and read bounds, and require UTF-8.
+- `O_NOFOLLOW` protects the final component; this reader does not prohibit
+  symlink ancestors.
+- Parsing failures report a line number without reproducing configuration
+  contents; schema and configuration invariants are subsequently validated.
+- Registry overrides take precedence over configured paths; configured relative
+  registry paths resolve beside the configuration.
+- Omitted working directories use the process launch directory. Normal
+  discovery does not use the CLI `--cwd` override.
+
+### FileRequest namespace and roots
+
+Source: `src/file_tools.rs:198-399,447-460`.
+
+- Requests use closed typed arguments and bounded lexical absolute paths; dot
+  components, repeated separators, trailing separators except `/`, and NUL are
+  rejected.
+- Mutations must target descendants strictly inside the write root;
+  sibling-prefix paths and the root itself are rejected.
+- `host_mapped` canonicalizes the selected workspace; `sandbox_mapped` requires
+  the prepared namespace to match the request namespace.
+- Exact-root paths map directly to the host root; descendant paths retain their
+  relative suffix. Mapping revalidates the resulting request.
+- Read operations outside the namespace remain unchanged. These helpers are
+  not authorization or host-shell confinement mechanisms.
+
+### Prepared sandbox observation
+
+Sources: `src/executor.rs:58-90,283-336`;
+`src/executor/progress.rs:95-163`.
+
+- Observation requires exactly one writable authoring grant whose destination
+  equals the prepared working directory, and maps through that grant's source.
+- Preparation and pre-observation failures prevent the execution callback;
+  post-observation failures preserve the outcome but reject progress evidence.
+- Evidence compares before/after revisions, is paired with the complete
+  intent/outcome identity, consumed once and capped at 128 pending observations.
+- Indistinguishable pending executions receive ambiguity errors rather than
+  interchangeable evidence.
+- Payload staging uses an external workspace-parent directory with explicit
+  directory/file modes of `0700`/`0600` and RAII cleanup; canonical `/` cannot
+  provide that staging parent.
+
+### Test assertions and limitations
+
+- `tests/shared_registry.rs:17-234` asserts creation guidance, private starter
+  permissions, no-clobber cases, incompatible modes, profile references and
+  rejected selections.
+- `tests/native_file_tools.rs:35-111` asserts exact-root/nested mapping and
+  ordinary-project sandbox discovery; `src/executor.rs:424-545` uses callbacks
+  to assert prepared-grant observation and rebinding rejection.
+- `src/executor/progress.rs:194-605` asserts revision evidence, ambiguity,
+  cancellation and observation failures. These are not runtime-wide isolation
+  proofs.
+- Tests were read, not run by the observer. Excluded registry,
+  revision-observer and sandbox implementations were not inspected.
+
+Parent-executed evidence, separate from the independent source observation:
+four initial bootstrap regressions and three exact-root regressions failed
+before production changes; the native case reproduced the reported error.
+The final selected run passed 391 tests: 257 library, 40 component, 5 headless,
+3 input-boundary, 17 model-selection, 41 native-file, 15 shared-registry and
+13 startup-lifecycle tests, with no failures/ignores. This includes actual
+installed sandbox root list/find/search in a temporary non-Kvist project,
+cross-project profile references and user-wide discovery.
+`cargo clippy --offline --locked -p skott --all-targets -- -D warnings`,
+format checking and `git diff --check` passed. No live model inference or
+exhaustive filesystem race testing was performed. No acceptance, receipt or
+runtime-wide compliance claim follows from these results.
+The updated component intent passed `component validate skott --json`.
+Read-only `task next` inspection was blocked by the enclosing project's
+`invalid` current-state gate; no acceptance or revision reset was performed.
+
+### Separate source-blind comparison
+
+`standalone-source-blind-comparator` read only the standalone requirement,
+contract, design and this scoped observation/evidence section; no source,
+executable tests, queue, history/diffs or other records were inspected.
+It established no material scoped contradiction, not certification or acceptance.
+The observations support early explicit initialization, unpinned workspaces,
+profile references, no-clobber publication, exact-root revalidation,
+prepared-grant mapping and strict mutation boundaries. A starter default
+provider does not establish an invented model.
+
+The comparator retained detail gaps: relative `--config` semantics,
+fallback/provider correspondence, exact absent-file guidance, offline/no-provider/
+no-tool/no-UI guarantees and omission of sandbox/tool-policy overrides are not
+all explicit in the independent observation bullets. Permission and rejected
+selection assertions, the 391-test run and lint/format results are attributed
+evidence, not independently executed verification. Parent-directory sync can
+fail after publication; this is a recovery caveat, not an established
+atomicity/no-clobber contradiction. Excluded dependencies, filesystem races,
+runtime-wide isolation and live inference remain outside this comparison.
+These limitations are retained for human arbitration rather than changing
+intent or representing an acceptance receipt.
+
 ## Scoped operational observations - resilience phase 4
 
 ### Final direct-error and fixture boundary observation

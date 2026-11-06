@@ -600,7 +600,7 @@ impl Config {
         if raw.models.is_empty() && raw.shared_profiles.is_empty() {
             return Err(Error::Config {
                 path: Some(path.to_string_lossy().into_owned()),
-                reason: "at least one `[[models]]` entry is required".to_owned(),
+                reason: "configure at least one native [[models]] entry or shared profile; run `skott --setup` to create shared profiles, then set default_provider to match".to_owned(),
             });
         }
 
@@ -1030,7 +1030,19 @@ pub(crate) fn read_configuration(path: &Path) -> Result<String> {
         .read(true)
         .custom_flags((nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_NONBLOCK).bits())
         .open(path)
-        .map_err(|source| io_error("open configuration", Some(&path.to_string_lossy()), source))?;
+        .map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                Error::Config {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    reason: format!(
+                        "configuration file not found. {}",
+                        crate::cli::CONFIG_CREATION_GUIDANCE
+                    ),
+                }
+            } else {
+                io_error("open configuration", Some(&path.to_string_lossy()), source)
+            }
+        })?;
     let metadata = file
         .metadata()
         .map_err(|source| io_error("inspect configuration descriptor", None, source))?;

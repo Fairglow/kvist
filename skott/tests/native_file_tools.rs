@@ -32,6 +32,85 @@ fn run(root: &Path, tool: &str, args: Value) -> skott::Result<Value> {
 }
 
 #[test]
+fn host_mapping_preserves_exact_root_and_nested_paths_without_relaxing_validation() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    fs::create_dir(root.join("sub")).unwrap();
+    fs::write(root.join("sub/text"), "needle").unwrap();
+    for path in ["/workspace", "/workspace/sub"] {
+        for (tool, arguments) in [
+            ("list_dir", json!({"path":path})),
+            ("find_files", json!({"path":path,"pattern":"text"})),
+            ("search_files", json!({"path":path,"query":"needle"})),
+        ] {
+            let mapped = FileRequest::new("/workspace", tool, arguments)
+                .unwrap()
+                .host_mapped(&root)
+                .unwrap();
+            let result = execute_file_request(&mapped).unwrap();
+            assert_eq!(result["total"], 1, "{tool}: {result}");
+        }
+    }
+    for path in [
+        "/workspace/",
+        "/workspace/.",
+        "/workspace/../escape",
+        "/workspace//sub",
+    ] {
+        assert!(FileRequest::new("/workspace", "list_dir", json!({"path":path})).is_err());
+    }
+}
+
+#[test]
+fn native_sandbox_discovers_exact_workspace_root_in_an_ordinary_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    fs::write(root.join("note.txt"), "needle").unwrap();
+    let executor = SandboxExecutor::new(
+        ToolRegistry::new(ToolPolicy::minimum()).with_file_helper(
+            Path::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+                .canonicalize()
+                .unwrap(),
+        ),
+        SandboxPaths {
+            runner: std::env::var_os("KVIST_GALLA")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(SandboxPaths::default_runner),
+            backend: SandboxPaths::default_backend(),
+        },
+        root,
+    );
+    for (name, arguments) in [
+        ("list_dir", json!({"path":"/workspace"})),
+        ("find_files", json!({"path":"/workspace","pattern":".txt"})),
+        (
+            "search_files",
+            json!({"path":"/workspace","query":"needle"}),
+        ),
+    ] {
+        let out = executor
+            .execute(
+                &ToolIntent {
+                    id: name.into(),
+                    provider_id: None,
+                    name: name.into(),
+                    arguments,
+                },
+                &CancellationToken::new(),
+            )
+            .unwrap();
+        assert_eq!(out.status, Some(0), "{name}: {}", out.error_text(4096));
+        let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["total"], 1, "{name}: {result}");
+        match name {
+            "list_dir" => assert_eq!(result["entries"][0]["name"], "note.txt"),
+            "find_files" => assert_eq!(result["files"][0], "/workspace/note.txt"),
+            _ => assert_eq!(result["matches"][0]["path"], "/workspace/note.txt"),
+        }
+    }
+}
+
+#[test]
 fn paginated_read_is_byte_bounded_and_hashes_complete_file() {
     let dir = fixture();
     let root = dir.path().canonicalize().unwrap();

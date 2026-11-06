@@ -277,8 +277,12 @@ impl FileRequest {
                 .strip_prefix(&self.write_root)
                 .ok_or_else(|| failure("cannot map workspace path"))?
                 .trim_start_matches('/');
-            *mapped.operation.path_mut() = root
-                .join(relative)
+            let path = if relative.is_empty() {
+                root.to_owned()
+            } else {
+                root.join(relative)
+            };
+            *mapped.operation.path_mut() = path
                 .to_str()
                 .ok_or_else(|| failure("mapped path must be UTF-8"))?
                 .to_owned();

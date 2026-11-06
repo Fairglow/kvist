@@ -25,6 +25,33 @@ fn main() -> ExitCode {
 
 fn run() -> skott::Result<ExitCode> {
     let cli = Cli::parse();
+    if cli.init_config {
+        let project = cli.cwd.clone().unwrap_or(std::env::current_dir()?);
+        let destination = cli
+            .config
+            .clone()
+            .unwrap_or_else(|| project.join("skott.toml"));
+        skott::config_init::create(
+            &destination,
+            &project,
+            cli.model.as_deref(),
+            cli.registry.as_deref(),
+        )?;
+        println!(
+            "Created `{}` without overwriting existing files.",
+            skott::error::terminal_text(&destination.to_string_lossy())
+        );
+        if cli.model.is_some() {
+            println!(
+                "References the selected shared native profile; workspace defaults to the launch directory. Use --config PATH if this is not your project or user config."
+            );
+        } else {
+            println!(
+                "Next: run `skott --setup`, then edit default_provider to match your native profiles, or fill in the commented [[models]] example. This starter is not yet a configured model."
+            );
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
     if let Some(path) = cli.attach.as_deref() {
         skott::inspection::inspect(
             path,

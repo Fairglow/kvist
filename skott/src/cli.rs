@@ -42,11 +42,17 @@ pub struct Cli {
     #[arg(short, long, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
+    /// Create a portable starter and exit, never overwriting an existing file.
+    /// --config selects the destination (default skott.toml under --cwd or the
+    /// current directory); --model NAME references a shared native profile.
+    #[arg(long, conflicts_with_all = ["setup", "attach", "headless", "list_models", "prompt", "allow_host_execution", "allow_control"])]
+    pub init_config: bool,
+
     /// Discover, qualify and save a shared provider profile without a Skott config.
     #[arg(long, conflicts_with_all = ["headless", "list_models"])]
     pub setup: bool,
 
-    /// Explicit shared provider registry (also used by --setup).
+    /// Explicit shared provider registry (also used by --setup/--init-config).
     #[arg(long, value_name = "PATH")]
     pub registry: Option<PathBuf>,
 
@@ -54,7 +60,7 @@ pub struct Cli {
     #[arg(long, requires = "setup")]
     pub force: bool,
 
-    /// Select a configured model id for this session.
+    /// Select a configured model id, or a shared native profile for --init-config.
     #[arg(short, long, value_name = "ID")]
     pub model: Option<String>,
 
@@ -161,6 +167,11 @@ const LOCAL_CONFIG_FILE: &str = "skott.toml";
 /// specification).
 const DEFAULT_XDG_CONFIG_DIRS: &str = "/etc/xdg";
 
+pub(crate) const CONFIG_CREATION_GUIDANCE: &str = "Create a starter with `skott --init-config` (or `skott --init-config --config PATH`). \
+     Then run `skott --setup` to configure shared providers and set default_provider in the starter. \
+     To reuse an existing native profile without copying project settings, use \
+     `skott --init-config --model NAME --registry /path/to/providers.toml`.";
+
 /// Resolves which configuration file to load, honouring an explicit `--config`
 /// path first, then the project-local file in the current directory, then the
 /// XDG Base Directory specification: `$XDG_CONFIG_HOME` (or `$HOME/.config`
@@ -204,7 +215,7 @@ pub fn resolve_config_path_with(
         }
     }
     let user_dir = xdg_user_config_dir(&env).map(|dir| dir.join(CONFIG_SUBDIR).join(CONFIG_FILE));
-    Err(match user_dir {
+    let locations = match user_dir {
         Some(path) => format!(
             "no configuration found; pass --config PATH, create {LOCAL_CONFIG_FILE} in the \n\
              current directory, or place {CONFIG_SUBDIR}/{CONFIG_FILE} at `{}`",
@@ -214,7 +225,8 @@ pub fn resolve_config_path_with(
             "no configuration found; pass --config PATH, create {LOCAL_CONFIG_FILE} in the \n\
              current directory, or place {CONFIG_SUBDIR}/{CONFIG_FILE} in an XDG config directory"
         ),
-    })
+    };
+    Err(format!("{locations}\n{CONFIG_CREATION_GUIDANCE}"))
 }
 
 /// The XDG user configuration directory: `$XDG_CONFIG_HOME` when set to an

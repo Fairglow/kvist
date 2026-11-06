@@ -2,6 +2,30 @@
 
 # Skott — Requirements
 
+## RUN-REQ-STANDALONE-BOOTSTRAP
+
+Skott MUST run against ordinary directories without Kvist intent artifacts.
+Missing configuration, including an explicitly named absent file, MUST explain
+how to create configuration and configure or reuse shared provider profiles.
+Configuration creation MUST be explicit, offline, private, atomic and
+no-clobber; it MUST NOT start providers, tools or the terminal UI.
+An unconfigured starter MUST identify the remaining setup steps rather than
+invent a model. An explicitly selected shared native profile MAY initialize a
+ready-to-load configuration by reference, retaining its provider and source
+without copying workspace paths, sandbox settings or provider facts.
+Invalid, disabled or external selections MUST fail without creating a file.
+Generated configurations MUST leave the workspace unpinned.
+
+Mapping the exact sandbox workspace root to its prepared host source MUST
+preserve canonical path syntax. Root listing, discovery and search MUST work
+outside this checkout without weakening traversal, link or mutation checks.
+Regressions MUST cover config creation/refusal, profile reuse, missing-file
+guidance and actual sandbox root discovery in a non-Kvist directory.
+
+This user-requested standalone repair has an explicit local advisory-review
+exception while receipt enforcement is unavailable. Independent observation
+and source-blind comparison remain separate from acceptance.
+
 ## Shared registry configuration acceptance (ADR 0015)
 
 Skott MUST consume shared named profiles without importing provider facts.

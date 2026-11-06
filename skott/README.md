@@ -33,6 +33,7 @@ Rust builds additionally need a matching `Cargo.lock` and a vendored
 ## Quick start
 
 ```
+skott --init-config         # create a starter without overwriting existing files
 skott                       # open the UI in the current directory
 skott --config ./cfg.toml   # use a specific configuration
 skott -m ollama "explain this repo"   # pick a model and submit a prompt
@@ -184,6 +185,66 @@ complete, commented example. Key points:
   `auto`, or `off`. `auto` advertises when the interpreter is available; `on`
   fails startup if it is not; `off` never advertises. The `Generic` base is
   always present.
+
+### Using Skott outside Kvist
+
+No Kvist project artifacts are required. Configuration discovery checks
+`./skott.toml`, then `$XDG_CONFIG_HOME/skott/config.toml` (default
+`$HOME/.config/skott/config.toml`), then system XDG locations. It does not search
+ancestor directories. `--config PATH` overrides discovery; `--cwd DIR` selects
+the execution workspace, not the configuration search directory.
+
+If no configuration exists:
+
+```bash
+skott --init-config
+skott --setup
+```
+
+Initialization is offline and creates only a private, no-clobber starter.
+Setup is a separate, explicit discovery/qualification operation. Set the
+starter's `default_provider` to match your configured native profiles, or edit
+its commented `[[models]]` example. No model is invented by initialization.
+Use `--init-config --config PATH` for another destination; its parent directory
+must already exist. Initialization with `--cwd DIR` creates `DIR/skott.toml`
+unless an explicit `--config` destination is given.
+
+For quick reuse of an existing native profile, no full-config import is needed:
+
+```bash
+cd /path/to/another/project
+skott --init-config --model qwen38-27b-q4-turbo \
+  --registry /opt/proj/kvist/.kvist/providers.toml
+skott
+```
+
+This writes only a reference to the selected profile, its absolute registry
+source, and a matching fallback/provider selection. It copies no workspace,
+sandbox or tool-policy settings, and does not modify the source registry.
+Registry edits take effect on the next configuration load; moving/removing
+that registry breaks the reference. For project-independent reuse, prefer
+`skott --setup`'s user Sav registry at
+`$XDG_CONFIG_HOME/sav/registry.toml` (default
+`$HOME/.config/sav/registry.toml`), then
+`skott --init-config --model NAME`. You can also create a user-wide Skott config
+with `--config` at the discovery location above; omit `working_directory` so it
+follows each launch directory. Project-local configs still take precedence.
+
+**Reusing a whole config is allowed, but reuses all its settings.** In
+particular, `/opt/proj/kvist/skott.toml` pins
+`working_directory = "/opt/proj/kvist"`: launching it elsewhere still gives
+the agent that workspace unless you pass `--cwd /path/to/another/project`.
+Its registry path and custom themes resolve relative to the config file, not
+the new workspace; configured runner/backend paths and tool policy also remain
+in force. The config file's directory is not automatically writable, but an
+explicitly configured workspace is. Prefer the selected-profile reference
+above rather than copying another project's whole execution configuration.
+
+Inside the sandbox the selected workspace appears at `/workspace`, regardless
+of its host location. The whole selected directory is writable; Skott does not
+apply Kvist task-level protected-path authority. Rust projects additionally
+need host-provisioned locked/vendor resources; referencing provider profiles
+does not provision them or authorize dependency downloads.
 
 ## Theming
 

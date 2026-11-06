@@ -2,6 +2,26 @@
 
 # Skott — Design
 
+## Standalone bootstrap and root mapping
+
+Dispatch explicit initialization before configuration discovery. A small
+configuration-bootstrap module constructs a commented starter or resolves the
+explicit shared native name using Sav's registry resolver. Serialize selected
+values as TOML, retain the canonical absolute source registry path, and omit
+workspace, sandbox and tool-policy overrides. No network or process probes are
+needed. Use a private same-directory temporary file, synchronize it, publish
+with no-clobber persistence and synchronize the parent. Fail with actionable
+context; never overwrite existing destinations or fabricate a usable model.
+Normal missing-config discovery and explicit absent-file reads share bootstrap
+guidance. The starter explicitly distinguishes creation from provider setup.
+
+Namespace mapping must special-case an empty relative suffix: `Path::join("")`
+adds a trailing separator on Linux, which strict lexical validation rejects.
+Keep the host root unchanged for this case; continue joining nonempty validated
+suffixes and validating the mapped request. Both explicit host execution and
+prepared sandbox observation use this mapping. Do not normalize arbitrary model
+input, re-resolve prepared scope, or relax revision/link binding.
+
 ## Shared registry realization (ADR 0015)
 
 Configuration loading materializes shared native profiles into presentation

@@ -2,6 +2,35 @@
 
 # Skott — Contract
 
+## Standalone configuration bootstrap
+
+`skott --init-config` creates `skott.toml` in the current directory and exits.
+`--cwd DIR` selects the project directory for initialization; `--config PATH`
+selects a different destination (relative paths remain process-relative).
+The parent directory must already exist. Existing files, directories and links
+are never replaced. The complete file is published atomically with private
+permissions; no provider discovery, qualification, tool execution or UI starts.
+Without a model selection the file is a commented starter: run `skott --setup`
+and set `default_provider`, or fill in the commented native model example.
+
+`--init-config --model NAME [--registry PATH]` references one enabled native Sav
+profile. The generated registry table retains only that name, sets its fallback
+binding, and names the absolute source registry path; `default_provider` matches
+the selected profile. Facts remain in that registry and are reloaded at startup.
+An explicit registry during initialization requires `--model`; invalid, disabled
+and external-agent selections fail before writing. This is reference-based
+reuse, not import of another application's configuration or authority.
+Generated configurations omit `working_directory`: normal execution uses the
+launch directory unless configuration or `--cwd` explicitly selects another.
+
+Missing-config diagnostics explain `--init-config`, `--setup`, and shared-profile
+reuse. An explicitly absent `--config` file is never silently created or replaced.
+Existing discovery precedence and configuration workspace semantics are unchanged.
+
+Exact-root native reads/discovery map `/workspace` to the prepared host grant
+without adding a trailing separator; strict canonical-path validation remains
+unchanged for model input and nested paths.
+
 ## Shared registry configuration (ADR 0015)
 
 `--setup [--registry PATH]` runs shared Sav setup before loading any Skott

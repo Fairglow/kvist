@@ -1,9 +1,10 @@
 # Example skott configuration.
 schema_version = 1
 
-# Optional override for the working directory; defaults to the process
-# current directory when omitted. Must be absolute and exist.
-working_directory = "/absolute/path/to/your/project"
+# Leave this unset for a portable config that follows the launch directory.
+# An explicit override pins the writable workspace even when launched elsewhere;
+# --cwd DIR overrides it for one run. Must be absolute and exist.
+# working_directory = "/absolute/path/to/your/project"
 
 # The provider to query for the currently active model. When the provider has
 # an active model that is already loaded, it is reused with no switch. When it

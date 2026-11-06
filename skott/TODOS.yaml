@@ -10,6 +10,58 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:3086d1bd8a18b675b1468721f662518abda2fa56473e02eaa032b4cc61d3fda4", "observed_revision": "sha256:02b7979e6f81e2815f5503538266d13034718471afe061ee55f71a37a7075ed5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03", "observed_revision": "sha256:4bec0afba47fcba5472c45f6a3b225cf7920bad53eacf3926f90205b36676f62"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:0c1cfae82b7f2f6819b5a1898fc15a1608e08b91c738fb405507e0b2b458f9fb", "observed_revision": "sha256:a21376824ea18202c8dbe373530fc9f92b44cc2e01a562ba610a8ac8b55bb93c"}]
 tasks:
+  - id: "standalone-write-tests"
+    title: "write_tests: standalone bootstrap and root discovery"
+    description: "Reproduce missing-config guidance and initialization failures, exact-root mapping, and sandbox discovery in a directory without Kvist artifacts."
+    context: "Four initial config cases and three exact-root cases reproduced failures before implementation; disabled/external refusals were subsequently strengthened against parser-only failure."
+    purpose: "Make standalone onboarding and root namespace behavior deterministic and safe."
+    expected_outcome: "Regressions reproduce the reported failure and guard bootstrap write boundaries."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"]
+    timestamps: {created_at: "2026-11-06T15:32:41Z", updated_at: "2026-11-06T15:42:07Z", completed_at: "2026-11-06T15:39:08Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "standalone-implement-code"
+    title: "implement_code: standalone bootstrap and canonical root mapping"
+    description: "Add explicit private no-clobber initialization, shared native-profile references and actionable missing-config guidance; preserve the exact mapped root and document cross-project semantics."
+    context: "Explicit bootstrap and reference-only reuse implemented; exact-root mapping repaired without relaxed validation. Selected 391 tests, strict all-target lint and formatting passed; no live inference claimed."
+    purpose: "Support ordinary directories and portable settings without importing another project's authority."
+    expected_outcome: "Focused regressions, actual native sandbox root discovery and related startup behavior pass."
+    kind: implementation
+    status: completed
+    depends_on: ["standalone-write-tests"]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"]
+    timestamps: {created_at: "2026-11-06T15:32:41Z", updated_at: "2026-11-06T15:39:08Z", completed_at: "2026-11-06T15:39:08Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "standalone-security-audit"
+    title: "security_audit: independently observe standalone changes"
+    description: "Independently inspect scoped source/tests for write safety, authority preservation and path confinement; derive a source-only IMPL supplement."
+    context: "Independent standalone-source-observer inspected only scoped current Skott source/tests, excluding intent, prior records/history and peers. It found no established must-fix security issue; observations and limits are persisted in IMPL."
+    purpose: "Avoid implementer self-certification of filesystem and profile reuse boundaries."
+    expected_outcome: "Attributed scoped observations and limitations persist in IMPL.md."
+    kind: security-audit
+    status: completed
+    depends_on: ["standalone-implement-code"]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"]
+    timestamps: {created_at: "2026-11-06T15:32:41Z", updated_at: "2026-11-06T15:39:08Z", completed_at: "2026-11-06T15:39:08Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "standalone-compliance-review"
+    title: "compliance_review: compare standalone intent and observations"
+    description: "Separately compare scoped intent with the independent record and attributed execution evidence without source access; retain limitations for human arbitration, not acceptance."
+    context: "Separate standalone-source-blind-comparator inspected only scoped intent and independent observations/attributed test evidence. No material scoped contradiction established; detailed evidence, sync-after-publication and excluded-runtime limits persist in IMPL. No acceptance or certification."
+    purpose: "Retain independent discrepancies without treating passing tests as proof or acceptance."
+    expected_outcome: "A separate scoped comparison and its limits are recorded."
+    kind: compliance-review
+    status: completed
+    depends_on: ["standalone-security-audit"]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"]
+    timestamps: {created_at: "2026-11-06T15:32:41Z", updated_at: "2026-11-06T15:42:07Z", completed_at: "2026-11-06T15:42:07Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "resilience-p2-write-tests"
     title: "write_tests: resilience phase 2"
     description: "Write and execute regressions before production changes. Scope: bounded streamed repetition and finite autonomous correction."

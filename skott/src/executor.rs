@@ -422,6 +422,42 @@ mod tests {
     }
 
     #[test]
+    fn sandbox_prepared_scope_accepts_discovery_at_the_exact_workspace_root() {
+        let fixture = prepared_selection();
+        for (name, arguments) in [
+            ("list_dir", json!({"path":"/workspace"})),
+            ("find_files", json!({"path":"/workspace","pattern":"text"})),
+            (
+                "search_files",
+                json!({"path":"/workspace","query":"before"}),
+            ),
+        ] {
+            let intent = ToolIntent {
+                id: name.into(),
+                provider_id: None,
+                name: name.into(),
+                arguments: arguments.clone(),
+            };
+            let request = FileRequest::new("/workspace", name, arguments).unwrap();
+            let executed = std::cell::Cell::new(false);
+            fixture
+                .executor
+                .execute_prepared(
+                    &intent,
+                    Some(&request),
+                    &fixture.sandbox_request,
+                    &CancellationToken::new(),
+                    || {
+                        executed.set(true);
+                        Ok(successful_fixture_outcome())
+                    },
+                )
+                .unwrap();
+            assert!(executed.get());
+        }
+    }
+
+    #[test]
     fn sandbox_prepared_scope_observes_the_executed_grant_not_a_rebound_selection() {
         let fixture = prepared_selection();
         let actual = fixture.file_request.host_mapped(&fixture.original).unwrap();
