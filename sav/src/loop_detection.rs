@@ -4,6 +4,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+mod generation;
+pub use generation::{
+    RecoveryBudget, RecoveryStep, RepetitionChannel, RepetitionReport, RepetitionUnit,
+    StreamLoopDetector,
+};
+
 /// Maximum number of recent actions retained in the sliding ring buffer.
 pub const ACTION_HASH_RING_CAPACITY: usize = 8;
 

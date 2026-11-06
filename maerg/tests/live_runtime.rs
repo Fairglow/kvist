@@ -11,6 +11,9 @@ use kvist::agent::{AgentExecutionRequest, execute_agent};
 use kvist::config::{AgentProfile, Model, Role, SandboxConfig, VcsSelection};
 use sav::observation::JournalFollower;
 
+#[path = "live_runtime/generation.rs"]
+mod generation;
+
 fn profile(endpoint: &str) -> AgentProfile {
     let command = format!("curl --json '{{\"model\":\"fixture\"}}' '{endpoint}/api/chat'");
     AgentProfile {

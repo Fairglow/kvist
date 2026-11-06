@@ -15,6 +15,7 @@ pub(super) struct ModelRetry<'a> {
     pub policy: RetryPolicy,
     pub budget: &'a TurnBudget,
     pub cancellation: &'a CancellationToken,
+    pub controls: Option<super::generation::Controls<'a>>,
     pub live: Option<&'a LiveRun>,
     pub phase: &'static str,
     pub model: &'a str,
@@ -64,6 +65,20 @@ impl ModelRetry<'_> {
                 Err(KvistError::Sav(source)) => source,
                 Err(error) => return Err(error),
             };
+            // Detection cancels only this operation's token. Keep the typed
+            // cause for the authoring owner, which checks parent controls first.
+            if matches!(
+                source,
+                ModelError::RepetitiveGeneration { .. } | ModelError::Observation { .. }
+            ) {
+                return if matches!(source, ModelError::RepetitiveGeneration { .. })
+                    && self.budget.remaining().is_zero()
+                {
+                    Err(KvistError::Sav(ModelError::ModelTransportTimedOut))
+                } else {
+                    Err(KvistError::Sav(source))
+                };
+            }
             if self.cancellation.is_cancelled()
                 || matches!(
                     source,
@@ -149,7 +164,7 @@ impl ModelRetry<'_> {
         Ok(())
     }
 
-    fn failure_context(&self, source: &ModelError, error: KvistError) -> KvistError {
+    pub(super) fn failure_context(&self, source: &ModelError, error: KvistError) -> KvistError {
         KvistError::AgentEvidenceFailed {
             reason: redact_bounded(
                 &format!(
@@ -222,6 +237,7 @@ mod tests {
             policy: RetryPolicy::new(5, Duration::from_millis(1), Duration::from_millis(2)),
             budget: &budget,
             cancellation: &cancellation,
+            controls: None,
             live: Some(&live),
             phase: "capacity discovery",
             model: "private-model",
@@ -271,6 +287,7 @@ mod tests {
             policy: RetryPolicy::default(),
             budget: &budget,
             cancellation: &cancellation,
+            controls: None,
             live: None,
             phase: "inference",
             model: "fixture",
@@ -313,6 +330,7 @@ mod tests {
             policy: RetryPolicy::default(),
             budget: &budget,
             cancellation: &cancellation,
+            controls: None,
             live: None,
             phase: "capacity discovery",
             model: "fixture",
@@ -357,6 +375,7 @@ mod tests {
             policy: RetryPolicy::default(),
             budget: &budget,
             cancellation: &cancellation,
+            controls: None,
             live: Some(&live),
             phase: "inference",
             model: "fixture",
@@ -390,6 +409,7 @@ mod tests {
                 policy: RetryPolicy::default(),
                 budget: &budget,
                 cancellation: &cancellation,
+                controls: None,
                 live: Some(&live),
                 phase: "inference",
                 model: "fixture",

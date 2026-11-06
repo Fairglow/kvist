@@ -420,6 +420,11 @@ task throughout at most two autonomous corrections for the entire authoring
 and repair sequence. Progress clears streaks but cannot replenish corrections;
 guidance and compaction retain spent allowance. Detection uses bounded
 deterministic heuristics, not semantic certification.
+Protected streaming uses Sav's `StreamLoopDetector` and transport
+`RepetitiveGeneration` report. A `RecoveryBudget` belongs to the authoring
+sequence, outside compactable messages; recovery discards incomplete proposals
+and cancels only the model operation. Reports contain bounded metadata, not
+copied untrusted model text.
 Repeated generation/proposals/observations may terminate authoring as stalled,
 never as synthesized completion. Novel read-only inspection has no turn cap.
 Read suppression requires the same observed content revision; a covered range

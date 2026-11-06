@@ -1,6 +1,92 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped generation observations - resilience phase 2
+
+Clean-slate `maerg-p2-source-observer` read only local agent generation,
+accounting, live/control/retry/review source and generation test assertions.
+It excluded all intent, queues, records/reviews, peers and history, made no
+changes and executed no checks.
+
+Streaming generation wraps the observed transport with a fresh imported
+detector; every returned complete turn receives independent terminal inspection
+before length growth, acceptance, broker authorization or effects. Redacted
+provisional text can be journaled before rejection, but rejecting output is
+not presented or applied. The imported detector's algorithms/bounds were
+outside the observer's context.
+
+Each authoring operation receives a separate imported operation token. Detected
+repetition records/checkpoints metadata before cancelling that token. Recording
+failure and whole-task controls retain precedence; repetition is not a temporal
+retry. One recovery budget outside the authoring loop provides numbered feedback,
+checkpointed before insertion into preserved conversation. Local code does not
+reset it after accepted effects or guidance. Exhaustion produces an unsuccessful,
+non-decision result, not completion. The exact two-step default is imported;
+inspected tests assert distinct 1/2 and 2/2 opportunities.
+
+Rejected turns never reach authorization, decision/dependency evidence or
+effect dispatch. Accepted effects require controls and dispatch-ready checks,
+durable dispatch recording, and an uncertain-outcome placeholder before
+execution. Complete guidance-superseded calls are paired as not executed.
+
+Task-wide accounting observes every counted return before completed-turn
+inspection. Positive usage replaces that attempt's estimate with normalized
+provider usage; missing/zero/error usage retains conservative charges and
+permanently unavailable cumulative provenance. Known partial totals remain
+explicit lower bounds. Length and superseded complete responses are included.
+The observer noted that a transport ignoring a rejected callback and returning
+success can lose usage when converted to repetition; reachability with native
+transports was not established. No high-confidence production defect was found.
+
+Required journal/checkpoint failures propagate. Finalization retains prior
+effects, turns and accounting on failure/cancellation, and combines recording
+or closure causes where applicable. Review requests use counted inspection but
+do not own autonomous authoring recovery or execute returned tools.
+
+Inspected assertions cover all six answer/reasoning 100/150/200-word combinations,
+no discarded effects, unary repetition before length growth, unchanged parent
+token, recovery numbering across guidance, known/unknown exhaustion, cumulative
+length usage and unavailable provenance after failed retry. Injection during
+recovery fsync and a short full-owner journal-failure seam remain untested.
+
+Implementer evidence: three corrective HTTP tests reproduced failures before
+fixes; known-usage steering already passed. All 11 generation tests pass
+concurrently and serially, 63 agent units and 38 full live tests pass; scoped
+formatting and strict lint pass. Parent independently reran 11 generation and
+63 agent tests successfully. A separate scoped security reviewer reported no
+vulnerabilities. No live-model qualification, acceptance or certification is
+claimed. Owned operational logs were archived privately and exact paths cleaned;
+the one-line review initializer change is implementer-attributed.
+
+### Final completed-stream handoff
+
+The conditional loss reproduced in two deterministic unit regressions:
+0 passed/2 failed before the private correction, 2 passed afterward.
+Fresh clean-slate `maerg-p2-handoff-observer` inspected only the final private
+adapter, counted owner, local observation/latch source and those two assertions,
+without intent, records, peers or history. It made no changes and ran no checks.
+
+It observed that the adapter retains the first rejection in an attempt-local
+cell while passing a successful underlying turn through required accounting and
+journal recording. The counted owner then rejects before reinspection or
+acceptance. A later callback or different assembled answer cannot overwrite
+latched repetition with its own operation cancellation. Known usage is retained;
+token-budget and required-recording failures still have their defined priority.
+The tests inspect one attempt, 10,000/100/10,100 accounting, complete provenance,
+recorded two proposed tools but no dispatch/decision, and untouched parent
+cancellation. No further high-confidence handoff defect was established.
+
+Parent execution after the final fix: all 65 agent units and all 38 live-runtime
+tests pass (live serially); strict all-target Kvist/Sav/Skott Clippy passes.
+These checks are separately attributed, not the observer's own execution.
+
+Fresh separate source-blind `maerg-p2-final-comparator` read only local intent
+and the exact phase-two observation supplement. It found no established
+remaining phase-two contradiction after the private handoff correction. Imported
+mechanisms, fsync/failure-seam coverage and live-model qualification remain
+limits; later progress/aggregate/typed-operational delivery is not certified.
+It read no source/tests/history, ran no checks and granted no acceptance.
+
 ## Final scoped resilience observations - phase 1
 
 Clean-slate `maerg-p1-final-observer` inspected only bounded current agent/broker

@@ -667,6 +667,7 @@ impl<'a> ReviewSession<'a> {
                     policy: retry_policy,
                     budget: &self.budget,
                     cancellation: &self.cancellation,
+                    controls: None,
                     live: Some(&self.live),
                     phase,
                     model: &self.choice.model,

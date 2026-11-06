@@ -150,7 +150,7 @@ fn drive_turn_retries_transient_timeouts_then_succeeds() {
     let mut tokens = Some(100_000_000_u64);
     let mut recorder: Option<&mut dyn Recorder> = None;
 
-    let (turn, _) = skott
+    let (turn, _, _) = skott
         .drive_turn(
             &request,
             &transport,
@@ -158,6 +158,7 @@ fn drive_turn_retries_transient_timeouts_then_succeeds() {
             &cancellation,
             &progress,
             &mut 0.0,
+            &mut AttemptUsage::default(),
             &budget,
             &mut tokens,
             &mut recorder,
@@ -223,6 +224,7 @@ fn drive_turn_exhausts_the_attempt_budget_on_persistent_failures() {
             &cancellation,
             &progress,
             &mut 0.0,
+            &mut AttemptUsage::default(),
             &budget,
             &mut tokens,
             &mut recorder,

@@ -1,6 +1,79 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped generation observations - resilience phase 2
+
+Clean-slate `sav-generation-source-observer` inspected only local Rust source
+and tests, excluding intent, queues, existing records, peers, reviews and
+chat/Git history. It changed nothing and executed no checks. Its detector
+observations remain applicable to unchanged detector source:
+
+- Independent answer/reasoning channels ignore tool arguments. Word retention
+  is 2,048 records per channel; unfinished tokens retain 2,048 scalars and an
+  eight-scalar prefix while hashing the complete normalized word.
+- Exact suffix periods 1-512 require at least six copies and 48 words for
+  periods below 50, or three copies otherwise. Terminal length-only exact prose
+  checks permit two substantial copies. Near matching uses three prose copies,
+  94-percent pairwise identity, numeric-change rejection, eight distinct words
+  and at most 16 admitted candidates. Character checks require 1,024 unbroken
+  prose scalars, inspect periods through 512 and exclude recognized code/data.
+- Inspection runs every eight words or 128 unfinished-word scalars, with
+  terminal flush and independent assembled-output checks. Cooperative checks
+  poll every 256 input scalars and latch interruption. These are bounded lexical
+  heuristics, not universal semantic detection or event-storage bounds.
+- A provider operation has its own cancellation token; detecting events are
+  recorded before inspection but not presented. Rejected proposals are not
+  applied to history and cannot execute. The prompt owns two nonresettable
+  corrections outside compactable context. The local detection exception
+  retains authority, recording, resource and action checks.
+
+That observer identified phantom correction consumption, known usage skipped by
+steering, and incomplete retry progress. Implementer evidence: four additional
+existing-API tests reproduced all three hazards before changes, then passed.
+
+Separate clean-slate `sav-p2-accounting-observer` inspected only local accounting,
+driver, controls, retry and generation test source. It observed per-return
+normalized usage accumulation before control precedence, monotonic excess
+debits without refunds, permanently unavailable provenance after unknown
+attempts, and completed-turn recording before steering/length/repetition.
+The late-guidance test inspects requests containing both human guidance and
+numbered correction feedback. This combination is deliberate: the recorded
+correction is not silently spent without delivery.
+
+Its misplaced final-progress flush finding reproduced with two strengthened
+known/unknown rejected-budget assertions. The implementer moved the flush
+outside the turn loop; both assertions and the full targeted set pass. This
+fix evidence is implementer-attributed, not an independent source reinspection.
+Error-return terminal publication and claimed-guidance final dispositions remain
+operational-phase work; no whole-component completion is claimed. A transport
+ignoring a failed recording callback cannot enable effects or further recording
+on that broken path.
+
+Scoped security observers reported no exploitable vulnerabilities in shared
+generation source or the Skott adapter. Their terse final outputs do not supply
+additional factual observation detail. No checks were independently executed.
+Current runner evidence: 16 generation, 14 detector, 11 action, 19 control,
+50 Skott integration and 39 Sav library cases pass; strict all-target Sav/Skott
+Clippy passes. No acceptance, receipt or compliance certification is claimed.
+
+Separate source-blind `sav-p2-intent-comparator` found no established remaining
+phase-two contradiction, while identifying limits in assertion-level evidence
+and final independent inspection of the corrected flush. Its initial IMPL read
+exposed older sections; it disclosed and excluded them from reasoning. It read
+no source/tests and executed no checks. This is a scoped comparison with that
+access limitation, not a clean-record-only receipt or whole-component verdict.
+
+Fresh clean-slate `sav-p2-final-accounting-record` subsequently observed the
+final native source: all returned-attempt accounting precedes controls;
+complete raw records precede acceptance; a latched stream rejection survives a
+callback-ignoring transport returning different text; and the dirty accounting
+flush is outside the loop on normal exits. It found no further normal-exit
+defect and explicitly retained propagated-error publication as phase-four work.
+It ran no checks and certified nothing. After its assertion-strength feedback,
+five accounting tests now inspect the last progress event rather than any
+matching intermediate snapshot. All 17 generation tests pass; the new adversarial
+completion case already passed without production changes.
+
 ## Scoped refused-proposal observations - resilience phase 1
 
 Independent clean-slate `sav-p1-observer` inspected local driver, session,

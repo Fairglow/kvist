@@ -17,6 +17,7 @@ use redaction::StreamRedactor;
 mod accounting;
 mod cancellation;
 mod context;
+mod generation;
 mod retry;
 pub(crate) mod review;
 mod startup;
@@ -59,6 +60,7 @@ pub struct AgentRunResult {
     /// dropped, and every authorized effect applied.
     pub success: bool,
     /// Cumulative known prompt/input tokens; `None` if no turn reported usage.
+    /// These are lower bounds; complete cumulative provenance is recorded separately.
     pub tokens_input: Option<usize>,
     /// Cumulative known output tokens; unavailable turns remain explicit in the log.
     pub tokens_output: Option<usize>,
@@ -566,6 +568,7 @@ fn complete_turn<T: ModelTransport>(
             ),
             budget,
             cancellation,
+            controls: None,
             live: None,
             phase: "inference",
             model: &request.model,
@@ -585,7 +588,15 @@ fn complete_turn_counted<T: ModelTransport>(
     retry: &ModelRetry<'_>,
     tokens: &mut TokenBudget,
 ) -> Result<ModelTurn> {
+    let inspection = generation::Inspection {
+        cancellation: retry.cancellation,
+        controls: retry.controls,
+        budget: retry.budget,
+    };
     retry.run(attempts, || {
+        if let Err(error) = inspection.check() {
+            return (Err(error.into()), false);
+        }
         let transport = match make_transport() {
             Ok(transport) => transport,
             Err(error) => return (Err(error), false),
@@ -595,16 +606,60 @@ fn complete_turn_counted<T: ModelTransport>(
             Ok(reservation) => reservation,
             Err(error) => return (Err(error), false),
         };
+        let rejection = std::cell::Cell::new(None);
         let (outcome, emitted) = if stream_output {
-            run_stream_attempt(&transport, &request, retry.cancellation, redactions)
+            run_stream_attempt(
+                &generation::DetectedTransport {
+                    transport: &transport,
+                    live: retry.live,
+                    inspection,
+                    rejection: &rejection,
+                },
+                &request,
+                retry.cancellation,
+                redactions,
+            )
         } else {
             (transport.complete(&request, retry.cancellation), false)
         };
-        let result = match outcome {
+        let rejection = rejection.into_inner();
+        let outcome = match outcome {
             Ok(turn) => {
                 tokens.finish(reservation, turn.usage);
                 Ok(turn)
             }
+            Err(source) => {
+                tokens.failed();
+                Err(source)
+            }
+        };
+        if let Some(live) = retry.live
+            && let Err(error) = live.record(
+                &serde_json::json!({"type":"model_accounting","data":tokens.accounting()}),
+                false,
+            )
+        {
+            let source = match &outcome {
+                Err(source) => Some(source),
+                Ok(_) => rejection.as_ref(),
+            };
+            let error = match source {
+                Some(source) => retry.failure_context(source, error.into()),
+                None => error.into(),
+            };
+            return (Err(error), emitted);
+        }
+        let result = match outcome {
+            Ok(turn) => tokens
+                .check()
+                .and_then(|()| {
+                    if let Some(error) = rejection {
+                        Err(error.into())
+                    } else {
+                        generation::finish(&turn, retry.live, inspection).map_err(Into::into)
+                    }
+                })
+                .map(|()| turn),
             Err(source) => Err(KvistError::Sav(source)),
         };
         (result, emitted)
@@ -638,6 +693,7 @@ fn execute_host_turn(
     live: &LiveRun,
     attempts: &mut u32,
     tokens: &mut TokenBudget,
+    controls: Option<generation::Controls<'_>>,
 ) -> Result<ModelTurn> {
     if choice.is_none {
         return Err(KvistError::InvalidModelSelection {
@@ -725,6 +781,7 @@ fn execute_host_turn(
                 policy: retry_policy,
                 budget,
                 cancellation,
+                controls,
                 live: Some(live),
                 phase: "inference",
                 model: &choice.model,
@@ -1329,6 +1386,7 @@ fn execute_agent_inner(
 
         let mut generations = 0u64;
         let mut model_attempts = 0;
+        let mut recovery = sav::loop_detection::RecoveryBudget::default();
         let mut observed_paths = std::collections::BTreeSet::new();
         let mut seen_read_hashes: std::collections::BTreeMap<String, usize> =
             std::collections::BTreeMap::new();
@@ -1405,6 +1463,7 @@ fn execute_agent_inner(
                 }
                 let _ = std::io::Write::flush(&mut std::io::stderr());
             }
+            let inspected_guidance = std::sync::atomic::AtomicBool::new(false);
             let generated = execute_host_turn(
                 &choice,
                 profile,
@@ -1416,6 +1475,10 @@ fn execute_agent_inner(
                 &live,
                 &mut model_attempts,
                 &mut tokens,
+                Some(generation::Controls {
+                    mailbox: controls,
+                    interrupted: &inspected_guidance,
+                }),
             );
             // Retain a completed turn before validation, controls, or any
             // effect/error path can exit the owner.
@@ -1433,11 +1496,16 @@ fn execute_agent_inner(
             if cancellation.is_cancelled() || controls.is_shutdown() {
                 return Err(KvistError::Sav(ModelError::Cancelled));
             }
-            if (operation.was_steered() || controls.has_pending())
+            if (operation.was_steered()
+                || controls.has_pending()
+                || inspected_guidance.load(std::sync::atomic::Ordering::Relaxed))
                 && (generated.is_ok()
                     || matches!(
                         &generated,
-                        Err(KvistError::Sav(ModelError::ModelTransportCancelled))
+                        Err(KvistError::Sav(
+                            ModelError::ModelTransportCancelled
+                                | ModelError::RepetitiveGeneration { .. }
+                        ))
                     ))
             {
                 live.record(&serde_json::json!({"type":"generation_interrupted","data":{"reason":"guidance","generation":generations}}),true)?;
@@ -1452,6 +1520,36 @@ fn execute_agent_inner(
             drop(operation);
             let turn = match generated {
                 Ok(turn) => turn,
+                Err(KvistError::Sav(ModelError::RepetitiveGeneration { report })) => {
+                    let Some(step) = recovery.take() else {
+                        live.record(
+                            &serde_json::json!({"type":"generation_stalled","data":{
+                                "report":report,"proposals_executed":false
+                            }}),
+                            true,
+                        )?;
+                        return Ok(Some(TurnFailure {
+                            reason: report.exhausted_message(),
+                            timed_out: false,
+                            output_limit_exceeded: false,
+                            cancelled: false,
+                        }));
+                    };
+                    let feedback = report.feedback(step);
+                    live.record(
+                        &serde_json::json!({"type":"generation_recovery","data":{
+                            "report":report,"attempt":step.attempt,"limit":step.limit,
+                            "proposals_executed":false,"response_reserve":reserve,
+                            "feedback":feedback
+                        }}),
+                        true,
+                    )?;
+                    eprintln!("{}", redact_bounded(&feedback, &redactions, 4096));
+                    conversation.push_user(feedback);
+                    model_attempts = 0;
+                    last_action_label = "generation correction".into();
+                    continue;
+                }
                 Err(source) => {
                     tracing::warn!(
                         task_id = %request.task_id,
@@ -1860,7 +1958,7 @@ fn execute_agent_inner(
         &redactions,
         &run_turns,
         failure.as_ref(),
-        tokens.uncertain_attempts,
+        &tokens,
     );
     let outcome = match outcome {
         Err(error) => match recorded {
@@ -1923,7 +2021,7 @@ fn record_turn_outcome(
     redactions: &[String],
     run_turns: &[RunTurn],
     failure: Option<&TurnFailure>,
-    uncertain_attempts: u32,
+    tokens: &TokenBudget,
 ) -> Result<AgentRunResult> {
     // The final turn is the run's answer; the earlier turns are the steps that
     // led to it. Aggregate effects and dropped intents across the whole run so
@@ -1986,20 +2084,29 @@ fn record_turn_outcome(
             .iter()
             .any(|record| record.output_limit_exceeded);
 
-    let mut input = 0_u64;
-    let mut output = 0_u64;
-    let mut reported = 0;
-    for usage in run_turns.iter().filter_map(|run_turn| run_turn.turn.usage) {
-        input = input.saturating_add(usage.input_tokens);
-        output = output.saturating_add(usage.output_tokens);
-        reported += 1;
-    }
-    let tokens_input = (reported > 0).then_some(input.min(usize::MAX as u64) as usize);
-    let tokens_output = (reported > 0).then_some(output.min(usize::MAX as u64) as usize);
+    let known_usage = tokens.known_usage();
+    let tokens_input = known_usage.map(|usage| usage.input_tokens.min(usize::MAX as u64) as usize);
+    let tokens_output =
+        known_usage.map(|usage| usage.output_tokens.min(usize::MAX as u64) as usize);
+    let reported = run_turns
+        .iter()
+        .filter(|run_turn| run_turn.turn.usage.is_some())
+        .count();
+    let uncertain_attempts = tokens.uncertain_attempts;
+    let accounting = tokens.accounting();
     let mut log = format!(
         "token accounting: known input={tokens_input:?}, known output={tokens_output:?}; \
-         reported turns={reported}, unavailable turns={}, conservatively charged/unknown attempts={uncertain_attempts}\n\n",
+         reported turns={reported}, unavailable turns={}, conservatively charged/unknown attempts={uncertain_attempts}\n\
+         cumulative provenance={}; returned attempts={}, known attempts={}; complete cumulative usage={:?}\n\n",
         run_turns.len() - reported,
+        if accounting.provenance_complete {
+            "complete"
+        } else {
+            "unavailable"
+        },
+        accounting.returned_attempts,
+        accounting.known_attempts,
+        accounting.cumulative_usage,
     );
     for (index, run_turn) in run_turns.iter().enumerate() {
         if index > 0 {
@@ -2112,16 +2219,12 @@ fn record_turn_outcome(
         timestamp: now_ts,
     })?;
 
-    let mut total_tokens: u64 = 0;
     for (index, run_turn) in run_turns.iter().enumerate() {
         let turn = &run_turn.turn;
         let turn_number = index + 1;
         let usage = turn.usage;
         let new_tokens = usage.map(|usage| usage.input_tokens);
         let output_tokens = usage.map(|usage| usage.output_tokens);
-        total_tokens = total_tokens
-            .saturating_add(new_tokens.unwrap_or(0))
-            .saturating_add(output_tokens.unwrap_or(0));
 
         recorder.record_event(&sav::TrajectoryEvent::TurnStart {
             turn: turn_number,
@@ -2199,7 +2302,9 @@ fn record_turn_outcome(
         session_id: redact(session_id, redactions),
         task_id: redact(request.task_id, redactions),
         total_turns: run_turns.len(),
-        total_tokens,
+        total_tokens: known_usage.map_or(0, |usage| {
+            usage.input_tokens.saturating_add(usage.output_tokens)
+        }),
         success,
     })?;
 
@@ -3122,6 +3227,7 @@ mod tests {
             &live,
             &mut 0,
             &mut TokenBudget::new(None),
+            None,
         )
         .expect_err("a non-loopback command must be refused");
         assert!(
@@ -3163,6 +3269,7 @@ mod tests {
             &live,
             &mut 0,
             &mut TokenBudget::new(None),
+            None,
         )
         .expect_err("the no-op model must be refused");
         assert!(

@@ -1,6 +1,49 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped generation adapter observations - resilience phase 2
+
+Clean-slate `skott-generation-source-observer` read local source and integration
+tests only, excluding intent, queues, records/reviews, Sav internals and history.
+It changed nothing and ran no checks.
+
+`Skott::with_retry` defaults generation detection on; its explicit builder
+changes only that private boolean. `run_controlled` builds a shared native
+runtime, forwards validated limits and that boolean, and passes session,
+transport, parent cancellation, context, mailbox and optional recorder through
+static bridges. Skott implements no separate detector or correction machine.
+Sink events and recorder request/event/turn/usage/control/effect callbacks are
+forwarded without rewriting. Recorder trait defaults do not guarantee durable
+capture; concrete private journals and transcripts own that responsibility.
+Executor read cursors and tool resolution are unaffected by the exception.
+
+Three inspected generation tests assert two corrections followed by completion
+without discarded effects, persistent repetition with an unsuccessful summary,
+and one-request acceptance under the explicit intentional-output exception.
+Other assertions cover compaction and uncapped productive runs. The script
+fixtures are not live-provider qualification; their count-based pairing helper
+does not prove call-ID correspondence. The exception-only test contains no tools.
+No high-confidence generation-specific adapter defect was established; shared
+detector semantics were outside the observer's context.
+
+Runner-attributed execution: all 50 integration tests and strict all-target
+Clippy pass after shared accounting corrections. A separate scoped security
+observer reported no vulnerabilities. Neither observer independently executed
+these checks or certified compliance.
+
+Separate source-blind `skott-p2-intent-comparator` found no established adapter
+contradiction, but noted missing assertion-level proof for ID pairing,
+retained tool protection under the exception and both frontend entrypoints.
+Shared detector behavior was outside its evidence. An overbroad initial IMPL
+read exposed older sections; the comparator disclosed and excluded them from
+reasoning, read no source/tests and ran no checks.
+
+The full suite then exposed an unrelated-purpose fixture now caught by the
+detector: `FloodTransport` concatenated identical unbroken provisional text and
+stopped before filling its 128-slot queue. Counter-bearing novel text preserves
+the actual backpressure/teardown threshold without disabling detection or
+relaxing the assertion. This fixture correction is runner-attributed.
+
 ## Hidden runtime-state scope regression - 2026-11-05
 
 Independent clean-slate `repair-source-observer` read only bounded source/test

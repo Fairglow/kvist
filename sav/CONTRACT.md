@@ -25,6 +25,46 @@ steering/replay capabilities are disclosed rather than emulated.
 
 ## Shared native runtime API (ADR 0015)
 
+### Generation resilience API
+
+`sav::loop_detection` exposes `StreamLoopDetector`, `RepetitionReport`,
+`RepetitionChannel` (answer/reasoning), `RepetitionUnit` (words/characters),
+`RecoveryBudget` and `RecoveryStep`. `observe(&ModelStreamEvent)` incrementally
+returns a repetition report; `finish(&ModelTurn)` flushes trailing tokens and
+checks complete/unary output. Reports contain channel, unit, period, copy count
+and token-identity percentage, not model text. Public report fields are
+`channel`, `unit`, `period`, `copies` and `similarity_percent`; enum variants are
+`Answer`/`Reasoning` and `Words`/`Characters`, serialized in snake case.
+Tool arguments are not prose
+and are not inspected by this detector.
+
+`observe_while(event, predicate)` and `finish_while(turn, predicate)` are the
+control-responsive equivalents. They poll at most every 256 Unicode scalars;
+a false predicate permanently interrupts that detector and yields no report.
+Hosts recheck cancellation, steering and limits before presenting or accepting
+output. Convenience `observe`/`finish` use an always-open predicate.
+Unknown generation reservations stay charged; known usage may increase the
+debit beyond that reservation and is never ignored or refunded to escape a
+configured allowance.
+Completed length retries and responses superseded by steering also contribute
+to cumulative provider progress. Any dispatched attempt without usage makes
+that cumulative accounting unavailable. Human guidance arriving while a
+correction notice is recorded is delivered alongside the recorded correction,
+not by spending and silently dropping that correction.
+
+`RecoveryBudget::take()` returns at most two numbered steps; it has no reset
+operation. Steps carry `attempt` and `limit` (two). Hosts keep it outside
+compactable conversations. `RepetitionReport::feedback(step)` and
+`exhausted_message()` generate
+bounded corrective feedback without copying untrusted output or authorizing
+tools. `sav::Error::RepetitiveGeneration` carries the report across transports.
+Hosts cancel only the provider-operation token and discard that proposal.
+
+`NativeRuntime::with_generation_loop_detection(false)` is an explicit
+host-owned exception for intentional repetitive output. It does not disable
+tool protection, grants, recording or resource limits. Operational configuration
+surfaces are delivered in phase 4; native detection defaults on.
+
 `sav::runtime` exposes `AgentSession`, `ModelIdentity { id, model }`,
 `ContextManager`, `RetryPolicy`, `NativeRuntime`, `RunLimits`, `RunSummary`,
 `ToolOutcome`, serializable `Event`, and a narrowly scoped runtime `Error`.

@@ -6,60 +6,60 @@ component:
   parent_contract: null
   revalidation:
     state: stale
-    checked_at: "2026-11-06T07:43:03Z"
+    checked_at: "2026-11-06T09:49:52Z"
     stale_since: "2026-11-06T06:54:17Z"
-    causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:3086d1bd8a18b675b1468721f662518abda2fa56473e02eaa032b4cc61d3fda4", "observed_revision": "sha256:02b7979e6f81e2815f5503538266d13034718471afe061ee55f71a37a7075ed5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03", "observed_revision": "sha256:0b112da2a1e75be5a0864dee630f42d284ba7323ba114930daeb118ce1c54a95"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:0c1cfae82b7f2f6819b5a1898fc15a1608e08b91c738fb405507e0b2b458f9fb", "observed_revision": "sha256:3cc4b77cb440b79ba3df738c66ce2076c5e838b583a2def4214ee5f3211c3d7f"}]
+    causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:3086d1bd8a18b675b1468721f662518abda2fa56473e02eaa032b4cc61d3fda4", "observed_revision": "sha256:02b7979e6f81e2815f5503538266d13034718471afe061ee55f71a37a7075ed5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03", "observed_revision": "sha256:2f6616b80aaba44c8f42da3719230bddc58c4ee8da1e33de8b63e3e6a7fe8635"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:0c1cfae82b7f2f6819b5a1898fc15a1608e08b91c738fb405507e0b2b458f9fb", "observed_revision": "sha256:3cc4b77cb440b79ba3df738c66ce2076c5e838b583a2def4214ee5f3211c3d7f"}]
 tasks:
   - id: "resilience-p2-write-tests"
     title: "write_tests: resilience phase 2"
     description: "Write and execute regressions before production changes. Scope: bounded streamed repetition and finite autonomous correction."
-    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    context: "Three adapter generation tests plus shared red-first regressions cover native recovery/exception. Full-suite queue fixture reproduced detector interruption before required 128-slot fill."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Required behavioral regressions fail against the prior implementation."
     kind: "test"
-    status: "pending"
+    status: "completed"
     depends_on: []
     requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:21:22Z", "completed_at": "2026-11-06T09:21:22Z"}
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-implement-code"
     title: "implement_code: resilience phase 2"
     description: "Implement the approved local phase and validate the exact regressions. Scope: bounded streamed repetition and finite autonomous correction."
-    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    context: "Default-on shared native forwarding and narrow builder exception; 50 integration cases and strict all-target lint passed. Backpressure fixture uses novel counters without weakening bounds."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
     kind: "implementation"
-    status: "pending"
+    status: "completed"
     depends_on: ["resilience-p2-write-tests"]
     requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:21:22Z", "completed_at": "2026-11-06T09:21:22Z"}
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-security-audit"
     title: "security_audit: resilience phase 2"
     description: "Independently inspect changed local source/tests and derive scoped observations. Scope: bounded streamed repetition and finite autonomous correction."
-    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    context: "Independent local source-only adapter observation and scoped security review recorded; no vulnerabilities/high-confidence generation adapter defects found."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
     kind: "security-audit"
-    status: "pending"
+    status: "completed"
     depends_on: ["resilience-p2-implement-code"]
     requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:21:22Z", "completed_at": "2026-11-06T09:21:22Z"}
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-compliance-review"
     title: "compliance_review: resilience phase 2"
     description: "Compare scoped intent with source-only observations and executed test evidence. Scope: bounded streamed repetition and finite autonomous correction."
-    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    context: "Separate source-blind comparator found no established adapter contradiction; assertion/access limits recorded in IMPL, no acceptance/certification."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
     kind: "compliance-review"
-    status: "pending"
+    status: "completed"
     depends_on: ["resilience-p2-security-audit"]
     requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:21:22Z", "completed_at": "2026-11-06T09:21:22Z"}
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-write-tests"

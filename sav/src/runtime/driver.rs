@@ -2,6 +2,7 @@
 use super::session::*;
 use super::{ControlMailbox, GuidanceNotice, GuidanceState};
 use super::{Error, Result, ToolOutcome, context::ContextManager, retry::RetryPolicy};
+use crate::loop_detection::{RecoveryBudget, StreamLoopDetector};
 use crate::{CancellationToken, ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn};
 use std::{
     collections::VecDeque,
@@ -164,13 +165,19 @@ impl Drop for Operation {
     }
 }
 /// The multi-turn loop driver.
-#[derive(Default)]
 pub struct NativeRuntime {
     pub max_turns: Option<u32>,
     /// How to retry a turn that ends in a transient, recoverable failure.
     pub retry: RetryPolicy,
     /// Limits shared by the complete prompt rather than reset on retries.
     pub limits: RunLimits,
+    generation_loop_detection: bool,
+}
+
+impl Default for NativeRuntime {
+    fn default() -> Self {
+        Self::with_retry(None, RetryPolicy::default())
+    }
 }
 
 impl NativeRuntime {
@@ -180,7 +187,15 @@ impl NativeRuntime {
             max_turns: max_turns.into(),
             retry,
             limits: RunLimits::default(),
+            generation_loop_detection: true,
         }
+    }
+
+    /// Explicit host exception for intentionally repetitive output.
+    /// Tool protection, authority, recording and resource limits remain active.
+    pub fn with_generation_loop_detection(mut self, enabled: bool) -> Self {
+        self.generation_loop_detection = enabled;
+        self
     }
 
     /// Sets validated whole-prompt limits.
@@ -357,13 +372,11 @@ impl NativeRuntime {
         controls: &ControlMailbox,
     ) -> Result<()> {
         let started_at = budget.started_at;
-        let mut input = 0_u64;
-        let mut output = 0_u64;
-        let mut total = 0_u64;
+        let mut usage = AttemptUsage::default();
         let mut generation_seconds = 0.0_f64;
-        let mut usage_complete = true;
         let mut tokens_remaining = self.limits.max_tokens;
         let mut actions = crate::ActionHashRing::new();
+        let mut generation_recovery = RecoveryBudget::default();
         let mut read_pages = VecDeque::new();
         let mut next_attempt = 1;
         let mut next_reserve = self.limits.response_reserve;
@@ -411,7 +424,7 @@ impl NativeRuntime {
             sink.send(Event::TurnStart {
                 model: session.model_selector().into(),
             })?;
-            let turn_value = match self.drive_turn(
+            let (turn_value, turn_index) = match self.drive_turn(
                 &request,
                 transport,
                 sink,
@@ -421,15 +434,16 @@ impl NativeRuntime {
                     context,
                     tool_defs: session.tool_defs.len(),
                     started_at,
-                    cumulative_input: input,
-                    cumulative_total: total,
+                    cumulative_input: usage.input,
+                    cumulative_total: usage.total,
                     // Prior turns' cumulative output and decode seconds, so
                     // the live path's average is the whole-session average over
                     // decode time (this turn's streamed estimate is added on).
-                    cumulative_output: output,
+                    cumulative_output: usage.output,
                     decode_seconds: generation_seconds,
                 },
                 &mut generation_seconds,
+                &mut usage,
                 budget,
                 &mut tokens_remaining,
                 recorder,
@@ -437,10 +451,39 @@ impl NativeRuntime {
                 next_attempt,
                 &|intent| executor.describe(intent),
             ) {
-                Ok((value, _)) => value,
+                Ok((value, _, index)) => (value, index.unwrap_or(summary.turns as usize)),
                 Err(Error::Steering { attempt, reserve }) => {
                     next_attempt = attempt;
                     next_reserve = reserve;
+                    continue;
+                }
+                Err(Error::RepetitiveGeneration { report, .. }) => {
+                    if controls.is_shutdown() {
+                        cancellation.cancel();
+                    }
+                    if cancellation.is_cancelled() || budget.remaining().is_zero() {
+                        break;
+                    }
+                    next_attempt = 1;
+                    next_reserve = self.limits.response_reserve;
+                    if controls.has_pending() {
+                        continue;
+                    }
+                    let Some(step) = generation_recovery.take() else {
+                        let message = report.exhausted_message();
+                        record_notice(sink, recorder, message.clone())?;
+                        summary.failure = Some(message);
+                        break;
+                    };
+                    let message = report.feedback(step);
+                    record_notice(sink, recorder, message.clone())?;
+                    if controls.is_shutdown() {
+                        cancellation.cancel();
+                    }
+                    if cancellation.is_cancelled() || budget.remaining().is_zero() {
+                        break;
+                    }
+                    session.push_user(message);
                     continue;
                 }
                 Err(error)
@@ -462,25 +505,6 @@ impl NativeRuntime {
             };
             next_attempt = 1;
             next_reserve = self.limits.response_reserve;
-            let turn_index = match recorder.as_mut() {
-                Some(recorder) => {
-                    let index = recorder.turn_start(&turn_value)?;
-                    recorder.turn_finish(
-                        index,
-                        &turn_value.usage,
-                        finish_reason_str(&turn_value.finish_reason),
-                    )?;
-                    index
-                }
-                None => summary.turns as usize,
-            };
-            if let Some(usage) = turn_value.usage {
-                input = input.saturating_add(usage.input_tokens);
-                output = output.saturating_add(usage.output_tokens);
-                total = total.saturating_add(usage.total_tokens);
-            } else {
-                usage_complete = false;
-            }
             if let Err(error) = validate_turn(&turn_value) {
                 summary.failure = Some(error.describe());
                 break;
@@ -598,17 +622,14 @@ impl NativeRuntime {
                 sink,
                 session,
                 context,
-                input,
-                output,
-                total,
-                if usage_complete {
-                    TokenAccounting::Provider
-                } else {
-                    TokenAccounting::Unavailable
-                },
+                usage.input,
+                usage.output,
+                usage.total,
+                usage.provenance(),
                 started_at,
                 generation_seconds,
             )?;
+            usage.dirty = false;
             if terminal
                 && summary.failure.is_none()
                 && !cancellation.is_cancelled()
@@ -620,6 +641,19 @@ impl NativeRuntime {
             if terminal || summary.failure.is_some() || cancellation.is_cancelled() {
                 break;
             }
+        }
+        if usage.dirty {
+            self.emit_progress(
+                sink,
+                session,
+                context,
+                usage.input,
+                usage.output,
+                usage.total,
+                usage.provenance(),
+                started_at,
+                generation_seconds,
+            )?;
         }
         summary.answer = session.answer.clone();
         Ok(())
@@ -654,13 +688,14 @@ impl NativeRuntime {
         cancellation: &CancellationToken,
         progress: &LiveProgress,
         total_generation_seconds: &mut f64,
+        usage: &mut AttemptUsage,
         budget: &PromptBudget,
         tokens_remaining: &mut Option<u64>,
         recorder: &mut Option<&mut dyn Recorder>,
         controls: &ControlMailbox,
         first_attempt: u32,
         describe: &impl Fn(&crate::ToolIntent) -> String,
-    ) -> Result<(ModelTurn, f64)>
+    ) -> Result<(ModelTurn, f64, Option<usize>)>
     where
         M: ModelTransport,
         S: EventSink,
@@ -676,6 +711,12 @@ impl NativeRuntime {
         let mut attempt_request = request.clone();
         let mut generation_secs = 0.0_f64;
         loop {
+            let attempt_progress = LiveProgress {
+                cumulative_input: usage.input,
+                cumulative_output: usage.output,
+                cumulative_total: usage.total,
+                ..*progress
+            };
             if controls.is_shutdown() {
                 cancellation.cancel();
             }
@@ -730,6 +771,11 @@ impl NativeRuntime {
             let mut last_emit = Instant::now();
             let mut sink_error = None;
             let mut event_interrupted = false;
+            let mut detector = self
+                .generation_loop_detection
+                .then(StreamLoopDetector::default);
+            let mut repetition = None;
+            let mut rejected_usage = None;
             let operation = Operation::start(cancellation, controls)?;
             let result = transport.stream_with_deadline(
                 &attempt_request,
@@ -742,9 +788,11 @@ impl NativeRuntime {
                             || event_interrupted
                             || controls.is_shutdown()
                         {
+                            operation.token().cancel();
                             return Err(crate::Error::ModelTransportCancelled);
                         }
-                        if sink_error.is_some() {
+                        if sink_error.is_some() || repetition.is_some() {
+                            operation.token().cancel();
                             return Err(crate::Error::ModelTransportCancelled);
                         }
                         decode_clock.observe(observed_at);
@@ -752,6 +800,31 @@ impl NativeRuntime {
                             && let Err(error) = recorder.model_event(&event)
                         {
                             sink_error = Some(error);
+                            operation.token().cancel();
+                            return Err(crate::Error::ModelTransportCancelled);
+                        }
+                        let report = detector.as_mut().and_then(|detector| {
+                            detector.observe_while(&event, &mut || {
+                                event_interrupted |= controls.has_pending();
+                                !cancellation.is_cancelled()
+                                    && !event_interrupted
+                                    && !controls.is_shutdown()
+                                    && !operation.token().is_cancelled()
+                                    && !budget.remaining().is_zero()
+                            })
+                        });
+                        if cancellation.is_cancelled()
+                            || event_interrupted
+                            || controls.is_shutdown()
+                            || budget.remaining().is_zero()
+                            || operation.token().is_cancelled()
+                        {
+                            operation.token().cancel();
+                            return Err(crate::Error::ModelTransportCancelled);
+                        }
+                        if let Some(report) = report {
+                            repetition = Some(report);
+                            operation.token().cancel();
                             return Err(crate::Error::ModelTransportCancelled);
                         }
                         let emitted = match event {
@@ -785,7 +858,7 @@ impl NativeRuntime {
                             last_emit = now;
                             if let Err(error) = emit_live_progress(
                                 sink,
-                                progress,
+                                &attempt_progress,
                                 attempt_output_chars,
                                 decode_clock.seconds(),
                                 generation_secs,
@@ -806,11 +879,34 @@ impl NativeRuntime {
             let seconds = decode_clock.seconds();
             generation_secs += seconds;
             *total_generation_seconds += seconds;
+            let reported_usage = result.as_ref().ok().and_then(|turn| turn.usage);
+            usage.observe(reported_usage);
+            let mut reported_exhaustion = false;
+            if let Some(reported) = reported_usage
+                && let Some(remaining) = tokens_remaining
+            {
+                let actual = reported
+                    .total_tokens
+                    .max(reported.input_tokens.saturating_add(reported.output_tokens));
+                let extra = actual.saturating_sub(charge);
+                reported_exhaustion = extra > *remaining;
+                *remaining = remaining.saturating_sub(extra);
+            }
             let interrupted = event_interrupted || operation.was_steered();
+            let operation_cancelled = operation.token().is_cancelled();
             drop(operation);
             if let Some(error) = sink_error {
                 return Err(error);
             }
+            let turn_index = if let Ok(turn) = &result
+                && let Some(recorder) = recorder.as_mut()
+            {
+                let index = recorder.turn_start(turn)?;
+                recorder.turn_finish(index, &turn.usage, finish_reason_str(&turn.finish_reason))?;
+                Some(index)
+            } else {
+                None
+            };
             if controls.is_shutdown() {
                 cancellation.cancel();
             }
@@ -818,6 +914,62 @@ impl NativeRuntime {
                 return Err(Error::Steering {
                     attempt: attempt + 1,
                     reserve,
+                });
+            }
+            if cancellation.is_cancelled() {
+                return Err(crate::Error::ModelTransportCancelled.into());
+            }
+            if budget.remaining().is_zero() {
+                return Err(Error::RunBudget {
+                    reason: "wall time".into(),
+                });
+            }
+            if operation_cancelled && repetition.is_none() {
+                return Err(crate::Error::ModelTransportCancelled.into());
+            }
+            if reported_exhaustion {
+                return Err(Error::RunBudget {
+                    reason: "provider-reported model tokens".into(),
+                });
+            }
+            if let Ok(turn) = &result {
+                let report = repetition.or_else(|| {
+                    detector.as_mut().and_then(|detector| {
+                        detector.finish_while(turn, &mut || {
+                            event_interrupted |= controls.has_pending();
+                            !cancellation.is_cancelled()
+                                && !event_interrupted
+                                && !controls.is_shutdown()
+                                && !budget.remaining().is_zero()
+                        })
+                    })
+                });
+                if controls.is_shutdown() {
+                    cancellation.cancel();
+                }
+                if cancellation.is_cancelled() {
+                    return Err(crate::Error::ModelTransportCancelled.into());
+                }
+                if budget.remaining().is_zero() {
+                    return Err(Error::RunBudget {
+                        reason: "wall time".into(),
+                    });
+                }
+                if event_interrupted || controls.has_pending() {
+                    return Err(Error::Steering {
+                        attempt: attempt + 1,
+                        reserve,
+                    });
+                }
+                if let Some(report) = report {
+                    rejected_usage = turn.usage;
+                    repetition = Some(report);
+                }
+            }
+            if let Some(report) = repetition {
+                return Err(Error::RepetitiveGeneration {
+                    report,
+                    usage: rejected_usage,
                 });
             }
             match result {
@@ -834,11 +986,7 @@ impl NativeRuntime {
                             .saturating_add(next_reserve as usize)
                             > progress.context.limit_tokens()
                     {
-                        return Ok((turn, generation_secs));
-                    }
-                    if let Some(recorder) = recorder.as_mut() {
-                        let index = recorder.turn_start(&turn)?;
-                        recorder.turn_finish(index, &turn.usage, "length")?;
+                        return Ok((turn, generation_secs, turn_index));
                     }
                     record_notice(
                         sink,
@@ -853,7 +1001,7 @@ impl NativeRuntime {
                     attempt_request = enlarged;
                     attempt += 1;
                 }
-                Ok(turn) => return Ok((turn, generation_secs)),
+                Ok(turn) => return Ok((turn, generation_secs, turn_index)),
                 // Retry only temporal, recoverable failures, and only while the
                 // attempt budget remains and the turn was not cancelled.
                 Err(error) if error.is_retryable() => {

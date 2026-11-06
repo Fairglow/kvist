@@ -9,7 +9,7 @@ review receipt.
 | Phase | Work tasks | Required evidence | State |
 | --- | --- | --- | --- |
 | 1: Correctness | Honest Maerg loop stops; revision-bound read delivery; failed-observation semantics; rejected-proposal recurrence; repair error/decision/digest propagation | Failing regressions first, targeted passing checks, source-only observations and separate source-blind comparison | Complete |
-| 2: Streaming | Bounded incremental exact/near repetition; independent answer/reasoning; 100/150/200-word periods; two autonomous corrections; no partial effects, sampling changes or reserve growth for loops | Chunk-boundary, false-positive, recovery, budget/cancellation/recording fixtures through both native hosts | Planned |
+| 2: Streaming | Bounded incremental exact/near repetition; independent answer/reasoning; 100/150/200-word periods; unbroken character loops; two autonomous corrections; intentional-output exception; no partial effects, sampling changes or reserve growth for loops | Chunk-boundary, false-positive, recovery, budget/cancellation/recording fixtures through both native hosts | Complete |
 | 3: Progress | State-aware repeat protection; discovery/failure/observation tracking; bounded multi-action cycles; no-op resistance; fair batch intervention; pagination/reverification preservation | Alternating/long cycles, repeated refusals, changed-state testing, bulk investigation and compaction regressions | Planned |
 | 4: Operations | Typed failures/recovery/effect certainty; actionable TUI/headless/transcript output; first-cause resource termination; aggregate authoring/repair model budgets; recurring repair signatures; cancellable backpressure; honest external capabilities | Integrated terminal/headless and protected-task evidence, offline lint/build/tests, independent final observations/comparison | Planned |
 
@@ -107,3 +107,139 @@ and scoped source observations; lexical checks are not semantic certification,
 and unchanged repair conclusions rely on the initial clean source record.
 Phase-one implementation and corrective items are complete. Streaming,
 progress-aware protection and operational hardening remain phases 2-4.
+
+Phase-one commit: `31ddf51` (`fix: preserve honest agent outcomes and failure evidence`).
+
+### Phase 2 evidence
+
+The five initial NativeRuntime regressions all failed before implementation:
+repeated output was accepted as success, one discarded-turn tool ran, a unary
+length response enlarged its reserve, and recovery/accounting/recording
+expectations were absent. Bounded shared detection and finite correction now
+cover both answer and reasoning at 100/150/200-word periods.
+
+Calibration initially passed nine of thirteen pure cases and exposed four
+false positives: numeric-bearing changes, multiline quotations, multiline
+inline code and a shorter internal code fence. Those cases reproduced before
+their fixes. Additional regressions reproduced a terminal near-match missed
+by all three fast anchors, late cancellation presenting stale text, and known
+rejected usage being ignored. All were corrected. The length-only two-copy
+prose rule was clarified during implementation and remains independently
+reviewable, not a universal semantic-loop guarantee. An additional unbroken
+JSON/XML payload false positive reproduced before its lexical exclusion.
+
+- `cargo test --offline --locked -p sav -p skott --test generation_resilience --test stream_loop_detection --test loop_detection --test runtime_controls --test loop_integration --quiet`: 12 + 14 + 11 + 19 + 50 passed.
+- `cargo test --offline --locked -p sav --lib --quiet`: 39 passed.
+- `cargo clippy --offline --locked -p sav -p skott --all-targets -- -D warnings`: passed.
+
+Tests assert exact 100/150/200/512-word metadata, 94-versus-93-percent identity,
+Unicode scalar handling, 2,048-entry retention, 256-scalar control polling,
+unchanged reserves, bounded corrections, no partial effects and no replenishment
+after actual compaction/intervening effects. The old compaction fixture used
+artificially repeated final text; equally sized novel counter words replace
+that padding without weakening its compaction or complete-record assertions.
+
+Protected integration initially reproduced six failures among eight cases;
+its cadence test stopped at the first failing combination rather than proving
+six separate red runs. All six combinations subsequently passed. Its loopback
+fixture's 400-ms completion fallback raced interruption under concurrent load;
+TCP_NODELAY and a five-second bounded fallback preserve the assertions while
+removing that artificial race. Final protected control checks and independent
+phase-two observations/comparison are still pending.
+
+No full-host recovery-journal failure is claimed: the protected owner constructs
+its held-descriptor journal internally. Three safe lower-level recording-failure
+tests pass, but path removal/chmod is not a valid late-write failure injection.
+
+The independent shared observer found three additional coupled hazards: a
+correction silently spent when guidance arrives during notice callbacks,
+returned known usage skipped by steering, and length/failed-retry usage omitted
+from progress provenance. Four existing-API regressions all failed first, then
+passed after correction. Guidance now accompanies rather than erases recorded
+feedback; all returned attempts reconcile once before control precedence.
+A separate accounting observer exposed a misplaced terminal-progress flush;
+two strengthened rejected-budget assertions reproduced it and pass after moving
+the flush outside the turn loop.
+
+Current shared checks pass 16 generation, 14 stream, 11 action, 19 controls,
+50 Skott integrations and 39 Sav library cases, plus strict all-target Clippy.
+Scoped security reviews reported no vulnerabilities. Source-derived records
+and execution attribution are retained in local IMPL supplements, not treated
+as acceptance or full compliance.
+
+The accounting observer also highlighted error-return terminal-event omissions
+and claimed-guidance disposition loss on recording failure. These are explicit
+phase-four operational tasks, not concealed as finished behavior. Combining
+late human guidance with recorded feedback is intentional; continuing recording
+after a failed callback is not an acceptable way to capture a transport that
+ignores the failure.
+
+The separate source-blind Sav/Skott comparisons found no established remaining
+phase-two contradiction, with missing assertion-level evidence and final-flush
+reinspection limits explicitly disclosed. Both initially read older IMPL
+sections and excluded them from reasoning; neither read source/tests or executed
+checks. Their scope is diagnostic comparison, not acceptance/certification.
+
+The broad shared/frontend suites additionally reproduced the backpressure
+fixture stopping before its required 128-slot fill because it concatenated
+identical provisional text. Novel counter-bearing text preserves that queue
+threshold, cancellation/teardown bounds and default-on detector.
+
+After that correction, `cargo test --offline --locked -p sav -p skott --quiet`
+passed all 784 tests with three existing ignored tests. The unchanged offline
+sandbox/toolchain integration tests also passed. Strict all-target Sav/Skott
+Clippy and whitespace checks pass; all three component bundles structurally
+validate while retaining stale acceptance. Protected follow-up and independent
+comparison are still required before the phase-two commit.
+
+Protected follow-up reproduced three additional HTTP failures before fixes;
+completed-usage steering already passed. All 11 generation tests pass both
+concurrently and serially, 63 agent units and 38 full-live serial cases pass.
+Parent independently reran 11 generation and 63 agent cases. Distinct recovery
+1/2 and 2/2 feedback survives later guidance; known length totals are 24/12/36,
+and unknown failure provenance stays unavailable. Scoped formatting/lint pass.
+The protected source-only observer found no established high-confidence
+production defect; a separate security reviewer found no vulnerabilities.
+Its imported-detector and late-fsync/transport boundaries are recorded in IMPL.
+
+The protected source-blind comparison identified conditional lost known usage
+when a transport ignores callback rejection and returns a completed turn.
+Rather than assuming native transports always cooperate, this is assigned a
+deterministic private-adapter correction before committing phase two. The native
+host already passes the corresponding adversarial case with no discarded
+effects, a 10,100-token debit and exact final provider progress.
+
+A final clean-slate native accounting observer confirms the corrected flush
+position and latched rejection; no further normal-exit defect was established.
+Its assertion-strength feedback tightened five tests to inspect final progress
+and exact known lower bounds. All 17 native generation tests pass. Propagated
+error publication remains explicitly operational-phase work.
+
+The final protected handoff regression reproduced two failures (lost 10,100
+usage and repetition replaced by its own cancellation), then passed after a
+private attempt-local rejection handoff. A fresh source-only observer confirms
+accounting/journal recording before typed rejection and unchanged no-effect
+semantics. Parent reran 65 agent units and all 38 live-runtime cases successfully;
+strict all-target Kvist/Sav/Skott Clippy passes. No shared API change was needed.
+
+The final fresh protected source-blind comparator used the exact observation
+supplement, found no established remaining scoped contradiction, and retained
+imported-mechanism and failure-injection limits. All phase-two lifecycle tasks
+are complete; this phase does not certify the planned progress-aware tools,
+aggregate repair budgets or operational diagnostics.
+
+## External practice and deliberate limits
+
+The design uses bounded deterministic evidence and goal-preserving correction,
+not an obligatory model judge. Gemini CLI's
+[pinned loop detector](https://github.com/google-gemini/gemini-cli/blob/acae7124bdd849e554eaa5e090199a0cf08cd782/packages/core/src/services/loopDetectionService.ts)
+illustrates separate tool/content protection; its short recurrence-distance
+window is not copied because it misses the reported long cadence.
+[Codex retries](https://github.com/openai/codex/blob/9d8de196748b57d7f463a7757eaa447b6483a331/codex-rs/codex-client/src/retry.rs)
+and [OpenAI Agents run guidance](https://openai.github.io/openai-agents-python/running_agents/)
+support explicit bounded recovery rather than treating activity as completion.
+[Anthropic tool handling](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
+and [stop reasons](https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons)
+reinforce complete tool-result pairing and distinct failure/truncation semantics.
+Opaque effectful agents are not automatically restarted to emulate these
+native capabilities.

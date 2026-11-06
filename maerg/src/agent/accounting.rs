@@ -2,6 +2,19 @@ use sav::{ModelRequest, ModelUsage};
 
 use crate::Result;
 
+/// Known usage is a lower bound; complete provenance is unavailable permanently
+/// once any generation attempt returns without trustworthy usage.
+#[derive(serde::Serialize)]
+pub(super) struct Accounting {
+    pub(super) returned_attempts: u64,
+    pub(super) known_attempts: u64,
+    pub(super) uncertain_attempts: u32,
+    pub(super) known_usage: Option<ModelUsage>,
+    pub(super) cumulative_usage: Option<ModelUsage>,
+    pub(super) provenance_complete: bool,
+    pub(super) charged_tokens: Option<u64>,
+}
+
 /// Known provider usage and conservative reservations are distinct.
 /// A failed/interrupted attempt, or an unavailable/zero usage report, consumes
 /// its full preflight estimate plus output reservation instead of becoming free.
@@ -9,6 +22,10 @@ use crate::Result;
 pub(super) struct TokenBudget {
     limit: Option<u64>,
     charged: u64,
+    known: Option<ModelUsage>,
+    returned_attempts: u64,
+    known_attempts: u64,
+    provenance_lost: bool,
     pub(super) uncertain_attempts: u32,
 }
 
@@ -25,6 +42,10 @@ impl TokenBudget {
         Self {
             limit: limit.map(|value| value as u64),
             charged: 0,
+            known: None,
+            returned_attempts: 0,
+            known_attempts: 0,
+            provenance_lost: false,
             uncertain_attempts: 0,
         }
     }
@@ -59,12 +80,22 @@ impl TokenBudget {
     }
 
     pub(super) fn finish(&mut self, reservation: u64, usage: Option<ModelUsage>) {
+        self.returned_attempts = self.returned_attempts.saturating_add(1);
         if let Some(usage) = usage {
             let total = usage
                 .input_tokens
                 .saturating_add(usage.output_tokens)
                 .max(usage.total_tokens);
+            let known = self.known.get_or_insert(ModelUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+            });
+            known.input_tokens = known.input_tokens.saturating_add(usage.input_tokens);
+            known.output_tokens = known.output_tokens.saturating_add(usage.output_tokens);
+            known.total_tokens = known.total_tokens.saturating_add(total);
             if total > 0 {
+                self.known_attempts = self.known_attempts.saturating_add(1);
                 if self.limit.is_some() {
                     self.charged = self
                         .charged
@@ -72,8 +103,38 @@ impl TokenBudget {
                         .saturating_add(total);
                 }
                 self.uncertain_attempts = self.uncertain_attempts.saturating_sub(1);
+            } else {
+                self.provenance_lost = true;
             }
+        } else {
+            self.provenance_lost = true;
         }
+    }
+
+    pub(super) fn failed(&mut self) {
+        self.returned_attempts = self.returned_attempts.saturating_add(1);
+        self.provenance_lost = true;
+    }
+
+    pub(super) fn accounting(&self) -> Accounting {
+        let provenance_complete = !self.provenance_lost && self.uncertain_attempts == 0;
+        Accounting {
+            returned_attempts: self.returned_attempts,
+            known_attempts: self.known_attempts,
+            uncertain_attempts: self.uncertain_attempts,
+            known_usage: self.known,
+            cumulative_usage: if provenance_complete {
+                self.known
+            } else {
+                None
+            },
+            provenance_complete,
+            charged_tokens: self.limit.map(|_| self.charged),
+        }
+    }
+
+    pub(super) fn known_usage(&self) -> Option<ModelUsage> {
+        self.known
     }
 
     pub(super) fn check(&self) -> Result<()> {

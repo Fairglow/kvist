@@ -197,6 +197,140 @@ mod tests {
     use sav::observation::JournalFollower;
 
     #[test]
+    fn cancelled_journaled_stream_event_is_not_presented() {
+        struct CancelBeforeEvent<'a> {
+            controls: Option<&'a sav::runtime::ControlMailbox>,
+        }
+        impl ModelTransport for CancelBeforeEvent<'_> {
+            fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
+                Err(sav::Error::ModelTransportCancelled)
+            }
+
+            fn stream(
+                &self,
+                _: &ModelRequest,
+                cancellation: &CancellationToken,
+                on_event: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+            ) -> sav::Result<ModelTurn> {
+                let guidance = self
+                    .controls
+                    .map(|controls| (controls, controls.steer("supplemental constraint").unwrap()));
+                if guidance.is_none() {
+                    cancellation.cancel();
+                }
+                let result = on_event(ModelStreamEvent::TextDelta("stale answer".into()));
+                if let Some((controls, id)) = guidance {
+                    controls.withdraw(id).unwrap();
+                }
+                result?;
+                Err(sav::Error::ModelTransportCancelled)
+            }
+
+            fn deadline(&self) -> Duration {
+                Duration::from_secs(1)
+            }
+        }
+
+        let fixture = tempfile::tempdir_in(".").unwrap();
+        let path = fixture.path().join("cancelled.events.jsonl");
+        let live = LiveRun::create(&path, "cancelled-event", "task", "model", &[]).unwrap();
+        let observed = ObservedTransport {
+            transport: CancelBeforeEvent { controls: None },
+            live: &live,
+            redactions: &[],
+        };
+        let cancellation = CancellationToken::new();
+        let budget = super::super::TurnBudget::new(Duration::from_secs(5));
+        let protected = super::super::generation::DetectedTransport {
+            transport: &observed,
+            live: Some(&live),
+            rejection: &std::cell::Cell::new(None),
+            inspection: super::super::generation::Inspection {
+                cancellation: &cancellation,
+                controls: None,
+                budget: &budget,
+            },
+        };
+        let request = ModelRequest {
+            model: "fixture".into(),
+            messages: vec![sav::ModelMessage::User("original task".into())],
+            tools: vec![],
+            tool_choice: sav::ToolChoice::None,
+            reasoning_effort: None,
+            output_schema: None,
+            max_output_tokens: Some(256),
+        };
+        let mut presented = 0;
+        let result = protected.stream(&request, &cancellation, &mut |_| {
+            presented += 1;
+            Ok(())
+        });
+        assert!(matches!(result, Err(sav::Error::ModelTransportCancelled)));
+        assert_eq!(
+            presented, 0,
+            "cancelled provisional output reached presentation"
+        );
+        live.finish("cancelled").unwrap();
+        let mut follower = JournalFollower::open(&path).unwrap();
+        let records = follower.poll().unwrap();
+        assert!(records.iter().any(|record| {
+            record.event["type"] == "text" && record.event["data"] == "stale answer"
+        }));
+        assert!(!records.iter().any(|record| {
+            matches!(
+                record.event["type"].as_str(),
+                Some("generation_repetition" | "generation_recovery")
+            )
+        }));
+        assert!(follower.is_finished());
+
+        let controls = sav::runtime::ControlMailbox::default();
+        controls.begin_run().unwrap();
+        let live = LiveRun::create(
+            &fixture.path().join("withdrawn.events.jsonl"),
+            "withdrawn-event",
+            "task",
+            "model",
+            &[],
+        )
+        .unwrap();
+        let observed = ObservedTransport {
+            transport: CancelBeforeEvent {
+                controls: Some(&controls),
+            },
+            live: &live,
+            redactions: &[],
+        };
+        let cancellation = CancellationToken::new();
+        let interrupted = std::sync::atomic::AtomicBool::new(false);
+        let protected = super::super::generation::DetectedTransport {
+            transport: &observed,
+            live: Some(&live),
+            rejection: &std::cell::Cell::new(None),
+            inspection: super::super::generation::Inspection {
+                cancellation: &cancellation,
+                controls: Some(super::super::generation::Controls {
+                    mailbox: &controls,
+                    interrupted: &interrupted,
+                }),
+                budget: &budget,
+            },
+        };
+        let mut presented = 0;
+        let result = protected.stream(&request, &cancellation, &mut |_| {
+            presented += 1;
+            Ok(())
+        });
+        assert!(matches!(result, Err(sav::Error::ModelTransportCancelled)));
+        assert_eq!(presented, 0);
+        assert!(!cancellation.is_cancelled());
+        assert!(!controls.has_pending());
+        assert!(interrupted.load(std::sync::atomic::Ordering::Relaxed));
+        live.finish("interrupted").unwrap();
+        controls.end_run().unwrap();
+    }
+
+    #[test]
     fn large_text_records_preserve_redacted_utf8_and_json_escaping_bounds() {
         let fixture = tempfile::tempdir().unwrap();
         let path = fixture.path().join("run.events.jsonl");

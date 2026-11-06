@@ -55,7 +55,7 @@ pub(super) const LIVE_PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 /// The provider's token usage is not known until the turn ends, so the running
 /// output estimate is derived from the characters streamed so far; the context
 /// figures come from the session's live context, which does not change mid-turn.
-/// `cumulative_output` carries output tokens from earlier turns so the live
+/// `cumulative_output` carries known output tokens from earlier attempts so the live
 /// path can report the whole-session average on the same basis as the post-turn
 /// figure (cumulative output over decode time).
 pub(super) struct LiveProgress<'a> {
@@ -67,6 +67,40 @@ pub(super) struct LiveProgress<'a> {
     pub(super) cumulative_total: u64,
     pub(super) cumulative_output: u64,
     pub(super) decode_seconds: f64,
+}
+
+#[derive(Default)]
+pub(super) struct AttemptUsage {
+    pub(super) input: u64,
+    pub(super) output: u64,
+    pub(super) total: u64,
+    pub(super) incomplete: bool,
+    pub(super) dirty: bool,
+}
+
+impl AttemptUsage {
+    pub(super) fn observe(&mut self, usage: Option<ModelUsage>) {
+        self.dirty = true;
+        if let Some(usage) = usage {
+            self.input = self.input.saturating_add(usage.input_tokens);
+            self.output = self.output.saturating_add(usage.output_tokens);
+            self.total = self.total.saturating_add(
+                usage
+                    .total_tokens
+                    .max(usage.input_tokens.saturating_add(usage.output_tokens)),
+            );
+        } else {
+            self.incomplete = true;
+        }
+    }
+
+    pub(super) fn provenance(&self) -> TokenAccounting {
+        if self.incomplete {
+            TokenAccounting::Unavailable
+        } else {
+            TokenAccounting::Provider
+        }
+    }
 }
 
 /// Emits a single live progress update while a turn streams, so the stats bar
@@ -155,12 +189,12 @@ impl DecodeClock {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TokenAccounting {
-    /// Complete provider usage for accepted turns.
+    /// Complete provider usage across all dispatched model attempts.
     Provider,
     /// Provisional streamed-output estimate, not provider usage.
     Estimated,
     #[default]
-    /// One or more accepted turns did not report provider usage.
+    /// One or more dispatched attempts did not report provider usage.
     Unavailable,
 }
 

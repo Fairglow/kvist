@@ -27,6 +27,9 @@ use skott::{
     ToolPolicy, ToolRegistry,
 };
 
+#[path = "loop_integration/generation.rs"]
+mod generation;
+
 /// A transport that yields a scripted sequence of turns, streaming each one's
 /// reasoning, text, and tool intents before returning the assembled turn.
 struct ScriptedTransport {
@@ -635,13 +638,21 @@ fn context_compacts_across_prompts_but_the_record_keeps_everything() {
             "shell",
             json!({ "command": "echo first task output" }),
         ),
-        answer_turn(&"finished first ".repeat(100)),
+        answer_turn(
+            &(0..100)
+                .map(|n| format!("finished first{n} "))
+                .collect::<String>(),
+        ),
         tool_turn(
             "working on the second task and reporting back now",
             "shell",
             json!({ "command": "echo second task output" }),
         ),
-        answer_turn(&"finished second ".repeat(100)),
+        answer_turn(
+            &(0..100)
+                .map(|n| format!("finished second{n} "))
+                .collect::<String>(),
+        ),
         tool_turn(
             "working on the third task and reporting back now",
             "shell",

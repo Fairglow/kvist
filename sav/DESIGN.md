@@ -14,14 +14,33 @@ suffix comparisons. Three substantial repeated periods are strong evidence;
 short phrases need additional repetitions. Bound token length/history and
 candidate work, and retain structural distinctions rather than deleting code
 or numbers. Inspect before presentation and before accepting unary results. Retain at most
-2,048 word fingerprints per channel and at most 256 characters of one word.
+2,048 word fingerprints per channel and at most eight prefix characters of one word.
 Inspect periods up to 512 words; substantial periods (50+) require three
 copies, shorter periods require at least six and 48 total words. Near matches
 require at least 94 percent token identity and sufficient token diversity.
+Before enlarging a length-limited generation, two exact substantial prose
+copies are enough for a conservative repetition warning and bounded correction;
+this terminal-only rule does not apply to structured output or near matches.
 Apply near matching only to prose, not fenced code, quoted/list/table/heading
 structure; exact matching still inspects structured content. Preserve numeric
-distinctions. Inspect on a fixed word cadence plus terminal flush, independent
+distinctions: changed numeric-bearing words are ineligible for near matching.
+Keep bounded quote/inline-code, indentation and fence-delimiter state across
+lines; an internal shorter fence cannot end a longer code fence, and a closing
+fence line must contain only the marker and whitespace. Inspect on an eight-word
+cadence plus terminal flush, independent
 of chunk boundaries. Bound near candidates to 16 per inspection.
+Terminal near inspection spreads disjoint anchors so cosmetic changes at the
+three fast streaming anchors do not defeat the final check. Poll a host control
+predicate at most every 256 Unicode scalars, including complete/unary fallback
+inspection; latch interruption and recheck host stopping causes before
+presentation or acceptance. Known usage increases a conservative token debit
+when larger than the reservation; unknown or smaller usage cannot refund it.
+Also retain at most 2,048 Unicode scalars of the current unfinished word:
+long unbroken character loops require at least 1,024 scalars and strong exact
+periodicity. This avoids waiting for whitespace/resource exhaustion without
+retaining unbounded tokens. Character checks exclude recognized quoted/code/data
+payloads, including unbroken bracketed JSON and XML-like text; arbitrary text
+cannot be semantically classified without a deliberate host exception.
 Bound action/outcome history to 128 proposals and cycles to 32 actions.
 These are tested heuristic windows, not universal semantic detection.
 
@@ -30,11 +49,22 @@ clears streaks but never replenishes spent corrections; only a new human prompt
 does. Record
 correction before adding bounded host-authored guidance. A batch produces one
 intervention, complete skipped-result pairing and one response opportunity.
+Reconcile every returned attempt before control precedence; retain a completed
+turn record even when guidance supersedes it. Accumulate usage once per attempt,
+including length retries, and latch unavailable provenance for unknown failures.
+After publishing a correction, append it before the next iteration delivers
+newly arrived human guidance. Do not charge an undelivered correction merely
+because guidance arrived during publication.
 Track proposals even when rendering/policy rejects them. Observe typed status
 and bounded content fingerprints, not claims of filesystem mutation from stdout.
 State revisions and new observation ranges permit useful repeated actions;
 unchanged observations and repeated failure/cycle signatures remain evidence
 of stagnation. No-op success cannot clear that evidence.
+
+Generation detection defaults on, with an explicit host-owned exception for
+intentional repetition. This exception cannot disable tool repeat protection,
+authority, recording or budgets. Operator-facing configuration follows in the
+operational phase rather than interpreting model text as an opt-out.
 
 Latch the first observed stopping cause before fallible/slow cleanup. A
 deadline expiring during cancelled-run cleanup cannot relabel earlier user

@@ -2,6 +2,274 @@ use super::*;
 use std::os::unix::{fs::symlink, process::ExitStatusExt};
 
 #[test]
+fn generation_completed_stream_repetition_retains_known_usage() {
+    assert_completed_repetitive_stream(false);
+}
+
+#[test]
+fn generation_completed_stream_repetition_keeps_first_cause() {
+    assert_completed_repetitive_stream(true);
+}
+
+fn assert_completed_repetitive_stream(later_callback: bool) {
+    struct CompletedDespiteInterruption<'a> {
+        calls: &'a std::sync::atomic::AtomicUsize,
+        later_callback: bool,
+    }
+    impl ModelTransport for CompletedDespiteInterruption<'_> {
+        fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
+            panic!("streaming fixture cannot use unary completion");
+        }
+
+        fn stream(
+            &self,
+            _: &ModelRequest,
+            cancellation: &CancellationToken,
+            on_event: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+        ) -> sav::Result<ModelTurn> {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let passage = (0..100)
+                .map(|index| format!("investigationword{index} "))
+                .collect::<String>();
+            assert!(on_event(ModelStreamEvent::TextDelta(passage.repeat(6))).is_err());
+            assert!(cancellation.is_cancelled());
+            if self.later_callback {
+                assert!(
+                    on_event(ModelStreamEvent::TextDelta(
+                        "A different nonrepetitive assembled answer.".into()
+                    ))
+                    .is_err()
+                );
+            }
+            let mut turn = effect_turn();
+            turn.text = "A different nonrepetitive assembled answer.".into();
+            turn.usage = Some(sav::ModelUsage {
+                input_tokens: 10000,
+                output_tokens: 100,
+                total_tokens: 10100,
+            });
+            Ok(turn)
+        }
+
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(5)
+        }
+    }
+
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let path = dir.path().join("completed-repetition.events.jsonl");
+    let live = LiveRun::create(&path, "completed-repetition", "task", "fixture", &[]).unwrap();
+    let parent = CancellationToken::new();
+    let controls = sav::runtime::ControlMailbox::default();
+    controls.begin_run().unwrap();
+    let operation = sav::runtime::Operation::start(&parent, &controls).unwrap();
+    let budget = TurnBudget::new(Duration::from_secs(5));
+    let request = ModelRequest {
+        model: "fixture".into(),
+        messages: vec![sav::ModelMessage::User("approved goal ".repeat(1024))],
+        tools: vec![],
+        tool_choice: sav::ToolChoice::None,
+        reasoning_effort: None,
+        output_schema: None,
+        max_output_tokens: Some(256),
+    };
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let mut attempts = 0;
+    let mut tokens = TokenBudget::new(Some(11000));
+    let result = complete_turn_counted(
+        || {
+            Ok(live::ObservedTransport {
+                transport: CompletedDespiteInterruption {
+                    calls: &calls,
+                    later_callback,
+                },
+                live: &live,
+                redactions: &[],
+            })
+        },
+        &request,
+        true,
+        &[],
+        &mut attempts,
+        &ModelRetry {
+            policy: sav::runtime::RetryPolicy::default(),
+            budget: &budget,
+            cancellation: operation.token(),
+            controls: None,
+            live: Some(&live),
+            phase: "inference",
+            model: "fixture",
+            endpoint: "fixture",
+            redactions: &[],
+        },
+        &mut tokens,
+    );
+    assert!(
+        matches!(
+            result,
+            Err(KvistError::Sav(ModelError::RepetitiveGeneration { report }))
+                if report.channel == sav::loop_detection::RepetitionChannel::Answer
+                    && report.period == 100
+        ),
+        "the first detected repetition must reject the completed proposal: {result:?}"
+    );
+    assert_eq!(
+        tokens.known_usage().map(|usage| usage.total_tokens),
+        Some(10100),
+        "successful underlying stream usage was lost during repetition conversion"
+    );
+    assert!(tokens.preflight(&request).is_err());
+    assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+    assert_eq!(attempts, 1);
+    assert!(operation.token().is_cancelled());
+    assert!(!parent.is_cancelled());
+    assert!(!dir.path().join("src").exists());
+    live.finish("rejected").unwrap();
+    let mut follower = sav::observation::JournalFollower::open(&path).unwrap();
+    let records = follower.poll().unwrap();
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record.event["type"] == "generation_repetition")
+            .count(),
+        1
+    );
+    let repetition = records
+        .iter()
+        .position(|record| record.event["type"] == "generation_repetition")
+        .unwrap();
+    let accounting = records
+        .iter()
+        .position(|record| record.event["type"] == "model_accounting")
+        .unwrap();
+    assert!(repetition < accounting);
+    assert_eq!(
+        records[repetition].event["data"]["proposals_executed"],
+        false
+    );
+    let data = &records[accounting].event["data"];
+    assert_eq!(data["returned_attempts"], 1);
+    assert_eq!(data["known_attempts"], 1);
+    assert_eq!(data["uncertain_attempts"], 0);
+    assert_eq!(data["provenance_complete"], true);
+    assert_eq!(data["charged_tokens"], 10100);
+    assert_eq!(data["cumulative_usage"]["input_tokens"], 10000);
+    assert_eq!(data["cumulative_usage"]["output_tokens"], 100);
+    assert_eq!(data["cumulative_usage"]["total_tokens"], 10100);
+    assert!(records.iter().any(|record| {
+        record.event["type"] == "model_result"
+            && record.event["data"]["tool_count"] == 2
+            && record.event["data"]["usage"]["total_tokens"] == 10100
+    }));
+    assert!(!records.iter().any(|record| {
+        matches!(
+            record.event["type"].as_str(),
+            Some("model_retry" | "broker_decision" | "tool_dispatch")
+        )
+    }));
+    assert!(follower.is_finished());
+    drop(operation);
+    controls.end_run().unwrap();
+}
+
+#[test]
+fn generation_completed_usage_reconciles_before_early_steering_return() {
+    struct ReturnedWithGuidance<'a>(&'a sav::runtime::ControlMailbox);
+    impl ModelTransport for ReturnedWithGuidance<'_> {
+        fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
+            self.0.steer("new constraint").unwrap();
+            let mut turn = effect_turn();
+            turn.tool_intents.clear();
+            turn.finish_reason = sav::FinishReason::Stop;
+            turn.usage = Some(sav::ModelUsage {
+                input_tokens: 10000,
+                output_tokens: 100,
+                total_tokens: 10100,
+            });
+            Ok(turn)
+        }
+        fn stream(
+            &self,
+            request: &ModelRequest,
+            cancellation: &CancellationToken,
+            _: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+        ) -> sav::Result<ModelTurn> {
+            self.complete(request, cancellation)
+        }
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(5)
+        }
+    }
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let live = LiveRun::create(
+        &dir.path().join("usage.events.jsonl"),
+        "steered-usage",
+        "task",
+        "fixture",
+        &[],
+    )
+    .unwrap();
+    let controls = sav::runtime::ControlMailbox::default();
+    controls.begin_run().unwrap();
+    let cancellation = CancellationToken::new();
+    let interrupted = std::sync::atomic::AtomicBool::new(false);
+    let budget = TurnBudget::new(Duration::from_secs(5));
+    let request = ModelRequest {
+        model: "fixture".into(),
+        messages: vec![sav::ModelMessage::User("approved goal ".repeat(1024))],
+        tools: vec![],
+        tool_choice: sav::ToolChoice::None,
+        reasoning_effort: None,
+        output_schema: None,
+        max_output_tokens: Some(256),
+    };
+    let mut tokens = TokenBudget::new(Some(11000));
+    let result = complete_turn_counted(
+        || Ok(ReturnedWithGuidance(&controls)),
+        &request,
+        false,
+        &[],
+        &mut 0,
+        &ModelRetry {
+            policy: sav::runtime::RetryPolicy::default(),
+            budget: &budget,
+            cancellation: &cancellation,
+            controls: Some(generation::Controls {
+                mailbox: &controls,
+                interrupted: &interrupted,
+            }),
+            live: Some(&live),
+            phase: "inference",
+            model: "fixture",
+            endpoint: "fixture",
+            redactions: &[],
+        },
+        &mut tokens,
+    );
+    assert!(matches!(
+        result,
+        Err(KvistError::Sav(ModelError::ModelTransportCancelled))
+    ));
+    assert_eq!(tokens.known_usage().unwrap().input_tokens, 10000);
+    assert_eq!(tokens.known_usage().unwrap().output_tokens, 100);
+    let accounting = tokens.accounting();
+    assert_eq!(accounting.returned_attempts, 1);
+    assert_eq!(accounting.known_attempts, 1);
+    assert_eq!(accounting.charged_tokens, Some(10100));
+    assert_eq!(accounting.cumulative_usage.unwrap().total_tokens, 10100);
+    assert!(accounting.provenance_complete);
+    assert!(
+        tokens.preflight(&request).is_err(),
+        "known completed usage was refunded"
+    );
+    assert!(interrupted.load(std::sync::atomic::Ordering::Relaxed));
+    assert!(!cancellation.is_cancelled());
+    controls.end_run().unwrap();
+    live.finish("interrupted").unwrap();
+}
+
+#[test]
 fn host_turn_checks_cancellation_and_expiry_before_transport_construction() {
     let dir = tempfile::tempdir().expect("workspace");
     let profile =
@@ -50,6 +318,7 @@ fn host_turn_checks_cancellation_and_expiry_before_transport_construction() {
                 &live,
                 &mut 0,
                 &mut TokenBudget::new(None),
+                None,
             )
             .expect_err("no transport work after cancellation or expiry");
             assert!(
@@ -327,6 +596,8 @@ fn partial_effects_and_usage_survive_cancellation_and_later_dispatch_failure() {
         let log = root.join("outcome.log");
         let mut file = fs::File::create(&log).expect("log");
         let redactions = vec!["private-value".into(), "write_file".into()];
+        let mut tokens = TokenBudget::new(None);
+        tokens.finish(0, retained.turn.usage);
         let result = record_turn_outcome(
             &profile,
             &request,
@@ -336,7 +607,7 @@ fn partial_effects_and_usage_survive_cancellation_and_later_dispatch_failure() {
             &redactions,
             &[retained],
             Some(&TurnFailure::from_kvist_error(&error)),
-            0,
+            &tokens,
         )
         .expect("retain evidence");
         assert!(!result.success);
@@ -418,6 +689,7 @@ fn outcome_reports_known_cumulative_usage_without_treating_missing_reports_as_ze
     let root = dir.path().canonicalize().expect("absolute workspace");
     fs::create_dir_all(root.join(".kvist/runs")).expect("runs");
     let mut turns = Vec::new();
+    let mut tokens = TokenBudget::new(None);
     for usage in [
         Some(sav::ModelUsage {
             input_tokens: 11,
@@ -436,6 +708,7 @@ fn outcome_reports_known_cumulative_usage_without_treating_missing_reports_as_ze
             total_tokens: 18,
         }),
     ] {
+        tokens.finish(0, usage);
         let mut turn = effect_turn();
         turn.usage = usage;
         turn.tool_intents.clear();
@@ -454,6 +727,7 @@ fn outcome_reports_known_cumulative_usage_without_treating_missing_reports_as_ze
     let request = tests::test_execution_request(&root);
     let path = root.join("usage.log");
     let mut log = fs::File::create(&path).expect("log");
+    tokens.uncertain_attempts = 2;
     let result = record_turn_outcome(
         &profile,
         &request,
@@ -463,7 +737,7 @@ fn outcome_reports_known_cumulative_usage_without_treating_missing_reports_as_ze
         &[],
         &turns,
         None,
-        2,
+        &tokens,
     )
     .expect("recorded");
     assert_eq!(result.tokens_input, Some(24));

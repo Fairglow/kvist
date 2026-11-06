@@ -7,6 +7,12 @@ pub enum Error {
     #[doc(hidden)]
     #[error("generation interrupted for guidance")]
     Steering { attempt: u32, reserve: u32 },
+    /// A repetitive provider proposal was discarded before effects.
+    #[error("repetitive generation detected: {report}")]
+    RepetitiveGeneration {
+        report: crate::loop_detection::RepetitionReport,
+        usage: Option<crate::ModelUsage>,
+    },
     /// Invalid runtime configuration.
     #[error("invalid configuration: {reason}")]
     Config {
@@ -80,6 +86,12 @@ impl Error {
 
 impl From<crate::Error> for Error {
     fn from(error: crate::Error) -> Self {
+        if let crate::Error::RepetitiveGeneration { report } = error {
+            return Self::RepetitiveGeneration {
+                report,
+                usage: None,
+            };
+        }
         Self::ModelTransport {
             model: None,
             reason: error.to_string(),

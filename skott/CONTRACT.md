@@ -102,6 +102,9 @@ Sav mechanisms. Progress clears streaks but cannot replenish corrections;
 guidance/compaction retain spent allowance. A stalled prompt fails explicitly
 without an invented answer. Detection has Sav's bounded heuristic windows,
 not universal semantic guarantees.
+`Skott::with_generation_loop_detection(false)` provides the same explicit
+host-owned intentional-output exception as Sav without changing tool protection
+or budgets. Native detection otherwise defaults on.
 Repeatable file/discovery tools remain observable but are not exempt from
 unchanged-result detection. Fresh native page metadata and digest-bound
 mutations provide progress evidence; arbitrary shell output never proves a

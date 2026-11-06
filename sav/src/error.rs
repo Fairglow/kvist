@@ -71,6 +71,12 @@ pub enum Error {
     #[error("model transport was cancelled")]
     ModelTransportCancelled,
 
+    /// Strong decoded repetition; only the provider operation was interrupted.
+    #[error("repetitive generation detected: {report}")]
+    RepetitiveGeneration {
+        report: crate::loop_detection::RepetitionReport,
+    },
+
     /// The overall model request deadline elapsed.
     #[error("model transport timed out")]
     ModelTransportTimedOut,

@@ -755,7 +755,7 @@ mod tests {
         ) -> sav::Result<ModelTurn> {
             for index in 1..=1000 {
                 self.0.store(index, Ordering::SeqCst);
-                emit(ModelStreamEvent::TextDelta("provisional".into()))?;
+                emit(ModelStreamEvent::TextDelta(format!("provisional{index} ")))?;
             }
             Err(AgentError::ModelTransportCancelled)
         }

@@ -122,6 +122,7 @@ pub struct Skott {
     pub max_turns: Option<u32>,
     pub retry: RetryPolicy,
     pub limits: RunLimits,
+    generation_loop_detection: bool,
 }
 impl Default for Skott {
     fn default() -> Self {
@@ -134,7 +135,13 @@ impl Skott {
             max_turns: max_turns.into(),
             retry,
             limits: RunLimits::default(),
+            generation_loop_detection: true,
         }
+    }
+    /// Host-owned exception for intentional repetition; effects remain protected.
+    pub fn with_generation_loop_detection(mut self, enabled: bool) -> Self {
+        self.generation_loop_detection = enabled;
+        self
     }
     pub fn with_limits(mut self, limits: RunLimits) -> Result<Self> {
         self.limits = limits.validate()?;
@@ -176,7 +183,8 @@ impl Skott {
         controls: &ControlMailbox,
     ) -> Result<RunSummary> {
         let runner = sav::runtime::NativeRuntime::with_retry(self.max_turns, self.retry)
-            .with_limits(self.limits)?;
+            .with_limits(self.limits)?
+            .with_generation_loop_detection(self.generation_loop_detection);
         let mut recorder = recorder.map(RecordBridge);
         let shared_recorder = recorder
             .as_mut()

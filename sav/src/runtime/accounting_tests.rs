@@ -206,6 +206,7 @@ fn measured_decode(provider: &TimedProvider, sink: &Sink, backoff: Duration) -> 
                 decode_seconds: 0.0,
             },
             &mut 0.0,
+            &mut AttemptUsage::default(),
             &budget,
             &mut tokens,
             &mut None,
