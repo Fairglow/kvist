@@ -283,8 +283,75 @@ fn poisoned() -> Error {
 
 #[cfg(test)]
 mod tests {
+    use super::super::default_resources;
     use super::*;
     use sav::CancellationToken;
+
+    #[test]
+    fn workspace_preflight_can_finish_after_the_former_30_second_limit() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".generated/deep")).unwrap();
+        let token = CancellationToken::new();
+        let preflight = Preflight {
+            started: Instant::now() - Duration::from_secs(45),
+            ..Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope")
+        };
+        let seen = Mutex::new(BTreeSet::new());
+        check_writable_scope_with(root.path(), &preflight, &|path| {
+            seen.lock().unwrap().insert(path.to_owned());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn workspace_preflight_after_30_seconds_still_detects_new_hidden_escapes() {
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join("work");
+        let hidden = work.join(".kvist/deep");
+        std::fs::create_dir_all(&hidden).unwrap();
+        let token = CancellationToken::new();
+        let preflight = Preflight {
+            started: Instant::now() - Duration::from_secs(45),
+            ..Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope")
+        };
+        check_writable_scope(&work, &preflight).unwrap();
+        std::os::unix::fs::symlink(root.path(), hidden.join("escape")).unwrap();
+        let error = check_writable_scope(&work, &preflight).unwrap_err();
+        assert!(
+            error.to_string().contains("escapes the writable scope"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn preflight_deadline_is_shared_across_stages_and_capped_at_120_seconds() {
+        let token = CancellationToken::new();
+        for (requested_ms, limit_ms) in [(500, 500), (120_000, 120_000), (u64::MAX, 120_000)] {
+            let preflight = Preflight::new(&token, requested_ms);
+            let started = preflight.started;
+            let preflight = preflight
+                .stage("workspace_scope")
+                .stage("request_validation");
+            assert_eq!(preflight.started, started);
+            let deadline = started + Duration::from_millis(limit_ms);
+            preflight
+                .check_at(deadline - Duration::from_nanos(1))
+                .unwrap();
+            let error = preflight.check_at(deadline).unwrap_err();
+            for expected in [
+                format!("limit_ms={limit_ms}"),
+                "stage=request_validation".into(),
+                format!("elapsed_ms={limit_ms}"),
+                "stage_elapsed_ms=".into(),
+            ] {
+                assert!(error.to_string().contains(&expected), "{error}");
+            }
+        }
+        let zero = Preflight::new(&token, 0);
+        assert!(zero.check_at(zero.started).is_err());
+    }
 
     #[test]
     fn directory_io_errors_are_not_omitted() {
@@ -292,7 +359,8 @@ mod tests {
         let gone = root.path().join("gone");
         std::fs::create_dir(&gone).unwrap();
         let token = CancellationToken::new();
-        let preflight = Preflight::new(&token).stage("workspace_scope");
+        let preflight =
+            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
         let error = check_writable_scope_with(root.path(), &preflight, &|path| {
             if path == gone {
                 std::fs::remove_dir(path).unwrap();
@@ -314,7 +382,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("child")).unwrap();
         let token = CancellationToken::new();
-        let preflight = Preflight::new(&token).stage("workspace_scope");
+        let preflight =
+            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
         let error = check_writable_scope_with(root.path(), &preflight, &|path| {
             assert_eq!(path, root.path(), "injected inspection worker panic");
             Ok(())
@@ -327,7 +396,8 @@ mod tests {
     fn cancellation_during_inspection_stops_owned_workers() {
         let root = tempfile::tempdir().unwrap();
         let token = CancellationToken::new();
-        let preflight = Preflight::new(&token).stage("workspace_scope");
+        let preflight =
+            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
         let error = check_writable_scope_with(root.path(), &preflight, &|_| {
             token.cancel();
             Ok(())
@@ -359,7 +429,8 @@ mod tests {
             std::fs::create_dir(root.path().join(index.to_string())).unwrap();
         }
         let token = CancellationToken::new();
-        let preflight = Preflight::new(&token).stage("workspace_scope");
+        let preflight =
+            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
         let active = AtomicUsize::new(0);
         let peak = AtomicUsize::new(0);
         let visits = AtomicUsize::new(0);

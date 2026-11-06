@@ -2,6 +2,38 @@
 
 # Skott — Requirements
 
+## RUN-REQ-OFFLINE-DEPENDENCIES
+
+`--vendor` MUST provision existing locked Rust dependencies through the common
+dependency library without model configuration or Kvist project artifacts.
+`--check` MUST be offline/read-only; `--offline` MUST select cached-only Cargo
+provisioning. Host authority, network behavior, scope and recovery MUST be
+disclosed before effects; no model tool or automatic startup download is added.
+Unsupported languages MUST fail explicitly. Future language support needs
+shared provisioning and actual tested offline environment wiring, not just
+language-tool discovery.
+
+Rust startup MUST validate available external dependencies against the locked
+catalogue in its private immutable snapshot and surface missing/corrupt material
+with the exact Skott provisioning command. Safe generated source configuration
+MUST support locked registry/Git replacements without trusting host paths.
+Existing dependency-free/local builds, sandbox masking, locked Cargo, no host
+credentials, no auto-installation and toolchain selection MUST remain intact.
+Provisioned dependency refresh requires explicit restart, without prompt replay.
+Tests MUST cover real CLI provisioning, checks with no effects, offline native
+compilation/tests, stale/malformed inputs and failures.
+Rust preparation timeout diagnostics MUST state the actual 180-second budget,
+separately from per-tool preflight and execution. Native Rust verification MUST
+exercise installed compiler/target selection, build/run, unit/integration/doc
+tests, formatting, Clippy, documentation, locked registry/Git dependencies and
+the existing isolation assertions; availability is not a promise of arbitrary
+system libraries, credentials or out-of-workspace path dependencies.
+Vendor snapshot files MUST retain their enumeration-time identity/size through
+copying, so concurrent file growth cannot bypass the 1 GiB aggregate bound.
+
+This human-requested Rust consolidation has a local advisory exception while
+receipts are unavailable; observations/reviews are not acceptance.
+
 ## RUN-REQ-STANDALONE-BOOTSTRAP
 
 Skott MUST run against ordinary directories without Kvist intent artifacts.
@@ -251,7 +283,7 @@ remain separate evidence, not acceptance or implementer certification.
 Sandbox request preparation MUST inspect the complete writable scope, including
 hidden and generated directories, without serializing independent directory I/O.
 Concurrency MUST remain bounded and preserve aggregate entry, depth and retained
-path quotas, link confinement, cancellation, and the existing preflight deadline.
+path quotas, link confinement, cancellation, and a bounded preflight deadline.
 Every inspection worker MUST finish before request construction returns; an I/O,
 worker or scheduling failure MUST prevent dispatch rather than omit coverage.
 Tests MUST demonstrate overlapping directory inspection, complete link checks,
@@ -264,6 +296,28 @@ environment values or tool output. The real repository sandbox trial remains
 non-ignored and retains its actual checkout, isolation and Cargo assertions.
 This repair does not claim that a finite wall-time guard can tolerate arbitrary
 external CPU/storage contention. No new intent acceptance is performed.
+
+### RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY
+
+The first tool request MUST NOT reject a safely progressing workspace scan
+solely because preparation exceeded an unrelated 30-second allowance.
+Preparation MUST use the requested tool wall-time budget, capped at 120 seconds,
+across all preflight stages and workers. Smaller requested budgets MUST remain
+effective. Cancellation, full hidden/generated-directory inspection, aggregate
+quotas, fail-before-dispatch behavior and owned worker cleanup MUST be preserved;
+no cache-based exemption, automatic replay or host fallback is permitted.
+
+Timeout diagnostics MUST state the effective budget, active stage, total elapsed
+time and stage elapsed time. Tests MUST cover preparation beyond 30 seconds,
+the exact effective deadline, smaller tool budgets and fresh detection of an
+escaping link. The actual checkout MUST exercise the reported initial Git
+inspection and a subsequent native root listing in the enforced sandbox.
+Warm-cache success MUST NOT be represented as proof of cold-cache performance
+or immunity to arbitrary filesystem contention.
+
+This human-requested reliability repair has an explicit local advisory exception
+while review receipts remain unavailable. Independent observations and comparison
+are not acceptance or compliance certification.
 
 ## RUN-REQ-HISTORY-NAVIGATION
 

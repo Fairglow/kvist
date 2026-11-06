@@ -365,6 +365,10 @@ of untrusted script fragments.
 
 The Cargo wrapper's vendored-source path is `/rust/vendor`; callers must expose
 their validated read-only registry there, outside writable workspace mounts.
+Cargo/Clippy additionally use `/rust/runtime/vendor-config.toml` when the caller
+stages that fixed file. The caller must validate it as source-replacement-only
+configuration, retarget its directories to `/rust/vendor`, and mount it
+read-only. Absence preserves the existing crates.io-only resolver.
 
 Optional host-owned `KVIST_CARGO_WORKDIR` selects the Cargo build-view directory;
 `KVIST_COMPONENT_BUILD_DIR` maps source argument paths in that view back to

@@ -10,6 +10,50 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:cd06c5851d83e39b324a929430af4d57a7549670f1ca827eb389c8dd2827e5df", "observed_revision": "sha256:750c2db2e20befb9a1c83d5ce99589e936d109e9ba214362db4b469f4b0e3691"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:390728e5867a1a299a56bec93b20373262c46d91339a42eb7f8981570e05c259", "observed_revision": "sha256:eb53c51c0021c3e295ea3764cab6a3c9f25338a4bcac7368c16f1e13b79b0e9b"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:7417b300a66353d6feef525d90339a0701247dffc56b790d9115ca8cc9fc74b2", "observed_revision": "sha256:49177cdcef45bf6d9a8fe1cd49cdad14d5a6e1d663695112ed649686e61ecfd0"}]
 tasks:
+  - id: "offline-source-config-write-tests"
+    title: "write_tests: fixed offline source resolver"
+    description: "SAV-REQ-OFFLINE-SOURCE-CONFIG: generated Cargo and Clippy wrapper flags and consumer native Git build."
+    context: "Rust-first shared vendoring must support locked Git source replacements."
+    purpose: "Verify wrappers consume only a fixed caller-controlled resolver."
+    kind: test
+    requirements: ["REQUIREMENTS.md#SAV-REQ-OFFLINE-SOURCE-CONFIG"]
+    depends_on: []
+    status: completed
+    expected_outcome: "Resolver regressions fail before wrapper changes."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T20:10:03Z", completed_at: "2026-11-06T20:10:03Z"}
+  - id: "offline-source-config-implement-code"
+    title: "implement_code: fixed offline source resolver"
+    description: "Conditionally consume only the fixed caller-staged read-only source config."
+    context: "Caller validates source-only TOML and owns read-only grants."
+    purpose: "Share literal wrapper behavior without adding runtime authority."
+    kind: implementation
+    requirements: ["REQUIREMENTS.md#SAV-REQ-OFFLINE-SOURCE-CONFIG"]
+    depends_on: ["offline-source-config-write-tests"]
+    status: completed
+    expected_outcome: "Git source works offline and absent-config behavior remains unchanged."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+  - id: "offline-source-config-security-audit"
+    title: "security_audit: fixed offline source resolver"
+    description: "Independent examination of literal argv and caller ownership boundaries."
+    context: "Model-supplied paths must not select source configuration. Final clean-slate source-only wrapper observations and caller-ownership limitations are retained in IMPL."
+    purpose: "Independently inspect literal argv and host authority boundaries."
+    kind: security-audit
+    requirements: ["REQUIREMENTS.md#SAV-REQ-OFFLINE-SOURCE-CONFIG"]
+    depends_on: ["offline-source-config-implement-code"]
+    status: completed
+    expected_outcome: "Record scoped independent findings."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+  - id: "offline-source-config-compliance-review"
+    title: "compliance_review: fixed offline source resolver"
+    description: "Source-only observation with separate source-blind intent comparison."
+    context: "Separate rust-source-blind-comparator found scoped correspondence for the fixed resolver and caller ownership, retaining finite evidence/backend limits in IMPL. Independent observations and review completion are not intent acceptance."
+    purpose: "Preserve discrepancies and evidence limitations."
+    kind: compliance-review
+    requirements: ["REQUIREMENTS.md#SAV-REQ-OFFLINE-SOURCE-CONFIG"]
+    depends_on: ["offline-source-config-security-audit"]
+    status: completed
+    expected_outcome: "Record evidence and limitations without implementer certification."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:37:01Z", completed_at: "2026-11-06T23:37:01Z"}
   - id: "resilience-p1-write-tests"
     title: "write_tests: resilience phase 1"
     description: "Write and execute regressions before production changes. Scope: honest outcomes, fresh reads, refused proposals and repair propagation."

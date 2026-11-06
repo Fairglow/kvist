@@ -2,6 +2,38 @@
 
 # Kvist Maerg Requirements
 
+## REQ-SHARED-OFFLINE-DEPENDENCIES
+
+Rust catalogue/provisioning/readiness MUST consume the common dependency
+library, preserving frontend error domains and protected-task authority.
+Explicit host provisioning and configured sandbox acquisition MUST remain
+distinct: failure of configured acquisition MUST NOT authorize host fallback.
+Non-Rust behavior remains unchanged until its backend is deliberately
+consolidated and verified. This human-requested extraction has a local advisory
+exception while receipts are unavailable; it is not acceptance.
+
+Configured Rust acquisition MUST receive a bounded, self-contained snapshot of
+the workspace and declared in-project path-dependency manifests, with empty
+target placeholders sufficient for Cargo fetch. It MUST NOT copy host Cargo
+configuration, credentials, component intent or implementation content, follow
+links, broaden grants, build code or silently fall back to host acquisition.
+Existing workspace/path-source discovery and bounds MUST be reused.
+Approved alternate registry definitions MAY be generated from acquisition
+policy, not inherited host configuration. Changed acquisition lock bytes MUST
+fail before repack/publication. Native tests MUST exercise locked workspace
+fetch with the installed enforcement boundary without downloading packages.
+
+Protected readiness and Rust runtime preparation MUST honor shared full
+readiness and publication/operation fences. Tests MUST cover interrupted
+same-lock publication, corrupt files and unchanged protected fulfillment
+refusal. These human-requested repairs use the existing local advisory exception.
+Configured acquisition MUST reject unsupported Git transports and unapproved
+repository/revision bindings in local manifests and Cargo.lock before fetching.
+Only exact approved canonical HTTPS Git repositories with immutable revisions
+are supported there; native Git/SSH transports must not bypass proxy policy.
+Standalone child authoring without root Cargo.lock or managed Rust state remains
+supported with the existing empty offline registry.
+
 ## Shared registry configuration acceptance (ADR 0015)
 
 Setup MUST persist shared profile references rather than copied commands.

@@ -1,6 +1,209 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Final native Rust support observations - 2026-11-06
+
+`final-rust-impl-observer` independently read source/test assertions without
+intent, queues, prior records/reviews or history and executed no tests.
+Installed-only preparation exposes the selected and additional installations
+read-only with private rustup state, explicit selection, offline/locked Cargo,
+validated source replacement and disabled automatic installation. Vendor
+material is copied outside the writable checkout and checked against managed
+lock/manifest/resolver controls; running sessions retain this immutable copy.
+Actual Rust startup timeout diagnostics now state its 180-second budget,
+separately from request preflight.
+
+Native assertions cover all installed compiler/target selections, default
+switching, linking/execution, unit/integration/doctests, formatting, Clippy,
+documentation, missing/stale locks, offline Git dependencies, denied mutations
+and unchanged host inventory. Environment-specific trial prerequisites and
+existing skip branches remain; this does not promise arbitrary system libraries,
+credentials, source layouts or toolchain installation.
+
+The observer identified enumeration-only aggregate size accounting as unsafe
+against subsequent file growth. `snapshot-bound-amendment` independently observed
+the repair's enumeration fingerprints, pre-copy identity check and exact final
+length/identity checks. `final-copy-byte-observer` then observed the additional
+per-chunk byte-count guard before writing, so partial destinations cannot exceed
+the matched pre-copy length either. The fingerprint includes file length; these
+metadata checks are not enumeration-time content hashes or an atomic filesystem
+snapshot. The growth regression failed before repair and later passed; concurrent
+mid-copy growth was not executed as a separate adversarial trial.
+
+Implementer-attributed execution: after the unrelated lock update, root vendor
+state was stale and refreshed explicitly using existing Cargo cache only.
+One combined run passed 387/388 cases but timed out at Rust startup during
+competing builds. A later diagnostic real-checkout trial passed with enumeration
+23402 ms, copy completion 80456 ms and complete Rust preparation 81342 ms:
+21551 entries, 18483 files, 3069 directories and 376894920 content bytes.
+Eight installed toolchains were exposed. This is measured finite execution,
+not reproduced cold-cache contention or guaranteed immunity to arbitrary I/O.
+Final nextest `2e9bc4ba-255b-4878-b85f-aafe0ae1e259` passed all 389 affected cases,
+including the full real-checkout Git/list/Cargo trial. After the final write
+guard, `f41a0ae3-0673-4c4f-90da-ff2c9c6d4b52` passed all 15 Rust-environment units;
+strict workspace lint, formatting and release builds passed.
+No acceptance, automatic replay or blanket security certification is implied.
+
+Separate source-blind `rust-source-blind-comparator` found correspondence for
+installed Rust tooling, immutable offline consumption, repaired copy bounds and
+180-second diagnostics. It retained the older requirement's “comfortably within
+30 seconds on representative hardware” wording as an unresolved intent/performance
+discrepancy: the measured shared-host startup exceeded 30 seconds, and hardware
+representativeness was not established. The 180-second cooperative deadline is
+not a claim that the older performance target was achieved. Source/intent sides
+were not changed to conceal that finding; human arbitration remains required.
+The review also retained native prerequisites, filesystem race limits and the
+lack of a separate mid-copy growth adversarial execution.
+
+Subsequent production-runner nextest
+`5c1a5560-129c-461a-b27b-4c29eac74ef1` reran and passed all 389 affected cases
+after the final byte guard and queue updates, closing that specific reported
+rerun gap. Release Skott and its file helper were atomically installed with
+byte/version verification; installed full vendor readiness passed. Running
+processes were left untouched and existing sessions still require restart.
+The broader intent/performance discrepancies above remain unresolved.
+
+## Independent preflight-budget observations - 2026-11-06
+
+Fresh `scope-budget-source-observer` inspected only current scoped sandbox,
+executor and test source. It excluded all intent, queues, prior records/reviews,
+chat and Git history and peer implementations; it made no edits, delegated
+nothing and executed no tests. The following is its source-derived supplement,
+not acceptance or certification.
+
+Request construction shares one cooperative deadline across identity hashing,
+workspace inspection, Rust-resource validation, context hashing and request
+validation: `min(wall_time_ms, 120 seconds)`. Stage transitions preserve the
+overall start. Budget errors include stage, limit, total elapsed time and stage
+elapsed time (`src/sandbox.rs:125-295,326-377`).
+
+Identity reads check cancellation/deadline between 64-KiB chunks and reject files
+initially exceeding, or growing beyond, 256 MiB (`src/sandbox.rs:400-455`).
+Workspace inspection enumerates hidden directories without exclusion filters,
+checks symlinks and deduplicates scheduled directory paths. Aggregate limits are
+one million entries, depth 128 and 32 MiB of charged directory-path storage
+(`src/sandbox.rs:470-504`; `src/sandbox/scope.rs:166-265`).
+Eight scoped workers share scheduling/accounting. Completion requires no queued
+or active directories; exits notify peers, failures/panics stop inspection, and
+started workers are joined (`src/sandbox/scope.rs:19-82,114-163,269-283`).
+
+The executor stages payloads before construction and reaches runner dispatch
+only after successful preflight and cancellation checks. Logging records stage
+starts, scan counts/timing, request metadata and runner outcome metadata rather
+than command/output payloads in these statements
+(`src/executor.rs:108-173`; `src/sandbox.rs:297-322,595-655`).
+
+Read, not executed, assertions cover shared/capped deadlines, synthetic
+45-second elapsed preflight, hidden-escape detection, quota boundaries,
+alias/cycle deduplication, concurrent inspection and cancellation/panic handling
+(`src/sandbox.rs:801-1005`; `src/sandbox/scope.rs:291-449`).
+Diagnostic assertions require chain markers and exclude selected
+command/output/environment-value sentinels
+(`tests/rust_build_environment.rs:311-387`).
+The repository trial asserts successful shell inspection, native root listing
+containing `Cargo.toml`, and nested repository-test output containing
+`test result: ok` (`tests/rust_build_environment.rs:392-446`).
+Request assertions cover authoring/network configuration, internal versus
+escaping links, context confinement and missing-runner fail-closed errors
+(`tests/component_tests.rs:668-756,813-935`).
+
+The observer identified no high-confidence scoped correctness/security defect.
+Filesystem calls are not preemptible, so worker joining can exceed the nominal
+budget. Preparation and execution have separate budgets. Inspection is not a
+filesystem snapshot or concurrent-mutation defense; path charging is not an
+exact heap ceiling. Uninspected callees, actual execution and cold-cache
+performance were not verified by this observer.
+
+### Attributed execution evidence
+
+The implementing parent recorded three failing regressions before production
+changes, then 18 passing sandbox units. Nextest run
+`30d33440-cc1b-4822-94dc-5a258ade31bb` passed all 344 selected tests; 15 unselected
+tests were outside that run. Selection covered Skott units, component/native
+file-tool callers, the real repository trial and diagnostic payload exclusion.
+The actual checkout's initial Git inspection, subsequent native root listing and
+existing nested offline Cargo trial all completed under Galla/Bubblewrap.
+Those three warm scans each covered 225862 entries and 9890 directories in
+101, 64 and 82 ms respectively (total preflight 122, 94 and 98 ms).
+Scoped strict Clippy, formatting, whitespace checks and the release binary build
+passed. These results are attributed parent execution, not independently
+re-executed by the observer.
+
+The original private journal establishes zero executed tools and a
+`workspace_scope` preflight timeout at 30029 ms, not a Git failure or established
+OOM. A bounded sequential directory census took 21.057 seconds before the warm
+native trial. Exact historical contention/cold-cache causation was not
+reproduced or proven; no global cache flushing or host authority expansion was
+used.
+
+Nextest run `27d66dd7-3ae1-4054-95f5-37ca97ee2bb0` repeated the actual repository
+trial five times with the configured `/opt/target/release/galla-runner`; all five
+iterations passed. At 2026-11-06T22:16:55Z the parent atomically replaced only the
+installed `/home/stefan/.kvist/bin/skott` from the repaired release build,
+verified byte equality and ran its version command successfully. Running
+processes were not stopped; existing sessions require restart to use the repair.
+No dependencies, toolchains or enforcement grants were provisioned or broadened.
+
+### Independent source-blind comparison
+
+Separate `scope-budget-source-blind-comparator` read only the scoped local
+requirements, contract and design and this fresh observation/evidence section,
+not source/tests, queues, prior records/reviews, peer documents or history.
+It established no concrete scoped contradiction: the record represents full
+hidden/generated traversal, aggregate quotas, bounded concurrency,
+fail-before-dispatch behavior, cancellation, owned joins and the shared
+`min(wall_time_ms, 120 seconds)` limit preserving smaller budgets.
+
+It retained evidence limits: smaller-budget/exact-boundary executions and fresh
+escaping-link detection were not individually itemized in the execution account;
+absence of caching, replay and host fallback was not explicitly established by
+the observation. Synthetic 45-second elapsed preparation is not a prolonged
+physical filesystem scan. Selected passing tests do not independently establish
+every obligation, and 15 tests were unselected. The original-journal account
+establishes zero executed tools and a `workspace_scope` timeout, not Git failure,
+OOM or cold-cache causation. Census/warm scans do not reproduce historical
+contention. Cooperative calls/mandatory joins can exceed the nominal budget,
+consistently with the stated limitation.
+
+This comparison is attributed, bounded and not certification, acceptance or a
+review receipt. Its limitations remain recorded for human arbitration. The
+subsequent five-iteration production-runner repetition and installed-binary
+replacement above are parent execution, not independently reviewed by this
+comparator.
+
+## Independent shared dependency observations - 2026-11-06
+
+Fresh `offline-dependency-source-observer` read only scoped current source/test
+assertions and explicitly referenced shared providers, excluding intent,
+queues, prior records/reviews and history. It changed/delegated nothing, ran
+no tests, and established no reportable scoped security vulnerability in its
+initial read or two selective corrective follow-ups. This is not acceptance.
+
+Current selective reads show complete routing for the previously omitted recovery fence and resolver directory, shared validation against the private copied vendor tree, and structurally retargeted read-only runtime resolver staging. Installed-Cargo failures retain selected-toolchain context, and lock-access failures provide dependency-prerequisite guidance. Earlier private-snapshot, fixed-grant, offline/locked wrapper, and no-installation observations are carried forward—not independently re-established here. Namespace enforcement and comprehensive adversarial ancestor-race resistance remain caller/backend boundaries rather than proven consequences of these corrections. Sources: `/opt/proj/kvist/skott/src/rust_environment.rs:726–773`; `/opt/proj/kvist/skott/src/rust_environment/host.rs:47–88`; `/opt/proj/kvist/skott/src/dependencies.rs:30–73`.
+
+The initial read observed separate vendor/check/offline flags conflicting with
+model/session options and early dispatch before config/model/UI initialization
+(logging initializes first). Check is shared filesystem-only readiness without
+installed-toolchain resolution. Provisioning resolves installed Cargo, including
+for reusable/local-only state; its preliminary metadata check is not a full
+lock parse before that selection.
+
+Private vendor copying precedes control checks and uses read-only files outside
+the writable workspace, with fixed read-only `/rust/vendor` grants. The first
+catalogue-only/control-bypass discrepancy was observed replaced by common
+snapshot/manifest/fence/resolver validation; the final follow-up observed
+recovery-only and empty resolver directories entering that gate. New assertions
+exercise these states, missing-lock guidance and real offline local-Git
+test/Clippy/documentation consumption. Existing assertions cover original-alias
+masking, no credential mounts, immutable-copy behavior and unchanged locks.
+They were read, not executed, by this observer.
+
+Checksum consistency is not cryptographic origin proof. Full ancestor-race
+resistance and namespace enforcement were not proven by source inspection.
+The earlier out-of-scope preparation-budget observation remains attributed:
+the constant is 180 seconds while existing text refers to 30 seconds.
+Parent-run test results remain separate evidence.
+
 ## Scoped standalone observations - 2026-11-06
 
 The independent `standalone-source-observer` security-review context read only

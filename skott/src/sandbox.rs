@@ -42,7 +42,7 @@ const MAX_IDENTITY_BYTES: u64 = 256 << 20;
 const MAX_SCOPE_ENTRIES: usize = 1_000_000;
 const MAX_SCOPE_DEPTH: usize = 128;
 const MAX_SCOPE_PATH_BYTES: usize = 32 << 20;
-const MAX_PREFLIGHT_TIME: Duration = Duration::from_secs(30);
+const MAX_PREFLIGHT_TIME: Duration = Duration::from_secs(120);
 
 /// Reasonable, well-bounded execution limits for one tool call.
 pub const fn default_resources() -> Resources {
@@ -128,7 +128,8 @@ pub(crate) fn build_request_with_rust(
     rust: Option<&crate::toolchain::rust_environment::RustEnvironment>,
     cancellation: &CancellationToken,
 ) -> Result<SandboxRequest> {
-    let preflight = Preflight::new(cancellation).stage("runner_identity");
+    let preflight =
+        Preflight::new(cancellation, request.resources.wall_time_ms).stage("runner_identity");
     preflight.check()?;
     let runner_identity = read_file_identity("sandbox runner", &sandbox.runner, &preflight)?;
     let preflight = preflight.stage("backend_identity");
@@ -325,36 +326,50 @@ pub(crate) fn build_request_with_rust(
 struct Preflight<'a> {
     cancellation: &'a CancellationToken,
     started: Instant,
+    limit: Duration,
     stage: &'static str,
+    stage_started: Instant,
 }
 
 impl<'a> Preflight<'a> {
-    fn new(cancellation: &'a CancellationToken) -> Self {
+    fn new(cancellation: &'a CancellationToken, wall_time_ms: u64) -> Self {
+        let started = Instant::now();
         Self {
             cancellation,
-            started: Instant::now(),
+            started,
+            limit: Duration::from_millis(wall_time_ms).min(MAX_PREFLIGHT_TIME),
             stage: "request",
+            stage_started: started,
         }
     }
 
     fn stage(mut self, stage: &'static str) -> Self {
         self.stage = stage;
+        self.stage_started = Instant::now();
         tracing::debug!(
             stage = %stage,
-            elapsed_ms = self.started.elapsed().as_millis() as u64,
+            elapsed_ms = self.stage_started.duration_since(self.started).as_millis() as u64,
+            limit_ms = self.limit.as_millis() as u64,
             "sandbox preflight stage started"
         );
         self
     }
 
     fn check(&self) -> Result<()> {
+        self.check_at(Instant::now())
+    }
+
+    fn check_at(&self, now: Instant) -> Result<()> {
         crate::executor::check_cancelled(self.cancellation)?;
-        if self.started.elapsed() >= MAX_PREFLIGHT_TIME {
+        let elapsed = now.duration_since(self.started);
+        if elapsed >= self.limit {
             return Err(Error::SandboxBuild {
                 reason: format!(
-                    "sandbox preflight exceeded 30 seconds; stage={}, elapsed_ms={}; narrow the working directory or reduce context files",
+                    "sandbox preflight exceeded its time budget; limit_ms={}, stage={}, elapsed_ms={}, stage_elapsed_ms={}; narrow the working directory or reduce context files",
+                    self.limit.as_millis(),
                     self.stage,
-                    self.started.elapsed().as_millis(),
+                    elapsed.as_millis(),
+                    now.duration_since(self.stage_started).as_millis(),
                 ),
             });
         }
@@ -838,7 +853,8 @@ mod preflight_tests {
             std::fs::create_dir(&path).unwrap();
         }
         let token = CancellationToken::new();
-        let preflight = Preflight::new(&token).stage("workspace_scope");
+        let preflight =
+            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
         check_writable_scope(root.path(), &preflight).unwrap();
         path.push("d");
         std::fs::create_dir(&path).unwrap();
@@ -875,7 +891,7 @@ mod preflight_tests {
         let token = CancellationToken::new();
         let expired = Preflight {
             started: Instant::now() - MAX_PREFLIGHT_TIME,
-            ..Preflight::new(&token).stage("workspace_scope")
+            ..Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope")
         };
         let error = check_writable_scope(root.path(), &expired).unwrap_err();
         assert!(
@@ -883,9 +899,34 @@ mod preflight_tests {
             "{error}"
         );
         assert!(error.to_string().contains("elapsed_ms="), "{error}");
-        let current = Preflight::new(&token).stage("workspace_scope");
+        let current =
+            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
         token.cancel();
         assert!(check_writable_scope(root.path(), &current).is_err());
+    }
+
+    #[test]
+    fn request_preflight_honors_a_smaller_tool_wall_time() {
+        let root = tempfile::tempdir().unwrap();
+        let (sandbox, work) = fixture(root.path(), 128 << 20);
+        let policy = ToolPolicy::minimum();
+        let argv = vec!["/bin/bash".into(), "-c".into(), "true".into()];
+        let request = BuildRequest {
+            argv: &argv,
+            working_directory: &work,
+            policy: &policy,
+            resources: Resources {
+                wall_time_ms: 1,
+                ..default_resources()
+            },
+            ..BuildRequest::default()
+        };
+        let error = build_request(&sandbox, &request).unwrap_err();
+        assert!(error.to_string().contains("limit_ms=1"), "{error}");
+        assert!(
+            error.to_string().contains("stage=runner_identity"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -898,7 +939,8 @@ mod preflight_tests {
             std::fs::create_dir(root.path().join(name)).unwrap();
         }
         let token = CancellationToken::new();
-        let preflight = Preflight::new(&token).stage("workspace_scope");
+        let preflight =
+            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
         let arrivals = AtomicUsize::new(0);
         let (sender, receiver) = mpsc::sync_channel(1);
         let receiver = Mutex::new(receiver);
@@ -931,7 +973,8 @@ mod preflight_tests {
         std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
         std::os::unix::fs::symlink(&root, root.join("real/nested/cycle")).unwrap();
         let token = CancellationToken::new();
-        let preflight = Preflight::new(&token).stage("workspace_scope");
+        let preflight =
+            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
         let seen = std::sync::Mutex::new(std::collections::BTreeSet::new());
         check_writable_scope_with(&root, &preflight, &|path| {
             assert!(seen.lock().unwrap().insert(path.to_owned()), "{path:?}");
@@ -950,7 +993,8 @@ mod preflight_tests {
             std::fs::create_dir_all(&hidden).unwrap();
             std::os::unix::fs::symlink(root.path(), hidden.join("escape")).unwrap();
             let token = CancellationToken::new();
-            let preflight = Preflight::new(&token).stage("workspace_scope");
+            let preflight =
+                Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
             let error = check_writable_scope(&work, &preflight).unwrap_err();
             assert!(
                 error.to_string().contains("escapes the writable scope"),

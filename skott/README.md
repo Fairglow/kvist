@@ -19,7 +19,7 @@ sessions afterwards.
 
 **Building.** Rust **1.95** (MSRV) on Linux. `skott` is a workspace member, so
 `cargo build -p skott` at the repository root builds it together with its
-dependencies (`sav`, `galla`, `blad`). No other tools are needed to build or
+dependencies (`kvist-dependencies`, `sav`, `galla`, `blad`). No other tools are needed to build or
 run the test suite.
 
 **Running.** An interactive terminal and a TOML configuration (see
@@ -28,7 +28,8 @@ run the test suite.
 (the default) a verified `galla-runner` and a Bubblewrap backend must be
 installed; skott fails closed rather than falling back to host execution.
 Rust builds additionally need a matching `Cargo.lock` and a vendored
-`.kvist/vendored` registry provisioned on the host.
+`.kvist/vendored` registry provisioned on the host when external dependencies
+are locked. Dependency-free Rust does not require a populated registry.
 
 ## Quick start
 
@@ -41,10 +42,49 @@ skott --list-models         # print configured models and exit
 skott --setup               # shared discover/test/configure wizard; no config needed
 skott --setup --registry ./providers.toml
 skott --registry ./providers.toml -m local-coder
+skott --vendor --cwd /path/to/project    # explicit host Rust vendoring; no config needed
+skott --vendor --check                  # process-free, read-only integrity check
+skott --vendor --offline                # reuse only existing Cargo cache
 ```
 
 Interactive execution requires a terminal; use `--headless` for unattended
 native workspace execution.
+
+## Offline dependencies
+
+From an ordinary Rust workspace with an existing `Cargo.lock`, run
+`skott --vendor`, then `skott --vendor --check`, and start Skott normally.
+If the lock is absent, resolve it explicitly on the host first. `--cwd`
+selects the workspace; `--config` and model/run flags are deliberately
+incompatible with this operation, so another project's config cannot redirect
+dependency writes.
+
+Vendoring is a human/operator host capability, **not a model tool or a
+sandboxed install**. It may read host Cargo configuration and acquire the
+exact locked packages. `--offline` restricts Cargo to its existing cache; it
+does not promise OS network isolation of the host command. Toolchain/component
+installation, lock resolution and sandbox networking are not enabled by this
+command. Package-manager failure stops without automatic retries or fallback.
+
+Kvist and Skott use the same headless `kvist-dependencies` library and existing
+`.kvist/vendored`, `.kvist/sandbox-cargo/config.toml`, and
+`.kvist/vendoring-v1.json` layout. The generated resolver accepts source
+replacements only, including locked Git sources; your `.cargo/config.toml`
+is not rewritten. Readiness verifies package/checksum/file integrity, not
+just directory names. Provisioning stages privately, rejects conflicting
+writers and lock drift, and preserves previous material before publication.
+Interrupted publication or a remaining `.kvist/vendor-operation.lock`
+requires inspecting the recorded state and reconciling it explicitly; never
+blindly remove the lock while another operator may be active.
+
+Agent execution stays network-denied and consumes a private read-only
+snapshot at `/rust/vendor`; its writable workspace vendor alias remains
+masked. **Restart the session after provisioning or dependency changes**
+to refresh that snapshot. Availability does not guarantee that arbitrary
+build scripts, system libraries, or out-of-workspace path dependencies work.
+The shared backend and Skott command support **Rust first**. Other languages
+still need deliberately tested offline provisioning and sandbox resource
+wiring; installing their system compiler alone is not dependency support.
 
 The prompt is editable immediately while model/toolchain discovery and context
 setup run in the background. You can submit before startup finishes; prompts
@@ -87,6 +127,16 @@ tool may have effects, inspect the current files/results before choosing another
 action; cancellation and failed recording do not undo completed work. Restore
 missing approved local tools/vendor resources separately, not by silently
 downloading dependencies or expanding permissions.
+
+Sandbox preparation uses the tool's wall-time budget, capped at 120 seconds
+(the default), separately from execution. It scans the complete workspace,
+including hidden and generated directories, on every call. A timeout names its
+effective budget, active stage and total/stage elapsed time; it means the tool
+did not execute, not that Git failed or the process ran out of memory.
+For unusually large or slow workspaces, select a narrower `--cwd`. Opt-in
+`SKOTT_LOG=skott::sandbox=debug` diagnostics report scan counts and preparation
+durations without logging command text or output. Cancellation remains available
+during preparation; no safety check is bypassed to make a timeout disappear.
 
 For deliberately repetitive native output, use
 `--disable-generation-loop-detection`. This explicit exception leaves tool

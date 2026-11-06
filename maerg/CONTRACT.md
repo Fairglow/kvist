@@ -2,6 +2,32 @@
 
 # Kvist Maerg Contract
 
+## Shared Rust dependency mechanics
+
+The common provider is `dependencies/CONTRACT.md` (ADR 0017). The public maerg
+catalogue module adapts/reexports its existing types and error domains; Rust
+operator provisioning uses the same transactional backend as Skott.
+Configured acquisition failure is explicit and does not fall back to host
+Cargo. Explicit human provisioning with no acquisition configuration remains
+host-authorized. Protected fulfillment refusal and non-Rust behavior are
+unchanged. Source-replacement resolver tables come from validated Cargo output;
+project `.cargo/config.toml` remains untouched.
+The closed configured-fetch workspace contains the exact bounded manifests and
+lock plus empty regular target placeholders for the workspace and declared
+in-project path dependencies. Source contents, component intent and host Cargo
+configuration/credentials are not exposed. Existing declared-resource bounds
+apply; unsupported layouts fail explicitly. Approved alternate registry
+definitions are generated from acquisition policy. Fetch uses the runner's
+unchanged closed argv; changed lock bytes are rejected before offline repack.
+The standalone explicit host operator command remains separate authority, not
+fallback or protected model fulfillment. Full managed readiness gates protected
+inspection and prepared Rust resources, including publication/operation fences.
+Configured Git fetch requires an exact approved HTTPS repository and full
+immutable revision in both manifests and the lock; unsupported transports,
+branch/tag-only declarations and unapproved bindings fail before fetch.
+Authoring a standalone child with no root lock or managed Rust state retains
+the empty offline registry rather than requiring nonexistent root metadata.
+
 ## Shared registry configuration (ADR 0015)
 
 `[agent.registry] path = "..."` selects a shared Sav registry relative to the

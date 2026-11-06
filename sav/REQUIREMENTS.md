@@ -2,6 +2,16 @@
 
 # Sav Requirements
 
+## SAV-REQ-OFFLINE-SOURCE-CONFIG
+
+Cargo and Clippy wrappers MUST consume an optional caller-staged fixed
+read-only `/rust/runtime/vendor-config.toml` in addition to the existing
+crates.io replacement. Absence MUST preserve existing behavior. This permits
+offline locked Git/alternate-source configuration without accepting model
+paths or adding execution/network authority. The caller validates the file;
+Sav only supplies the fixed wrapper. This requested consolidation has an
+explicit advisory exception while receipt enforcement is unavailable.
+
 ## Shared registry configuration acceptance (ADR 0015)
 
 - One bounded typed representation MUST distinguish native local HTTP models

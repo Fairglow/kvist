@@ -151,6 +151,25 @@ impl RustEnvironment {
         component: &Path,
     ) -> Result<Self> {
         let started = Instant::now();
+        // A standalone child can have no root lock or managed Rust state.
+        for path in [
+            "Cargo.lock",
+            ".kvist/vendoring-v1.json",
+            ".kvist/vendor-operation.lock",
+            ".kvist/vendor-publication",
+            ".kvist/vendored",
+            ".kvist/sandbox-cargo",
+        ] {
+            match fs::symlink_metadata(project.join(path)) {
+                Ok(_) => {
+                    kvist_dependencies::rust::check(project, &sav::CancellationToken::new())?;
+                    break;
+                }
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(sandbox_error(config, "inspect managed Rust readiness", e)),
+            }
+        }
+        check_budget(config, started)?;
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .ok_or_else(|| failure(config, "HOME is required to resolve installed Rust"))?;
@@ -255,6 +274,57 @@ impl RustEnvironment {
         fs::create_dir_all(staging.path().join("runtime/bin"))
             .and_then(|_| fs::create_dir_all(staging.path().join("rustup-home/toolchains")))
             .map_err(|e| sandbox_error(config, "create private Rust runtime", e))?;
+        let resolver = project.join(".kvist/sandbox-cargo/config.toml");
+        match fs::symlink_metadata(&resolver) {
+            Ok(_) => {
+                let before = inspect(config, &resolver)?;
+                if !before.is_file() || before.len() > 64 << 10 || before.nlink() != 1 {
+                    return Err(failure(
+                        config,
+                        "offline source config must be a bounded regular single-link file",
+                    ));
+                }
+                let opened = fs::OpenOptions::new()
+                    .read(true)
+                    .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+                    .open(&resolver)
+                    .map_err(|error| sandbox_error(config, "open offline source config", error))?;
+                let identity = opened.metadata().map_err(|error| {
+                    sandbox_error(config, "inspect opened source config", error)
+                })?;
+                if fingerprint(&before) != fingerprint(&identity) || !identity.is_file() {
+                    return Err(failure(
+                        config,
+                        "offline source config changed while opening",
+                    ));
+                }
+                let mut bytes = Vec::new();
+                opened
+                    .take((64 << 10) + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|error| sandbox_error(config, "read bounded source config", error))?;
+                if bytes.len() > 64 << 10 {
+                    return Err(failure(config, "offline source config exceeded 64 KiB"));
+                }
+                let text = std::str::from_utf8(&bytes)
+                    .map_err(|_| failure(config, "offline source config must be UTF-8"))?;
+                let contents = kvist_dependencies::rust::resolver_config(text, "/rust/vendor")?;
+                let staged = staging.path().join("runtime/vendor-config.toml");
+                fs::write(&staged, contents)
+                    .and_then(|_| fs::set_permissions(&staged, fs::Permissions::from_mode(0o400)))
+                    .map_err(|error| {
+                        sandbox_error(config, "stage private offline resolver", error)
+                    })?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(sandbox_error(
+                    config,
+                    "inspect offline source config",
+                    error,
+                ));
+            }
+        }
         fs::write(
             staging.path().join("runtime/initialize"),
             sav::offline_rust::INITIALIZE,

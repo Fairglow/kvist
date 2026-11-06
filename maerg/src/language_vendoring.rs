@@ -1245,9 +1245,10 @@ mod tests {
 
     #[test]
     fn rust_mounts_resolve_from_current_root_not_recorded_host_path() {
+        use sha2::{Digest, Sha256};
         let tmp = project_with(&[(
             "Cargo.lock",
-            "version = 4\n\n[[package]]\nname = \"serde_json\"\nversion = \"1.0.151\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n",
+            "version = 4\n\n[[package]]\nname = \"serde_json\"\nversion = \"1.0.151\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n",
         )]);
         let project = tmp.path();
         let strategy = detect_language_strategy(project).unwrap();
@@ -1260,6 +1261,23 @@ mod tests {
             "[package]\nname = \"serde_json\"\nversion = \"1.0.151\"",
         )
         .expect("Cargo.toml");
+        let digest = hex::encode(Sha256::digest(
+            fs::read(pkg_dir.join("Cargo.toml")).unwrap(),
+        ));
+        fs::write(
+            pkg_dir.join(".cargo-checksum.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "package": "a".repeat(64), "files": {"Cargo.toml": digest}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::create_dir(project.join(".kvist/sandbox-cargo")).unwrap();
+        fs::write(
+            project.join(".kvist/sandbox-cargo/config.toml"),
+            rust_vendoring::offline_cargo_config(rust_vendoring::VENDOR_SANDBOX_MOUNT),
+        )
+        .unwrap();
 
         // Record a manifest whose absolute paths name a DIFFERENT host root
         // (the path the manifest recorded on the machine that produced it).

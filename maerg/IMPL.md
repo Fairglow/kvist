@@ -1,6 +1,93 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Final configured Rust acquisition repairs - 2026-11-06
+
+Clean-slate `final-rust-impl-observer` inspected current source/test assertions,
+excluding intent, queues, prior records/reviews and history; it executed no
+tests. The configured adapter retains closed sandbox fetch authority and never
+falls back to host acquisition after failure.
+
+Cargo-context discovery follows workspace, target, patch, replacement and
+declared in-project path dependencies under existing bounds. Acquisition stages
+stable regular single-link manifest/lock bytes and empty implementation/target
+placeholders with relative layout preserved. It excludes implementation content,
+host Cargo settings/credentials and component intent. Alternate registry settings
+come only from validated acquisition policy.
+
+The initial `rust-source-observer` security review reported a medium-severity
+(confidence 9/10) native Git proxy-bypass admission defect. Subsequent
+independent source observation found manifest dependency tables and root lock
+Git sources checked before fetch against exact approved HTTPS/full-revision
+pairs; source policy rejects unsupported transports and noncanonical bindings.
+Two admission regressions failed before repair in
+`d353668b-3512-4fe6-afed-cb19da4c082d`. No live unauthorized network request was
+executed, and these admission checks are not proof of total backend egress
+confinement, DNS behavior or redirect handling.
+
+After fetch both staged and original lock digests must match the prefetch
+identity before host offline repack. Owned acquisition scratch closes before
+publication; cleanup failure is not success. Protected fulfillment still always
+refuses unbound model requests. Separate protected readiness uses the full shared
+gate, cancellation, budget and approved runner identity without fetching.
+Authoring checks full root readiness when lock or managed Rust state exists;
+an unmanaged standalone child retains its empty offline build view.
+
+Observed assertions include fences, untouched protected state/host sentinels,
+native workspace/path fetch without builds/downloads, unchanged lock and scratch
+cleanup, complete installed Rust inventory, offline authoring and foreign-root
+manifest relocation with valid package/checksum/resolver material.
+Implementer-attributed final nextest
+`2e9bc4ba-255b-4878-b85f-aafe0ae1e259` passed all 389 selected tests.
+The earlier incomplete fixtures and malformed reopened queue timestamps were
+repaired without weakening source/checksum validation or isolation assertions.
+This record is not acceptance or a blanket compliance/security certificate.
+
+Separate source-blind `rust-source-blind-comparator` found correspondence for
+the scoped locked operator adapter, source admission, full readiness and child
+authoring, but retained three broader intent discrepancies for human arbitration:
+`REQ-DEPENDENCY-ACQUISITION` targets lock-changing immutable-generation resolution,
+not this unchanged-lock operator repack; `REQ-DEPENDENCY-REQUEST` still targets
+automatic approved model fulfillment, which remains explicitly unimplemented;
+and `REQ-RUST-TOOLCHAIN` durable-baseline wording differs from the enforcement
+design's permitted baseline-free verification. The latter branch was not
+established by the scoped new observations. These are not silently deferred,
+accepted or fixed by this repair; no automatic acquisition was enabled.
+HTTPS admission is not total backend egress/DNS/redirect proof.
+
+Subsequent production-runner nextest
+`5c1a5560-129c-461a-b27b-4c29eac74ef1` passed all 389 affected cases with
+`KVIST_GALLA=/opt/target/release/galla-runner` after final code/queue updates.
+The release Kvist binary was atomically installed and byte/version verified;
+running processes were not stopped.
+
+## Independent shared dependency observations - 2026-11-06
+
+Fresh `offline-dependency-source-observer` read only scoped current Rust
+source/tests and explicit process-provider source, excluding intent, queues,
+prior records/reviews and history. Its initial read and two selective corrective
+follow-ups changed/delegated nothing, ran no tests and established no reportable
+scoped security vulnerability. These are observations, not acceptance.
+
+Carried forward from the preceding corrective source read: acquisition uses an owned private temporary directory with explicit cleanup before returning publishable configuration; cleanup failure prevents success. Simulated assertions cover default/custom shared publication, while CLI assertions cover explicit custom destination selection. Configured acquisition still stages **only Cargo.lock**, so general native configured-fetch success is unestablished; failure stops without host fallback, followed on success by host Cargo-level offline repacking. Protected readiness remains the legacy cheap inspection, not full data verification. Sources: `/opt/proj/kvist/maerg/src/vendor_command.rs:437–458,504–599,1157–1196`; `/opt/proj/kvist/maerg/tests/shared_vendoring.rs:40–64`. Protected-readiness attribution: first review, `/opt/proj/kvist/maerg/src/vendor_command.rs:162–228`.
+
+The first read additionally observed shared catalogue reexports, error-domain
+and cancellation adaptation, both Vendor CLI branches propagating malformed
+configuration, and missing configuration alone selecting no configured sandbox.
+Rust publication delegates to common transactions; unconfigured operator
+acquisition uses host Cargo, while configured failure never falls back.
+Protected fulfillment refuses unbound requests before path inspection.
+Optional runtime resolver staging is bounded, no-follow, single-link and
+source-only, retargeted to `/rust/vendor` and staged read-only.
+
+The initial scratch/candidate-layout discrepancy was independently observed
+corrected through explicit temporary-directory cleanup and default/custom
+publication assertions. Those simulate acquisition composition; they do not
+establish successful native configured fetching. Fetch/repack retain separate
+allowances/cancellation arrangements. Checksums are metadata consistency, not
+origin attestation; subprocess supervision is not OS confinement. The source
+observer ran no tests; parent-run results are separately attributed evidence.
+
 ## Final reader observations - resilience phase 4
 
 Fresh `maerg-p4-reader-source-observer` inspected only the local bounded reader/

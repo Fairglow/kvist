@@ -2,6 +2,34 @@
 
 # Skott — Contract
 
+## Offline dependency provisioning
+
+`skott --vendor [--cwd DIR] [--check | --offline]` acts on DIR or the launch
+directory and exits before loading application/model configuration or starting
+the UI. No configuration-derived workspace participates:
+configuration/run options conflict with this operation. It requires an existing
+Cargo.lock and supports Rust only in this delivery.
+
+The operator command is explicit host package-management authority: Cargo may
+read project/user source configuration and use network sources. It is not a
+sandboxed agent command. `--offline` asks Cargo to use cached material with
+`--locked --offline`; it is not OS network isolation. `--check` starts no
+process and writes no files, fails nonzero on incomplete/stale/corrupt material,
+and requires no provider or Rust installation. No automatic fallback/retry,
+toolchain installation, lock resolution or model-requested acquisition occurs.
+
+The common provider is `dependencies/CONTRACT.md`. Data remains in shared
+`.kvist` storage. Complete material is reused; provisioning publishes validated
+material without overwriting project `.cargo/config.toml`. Diagnostics identify
+scope, recovery and `skott --vendor --cwd DIR`; no raw package-manager output
+or credentials are printed. Resource drift or legitimate vendoring refresh
+requires restarting Skott to rebuild its immutable resources. No task replay
+is implied.
+Installed Rust resource preparation has a 180-second cooperative budget;
+per-tool request preparation and execution retain their separate limits.
+Vendor files changed between enumeration and copying fail preparation instead
+of increasing the approved aggregate snapshot size.
+
 ## Standalone configuration bootstrap
 
 `skott --init-config` creates `skott.toml` in the current directory and exits.
@@ -854,7 +882,9 @@ Sandbox request preflight streams regular non-link identity files in 64-KiB
 blocks, with a 256-MiB/file read-time bound. Workspace inspection bounds
 1,000,000 entries, depth 128 (root depth zero), and 32 MiB of charged directory
 path bytes for its two retained representations. Both stages check cancellation
-between I/O operations and share a 30-second cooperative preflight limit;
+between I/O operations and share a cooperative preflight limit equal to the
+requested `resources.wall_time_ms`, capped at 120 seconds (120 seconds with
+default resources). The limit covers the entire request, not each stage or worker;
 the executor supplies the prompt's cancellation/deadline token. Oversized
 workspaces fail explicitly with narrowing guidance. Filesystem/kernel calls
 are not preemptible, and preflight is not a substitute for namespace enforcement.
@@ -862,7 +892,12 @@ Workspace inspection uses at most eight owned workers sharing the same aggregate
 quotas and deadline, never a per-worker allowance. All workers are joined before
 return, including failure and cancellation. Debug logs identify preflight stages
 and report inspected entries/directories and elapsed time without payloads;
-preflight timeout errors name the active stage and elapsed milliseconds.
+preflight timeout errors name the effective limit, active stage, total elapsed
+milliseconds and stage elapsed milliseconds. This preparation allowance is
+separate from runner execution time; the prompt cancellation/deadline token
+still applies throughout. It tolerates preparation exceeding the former fixed
+30-second allowance without skipping coverage or replaying tools, but cannot
+guarantee completion under arbitrary filesystem/kernel contention.
 
 ### `ToolOutcome`
 

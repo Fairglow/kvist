@@ -3,11 +3,13 @@
 use super::rust_environment::{Fingerprint, check_budget, fingerprint, inspect};
 use super::*;
 use std::collections::BTreeSet;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
 pub(super) struct CargoContext {
     pub grants: Vec<SandboxGrant>,
     pub tracked: Vec<(PathBuf, Fingerprint)>,
     pub directory: String,
+    metadata: BTreeSet<PathBuf>,
 }
 
 fn failure(config: &SandboxConfig, reason: impl Into<String>) -> KvistError {
@@ -26,13 +28,7 @@ fn manifest(config: &SandboxConfig, root: &Path) -> Result<toml::Value> {
             "Cargo build context requires regular manifests no larger than 1 MiB",
         ));
     }
-    let mut bytes = Vec::new();
-    File::open(&path)
-        .and_then(|file| file.take((1 << 20) + 1).read_to_end(&mut bytes))
-        .map_err(|e| sandbox_error(config, "read bounded Cargo build manifest", e))?;
-    if bytes.len() > 1 << 20 {
-        return Err(failure(config, "Cargo manifest grew beyond 1 MiB"));
-    }
+    let bytes = read_metadata(config, &path, fingerprint(&metadata))?;
     let text = std::str::from_utf8(&bytes)
         .map_err(|_| failure(config, "Cargo build manifests must be UTF-8"))?;
     toml::from_str(text).map_err(|e| {
@@ -43,19 +39,104 @@ fn manifest(config: &SandboxConfig, root: &Path) -> Result<toml::Value> {
     })
 }
 
+fn read_metadata(config: &SandboxConfig, path: &Path, expected: Fingerprint) -> Result<Vec<u8>> {
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|e| sandbox_error(config, "open Cargo metadata", e))?;
+    let before = file
+        .metadata()
+        .map_err(|e| sandbox_error(config, "inspect Cargo metadata", e))?;
+    if !before.is_file()
+        || before.nlink() != 1
+        || before.len() > 1 << 20
+        || fingerprint(&before) != expected
+    {
+        return Err(failure(
+            config,
+            "Cargo metadata must be stable regular single-link files no larger than 1 MiB",
+        ));
+    }
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take((1 << 20) + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| sandbox_error(config, "read bounded Cargo metadata", e))?;
+    let after = file
+        .metadata()
+        .map_err(|e| sandbox_error(config, "reinspect Cargo metadata", e))?;
+    if bytes.len() > 1 << 20 || fingerprint(&after) != expected {
+        return Err(failure(config, "Cargo metadata changed while reading"));
+    }
+    Ok(bytes)
+}
+
 fn dependency_paths(
     config: &SandboxConfig,
     value: &toml::Value,
     paths: &mut Vec<String>,
+    acquisition: bool,
 ) -> Result<()> {
     if let Some(table) = value.as_table() {
         for dependency in table.values().filter_map(toml::Value::as_table) {
+            if acquisition && let Some(repository) = dependency.get("git") {
+                let repository = repository
+                    .as_str()
+                    .ok_or_else(|| failure(config, "Cargo Git repository must be a string"))?;
+                let revision = dependency.get("rev").and_then(toml::Value::as_str)
+                    .ok_or_else(|| failure(config, "configured Git acquisition requires an approved full immutable revision; branch/tag-only declarations are unsupported"))?;
+                approved_git(config, repository, revision)?;
+            }
             if let Some(path) = dependency.get("path") {
                 paths.push(
                     path.as_str()
                         .ok_or_else(|| failure(config, "Cargo dependency path must be a string"))?
                         .to_owned(),
                 );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn approved_git(config: &SandboxConfig, repository: &str, revision: &str) -> Result<()> {
+    if config.acquisition.additional_sources.iter().any(|source| {
+        matches!(source, crate::config::PackageSource::CargoGit {
+            repository: approved_repository, revision: approved_revision
+        } if repository == approved_repository && revision == approved_revision)
+    }) {
+        Ok(())
+    } else {
+        Err(failure(
+            config,
+            "Cargo Git source is not an exact approved HTTPS repository/revision; unsupported transports cannot be acquired; no host fallback",
+        ))
+    }
+}
+
+fn acquisition_lock_sources(config: &SandboxConfig, bytes: &[u8]) -> Result<()> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| failure(config, "acquisition Cargo.lock must be UTF-8"))?;
+    let lock: toml::Value =
+        toml::from_str(text).map_err(|_| failure(config, "cannot parse acquisition Cargo.lock"))?;
+    if let Some(packages) = lock.get("package").and_then(toml::Value::as_array) {
+        for package in packages {
+            if let Some(source) = package
+                .get("source")
+                .and_then(toml::Value::as_str)
+                .and_then(|source| source.strip_prefix("git+"))
+            {
+                let (repository, revision) = source.rsplit_once('#').ok_or_else(|| {
+                    failure(
+                        config,
+                        "locked Git acquisition requires an immutable revision",
+                    )
+                })?;
+                let repository = repository
+                    .split_once('?')
+                    .map_or(repository, |(repository, _)| repository);
+                approved_git(config, repository, revision)?;
             }
         }
     }
@@ -263,6 +344,16 @@ pub(super) fn prepare(
     component: &Path,
     started: Instant,
 ) -> Result<CargoContext> {
+    prepare_with_policy(config, project, component, started, true)
+}
+
+fn prepare_with_policy(
+    config: &SandboxConfig,
+    project: &Path,
+    component: &Path,
+    started: Instant,
+    authoring: bool,
+) -> Result<CargoContext> {
     let project = project
         .canonicalize()
         .map_err(|e| sandbox_error(config, "resolve Cargo build project", e))?;
@@ -295,7 +386,8 @@ pub(super) fn prepare(
             return Err(failure(config, "Cargo build context exceeds 128 crates"));
         }
         let value = manifest(config, &root)?;
-        if root != component
+        if authoring
+            && root != component
             && AUTHORING_WRITABLE_ROOTS
                 .iter()
                 .any(|name| root.starts_with(component.join(name)))
@@ -313,26 +405,26 @@ pub(super) fn prepare(
             "replace",
         ] {
             if let Some(table) = value.get(key) {
-                dependency_paths(config, table, &mut paths)?;
+                dependency_paths(config, table, &mut paths, !authoring)?;
             }
         }
         if let Some(targets) = value.get("target").and_then(toml::Value::as_table) {
             for target in targets.values() {
                 for key in ["dependencies", "dev-dependencies", "build-dependencies"] {
                     if let Some(table) = target.get(key) {
-                        dependency_paths(config, table, &mut paths)?;
+                        dependency_paths(config, table, &mut paths, !authoring)?;
                     }
                 }
             }
         }
         if let Some(patches) = value.get("patch").and_then(toml::Value::as_table) {
             for table in patches.values() {
-                dependency_paths(config, table, &mut paths)?;
+                dependency_paths(config, table, &mut paths, !authoring)?;
             }
         }
         if let Some(workspace) = value.get("workspace") {
             if let Some(table) = workspace.get("dependencies") {
-                dependency_paths(config, table, &mut paths)?;
+                dependency_paths(config, table, &mut paths, !authoring)?;
             }
             let mut exclusions = BTreeSet::new();
             if let Some(exclude) = workspace.get("exclude").and_then(toml::Value::as_array) {
@@ -377,10 +469,13 @@ pub(super) fn prepare(
         roots.insert(root, value);
     }
     let mut candidates = BTreeSet::new();
+    let mut metadata = BTreeSet::new();
     for (root, value) in &roots {
         candidates.insert(root.join("Cargo.toml"));
+        metadata.insert(root.join("Cargo.toml"));
         if root.join("Cargo.lock").exists() {
             candidates.insert(root.join("Cargo.lock"));
+            metadata.insert(root.join("Cargo.lock"));
         }
         if value.get("package").is_none() {
             continue;
@@ -459,7 +554,107 @@ pub(super) fn prepare(
         grants,
         tracked,
         directory,
+        metadata,
     })
+}
+
+/// Stage bounded manifests/lock bytes and empty target files, never source contents.
+pub(crate) fn stage_acquisition_workspace(
+    config: &SandboxConfig,
+    project: &Path,
+    destination: &Path,
+) -> Result<String> {
+    let started = Instant::now();
+    crate::acquisition::validate_acquisition_config(&config.acquisition)
+        .map_err(|e| failure(config, format!("invalid acquisition source policy: {e}")))?;
+    let project = project
+        .canonicalize()
+        .map_err(|e| sandbox_error(config, "resolve acquisition project", e))?;
+    let context = prepare_with_policy(config, &project, &project, started, false)?;
+    let mut lock_identity = None;
+    for (source, expected) in &context.tracked {
+        check_budget(config, started)?;
+        let metadata = inspect(config, source)?;
+        if fingerprint(&metadata) != *expected {
+            return Err(failure(
+                config,
+                "Cargo inputs changed before acquisition staging",
+            ));
+        }
+        let relative = source
+            .strip_prefix(&project)
+            .map_err(|_| failure(config, "Cargo acquisition inputs escape the project"))?;
+        let target = destination.join(relative);
+        if metadata.is_dir() {
+            fs::create_dir_all(&target)
+                .map_err(|e| sandbox_error(config, "stage Cargo target directory", e))?;
+            continue;
+        }
+        fs::create_dir_all(
+            target
+                .parent()
+                .ok_or_else(|| failure(config, "Cargo target has no parent"))?,
+        )
+        .map_err(|e| sandbox_error(config, "stage Cargo metadata parent", e))?;
+        let bytes = if context.metadata.contains(source) {
+            read_metadata(config, source, *expected)?
+        } else {
+            Vec::new()
+        };
+        if relative == Path::new("Cargo.lock") {
+            acquisition_lock_sources(config, &bytes)?;
+            lock_identity = Some(crate::vendoring::lockfile_digest(&bytes));
+        }
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .map_err(|e| sandbox_error(config, "create private Cargo metadata/target", e))?;
+        file.write_all(&bytes)
+            .map_err(|e| sandbox_error(config, "write private Cargo metadata/target", e))?;
+    }
+    for (path, expected) in &context.tracked {
+        check_budget(config, started)?;
+        if fingerprint(&inspect(config, path)?) != *expected {
+            return Err(failure(
+                config,
+                "Cargo inputs changed during acquisition staging",
+            ));
+        }
+    }
+    let identity = lock_identity
+        .ok_or_else(|| failure(config, "Cargo acquisition requires a regular Cargo.lock"))?;
+    let mut registries = toml::Table::new();
+    for source in &config.acquisition.additional_sources {
+        if let crate::config::PackageSource::CargoRegistry {
+            name, index_origin, ..
+        } = source
+        {
+            let registry = toml::Table::from_iter([(
+                "index".into(),
+                toml::Value::String(index_origin.clone()),
+            )]);
+            if registries
+                .insert(name.clone(), toml::Value::Table(registry))
+                .is_some()
+            {
+                return Err(failure(config, "duplicate approved Cargo registry name"));
+            }
+        }
+    }
+    if !registries.is_empty() {
+        let cargo = destination.join(".cargo");
+        fs::create_dir(&cargo)
+            .map_err(|e| sandbox_error(config, "stage approved registry settings", e))?;
+        let contents = toml::to_string(&toml::Table::from_iter([(
+            "registries".into(),
+            toml::Value::Table(registries),
+        )]))
+        .map_err(|e| failure(config, format!("serialize approved registry settings: {e}")))?;
+        fs::write(cargo.join("config.toml"), contents)
+            .map_err(|e| sandbox_error(config, "write approved registry settings", e))?;
+    }
+    Ok(identity)
 }
 
 #[cfg(test)]
@@ -472,6 +667,151 @@ mod tests {
             backend: "/not-invoked".into(),
             environment_allowlist: Vec::new(),
             acquisition: crate::config::AcquisitionConfig::default(),
+        }
+    }
+
+    #[test]
+    fn acquisition_snapshot_preserves_metadata_but_not_source_or_host_configuration() {
+        let project = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        fs::create_dir(project.path().join("src")).unwrap();
+        fs::create_dir(project.path().join(".cargo")).unwrap();
+        let manifest = "[package]\nname='fixture'\nversion='0.1.0'\nedition='2024'\n";
+        fs::write(project.path().join("Cargo.toml"), manifest).unwrap();
+        fs::write(project.path().join("Cargo.lock"), "version=4\n").unwrap();
+        fs::write(project.path().join("src/lib.rs"), "PRIVATE_SOURCE_CONTENT").unwrap();
+        fs::write(
+            project.path().join(".cargo/config.toml"),
+            "[alias]\nbuild='dangerous'\n",
+        )
+        .unwrap();
+        fs::write(project.path().join("REQUIREMENTS.md"), "PRIVATE_INTENT").unwrap();
+        let mut config = config();
+        config
+            .acquisition
+            .additional_sources
+            .push(crate::config::PackageSource::CargoRegistry {
+                name: "approved".into(),
+                index_origin: "https://registry.example.invalid/index/".into(),
+                download_origin: "https://registry.example.invalid/crates/".into(),
+            });
+        let identity =
+            stage_acquisition_workspace(&config, project.path(), destination.path()).unwrap();
+        assert_eq!(identity, crate::vendoring::lockfile_digest(b"version=4\n"));
+        assert_eq!(
+            fs::read_to_string(destination.path().join("Cargo.toml")).unwrap(),
+            manifest
+        );
+        assert!(
+            fs::read(destination.path().join("src/lib.rs"))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!destination.path().join("REQUIREMENTS.md").exists());
+        let settings: toml::Value = toml::from_str(
+            &fs::read_to_string(destination.path().join(".cargo/config.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            settings["registries"]["approved"]["index"].as_str(),
+            Some("https://registry.example.invalid/index/")
+        );
+        assert!(settings.get("alias").is_none());
+        assert_eq!(
+            fs::read_to_string(project.path().join("src/lib.rs")).unwrap(),
+            "PRIVATE_SOURCE_CONTENT"
+        );
+    }
+
+    #[test]
+    fn acquisition_snapshot_rejects_links_and_missing_lockfiles() {
+        for linked in [false, true] {
+            let project = tempfile::tempdir().unwrap();
+            let destination = tempfile::tempdir().unwrap();
+            fs::create_dir(project.path().join("src")).unwrap();
+            fs::write(
+                project.path().join("Cargo.toml"),
+                "[package]\nname='fixture'\nversion='0.1.0'\n",
+            )
+            .unwrap();
+            if linked {
+                fs::write(project.path().join("Cargo.lock"), "version=4\n").unwrap();
+                std::os::unix::fs::symlink("/etc/passwd", project.path().join("src/lib.rs"))
+                    .unwrap();
+            } else {
+                fs::write(project.path().join("src/lib.rs"), "").unwrap();
+            }
+            assert!(
+                stage_acquisition_workspace(&config(), project.path(), destination.path()).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn acquisition_rejects_unapproved_git_and_native_transports_before_fetch() {
+        let revision = "a".repeat(40);
+        for (repository, approved) in [
+            ("git://internal.example.invalid/private", false),
+            ("ssh://internal.example.invalid/private", false),
+            ("https://unapproved.example.invalid/private", false),
+            ("https://git.example.invalid/dependency.git", true),
+        ] {
+            let project = tempfile::tempdir().unwrap();
+            let destination = tempfile::tempdir().unwrap();
+            fs::create_dir(project.path().join("src")).unwrap();
+            fs::write(project.path().join("src/lib.rs"), "").unwrap();
+            fs::write(project.path().join("Cargo.toml"), format!(
+                "[package]\nname='fixture'\nversion='0.1.0'\n[dependencies]\nexternal={{git='{repository}',rev='{revision}'}}\n"
+            )).unwrap();
+            fs::write(project.path().join("Cargo.lock"), format!(
+                "version=4\n[[package]]\nname='external'\nversion='0.1.0'\nsource='git+{repository}?rev={revision}#{revision}'\n"
+            )).unwrap();
+            let mut config = config();
+            config
+                .acquisition
+                .additional_sources
+                .push(crate::config::PackageSource::CargoGit {
+                    repository: "https://git.example.invalid/dependency.git".into(),
+                    revision: revision.clone(),
+                });
+            let result = stage_acquisition_workspace(&config, project.path(), destination.path());
+            assert_eq!(result.is_ok(), approved, "{repository}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn acquisition_rejects_native_git_hidden_in_lock_or_target_patch_tables() {
+        let revision = "a".repeat(40);
+        for section in [
+            "",
+            "[target.'cfg(unix)'.build-dependencies]",
+            "[workspace.dependencies]",
+            "[patch.crates-io]",
+            "[replace]",
+        ] {
+            let project = tempfile::tempdir().unwrap();
+            let destination = tempfile::tempdir().unwrap();
+            fs::create_dir(project.path().join("src")).unwrap();
+            fs::write(project.path().join("src/lib.rs"), "").unwrap();
+            let dependency = if section.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "{section}\nexternal={{git='git://internal.example.invalid/private',rev='{revision}'}}\n"
+                )
+            };
+            fs::write(
+                project.path().join("Cargo.toml"),
+                format!("[package]\nname='fixture'\nversion='0.1.0'\n{dependency}"),
+            )
+            .unwrap();
+            fs::write(project.path().join("Cargo.lock"), if section.is_empty() {
+                format!("version=4\n[[package]]\nname='external'\nversion='0.1.0'\nsource='git+git://internal.example.invalid/private#{revision}'\n")
+            } else { "version=4\n".into() }).unwrap();
+            assert!(
+                stage_acquisition_workspace(&config(), project.path(), destination.path()).is_err(),
+                "{section}"
+            );
         }
     }
 

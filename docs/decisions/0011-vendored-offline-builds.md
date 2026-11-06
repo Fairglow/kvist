@@ -78,20 +78,22 @@ Validated live (security-sensitive, requires the bwrap runner environment):
   `kvist vendor` runs a network-allow **dependency-acquisition sandbox**
   (`cargo fetch` with allowlisted package sources) *before* the effect sandbox
   executes, then repacks the fetched material into the vendored registry with an
-  **offline** `cargo vendor --offline` (the host never resolves crate sources).
+  **offline** `cargo vendor --offline --locked`. This restricts Cargo resolution
+  to the fetched cache, not the host process's OS network authority.
   The request is the closed four-grant `DependencyAcquisition` topology
   (toolchain, writable Cargo home, writable scratch, writable lockfile
   workspace) with `PackageSources` network authority, built by
   `sandbox::build_dependency_acquisition_request` and executed by
   `sandbox::execute_dependency_acquisition`; the runner promotes the fetched
-  Cargo home after the fetch child exits. When a sandbox cannot run (no runner,
-  backend, or toolchain) the pass falls back to the classic host `cargo vendor`
-  so plain checkouts and CI keep working. Implemented and unit-tested: the
+  Cargo home after the fetch child exits. ADR 0017 supersedes the former host
+  fallback: configured acquisition failure stops explicitly. Only a separately
+  selected human operator path with no acquisition configuration runs host
+  Cargo. Current source/readiness publication is shared with Skott. The
   acquisition request is validated against the shared runner parser/validator
   (`sandbox::tests::dependency_acquisition_request_satisfies_the_shared_runner_validator`),
-  the fallback path is tested
-  (`vendor_command::tests::acquisition_fallback_when_no_toolchain_is_resolvable`),
-  and a live end-to-end test
+  configured failure boundary is tested
+  (`vendor_command::tests::configured_acquisition_failure_never_authorizes_host_fallback`).
+  The earlier live end-to-end test
   (`maerg/tests/offline_cargo_verification_e2e.rs::acquisition_sandbox_provisions_vendored_registry_before_verification`)
   drives the full in-sandbox provision → offline verify path (it self-skips
   where the live sandbox cannot run).
@@ -125,8 +127,9 @@ the host outside the sandbox and re-checks it against its own lock file:
 - **Rust** — the network step is `cargo fetch` in a network-allow
   **acquisition sandbox** (allowlisted package sources), run before the effect
   sandbox executes; the fetched material is repacked into `.kvist/vendored` by
-  an offline `cargo vendor --offline` (falling back to a host `cargo vendor`
-  when no sandbox can run). Enforced exactly through `Cargo.lock`; offline
+  an offline locked `cargo vendor`. Configured failure never falls back to
+  host acquisition (ADR 0017). Explicit operator host vendoring is separate.
+  Enforced through `Cargo.lock`; offline
   config at `/workspace/.cargo`.
 - **Python** — `pip`/`uv`: `requirements.lock.txt` or `uv.lock`; vendored
   wheels/sdists in `.kvist/vendored-python`; offline `pip.conf` at
@@ -174,12 +177,13 @@ make the sandbox build from it offline.
   `cargo fetch` **before the effect sandbox executes**. This is the only step
   that may contact the network, and it runs inside a sandbox, not as an
   unrestricted host `cargo`. The fetched material is then repacked into the
-  vendored registry by an **offline** `cargo vendor --offline` (network denied,
-  so the host never resolves crate sources); the runner promotes the fetched
+  vendored registry by an **offline locked** `cargo vendor` using the fetched
+  cache (Cargo-level mode, not OS confinement); the runner promotes the fetched
   Cargo home into a project cache after the fetch child exits. When a sandbox
   cannot run in the environment (no runner, backend, or toolchain), the pass
-  falls back to the classic host `cargo vendor` so plain checkouts and CI keep
-  working. Git dependencies must be immutable and pre-approved, restricted to
+  stops without host fallback (ADR 0017). The standalone explicit human path
+  remains available under Kvist and Skott. Git dependencies must be immutable
+  and pre-approved for mediated acquisition, restricted to
   the sources approved under
   [ADR 0005](0005-mediated-dependency-and-model-networking.md). When the
   registry already holds material it is reused and the acquisition pass is

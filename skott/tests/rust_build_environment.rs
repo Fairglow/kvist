@@ -404,13 +404,37 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
         "provision repository dependencies on the host"
     );
     let executor = SandboxExecutor::new(
-        resolve(&workdir).unwrap(),
+        resolve(&workdir)
+            .unwrap()
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
         SandboxPaths {
             runner: runner(),
             backend: "/usr/bin/bwrap".into(),
         },
         workdir,
     );
+    let inspection = checked_shell(
+        &executor,
+        "cd /workspace && git status --short && printf '\\n---\\n' && git diff --stat",
+    );
+    assert!(inspection.output_text(16384).contains("---"));
+    let listing = executor
+        .execute(
+            &ToolIntent {
+                id: "repository-root-listing".into(),
+                provider_id: None,
+                name: "list_dir".into(),
+                arguments: json!({"path": "/workspace"}),
+            },
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    assert!(
+        !listing.failed(),
+        "native root listing failed: {}",
+        listing.error_text(16384)
+    );
+    assert!(listing.output_text(16384).contains("Cargo.toml"));
     let result = checked_shell(
         &executor,
         &format!(

@@ -22,6 +22,7 @@ name = "skott-file-tool"
 path = "src/bin/file_tool.rs"
 
 [dependencies]
+kvist-dependencies = { version = "0.3", path = "../dependencies" }
 blad = { package = "kvist-blad", version = "0.3", path = "../blad" }
 sav = { version = "0.3", path = "../sav" }
 galla = { version = "0.3", path = "../galla" }

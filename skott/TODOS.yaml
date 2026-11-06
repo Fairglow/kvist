@@ -10,17 +10,105 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:3086d1bd8a18b675b1468721f662518abda2fa56473e02eaa032b4cc61d3fda4", "observed_revision": "sha256:02b7979e6f81e2815f5503538266d13034718471afe061ee55f71a37a7075ed5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03", "observed_revision": "sha256:4bec0afba47fcba5472c45f6a3b225cf7920bad53eacf3926f90205b36676f62"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:0c1cfae82b7f2f6819b5a1898fc15a1608e08b91c738fb405507e0b2b458f9fb", "observed_revision": "sha256:a21376824ea18202c8dbe373530fc9f92b44cc2e01a562ba610a8ac8b55bb93c"}]
 tasks:
+  - id: "scope-reliability-write-tests"
+    title: "write_tests: first-tool preflight budget"
+    description: "Pin preparation beyond 30 seconds, exact and smaller effective budgets, unchanged stage/cancellation behavior and fresh escape detection; exercise initial Git inspection and native root listing."
+    context: "The reported private journal records zero executed tools and workspace_scope timeout at 30029 ms; warm actual-checkout inspection sees 225862 entries and 9890 directories. On 2026-11-06T22:09Z, all three new regressions failed before production changes: two 45-second simulated elapsed scans hit the old 30-second guard, and a requested 1-ms budget incorrectly returned a request. Native timestamps for the four scope-reliability entries were initialized during the 2026-11-06T22:30:46Z precommit schema repair; earlier execution chronology remains in their contexts and IMPL."
+    purpose: "Expose the hard-coded preparation/execution budget mismatch without weakening confinement."
+    kind: test
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"]
+    depends_on: []
+    status: completed
+    expected_outcome: "New beyond-30-second and smaller-budget regressions fail before production changes."
+    timestamps: {created_at: "2026-11-06T22:30:46Z", updated_at: "2026-11-06T22:30:46Z", completed_at: "2026-11-06T22:30:46Z"}
+  - id: "scope-reliability-implement-code"
+    title: "implement_code: bound resource-aligned preflight"
+    description: "Use the existing requested tool wall time capped at 120 seconds across preparation, with effective-budget and stage-duration diagnostics."
+    context: "Resource-aligned capped preparation and total/stage budget diagnostics implemented. Three red-first regressions and exact-boundary coverage pass; nextest 30d33440-cc1b-4822-94dc-5a258ade31bb passed all 344 selected tests, including initial Git inspection, native root listing and existing offline nested Cargo on the actual checkout. Three warm scans covered 225862 entries and 9890 directories in 101/64/82 ms; original cold contention remains unproven. Strict scoped Clippy, formatting, whitespace and release build passed. Subsequent run 27d66dd7-3ae1-4054-95f5-37ca97ee2bb0 passed five actual-checkout repetitions with the configured production runner. Only installed Skott was atomically updated and byte/version verified at 2026-11-06T22:16:55Z; running sessions were not stopped."
+    purpose: "Allow safe preparation beyond the unrelated 30-second limit without unlimited waits."
+    kind: implementation
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"]
+    depends_on: ["scope-reliability-write-tests"]
+    status: completed
+    expected_outcome: "Focused regressions and enforced actual-checkout initial tools pass."
+    timestamps: {created_at: "2026-11-06T22:30:46Z", updated_at: "2026-11-06T22:30:46Z", completed_at: "2026-11-06T22:30:46Z"}
+  - id: "scope-reliability-security-audit"
+    title: "security_audit: observe preflight reliability"
+    description: "Independently inspect scoped source/tests and derive an IMPL supplement without intent, queue, prior records, reviews or history."
+    context: "Fresh scope-budget-source-observer read only scoped current source/test assertions, excluding intent, queues, prior records/reviews, chat/history and peers. It executed no tests and found no high-confidence scoped correctness/security defect. Its independent IMPL supplement records full traversal, bounded/shared timing and workers, payload-free diagnostics and cooperative/mutable-filesystem limits."
+    purpose: "Retain independent source-derived observations rather than self-certify the repair."
+    kind: security-audit
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"]
+    depends_on: ["scope-reliability-implement-code"]
+    status: completed
+    expected_outcome: "Persist attributed scoped observations and evidence limitations."
+    timestamps: {created_at: "2026-11-06T22:30:46Z", updated_at: "2026-11-06T22:30:46Z", completed_at: "2026-11-06T22:30:46Z"}
+  - id: "scope-reliability-compliance-review"
+    title: "compliance_review: compare preflight reliability evidence"
+    description: "Separately compare scoped intent with independent observations and attributed test evidence, without source access."
+    context: "Separate scope-budget-source-blind-comparator compared only scoped intent with fresh independent observations and attributed test evidence. No concrete contradiction established; exact-case itemization, absent-cache/replay/fallback observation limits and historical cold contention remain explicitly unverified. Synthetic elapsed tests are not physical prolonged scans. Comparison/limits are persisted in IMPL for human arbitration, not acceptance, certification or a fabricated receipt."
+    purpose: "Retain discrepancies and evidence limits for human arbitration."
+    kind: compliance-review
+    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"]
+    depends_on: ["scope-reliability-security-audit"]
+    status: completed
+    expected_outcome: "Record source-blind comparison without acceptance or certification."
+    timestamps: {created_at: "2026-11-06T22:30:46Z", updated_at: "2026-11-06T22:30:46Z", completed_at: "2026-11-06T22:30:46Z"}
+  - id: "offline-dependencies-write-tests"
+    title: "write_tests: shared offline Rust dependencies"
+    description: "RUN-REQ-OFFLINE-DEPENDENCIES: standalone flags, read-only checks, transactions and real offline Git dependency sandbox."
+    context: "Human requested standalone Rust-first offline dependency provisioning and complete native Rust toolchain verification. Timeout and snapshot-growth regressions failed before repairs; final affected suite passed 389 cases and the final byte guard passed all 15 Rust-environment units. Reopened timestamp bookkeeping reconciled at actual 2026-11-06T23:34:10Z; detailed chronology and finite I/O evidence remain in IMPL."
+    purpose: "Verify explicit acquisition and immutable network-denied consumption."
+    kind: test
+    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
+    depends_on: []
+    status: completed
+    expected_outcome: "New vendoring_cli regressions fail on unsupported --vendor before production changes."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+  - id: "offline-dependencies-implement-code"
+    title: "implement_code: shared offline Rust dependencies"
+    description: "Integrate the common provider, early explicit operator command and safe immutable source resolver."
+    context: "Rust-first shared provider with operator-only acquisition."
+    purpose: "Keep Skott independent of maerg while consolidating mechanics."
+    kind: implementation
+    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
+    depends_on: ["offline-dependencies-write-tests"]
+    status: completed
+    expected_outcome: "Standalone provisioning and subsequent offline sandbox consumption pass."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+  - id: "offline-dependencies-security-audit"
+    title: "security_audit: shared offline Rust dependencies"
+    description: "Independently inspect acquisition authority, input bounds, publication and sandbox resolver behavior."
+    context: "Filesystem/package inputs and subprocess output are untrusted. Independent source-only main observations and narrow final snapshot-bound amendments are retained in IMPL; no broad certification."
+    purpose: "Avoid self-certification of authority and integrity."
+    kind: security-audit
+    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
+    depends_on: ["offline-dependencies-implement-code"]
+    status: completed
+    expected_outcome: "Record independent scoped findings without self-certification."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+  - id: "offline-dependencies-compliance-review"
+    title: "compliance_review: shared offline Rust dependencies"
+    description: "Source-only observation followed by separate source-blind comparison with local intent."
+    context: "Separate rust-source-blind-comparator found scoped correspondence and retained the older representative-hardware 30-second performance target versus measured shared-host startup/180-second budget for human arbitration, plus finite native/race coverage limits. Report is in IMPL; no acceptance or certification."
+    purpose: "Retain discrepancies and evidence limits for human arbitration."
+    kind: compliance-review
+    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
+    depends_on: ["offline-dependencies-security-audit"]
+    status: completed
+    expected_outcome: "Record discrepancies and evidence limitations explicitly."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:37:01Z", completed_at: "2026-11-06T23:37:01Z"}
   - id: "standalone-write-tests"
     title: "write_tests: standalone bootstrap and root discovery"
     description: "Reproduce missing-config guidance and initialization failures, exact-root mapping, and sandbox discovery in a directory without Kvist artifacts."
-    context: "Four initial config cases and three exact-root cases reproduced failures before implementation; disabled/external refusals were subsequently strengthened against parser-only failure."
+    context: "Four initial config cases and three exact-root cases reproduced failures before implementation; disabled/external refusals were subsequently strengthened against parser-only failure. Scoped revalidation on 2026-11-06T20:38:01Z passed all 15 shared_registry tests and the 257 Skott units; completion/update chronology was aligned with this actual revalidation."
     purpose: "Make standalone onboarding and root namespace behavior deterministic and safe."
     expected_outcome: "Regressions reproduce the reported failure and guard bootstrap write boundaries."
     kind: test
     status: completed
     depends_on: []
     requirements: ["REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"]
-    timestamps: {created_at: "2026-11-06T15:32:41Z", updated_at: "2026-11-06T15:42:07Z", completed_at: "2026-11-06T15:39:08Z"}
+    timestamps: {created_at: "2026-11-06T15:32:41Z", updated_at: "2026-11-06T20:38:01Z", completed_at: "2026-11-06T20:38:01Z"}
     blocked_reason: null
     recovery_state: null
   - id: "standalone-implement-code"

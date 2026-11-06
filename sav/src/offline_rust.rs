@@ -87,9 +87,19 @@ pub fn wrapper(tool: RustTool) -> String {
     } else {
         ""
     };
+    let source_config = if matches!(tool, RustTool::Cargo | RustTool::CargoClippy) {
+        "source_config=(); if [[ -f /rust/runtime/vendor-config.toml ]]; then source_config=(--config /rust/runtime/vendor-config.toml); fi\n"
+    } else {
+        ""
+    };
+    let source_arguments = if matches!(tool, RustTool::Cargo | RustTool::CargoClippy) {
+        " \"${source_config[@]}\""
+    } else {
+        ""
+    };
     let tool = tool.name();
     format!(
-        "#!/usr/bin/bash\nset -eu\n{working_directory}if [[ \"${{1-}}\" == +* ]]; then selected=\"${{1:1}}\"; shift; else active=\"$(/usr/bin/rustup show active-toolchain)\"; selected=\"${{active%% *}}\"; fi\n{subcommand}{source_paths}exec /usr/bin/rustup run -- \"$selected\" {tool}{arguments} \"$@\"\n"
+        "#!/usr/bin/bash\nset -eu\n{working_directory}if [[ \"${{1-}}\" == +* ]]; then selected=\"${{1:1}}\"; shift; else active=\"$(/usr/bin/rustup show active-toolchain)\"; selected=\"${{active%% *}}\"; fi\n{subcommand}{source_paths}{source_config}exec /usr/bin/rustup run -- \"$selected\" {tool}{arguments}{source_arguments} \"$@\"\n"
     )
 }
 
@@ -127,6 +137,13 @@ mod tests {
             wrapper(RustTool::CargoClippy).contains("if [[ \"${1-}\" == clippy ]]; then shift; fi")
         );
         assert!(wrapper(RustTool::CargoClippy).contains("/rust/vendor"));
+        for tool in [RustTool::Cargo, RustTool::CargoClippy] {
+            let script = wrapper(tool);
+            assert!(script.contains("[[ -f /rust/runtime/vendor-config.toml ]]"));
+            assert!(script.contains("source_config=(--config /rust/runtime/vendor-config.toml)"));
+            assert!(script.contains("\"${source_config[@]}\""));
+        }
+        assert!(!wrapper(RustTool::Rustc).contains("vendor-config.toml"));
         assert!(
             wrapper(RustTool::CargoClippy)
                 .contains("source.crates-io.replace-with=\"vendored-sources\"")

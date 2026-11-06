@@ -1,6 +1,51 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Final shared offline resolver observations - 2026-11-06
+
+Independent clean-slate `final-rust-impl-observer` inspected source and test
+assertions only, excluding intent, queues, prior records/reviews and history.
+It executed no tests. Selection-aware Cargo/Clippy wrappers inject offline,
+locked and fixed vendor replacement arguments and optionally consume only
+`/rust/runtime/vendor-config.toml`. The caller owns validation and read-only
+staging of that fixed source-only configuration. Clippy removes Cargo's
+delegated subcommand token before adding arguments. Private initialization
+registers read-only installed toolchains without enabling installation.
+
+Observed wrapper/native consumer assertions cover selection, optional resolver
+injection, Clippy handling and offline Git source consumption. Implementer-run
+nextest `2e9bc4ba-255b-4878-b85f-aafe0ae1e259` passed 389 affected tests; strict
+workspace lint/formatting and affected doctests passed. Source observations,
+test outcomes and caller/backend confinement remain distinct; no acceptance
+or blanket certificate is recorded.
+
+Separate source-blind `rust-source-blind-comparator` found scoped correspondence
+for fixed optional resolver consumption, selection-aware offline/locked
+wrappers and caller-owned validation/mounting. It retained finite attributed
+evidence and backend boundaries; review completion is not intent acceptance.
+
+Final production-runner nextest
+`5c1a5560-129c-461a-b27b-4c29eac74ef1` passed all 389 affected cases after final
+code/queue updates, including the shared wrapper and native consumer coverage.
+
+## Independent offline resolver observations - 2026-11-06
+
+Fresh `offline-dependency-source-observer` inspected scoped current wrapper and
+process-provider source/tests without intent, queues, prior records/reviews
+or history. It ran no tests, changed/delegated nothing, and established no
+reportable scoped vulnerability. Sav observations below are carried forward
+unchanged from its first read, not reread in the consumer corrective follow-ups.
+
+Carried forward unchanged from the first source review: closed-enum wrappers quote arguments, select installed toolchains, supply Cargo/cargo-clippy offline/locked settings, and optionally consume fixed-path resolver configuration. The observed supervisor uses literal subprocess arguments, bounded captured output, deadlines/cancellation, process-group cleanup, and no automatic effect replay. **Neither wrappers nor subprocess supervision constitute OS confinement**, and process-group cleanup does not contain descendants escaping that group. Sources: `/opt/proj/kvist/sav/src/offline_rust.rs:3–109`; `/opt/proj/kvist/sav/src/supervisor.rs:345–369,470–563,663–788,861–885`.
+
+The first read observed the Cargo-clippy delegated leading token being stripped,
+an optional quoted argument array for the fixed resolver, private initialization
+settings/registrations, and no toolchain installation. Wrapper assertions cover
+fixed paths, selection, offline/locked flags and optional resolver consumption.
+Source supervision retries executable-busy spawn failures before successful
+execution, not effects. The observer did not execute those assertions or certify
+backend containment; parent-run results are separate evidence.
+
 ## Scoped operational observations - resilience phase 4
 
 Fresh `sav-p4-source-observer` inspected only local runtime diagnostics, errors,

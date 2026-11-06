@@ -5,7 +5,8 @@
 ## Scope, stakeholders, and concerns
 
 The system of interest is the local `kvist` CLI, its reusable `sav`
-component, its independently installed `galla` enforcement component,
+component, its shared headless `dependencies` provisioning component,
+its independently installed `galla` enforcement component,
 its standalone sandboxed workspace-agent `skott` component,
 and the durable project artifacts they read or write. The human architect is
 the approval and arbitration authority. External coding agents, models,
@@ -44,7 +45,8 @@ trusted core.
   provision a versioned, enforced vendored registry on the host so sandbox
   builds and tests resolve everything offline ([ADR 0011](docs/decisions/0011-vendored-offline-builds.md)).
   Vendoring is language-aware (Rust, Python/`uv`, Node/`npm`, `Conan`) and
-  enforced through a single Kvist-owned entry point; a directory vendored mount
+  consolidated through a shared dependency library, Rust first (ADR 0017);
+  other maerg language backends await extraction. A directory vendored mount
   is identified by its lock-file digest rather than by hashing every file.
 - Linux is the only executable target until other backends have independent
   native tests.
@@ -53,15 +55,18 @@ trusted core.
 
 | Stable ID        | Path              | Responsibility                                                                                                                                  | Provides                                                             | Requires                                                                                    |
 | ---------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `kvist.maerg`   | `maerg/`         | Project artifacts, component discovery, validation, status, queues, policy, task lifecycle, context selection, evidence, and CLI dispatch       | `kvist.cli/v1`, `kvist.artifacts/v1`, `kvist.host-authority/planned` | `sav.library/v1`, `blad.library/v1`, `galla.protocol/v1`, operating-system and VCS services |
+| `kvist.maerg`   | `maerg/`         | Project artifacts, component discovery, validation, status, queues, policy, task lifecycle, context selection, evidence, and CLI dispatch       | `kvist.cli/v1`, `kvist.artifacts/v1`, `kvist.host-authority/planned` | `dependencies.library/v1`, `sav.library/v1`, `blad.library/v1`, `galla.protocol/v1`, operating-system and VCS services |
 | `sav`  | `sav/`  | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport, and reusable bounded runtime mechanisms | `sav.library/v1`, `sav.cli/v1`                   | Host authority interfaces and operating-system process/network services                     |
 | `galla` | `galla/` | Strict request validation and Linux Bubblewrap enforcement for approved task grants                                                             | `galla.protocol/v1`, `galla.cli/v1`                | Bubblewrap, Linux kernel isolation, and operating-system process/filesystem services        |
-| `skott` | `skott/` | Interactive/headless workspace agent, request budgets, native file tools and private operational journals; no task approval or canonical evidence | `skott.library/v1`, `skott.cli/v1` | `sav.library/v1`, `blad.library/v1`, `galla.protocol/v1`, installed Linux enforcement |
+| `dependencies` | `dependencies/` | Shared locked dependency catalogue, explicit provisioning and offline readiness; no task/model authority | `dependencies.library/v1` | `sav.library/v1`, host package managers and filesystem services |
+| `skott` | `skott/` | Interactive/headless workspace agent, request budgets, native file tools and private operational journals; no task approval or canonical evidence | `skott.library/v1`, `skott.cli/v1` | `dependencies.library/v1`, `sav.library/v1`, `blad.library/v1`, `galla.protocol/v1`, installed Linux enforcement |
 | `blad` | `blad/` | Terminal Markdown rendering: tables, diagrams, math, code highlighting, and themes. A pure string-in/writer-out renderer plus an interactive viewer; owns no session or workflow state | `blad.library/v1`, `blad.cli/v1` | Operating-system terminal and filesystem services |
 
 The repository layout places the root Rust workspace manifest at the project
-root (`/Cargo.toml`), with `maerg/`, `sav/`, `galla/`, `skott/`, and `blad/`
-as top-level peer components. `kvist.maerg` depends on `sav` as a
+root (`/Cargo.toml`), with `maerg/`, `sav/`, `dependencies/`, `galla/`, `skott/`, and `blad/`
+as top-level peer components. Maerg and Skott depend on `dependencies` for
+shared Rust provisioning; that library depends on Sav, never a frontend.
+`kvist.maerg` depends on `sav` as a
 Rust library and on `blad` for Markdown rendering in its interactive TUI, while
 `galla` is an independent execution boundary.
 Neither child imports Kvist maerg types. The maerg and installed runner
@@ -224,6 +229,8 @@ transport views for the child runtime live in
 Selection guidance for native, Rig-run, containerized Rig-agent, and external
 agent drivers lives in
 [`docs/runtime-selection.md`](docs/runtime-selection.md).
+Shared offline dependency ownership is recorded in
+[`ADR 0017`](docs/decisions/0017-shared-offline-dependencies.md).
 
 Future diagrams should use C4-compatible context, container, component, and
 dynamic concepts only when they answer a named stakeholder concern. Diagram

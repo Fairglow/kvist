@@ -2,6 +2,27 @@
 
 # Skott — Design
 
+## Shared Rust dependencies
+
+Dispatch standalone vendor operations before config discovery. Resolve the
+explicit operation directory rather than loading another config's workspace.
+Checks call the shared filesystem-only validator. Provisioning resolves an
+installed host Cargo outside the workspace, prints concise authority/scope
+diagnostics and invokes the shared supervised backend once. No sandbox/model
+loop opt-out or new writable agent tool is introduced.
+
+Validate locked external packages against the already bounded private vendor
+snapshot, not a mutable host alias. Retarget shared generated source tables to
+`/rust/vendor`; managed state also passes the shared snapshot coherence gate
+(manifest, publication fences and resolver/lock binding). Partial publication
+must not be bypassed merely because package content is present. Stage that
+config as a read-only runtime file. Sav's Cargo/Clippy
+wrappers select this fixed config in addition to the existing crates.io override.
+Keep dependency-free/legacy manually provisioned Cargo trees working without
+trusting a maerg manifest's host paths. Missing packages remain actionable
+startup diagnostics, with no automatic acquisition. Do not rehash the complete
+host vendor tree on every tool call.
+
 ## Standalone bootstrap and root mapping
 
 Dispatch explicit initialization before configuration discovery. A small
@@ -631,7 +652,9 @@ behind mode-000 read-only tmpfs after binding grants. There is no second usable
 registry inside the sandbox and no generalized overlapping grant exception.
 Selection uses the standard host rustup layout, ignoring ambient overrides and
 custom linked roots; maerg `.kvist/rust-toolchain.json` is not authorization.
-Preparation bounds are 30 seconds, 1 GiB vendor aggregate, 256 MiB/file,
+Preparation bounds are 180 seconds, 1 GiB vendor aggregate, 256 MiB/file,
+with enumeration-time file fingerprints retained and checked before copy so
+the approved aggregate size cannot grow between phases;
 100,000 entries, depth 64 and 32 MiB retained paths. Stage ownership is shared
 with the registry/executor and removed when the final owner drops. Pin/root
 substitution and tracked executable/library/shim drift fail before dispatch;
@@ -818,7 +841,13 @@ identity files in 64-KiB blocks and scanning the workspace. A held non-following
 regular descriptor limits identities to 256 MiB, including concurrent growth.
 Deduplicated directory scheduling charges two retained path representations,
 caps their bytes at 32 MiB, and rejects depth above 128 or more than 1,000,000
-entries. One 30-second cooperative preflight guard bounds both stages.
+entries. One cooperative preflight guard bounds all stages by the requested
+tool wall time, capped at 120 seconds; it never resets on stage transitions.
+This replaces the unrelated fixed 30-second allowance that could reject the
+first tool on a cold or contended filesystem even with valid resources.
+Keep both the original request start and the current stage start so a timeout
+distinguishes stage cost from preparation already spent elsewhere. Derive the
+diagnostic limit from the effective duration rather than hard-coding its text.
 Enumeration/read-link failures are errors, not skipped entries or empty targets.
 Writable-scope traversal uses at most eight scoped workers. A mutex owns the
 pending directory stack, visited set, charged path bytes and active count;
@@ -833,8 +862,10 @@ invocations or excluded based on directory name.
 An internal directory-visit callback permits a bounded rendezvous regression
 to demonstrate actual overlapping I/O without depending on machine throughput.
 Preflight stage transitions retain the original start instant and cancellation
-token. Debug start/completion events and timeout errors expose stages and
-durations, not command/environment/output values.
+token and effective budget. Debug start/completion events and timeout errors
+expose stages, total/stage durations and budget, not command/environment/output
+values. Regressions inject elapsed preparation time without sleeping for an
+entire production deadline, check exact boundaries and preserve fresh full scans.
 Post-exit retained streams have a finite cleanup window and explicit failure.
 No drain reader is detached. Uninterruptible kernel work and genuinely escaped
 host descendants are not claimed terminated merely because cleanup was attempted.

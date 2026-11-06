@@ -12,7 +12,7 @@
 //! `$HOME/.rustup/toolchains` installation layout. Channels, requested
 //! components/targets and executable/layout identities are checked without
 //! installing anything. Missing material must be provisioned separately on the
-//! host. The snapshot is bounded to 1 GiB, 100,000 entries and 30 seconds;
+//! host. The snapshot is bounded to 1 GiB, 100,000 entries and 180 seconds;
 //! cache/selection state is private to each sandbox invocation; build targets
 //! persist in the writable workspace.
 
@@ -32,6 +32,8 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result, io_error};
 
+#[path = "rust_environment/host.rs"]
+mod host;
 #[path = "rust_environment/inventory.rs"]
 mod inventory;
 
@@ -125,9 +127,10 @@ impl Preparation<'_> {
     fn check(&self) -> Result<()> {
         crate::executor::check_cancelled(self.cancellation)?;
         if self.started.elapsed() >= PREPARATION_BUDGET {
-            return Err(failure(
-                "Rust preparation exceeded 30 seconds; narrow the workspace/vendor tree",
-            ));
+            return Err(failure(format!(
+                "Rust preparation exceeded {} seconds; narrow the workspace/vendor tree",
+                PREPARATION_BUDGET.as_secs()
+            )));
         }
         Ok(())
     }
@@ -499,6 +502,20 @@ fn query_rustup(
     String::from_utf8(result.stdout).map_err(|_| failure("rustup selection output must be UTF-8"))
 }
 
+/// Resolve installed Cargo for explicit operator provisioning without copying
+/// dependencies, loading application configuration, or installing a toolchain.
+pub(crate) fn host_cargo(workspace: &Path, cancellation: &CancellationToken) -> Result<PathBuf> {
+    let workspace = workspace
+        .canonicalize()
+        .map_err(|error| io_error("resolve Rust workspace", None, error))?;
+    let preparation = Preparation {
+        started: Instant::now(),
+        cancellation,
+    };
+    let pin = project_pin(&workspace)?;
+    Ok(host::resolve(&workspace, pin.as_ref(), &preparation)?.cargo)
+}
+
 impl RustEnvironment {
     /// Resolves the installed inventory and initial selection, and snapshots vendor
     /// material. Ambient Cargo/Rust configuration and rustup overrides are not
@@ -525,75 +542,14 @@ impl RustEnvironment {
         let pin = project_pin(&workspace)?;
         let pinned = pin.is_some();
         let pin_identity = pin_identity(&workspace)?;
-        // Only the resolved system rustup is an executable authority. Neither
-        // repository config nor PATH may select this host subprocess.
-        let rustup = Path::new("/usr/bin/rustup")
-            .canonicalize()
-            .map_err(|e| io_error("resolve system rustup; provision Rust on the host", None, e))?;
-        if !rustup.starts_with("/usr")
-            || !inspect_path(&rustup)?.is_file()
-            || rustup.starts_with(&workspace)
-        {
-            return Err(failure(
-                "rustup must be a trusted system executable outside the writable workspace",
-            ));
-        }
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .ok_or_else(|| {
-                failure("HOME is required to resolve the installed host Rust selection")
-            })?
-            .canonicalize()
-            .map_err(|e| io_error("canonicalize HOME for Rust resolution", None, e))?;
-        if !inspect_path(&home)?.is_dir() || home.starts_with(&workspace) {
-            return Err(failure(
-                "host HOME must be a canonical non-link directory outside the writable workspace",
-            ));
-        }
-        let selected = match &pin {
-            Some(pin) => pin.channel.clone(),
-            None => {
-                let text =
-                    query_rustup(&rustup, &home, &["show", "active-toolchain"], &preparation)?;
-                text.split_whitespace()
-                    .next()
-                    .ok_or_else(|| failure("rustup returned no installed default selection"))?
-                    .to_owned()
-            }
-        };
-        channel(&selected)?;
-        let cargo_output = query_rustup(
-            &rustup,
-            &home,
-            &["which", "--toolchain", &selected, "cargo"],
-            &preparation,
-        )
-        .map_err(|e| {
-            failure(format!(
-                "Rust `{selected}` is unavailable; provision it on the host before startup: {e}"
-            ))
-        })?;
-        let cargo = PathBuf::from(cargo_output.trim());
-        let root = cargo
-            .parent()
-            .and_then(Path::parent)
-            .ok_or_else(|| failure("rustup returned an invalid concrete cargo path"))?
-            .to_owned();
-        let installed_name = root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| failure("installed Rust selection name must be UTF-8"))?
-            .to_owned();
-        channel(&installed_name)?;
-        let installations = home.join(".rustup/toolchains");
-        if root.parent() != Some(installations.as_path())
-            || cargo != root.join("bin/cargo")
-            || root.starts_with(&workspace)
-        {
-            return Err(failure(
-                "Rust root must be an exact installed toolchain outside the writable workspace, not a custom linked or substituted root",
-            ));
-        }
+        let host::Selection {
+            rustup,
+            home,
+            selected,
+            cargo: _,
+            root,
+            installed_name,
+        } = host::resolve(&workspace, pin.as_ref(), &preparation)?;
         tracing::debug!(
             requested_channel = %selected,
             installed_channel = %installed_name,
@@ -768,6 +724,52 @@ impl RustEnvironment {
             .map_err(|e| io_error("create private Rust runtime", None, e))?;
         fs::create_dir(staging.path().join("runtime/bin"))
             .map_err(|e| io_error("create private Rust wrappers", None, e))?;
+        let mut has_locked_state = false;
+        for marker in [
+            "Cargo.lock",
+            ".kvist/vendoring-v1.json",
+            ".kvist/vendor-operation.lock",
+            ".kvist/vendor-publication",
+            ".kvist/sandbox-cargo",
+        ] {
+            match fs::symlink_metadata(workspace.join(marker)) {
+                Ok(_) => has_locked_state = true,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(io_error("inspect Rust dependency state", None, error)),
+            }
+        }
+        if has_locked_state {
+            let (_, resolver) = kvist_dependencies::rust::check_snapshot(
+                &workspace,
+                &staging.path().join("vendor"),
+                cancellation,
+            )
+            .map_err(crate::dependencies::from_error)?;
+            if let Some(resolver) = resolver {
+                let contents = kvist_dependencies::rust::resolver_config(&resolver, "/rust/vendor")
+                    .map_err(crate::dependencies::from_error)?;
+                let staged = staging.path().join("runtime/vendor-config.toml");
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o400)
+                    .open(&staged)
+                    .map_err(|error| {
+                        io_error("create private offline source config", None, error)
+                    })?;
+                file.write_all(contents.as_bytes())
+                    .and_then(|_| file.sync_all())
+                    .map_err(|error| {
+                        io_error("write private offline source config", None, error)
+                    })?;
+                let (identity, fingerprint) = hash_file(&staged, &preparation)?;
+                executables.push(TrackedExecutable {
+                    path: staged,
+                    identity,
+                    fingerprint,
+                });
+            }
+        }
         let initialization = staging.path().join("runtime/initialize");
         fs::write(&initialization, sav::offline_rust::INITIALIZE)
             .map_err(|e| io_error("write sandbox-only Rust initialization", None, e))?;
@@ -1092,6 +1094,7 @@ impl RustEnvironment {
 struct SnapshotFile {
     source: PathBuf,
     destination: PathBuf,
+    fingerprint: Fingerprint,
     /// The source-root-relative path as encoded bytes, used by the identity.
     relative: Vec<u8>,
 }
@@ -1113,6 +1116,11 @@ fn copy_vendor_file(entry: &SnapshotFile, preparation: &Preparation<'_>) -> Copy
     let before = input
         .metadata()
         .map_err(|e| io_error("inspect vendor snapshot input", None, e))?;
+    if fingerprint(&before) != entry.fingerprint {
+        return Err(failure(
+            "vendored file changed after enumeration; refresh on the host and restart",
+        ));
+    }
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -1131,9 +1139,9 @@ fn copy_vendor_file(entry: &SnapshotFile, preparation: &Preparation<'_>) -> Copy
             break;
         }
         file_bytes += n as u64;
-        if file_bytes > MAX_FILE_BYTES {
+        if file_bytes > before.len() || file_bytes > MAX_FILE_BYTES {
             return Err(failure(
-                "vendor snapshot exceeds 256 MiB/file or 1 GiB aggregate",
+                "vendor file grew beyond its approved snapshot size; refresh on the host and restart",
             ));
         }
         output
@@ -1141,7 +1149,9 @@ fn copy_vendor_file(entry: &SnapshotFile, preparation: &Preparation<'_>) -> Copy
             .map_err(|e| io_error("write private vendor snapshot", None, e))?;
         hash.update(&bytes[..n]);
     }
-    if fingerprint(&before) != fingerprint(&inspect_path(&entry.source)?) {
+    if file_bytes != before.len()
+        || fingerprint(&before) != fingerprint(&inspect_path(&entry.source)?)
+    {
         return Err(failure(
             "vendored file changed while snapshotting; refresh on the host and restart",
         ));
@@ -1237,6 +1247,7 @@ fn snapshot_vendor(
             files.push(SnapshotFile {
                 source: src,
                 destination: dst,
+                fingerprint: fingerprint(&metadata),
                 relative,
             });
         }
@@ -1319,6 +1330,42 @@ fn snapshot_vendor(
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn preparation_timeout_reports_the_actual_180_second_budget() {
+        let cancellation = CancellationToken::new();
+        let preparation = Preparation {
+            started: Instant::now() - PREPARATION_BUDGET,
+            cancellation: &cancellation,
+        };
+        let error = preparation.check().unwrap_err();
+        assert!(error.to_string().contains("180 seconds"), "{error}");
+    }
+
+    #[test]
+    fn vendor_file_growth_after_enumeration_is_rejected_before_copy() {
+        let source = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        let path = source.path().join("file");
+        fs::write(&path, "initial").unwrap();
+        let entry = SnapshotFile {
+            source: path.clone(),
+            destination: destination.path().join("file"),
+            fingerprint: fingerprint(&inspect_path(&path).unwrap()),
+            relative: b"file".to_vec(),
+        };
+        fs::write(&path, "grown after enumeration").unwrap();
+        let cancellation = CancellationToken::new();
+        let preparation = Preparation {
+            started: Instant::now(),
+            cancellation: &cancellation,
+        };
+        assert!(copy_vendor_file(&entry, &preparation).is_err());
+        assert!(
+            !entry.destination.exists(),
+            "changed file must fail before snapshot writes"
+        );
+    }
 
     fn fixture() -> tempfile::TempDir {
         // Prefer the run-time `CARGO_MANIFEST_DIR` (set by cargo) so the

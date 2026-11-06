@@ -4,6 +4,34 @@ This document explains how toolchains and their dependencies are mounted into
 the sandbox, how they are discovered and used inside the sandbox, and how to
 add or change vendored dependencies for each supported toolchain.
 
+## Standalone Rust provisioning
+
+`skott --vendor [--cwd DIR]` provisions an ordinary Rust project with an existing
+`Cargo.lock`, without `kvist.toml`, `skott.toml`, model setup, or a UI.
+`skott --vendor --check` performs filesystem-only full readiness checks;
+`skott --vendor --offline` uses Cargo's existing host cache only.
+Both Skott and `kvist vendor` share the `kvist-dependencies` library, not a
+subprocess call to the other application.
+
+Acquisition is explicit operator host authority; normal agent execution stays
+strictly network-denied. Host Cargo may read operator configuration and contact
+package sources unless `--offline` is selected. Cargo's offline flag is not OS
+confinement. Configured Kvist acquisition errors never authorize a host
+fallback; protected model dependency fulfillment remains unsupported.
+Configured acquisition stages bounded exact manifests/locks and empty target
+placeholders, not implementation content or host Cargo configuration. Git
+declarations and lock sources must match approved HTTPS/full-revision pairs;
+native Git/SSH transports and branch/tag-only declarations fail before fetch.
+Other-language maerg strategies remain in place, but Skott's consolidated
+offline backend is Rust-only until each language's resource wiring is tested.
+
+The common `.kvist` layout is retained for interoperability and alias masking.
+Private staging, an exclusive operation lock, exact lock rechecking, checksum
+validation and bounded process execution protect publication. A failed
+multi-file publication is not reported ready; inspect retained recovery
+state before another explicit action. Restart Skott after dependency changes,
+because running sessions deliberately retain their immutable vendor snapshot.
+
 ## Toolchain Mount Architecture
 
 The `/rust/*` layout below belongs to **Skott workspace authoring** and
@@ -35,6 +63,7 @@ The mount layout is:
 | `/rust/toolchains/N`                                   | Other validated installed toolchains, sorted by name                                 | Read-only access to every other installed version and its targets                 |
 | `/rust/runtime/bin/cargo`                              | Kvist-provided Cargo shim                                                            | A wrapper that forces `--offline --locked` and the vendored sources configuration |
 | `/rust/vendor`                                         | Snapshot of `.kvist/vendored`                                                        | Read-only snapshot of the vendored dependency registry                            |
+| `/rust/runtime/vendor-config.toml`                     | Validated generated source-replacement config, retargeted to `/rust/vendor`          | Optional read-only locked Git/alternate-registry resolver                          |
 | `/rust/runtime/bin/rustc`, `/rust/runtime/bin/rustdoc` | Fixed selection-aware wrappers                                                       | Compiler and documentation selection follows Cargo or a leading `+name`           |
 | `/rust/rustup-home`                                    | Private generated settings and sandbox-native registrations for every installed name | Read-only complete installed inventory discovery                                  |
 | `/tmp/rustup-home`                                     | Settings copied inside the sandbox; link to the read-only registration directory     | Invocation-local selection/profile state; never host settings                     |
@@ -155,10 +184,12 @@ mounts for other languages.
 
 ### Diagnosing Skott request preflight
 
-Skott's 30-second request-preflight guard is separate from Rust startup
+Skott's request-preflight guard uses the requested tool wall time capped at
+120 seconds, separate from the 180-second Rust startup
 preparation, a sandbox command's execution timeout, and nextest's test timeout.
-A test taking more than 30 seconds can therefore still fail specifically during
-preflight. Timeout errors include `stage` and `elapsed_ms`; `SKOTT_LOG=debug`
+A longer test can still fail specifically during finite preflight.
+Timeout errors include `limit_ms`, `stage`, `elapsed_ms` and
+`stage_elapsed_ms`; `SKOTT_LOG=debug`
 also records identity, workspace, Rust-resource, context and request-validation
 stages. Logs omit command text, environment values and captured output.
 

@@ -14,6 +14,27 @@ use clap::Parser;
     long_about = None,
 )]
 pub struct Cli {
+    /// Explicitly provision locked Rust dependencies on the host and exit.
+    /// Uses --cwd or the launch directory, without application configuration.
+    #[arg(long, conflicts_with_all = [
+        "config", "registry", "model", "effort", "profile", "theme",
+        "init_config", "setup", "attach", "headless", "list_models", "prompt",
+        "log_dir", "context_limit", "no_logs", "allow_control",
+        "response_reserve", "disable_generation_loop_detection",
+        "max_run_secs", "max_run_tokens", "max_turns",
+        "allow_host_execution", "host_turns",
+    ])]
+    pub vendor: bool,
+
+    /// Verify existing locked dependencies without running Cargo or writing files.
+    #[arg(long, requires = "vendor", conflicts_with = "offline")]
+    pub check: bool,
+
+    /// Restrict explicit vendoring to Cargo's existing local cache.
+    /// This is Cargo's offline mode, not an OS sandbox.
+    #[arg(long, requires = "vendor", conflicts_with = "check")]
+    pub offline: bool,
+
     /// Inspect a shared live run journal without initializing models or tools.
     #[arg(long, value_name = "JOURNAL", conflicts_with_all = ["prompt", "headless", "list_models"])]
     pub attach: Option<PathBuf>,

@@ -879,9 +879,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 // provisions a stale registry via the in-sandbox acquisition
                 // phase (network-allow `cargo fetch`) before the effect sandbox
                 // runs; otherwise the classic host `cargo vendor` pass is used.
-                let sandbox = crate::config::load(&project.project_dir)
-                    .ok()
-                    .and_then(|config| config.sandbox);
+                let sandbox = vendor_command::configured_sandbox(&project.project_dir)?;
                 vendor_command::vendor_project(
                     &project.project_dir,
                     vendor_command::VendorOptions {
@@ -1538,9 +1536,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 vendored_dir,
             } => {
                 let project = context::ProjectContext::resolve(project_dir.as_deref())?;
-                let sandbox = crate::config::load(&project.project_dir)
-                    .ok()
-                    .and_then(|config| config.sandbox);
+                let sandbox = vendor_command::configured_sandbox(&project.project_dir)?;
                 vendor_command::vendor_project(
                     &project.project_dir,
                     vendor_command::VendorOptions {

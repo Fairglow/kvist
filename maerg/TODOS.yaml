@@ -10,6 +10,50 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:1339c23f9bfbeacaf136e951c4f62ecec394c932101691fdc241a19402cc62c5", "observed_revision": "sha256:91d5b83ce9c19639c2d381062413d6e60c4e6f06a3e889589e2d6661cf4dddd5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:2bceb93227d8669a775839cc66a3551913d53273c8917973b2fe447399bbd300", "observed_revision": "sha256:f9c3f0229bc4968cc099e3a139ea7dd8fc75933cd7ac6465a01596ff4a3a0029"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:e18eae35428b3e86a5aed9f4feaff20b3d7aff10c1bdb652f5d23b25f0fe4206", "observed_revision": "sha256:0ca9db51d23c506aad7f648c9ceca5784d613846b1d109ea618f6a2dfac64c2c"}]
 tasks:
+  - id: "shared-dependencies-write-tests"
+    title: "write_tests: shared offline Rust provider"
+    description: "REQ-SHARED-OFFLINE-DEPENDENCIES: failure/no fallback, common readiness and retained protected refusals."
+    context: "Human approved consolidated Rust-first offline dependency mechanics and completion of the missing acquisition manifests and authoritative readiness gates. Initial blocker and Git admission regressions failed before repair; final affected 389-case suite passed. Reopened timestamp bookkeeping reconciled at actual 2026-11-06T23:34:10Z; execution chronology remains in IMPL."
+    purpose: "Test configured failure without acquiring extra host authority."
+    kind: test
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    depends_on: []
+    status: completed
+    expected_outcome: "New regressions fail before integration code."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+  - id: "shared-dependencies-implement-code"
+    title: "implement_code: shared offline Rust provider"
+    description: "Extract catalogue ownership and use the common Rust transaction while retaining maerg acquisition authority."
+    context: "Common provider retains frontend authorization separation."
+    purpose: "Remove duplicated Rust publication mechanics."
+    kind: implementation
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    depends_on: ["shared-dependencies-write-tests"]
+    status: completed
+    expected_outcome: "Common backend used, existing errors preserved and configured acquisition never host-falls-back."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+  - id: "shared-dependencies-security-audit"
+    title: "security_audit: shared offline Rust provider"
+    description: "Independent examination of explicit operator and protected-request boundaries."
+    context: "Protected requests remain unsupported independently of operator capability. Independent source observations and the reported/repaired native Git admission issue are retained in IMPL, without claiming total egress proof."
+    purpose: "Independently inspect authority and publication failures."
+    kind: security-audit
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    depends_on: ["shared-dependencies-implement-code"]
+    status: completed
+    expected_outcome: "Persist scoped independent findings."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+  - id: "shared-dependencies-compliance-review"
+    title: "compliance_review: shared offline Rust provider"
+    description: "Compare source-only observed behavior with local intent in a separate source-blind context."
+    context: "Separate rust-source-blind-comparator found scoped correspondence and recorded broader lock-changing acquisition, unimplemented automatic fulfillment and baseline-intent discrepancies for human arbitration in IMPL. Review completed, not accepted or certified; no automatic acquisition enabled."
+    purpose: "Record discrepancies rather than certify implementation."
+    kind: compliance-review
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    depends_on: ["shared-dependencies-security-audit"]
+    status: completed
+    expected_outcome: "No material unexplained contradictions; limitations retained."
+    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:37:01Z", completed_at: "2026-11-06T23:37:01Z"}
   - id: "resilience-p1-write-tests"
     title: "write_tests: resilience phase 1"
     description: "Write and execute regressions before production changes. Scope: honest outcomes, fresh reads, refused proposals and repair propagation."

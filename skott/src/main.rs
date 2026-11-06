@@ -25,6 +25,24 @@ fn main() -> ExitCode {
 
 fn run() -> skott::Result<ExitCode> {
     let cli = Cli::parse();
+    if cli.vendor {
+        let project = cli.cwd.clone().unwrap_or(std::env::current_dir()?);
+        let cancellation = sav::CancellationToken::new();
+        if !cli.check {
+            eprintln!(
+                "Explicit host Rust vendoring for `{}`. {} Cargo may read host configuration; no model, toolchain installation, or automatic replay.",
+                skott::error::terminal_text(&project.to_string_lossy()),
+                if cli.offline {
+                    "Using Cargo's existing cache only (--offline --locked)."
+                } else {
+                    "Cargo may acquire locked dependencies from configured package sources (--locked)."
+                },
+            );
+        }
+        let report = skott::dependencies::run(&project, cli.check, cli.offline, &cancellation)?;
+        println!("{report}");
+        return Ok(ExitCode::SUCCESS);
+    }
     if cli.init_config {
         let project = cli.cwd.clone().unwrap_or(std::env::current_dir()?);
         let destination = cli

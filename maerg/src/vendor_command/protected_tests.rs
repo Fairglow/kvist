@@ -134,6 +134,98 @@ fn protected_readiness_reuses_ready_rust_without_rewriting_state() {
 }
 
 #[test]
+fn protected_readiness_rejects_active_and_interrupted_publication() {
+    for name in ["vendor-operation.lock", "vendor-publication"] {
+        let fixture = Fixture::new();
+        fixture.provision_empty_rust();
+        let path = fixture.project.join(".kvist").join(name);
+        if name == "vendor-publication" {
+            fs::create_dir(&path).unwrap();
+        } else {
+            fs::write(&path, "").unwrap();
+        }
+        let cancellation = sav::CancellationToken::new();
+        assert!(
+            check_protected_vendor_readiness(&fixture.project, fixture.options(&cancellation))
+                .is_err(),
+            "{name} was reported ready"
+        );
+        assert!(path.exists(), "readiness must not reconcile the fence");
+    }
+}
+
+#[test]
+fn native_acquisition_fetches_a_locked_workspace_without_building_or_downloading() {
+    let mut fixture = Fixture::new();
+    let runner = std::env::var_os("KVIST_GALLA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::current_exe()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("galla-runner")
+        });
+    assert!(runner.is_file(), "build the native Galla runner first");
+    fixture.sandbox.runner = runner
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    fixture.sandbox.backend = "/usr/bin/bwrap".into();
+    fs::create_dir_all(fixture.project.join("app/src")).unwrap();
+    fs::create_dir_all(fixture.project.join("src/dependency/src")).unwrap();
+    fs::write(
+        fixture.project.join("Cargo.toml"),
+        "[workspace]\nmembers=['app']\nresolver='3'\n",
+    )
+    .unwrap();
+    fs::write(fixture.project.join("app/Cargo.toml"), "[package]\nname='acquisition-app'\nversion='0.1.0'\nedition='2024'\n[dependencies]\nacquisition-dependency={path='../src/dependency'}\n").unwrap();
+    fs::write(fixture.project.join("app/src/lib.rs"), "pub fn app() {}\n").unwrap();
+    fs::write(
+        fixture.project.join("app/build.rs"),
+        "fn main(){panic!(\"acquisition must not build\");}\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.project.join("src/dependency/Cargo.toml"),
+        "[package]\nname='acquisition-dependency'\nversion='0.1.0'\nedition='2024'\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.project.join("src/dependency/src/lib.rs"),
+        "pub fn dependency() {}\n",
+    )
+    .unwrap();
+    let cargo =
+        crate::toolchain::resolve_pinned_toolchain(&fixture.project, "native acquisition fixture")
+            .unwrap()
+            .cargo;
+    let output = Command::new(cargo)
+        .args(["generate-lockfile", "--offline"])
+        .current_dir(&fixture.project)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let lock = fs::read(fixture.project.join("Cargo.lock")).unwrap();
+    let stage = fixture._root.path().join("staging");
+    fs::create_dir(&stage).unwrap();
+    let vendor = stage.join("vendor");
+    fs::create_dir(&vendor).unwrap();
+    provision_rust_via_acquisition_sandbox(&fixture.project, &fixture.sandbox, &vendor).unwrap();
+    assert_eq!(fs::read(fixture.project.join("Cargo.lock")).unwrap(), lock);
+    assert!(!fixture.project.join("target").exists());
+    assert_eq!(fs::read_dir(&vendor).unwrap().count(), 0);
+    assert_eq!(
+        fs::read_dir(&stage).unwrap().count(),
+        1,
+        "acquisition scratch leaked"
+    );
+}
+
+#[test]
 fn protected_vendor_does_not_replace_the_approved_runner_identity() {
     let mut fixture = Fixture::new();
     fixture.provision_empty_rust();
@@ -275,7 +367,10 @@ fn protected_vendor_refusal_child() {
     )
     .expect("stale manifest");
     let error = check_protected_vendor_readiness(&project, options()).expect_err("stale registry");
-    assert!(error.to_string().contains("vendor repack"), "{error}");
+    assert!(
+        error.to_string().contains("vendor package is not locked"),
+        "{error}"
+    );
     assert!(
         stale.exists(),
         "protected refusal must not remove stale material"
@@ -286,7 +381,8 @@ fn protected_vendor_refusal_child() {
     fs::write(
         project.join("Cargo.lock"),
         "version = 4\n\n[[package]]\nname = \"missing\"\nversion = \"1.0.0\"\n\
-         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n",
+         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n\
+         checksum = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n",
     )
     .expect("changed lock");
     let error = check_protected_vendor_readiness(&project, options()).expect_err("lock drift");

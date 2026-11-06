@@ -2,6 +2,37 @@
 
 # Kvist Maerg Design
 
+## Consolidated Rust provisioning
+
+Replace the local catalogue implementation with shared provider exports and
+frontend error adaptation. Route Rust publication through the shared transaction.
+Keep maerg acquisition request construction/runner policy as a callback; a
+failed fetch/repack returns an error rather than invoking a host fallback.
+Callback scratch is transaction-private and must be closed before returning;
+only the staged vendor tree belongs in the shared publication candidate.
+Reuse Cargo build-context discovery for workspace/path roots and bounded
+non-link resource enumeration, without its authoring-only writable-overlap
+restriction. Stage exact manifest/lock bytes and empty regular placeholders
+for other selected files inside owned acquisition scratch; preserve relative
+layout so inherited workspace metadata, globs and path dependencies resolve.
+Bound metadata reads, compare original/opened/final fingerprints and revalidate
+the entire selected set before dispatch. No source contents or host `.cargo`
+configuration are copied. Generate alternate registry index definitions only
+from approved acquisition policy. Compare the staged and original lock digests
+with the prefetch identity before any host offline repack or shared publication.
+Keep the existing closed runner request and source-aware network authority.
+Use the shared full check for protected readiness and Rust preparation rather
+than cheap catalogue presence; propagate cancellation and retain budget checks.
+Before acquisition dispatch, validate Git dependency tables (including target,
+workspace, patch and replacement declarations) and Git lock sources against
+approved HTTPS repository/full-revision pairs. Reject other transports before
+any fetch rather than relying on proxy-aware Git clients. Full preparation
+readiness applies when root Cargo.lock or managed Rust controls exist; an
+unmanaged standalone child can retain the existing empty-registry build view.
+The explicit no-sandbox operator path uses the shared bounded Cargo backend.
+No new model acquisition path or cross-component task authority is introduced.
+Other language provisioning remains local pending its deliberate extraction.
+
 ## Shared registry realization (ADR 0015)
 
 Resilience delivery first repairs honest completion and read observations, then

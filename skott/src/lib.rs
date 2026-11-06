@@ -20,6 +20,7 @@ mod run;
 pub mod config;
 pub mod config_init;
 pub mod context;
+pub mod dependencies;
 pub mod error;
 pub mod executor;
 pub mod external;

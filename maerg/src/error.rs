@@ -677,6 +677,48 @@ pub enum KvistError {
     },
 }
 
+impl From<kvist_dependencies::Error> for KvistError {
+    fn from(error: kvist_dependencies::Error) -> Self {
+        match error {
+            kvist_dependencies::Error::VendoringUnavailable { path, reason } => {
+                Self::VendoringUnavailable { path, reason }
+            }
+            kvist_dependencies::Error::VendoringIncomplete {
+                path,
+                count,
+                missing,
+            } => Self::VendoringIncomplete {
+                path,
+                count,
+                missing,
+            },
+            kvist_dependencies::Error::VendoringStale {
+                path,
+                current,
+                expected,
+            } => Self::VendoringStale {
+                path,
+                current,
+                expected,
+            },
+            kvist_dependencies::Error::Io {
+                operation,
+                path,
+                source,
+            } => Self::Io {
+                operation,
+                path,
+                source,
+            },
+            kvist_dependencies::Error::Cancelled => Self::Sav(sav::Error::Cancelled),
+            error => Self::VendoringUnavailable {
+                path: "<dependencies>".into(),
+                reason: error.to_string(),
+            },
+        }
+    }
+}
+
 /// Result type used by Kvist's domain and command layers.
 pub type Result<T> = std::result::Result<T, KvistError>;
 

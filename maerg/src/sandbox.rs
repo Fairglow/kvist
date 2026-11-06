@@ -39,6 +39,7 @@ use crate::{
 
 #[path = "sandbox/cargo_context.rs"]
 mod cargo_context;
+pub(crate) use cargo_context::stage_acquisition_workspace;
 #[path = "sandbox/rust_environment.rs"]
 mod rust_environment;
 

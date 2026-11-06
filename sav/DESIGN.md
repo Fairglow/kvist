@@ -2,6 +2,14 @@
 
 # Sav Design
 
+## Fixed offline source configuration
+
+Only the Cargo and Clippy wrappers conditionally add the fixed
+`/rust/runtime/vendor-config.toml` argument when the host stages it. Use a shell
+array for the literal optional argument; no environment/model path or shell
+interpolation constructs executable fragments. Preserve the always-enforced
+offline/locked/crates.io arguments and selection behavior.
+
 ## Resilience realization
 
 Deliver four independently checked phases: outcome correctness; streamed
