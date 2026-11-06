@@ -12,6 +12,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use sav::loop_detection::ProgressEvidence;
 use sav::{CancellationToken, ToolIntent};
 
 use crate::config::SandboxPaths;
@@ -21,11 +22,15 @@ use crate::sandbox::{BuildRequest, ToolOutcome, default_resources, execute};
 use crate::session::ToolExecutor;
 use crate::tools::{ExecContext, ToolRegistry};
 
+mod progress;
+pub(crate) use progress::NativeProgress;
+
 /// Executes tool intents inside the sandbox.
 pub struct SandboxExecutor {
     registry: ToolRegistry,
     sandbox: SandboxPaths,
     working_directory: PathBuf,
+    progress: NativeProgress,
 }
 
 impl SandboxExecutor {
@@ -36,6 +41,7 @@ impl SandboxExecutor {
             registry,
             sandbox,
             working_directory,
+            progress: NativeProgress::default(),
         }
     }
 
@@ -48,6 +54,40 @@ impl SandboxExecutor {
     pub fn profiles(&self) -> Vec<&'static str> {
         self.registry.profiles()
     }
+
+    fn execute_prepared(
+        &self,
+        intent: &ToolIntent,
+        file_request: Option<&FileRequest>,
+        request: &galla::protocol::SandboxRequest,
+        cancellation: &CancellationToken,
+        execute: impl FnOnce() -> Result<ToolOutcome>,
+    ) -> Result<ToolOutcome> {
+        check_cancelled(cancellation)?;
+        let prepared = file_request.map(|file_request| {
+            let mut authoring = request.grants.iter().filter(|grant| {
+                grant.purpose == galla::protocol::Purpose::Authoring
+                    && grant.access == galla::protocol::Access::ReadWrite
+            });
+            let grant = authoring.next().ok_or_else(|| Error::SandboxBuild {
+                reason: "prepared sandbox request has no writable authoring scope".into(),
+            })?;
+            if authoring.next().is_some() || grant.destination != request.working_directory {
+                return Err(Error::SandboxBuild {
+                    reason: "prepared sandbox authoring scope is ambiguous or differs from its working directory".into(),
+                });
+            }
+            file_request.sandbox_mapped(&request.working_directory, Path::new(&grant.source))
+        }).transpose().map_err(|error| Error::SandboxExec {
+            tool: Some(intent.name.clone()),
+            reason: format!(
+                "native sandbox observation preparation failed (not executed): {error}; \
+                 reconcile the prepared scope before further work; no automatic replay"
+            ),
+        })?;
+        self.progress
+            .execute_prepared(intent, prepared.as_ref(), cancellation, execute)
+    }
 }
 
 impl<T: ToolExecutor + ?Sized> ToolExecutor for Arc<T> {
@@ -57,6 +97,10 @@ impl<T: ToolExecutor + ?Sized> ToolExecutor for Arc<T> {
         cancellation: &CancellationToken,
     ) -> Result<ToolOutcome> {
         self.as_ref().execute(intent, cancellation)
+    }
+
+    fn progress(&self, intent: &ToolIntent, outcome: &ToolOutcome) -> Result<ProgressEvidence> {
+        self.as_ref().progress(intent, outcome)
     }
 }
 
@@ -116,7 +160,20 @@ impl ToolExecutor for SandboxExecutor {
             cancellation,
         )?;
         check_cancelled(cancellation)?;
-        execute(&self.sandbox, &request, cancellation)
+        self.execute_prepared(
+            intent,
+            rendered.file_request.as_ref(),
+            &request,
+            cancellation,
+            || {
+                check_cancelled(cancellation)?;
+                execute(&self.sandbox, &request, cancellation)
+            },
+        )
+    }
+
+    fn progress(&self, intent: &ToolIntent, outcome: &ToolOutcome) -> Result<ProgressEvidence> {
+        self.progress.progress(intent, outcome)
     }
 }
 
@@ -257,6 +314,174 @@ pub(crate) fn stage_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    struct PreparedSelection {
+        _directory: tempfile::TempDir,
+        executor: SandboxExecutor,
+        sandbox_request: galla::protocol::SandboxRequest,
+        file_request: FileRequest,
+        intent: ToolIntent,
+        original: PathBuf,
+        rebound: PathBuf,
+    }
+
+    fn prepared_selection() -> PreparedSelection {
+        let directory = tempfile::tempdir_in(".").unwrap();
+        let parent = directory.path().canonicalize().unwrap();
+        let original = parent.join("original");
+        let rebound = parent.join("rebound");
+        let selected = parent.join("selected");
+        std::fs::create_dir(&original).unwrap();
+        std::fs::create_dir(&rebound).unwrap();
+        std::fs::write(original.join("text"), "before").unwrap();
+        std::fs::write(rebound.join("text"), "unrelated").unwrap();
+        std::os::unix::fs::symlink(&original, &selected).unwrap();
+        let sandbox = SandboxPaths {
+            runner: parent.join("runner"),
+            backend: parent.join("backend"),
+        };
+        std::fs::write(&sandbox.runner, "fixture runner").unwrap();
+        std::fs::write(&sandbox.backend, "fixture backend").unwrap();
+        let policy = crate::config::ToolPolicy::minimum();
+        let argv = vec!["/usr/bin/true".into()];
+        let sandbox_request = crate::sandbox::build_request(
+            &sandbox,
+            &BuildRequest {
+                argv: &argv,
+                working_directory: &selected,
+                read_roots: &[],
+                environment: BTreeMap::new(),
+                policy: &policy,
+                resources: default_resources(),
+            },
+        )
+        .unwrap();
+        let grant = sandbox_request
+            .grants
+            .iter()
+            .find(|grant| grant.purpose == galla::protocol::Purpose::Authoring)
+            .unwrap();
+        assert_eq!(grant.source, original.to_str().unwrap());
+        std::fs::remove_file(&selected).unwrap();
+        std::os::unix::fs::symlink(&rebound, &selected).unwrap();
+        let intent = ToolIntent {
+            id: "prepared-sandbox".into(),
+            provider_id: None,
+            name: "write_file".into(),
+            arguments: json!({"path":"/workspace/text","content":"changed"}),
+        };
+        let file_request =
+            FileRequest::new("/workspace", &intent.name, intent.arguments.clone()).unwrap();
+        PreparedSelection {
+            _directory: directory,
+            executor: SandboxExecutor::new(ToolRegistry::new(policy), sandbox, selected),
+            sandbox_request,
+            file_request,
+            intent,
+            original,
+            rebound,
+        }
+    }
+
+    fn successful_fixture_outcome() -> ToolOutcome {
+        ToolOutcome {
+            exited: true,
+            status: Some(0),
+            stdout: b"completed".to_vec(),
+            stderr: vec![],
+            timed_out: false,
+            output_limit_exceeded: false,
+            cancelled: false,
+        }
+    }
+
+    #[test]
+    fn sandbox_prepared_scope_observes_the_executed_grant_not_a_rebound_selection() {
+        let fixture = prepared_selection();
+        let actual = fixture.file_request.host_mapped(&fixture.original).unwrap();
+        let out = fixture
+            .executor
+            .execute_prepared(
+                &fixture.intent,
+                Some(&fixture.file_request),
+                &fixture.sandbox_request,
+                &CancellationToken::new(),
+                || {
+                    crate::file_tools::execute_file_request(&actual).unwrap();
+                    Ok(successful_fixture_outcome())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            fixture.executor.progress(&fixture.intent, &out).unwrap(),
+            ProgressEvidence::StateChanged
+        );
+        assert_eq!(
+            std::fs::read(fixture.original.join("text")).unwrap(),
+            b"changed"
+        );
+        assert_eq!(
+            std::fs::read(fixture.rebound.join("text")).unwrap(),
+            b"unrelated"
+        );
+    }
+
+    #[test]
+    fn sandbox_prepared_scope_never_certifies_a_change_in_the_rebound_selection() {
+        let fixture = prepared_selection();
+        let out = fixture
+            .executor
+            .execute_prepared(
+                &fixture.intent,
+                Some(&fixture.file_request),
+                &fixture.sandbox_request,
+                &CancellationToken::new(),
+                || {
+                    std::fs::write(fixture.rebound.join("text"), "unrelated external edit")
+                        .unwrap();
+                    Ok(successful_fixture_outcome())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            fixture.executor.progress(&fixture.intent, &out).unwrap(),
+            ProgressEvidence::None
+        );
+        assert_eq!(
+            std::fs::read(fixture.original.join("text")).unwrap(),
+            b"before"
+        );
+    }
+
+    #[test]
+    fn sandbox_prepared_scope_link_rebind_is_rejected_before_effects() {
+        let fixture = prepared_selection();
+        let moved = fixture.original.with_file_name("moved");
+        std::fs::rename(&fixture.original, &moved).unwrap();
+        std::os::unix::fs::symlink(&fixture.rebound, &fixture.original).unwrap();
+        let executed = std::cell::Cell::new(false);
+        let result = fixture.executor.execute_prepared(
+            &fixture.intent,
+            Some(&fixture.file_request),
+            &fixture.sandbox_request,
+            &CancellationToken::new(),
+            || {
+                executed.set(true);
+                Ok(successful_fixture_outcome())
+            },
+        );
+        assert!(result.is_err(), "prepared source alias must be refused");
+        let error = result.unwrap_err();
+        assert!(error.describe().contains("not executed"), "{error}");
+        assert!(error.describe().contains("reconcile"), "{error}");
+        assert!(!executed.get());
+        assert_eq!(std::fs::read(moved.join("text")).unwrap(), b"before");
+        assert_eq!(
+            std::fs::read(fixture.rebound.join("text")).unwrap(),
+            b"unrelated"
+        );
+    }
 
     #[test]
     fn stage_bytes_creates_private_payload_outside_workspace() {

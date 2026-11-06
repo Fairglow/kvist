@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use sav::ToolIntent;
+use sav::{ToolIntent, loop_detection::ProgressEvidence};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -32,7 +32,6 @@ fn nullable_offset<'de, D: serde::Deserializer<'de>>(
 struct Cursor {
     offset: usize,
     sha256: String,
-    eof: bool,
 }
 
 #[cfg(test)]
@@ -144,6 +143,35 @@ mod tests {
                 .is_ok()
         );
     }
+
+    #[test]
+    fn only_a_changed_prior_full_digest_is_state_change_not_a_first_read_or_new_page() {
+        let mut reads = ReadCursors::default();
+        let read = intent(json!({"path":"/workspace/a","offset":0,"limit":2}));
+        assert_eq!(
+            reads.observe(&read, &outcome(page())).unwrap(),
+            ProgressEvidence::None
+        );
+        let next = intent(json!({"path":"/workspace/a","offset":2,"limit":2}));
+        let mut next_page = page();
+        next_page["offset"] = json!(2);
+        next_page["content"] = json!("cd");
+        next_page["next_offset"] = json!(4);
+        assert_eq!(
+            reads.observe(&next, &outcome(next_page)).unwrap(),
+            ProgressEvidence::None
+        );
+        let mut changed = page();
+        changed["sha256"] = json!(format!("sha256:{}", "b".repeat(64)));
+        assert_eq!(
+            reads.observe(&read, &outcome(changed.clone())).unwrap(),
+            ProgressEvidence::StateChanged
+        );
+        assert_eq!(
+            reads.observe(&read, &outcome(changed)).unwrap(),
+            ProgressEvidence::None
+        );
+    }
 }
 
 #[derive(Default)]
@@ -157,24 +185,6 @@ fn invalid(reason: &str) -> Error {
 }
 
 impl ReadCursors {
-    pub(super) fn repeatable(&self, intent: &ToolIntent) -> bool {
-        let Some(path) = intent.arguments.get("path").and_then(|v| v.as_str()) else {
-            return false;
-        };
-        let Some(cursor) = self.0.get(path) else {
-            return true;
-        };
-        if !cursor.eof {
-            return true;
-        }
-        // Explicit earlier offsets deliberately request fresh observations.
-        intent.arguments.get("offset").is_some_and(|offset| {
-            offset
-                .as_u64()
-                .is_some_and(|offset| offset < cursor.offset as u64)
-        })
-    }
-
     pub(super) fn resolve(&self, intent: &ToolIntent) -> Result<ToolIntent> {
         if intent.name != "read_file" {
             return Ok(intent.clone());
@@ -211,9 +221,13 @@ impl ReadCursors {
         Ok(resolved)
     }
 
-    pub(super) fn observe(&mut self, intent: &ToolIntent, outcome: &ToolOutcome) -> Result<()> {
+    pub(super) fn observe(
+        &mut self,
+        intent: &ToolIntent,
+        outcome: &ToolOutcome,
+    ) -> Result<ProgressEvidence> {
         if intent.name != "read_file" || outcome.failed() {
-            return Ok(());
+            return Ok(ProgressEvidence::None);
         }
         if outcome.stdout.len() > MAX_OUTPUT_BYTES {
             return Err(invalid("native read result exceeds the output byte bound"));
@@ -256,14 +270,22 @@ impl ReadCursors {
             .get("path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| invalid("read result has no request path"))?;
+        let progress = if self
+            .0
+            .get(path)
+            .is_some_and(|cursor| cursor.sha256 != page.sha256)
+        {
+            ProgressEvidence::StateChanged
+        } else {
+            ProgressEvidence::None
+        };
         self.0.insert(
             path.into(),
             Cursor {
                 offset: end,
                 sha256: page.sha256,
-                eof: page.next_offset.is_none(),
             },
         );
-        Ok(())
+        Ok(progress)
     }
 }

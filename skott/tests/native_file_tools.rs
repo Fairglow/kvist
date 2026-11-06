@@ -430,6 +430,162 @@ fn explicit_host_executor_uses_same_helper_without_workspace_staging() {
 }
 
 #[test]
+fn phase3_host_progress_observes_all_native_mutations_and_rejects_noops() {
+    use sav::loop_detection::ProgressEvidence::{None, StateChanged};
+
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    let executor = HostExecutor::new(
+        ToolRegistry::new(ToolPolicy::minimum())
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+        root.clone(),
+    );
+    let calls = [
+        (
+            "write_file",
+            json!({"path":"/workspace/text","content":""}),
+            StateChanged,
+        ),
+        (
+            "write_file",
+            json!({"path":"/workspace/text","content":""}),
+            None,
+        ),
+        (
+            "write_file",
+            json!({"path":"/workspace/text","content":"one\n"}),
+            StateChanged,
+        ),
+        (
+            "edit_file",
+            json!({"path":"/workspace/text","old_text":"one","new_text":"one",
+            "expected_sha256":digest(b"one\n")}),
+            None,
+        ),
+        (
+            "edit_file",
+            json!({"path":"/workspace/text","old_text":"one","new_text":"two",
+            "expected_sha256":digest(b"one\n")}),
+            StateChanged,
+        ),
+        (
+            "append_file",
+            json!({"path":"/workspace/text","content":"",
+            "expected_sha256":digest(b"two\n")}),
+            None,
+        ),
+        (
+            "append_file",
+            json!({"path":"/workspace/text","content":"three\n",
+            "expected_sha256":digest(b"two\n")}),
+            StateChanged,
+        ),
+        (
+            "apply_patch",
+            json!({"path":"/workspace/text","patch":"@@ -1 +1 @@\n-two\n+four\n",
+            "expected_sha256":digest(b"two\nthree\n")}),
+            StateChanged,
+        ),
+        (
+            "read_file",
+            json!({"path":"/workspace/text","offset":0}),
+            None,
+        ),
+        (
+            "shell",
+            json!({"command":"printf 'mutation succeeded'"}),
+            None,
+        ),
+    ];
+    for (index, (name, arguments, expected)) in calls.into_iter().enumerate() {
+        let intent = ToolIntent {
+            id: format!("native-{index}"),
+            provider_id: Option::None,
+            name: name.into(),
+            arguments,
+        };
+        let out = executor
+            .execute(&intent, &CancellationToken::new())
+            .unwrap();
+        assert!(!out.failed(), "{name}: {}", out.error_text(4096));
+        assert_eq!(
+            executor.progress(&intent, &out).unwrap(),
+            expected,
+            "{name}"
+        );
+        assert_eq!(
+            executor.progress(&intent, &out).unwrap(),
+            None,
+            "consumed {name}"
+        );
+    }
+    assert_eq!(fs::read(root.join("text")).unwrap(), b"four\nthree\n");
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+}
+
+#[test]
+fn phase3_failed_native_edit_has_no_progress_and_preserves_error_and_bytes() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    fs::write(root.join("text"), "original").unwrap();
+    let executor = HostExecutor::new(
+        ToolRegistry::new(ToolPolicy::minimum())
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+        root.clone(),
+    );
+    let intent = ToolIntent {
+        id: "stale-edit".into(),
+        provider_id: None,
+        name: "edit_file".into(),
+        arguments: json!({"path":"/workspace/text","old_text":"original","new_text":"changed",
+            "expected_sha256":digest(b"stale")}),
+    };
+    let out = executor
+        .execute(&intent, &CancellationToken::new())
+        .unwrap();
+    assert!(out.failed());
+    assert!(out.error_text(4096).contains("stale"));
+    assert_eq!(
+        executor.progress(&intent, &out).unwrap(),
+        sav::loop_detection::ProgressEvidence::None,
+    );
+    assert_eq!(fs::read(root.join("text")).unwrap(), b"original");
+}
+
+#[test]
+fn followup_ambiguous_public_host_executions_fail_instead_of_certifying_the_wrong_write() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    let executor = HostExecutor::new(
+        ToolRegistry::new(ToolPolicy::minimum())
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+        root.clone(),
+    );
+    let intent = ToolIntent {
+        id: "same-id".into(),
+        provider_id: None,
+        name: "write_file".into(),
+        arguments: json!({"path":"/workspace/text","content":"same"}),
+    };
+    let first = executor
+        .execute(&intent, &CancellationToken::new())
+        .unwrap();
+    let second = executor
+        .execute(&intent, &CancellationToken::new())
+        .unwrap();
+    assert!(!first.failed());
+    assert!(!second.failed());
+    assert_eq!(first.stdout, second.stdout);
+    assert_eq!(first.stderr, second.stderr);
+    assert_eq!(first.status, second.status);
+    for out in [&second, &first] {
+        let error = executor.progress(&intent, out).unwrap_err();
+        assert!(error.describe().contains("ambiguous"), "{error}");
+    }
+    assert_eq!(fs::read(root.join("text")).unwrap(), b"same");
+}
+
+#[test]
 fn helper_must_be_regular_nonlink_and_outside_write_scope() {
     let dir = fixture();
     let root = dir.path().canonicalize().unwrap();

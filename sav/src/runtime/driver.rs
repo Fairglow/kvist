@@ -2,7 +2,9 @@
 use super::session::*;
 use super::{ControlMailbox, GuidanceNotice, GuidanceState};
 use super::{Error, Result, ToolOutcome, context::ContextManager, retry::RetryPolicy};
-use crate::loop_detection::{RecoveryBudget, StreamLoopDetector};
+use crate::loop_detection::{
+    ProgressEvidence, RecoveryBudget, StreamLoopDetector, ToolLoopTracker,
+};
 use crate::{CancellationToken, ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn};
 use std::{
     collections::VecDeque,
@@ -375,7 +377,10 @@ impl NativeRuntime {
         let mut usage = AttemptUsage::default();
         let mut generation_seconds = 0.0_f64;
         let mut tokens_remaining = self.limits.max_tokens;
-        let mut actions = crate::ActionHashRing::new();
+        let mut actions = ToolLoopTracker::default();
+        let mut continuity = self
+            .generation_loop_detection
+            .then(StreamLoopDetector::default);
         let mut generation_recovery = RecoveryBudget::default();
         let mut read_pages = VecDeque::new();
         let mut next_attempt = 1;
@@ -424,7 +429,7 @@ impl NativeRuntime {
             sink.send(Event::TurnStart {
                 model: session.model_selector().into(),
             })?;
-            let (turn_value, turn_index) = match self.drive_turn(
+            let driven = self.drive_turn(
                 &request,
                 transport,
                 sink,
@@ -450,7 +455,48 @@ impl NativeRuntime {
                 controls,
                 next_attempt,
                 &|intent| executor.describe(intent),
-            ) {
+            );
+            let driven = driven.and_then(|(value, seconds, index)| {
+                let mut interrupted = false;
+                let report = continuity.as_mut().and_then(|detector| {
+                    detector.observe_turn_while(&value, &mut || {
+                        let open = !cancellation.is_cancelled()
+                            && !controls.is_shutdown()
+                            && !controls.has_pending()
+                            && !budget.remaining().is_zero();
+                        interrupted |= !open;
+                        open
+                    })
+                });
+                if controls.is_shutdown() {
+                    cancellation.cancel();
+                }
+                if cancellation.is_cancelled() {
+                    return Err(crate::Error::ModelTransportCancelled.into());
+                }
+                if budget.remaining().is_zero() {
+                    return Err(Error::RunBudget {
+                        reason: "wall time".into(),
+                    });
+                }
+                if interrupted || controls.has_pending() {
+                    continuity = self
+                        .generation_loop_detection
+                        .then(StreamLoopDetector::default);
+                    return Err(Error::Steering {
+                        attempt: 1,
+                        reserve: self.limits.response_reserve,
+                    });
+                }
+                if let Some(report) = report {
+                    return Err(Error::RepetitiveGeneration {
+                        report,
+                        usage: value.usage,
+                    });
+                }
+                Ok((value, seconds, index))
+            });
+            let (turn_value, turn_index) = match driven {
                 Ok((value, _, index)) => (value, index.unwrap_or(summary.turns as usize)),
                 Err(Error::Steering { attempt, reserve }) => {
                     next_attempt = attempt;
@@ -511,9 +557,11 @@ impl NativeRuntime {
             }
             let intents = session.apply_assistant(turn_value);
             let terminal = intents.is_empty();
+            let mut batch_report = None;
             for (index, intent) in intents.iter().enumerate() {
                 if cancellation.is_cancelled()
                     || summary.failure.is_some()
+                    || batch_report.is_some()
                     || controls.has_pending()
                     || controls.is_shutdown()
                 {
@@ -526,7 +574,7 @@ impl NativeRuntime {
                             turn_index,
                             remaining,
                             &ToolOutcome::rejected_with(
-                                "not executed: prompt interrupted or superseded by guidance",
+                                "not executed: prompt interrupted, superseded, or awaiting tool-loop correction",
                             ),
                         )?;
                     }
@@ -546,12 +594,8 @@ impl NativeRuntime {
                         read_pages.push_back(hash.clone());
                     }
                 }
-                let decision = if native_read {
-                    crate::LoopDecision::Proceed
-                } else {
-                    actions.check_proposed_action(&hash)
-                };
-                if decision.is_loop_break() {
+                if let Some(report) = actions.propose(intent, native_read) {
+                    batch_report = Some(report);
                     let reason = "Repeated identical tool arguments are blocked. Inspect the current state or choose a different action; filesystem change was not observed by this detector.";
                     fold_outcome(
                         session,
@@ -562,13 +606,6 @@ impl NativeRuntime {
                         intent,
                         &ToolOutcome::rejected_with(reason),
                     )?;
-                    record_notice(sink, recorder, reason.into())?;
-                    if matches!(decision, crate::LoopDecision::CircuitBreaker { .. }) {
-                        summary.failure = Some(
-                            "Repeated-action circuit breaker: too many identical tool proposals"
-                                .into(),
-                        );
-                    }
                     continue;
                 }
                 if let Some(recorder) = recorder.as_mut() {
@@ -591,15 +628,9 @@ impl NativeRuntime {
                     }
                     break;
                 }
-                if !native_read {
-                    actions.record_action(hash, intent.name.clone());
-                }
                 let outcome = match executor.execute(intent, cancellation) {
                     Ok(outcome) => {
                         summary.tools_executed += 1;
-                        if !outcome.failed() {
-                            actions.reset_stalls();
-                        }
                         outcome
                     }
                     Err(error) => {
@@ -617,6 +648,15 @@ impl NativeRuntime {
                 fold_outcome(
                     session, recorder, sink, executor, turn_index, intent, &outcome,
                 )?;
+                let progress = executor.progress(intent, &outcome)?;
+                if progress == ProgressEvidence::StateChanged
+                    || (native_read && actions.is_new_observation(intent, &outcome))
+                {
+                    continuity = self
+                        .generation_loop_detection
+                        .then(StreamLoopDetector::default);
+                }
+                batch_report = actions.observe(intent, &outcome, native_read, progress);
             }
             self.emit_progress(
                 sink,
@@ -630,6 +670,36 @@ impl NativeRuntime {
                 generation_seconds,
             )?;
             usage.dirty = false;
+            if let Some(report) = batch_report {
+                if summary.failure.is_some() {
+                    break;
+                }
+                if controls.is_shutdown() {
+                    cancellation.cancel();
+                }
+                if cancellation.is_cancelled() || budget.remaining().is_zero() {
+                    break;
+                }
+                if controls.has_pending() {
+                    continue;
+                }
+                let Some(step) = generation_recovery.take() else {
+                    let message = report.exhausted_message();
+                    record_notice(sink, recorder, message.clone())?;
+                    summary.failure = Some(message);
+                    break;
+                };
+                let message = report.feedback(step);
+                record_notice(sink, recorder, message.clone())?;
+                if controls.is_shutdown() {
+                    cancellation.cancel();
+                }
+                if cancellation.is_cancelled() || budget.remaining().is_zero() {
+                    break;
+                }
+                session.push_user(message);
+                continue;
+            }
             if terminal
                 && summary.failure.is_none()
                 && !cancellation.is_cancelled()

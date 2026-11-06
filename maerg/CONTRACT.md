@@ -27,6 +27,12 @@ all capitals.
 - **Consumers:** human CLI users, scripts, future editor/web integrations, and
   child component workflows
 
+Protected tool stagnation consumes the shared Sav `ToolLoopTracker` mechanism
+with local broker outcome/revision evidence. New observations and verified
+component revisions permit useful progress; routine successful output cannot
+replenish corrections. A batch supplies one bounded correction opportunity,
+complete result pairing and retained decisions, without replaying effects.
+
 The component owns Kvist project and component artifacts, CLI dispatch,
 validation, discovery, task policy and lifecycle, context selection, sandbox
 approval, and durable evidence. It does not own model-provider wire protocols,

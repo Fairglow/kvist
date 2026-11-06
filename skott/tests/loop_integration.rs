@@ -29,6 +29,8 @@ use skott::{
 
 #[path = "loop_integration/generation.rs"]
 mod generation;
+#[path = "loop_integration/progress.rs"]
+mod progress;
 
 /// A transport that yields a scripted sequence of turns, streaming each one's
 /// reasoning, text, and tool intents before returning the assembled turn.
@@ -133,18 +135,20 @@ fn answer_turn(text: &str) -> ModelTurn {
 
 #[test]
 fn default_run_continues_beyond_500_turns_and_compacts_between_tasks() {
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let path = root.join("investigation");
+    let pages: String = (0..540).map(|page| format!("{page:06}\n")).collect();
+    std::fs::write(&path, pages).unwrap();
     let mut turns: Vec<_> = (0..540)
-        .map(|page| {
-            tool_turn(
-                "next step",
-                "shell",
-                json!({"command":format!("printf {page}")}),
-            )
-        })
+        .map(|_| tool_turn("next step", "read_file", json!({"path":path,"limit":7})))
         .collect();
     turns.push(answer_turn("long task completed"));
     let transport = ScriptedTransport::new(turns);
-    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let executor = NativeReadExecutor {
+        root,
+        pages: Mutex::new(Vec::new()),
+    };
     let mut session = make_session();
     session.push_user("complete the long task");
     let mut context = ContextManager::for_model(131_072);
@@ -1350,6 +1354,21 @@ fn hardening_unchanged_repeated_actions_are_not_executed_again() {
 
 #[test]
 fn reliability_legitimate_native_rereads_do_not_trip_effect_breakers() {
+    struct RefreshedReadExecutor {
+        native: NativeReadExecutor,
+        path: PathBuf,
+    }
+    impl ToolExecutor for RefreshedReadExecutor {
+        fn execute(
+            &self,
+            intent: &ToolIntent,
+            token: &CancellationToken,
+        ) -> skott::Result<ToolOutcome> {
+            let revision = self.native.pages.lock().unwrap().len();
+            std::fs::write(&self.path, format!("fresh revision {revision}")).unwrap();
+            self.native.execute(intent, token)
+        }
+    }
     let dir = tempfile::tempdir_in(".").unwrap();
     let root = dir.path().canonicalize().unwrap();
     let path = root.join("text");
@@ -1363,9 +1382,12 @@ fn reliability_legitimate_native_rereads_do_not_trip_effect_breakers() {
         proposal,
         answer_turn("done"),
     ]);
-    let executor = NativeReadExecutor {
-        root,
-        pages: Mutex::new(Vec::new()),
+    let executor = RefreshedReadExecutor {
+        native: NativeReadExecutor {
+            root,
+            pages: Mutex::new(Vec::new()),
+        },
+        path,
     };
     let mut session = make_session();
     session.push_user("refresh state");
@@ -1381,7 +1403,11 @@ fn reliability_legitimate_native_rereads_do_not_trip_effect_breakers() {
     );
     assert!(summary.success(), "{summary:?}");
     assert_eq!(summary.tools_executed, 5);
-    assert_eq!(executor.pages.lock().unwrap().len(), 5);
+    let pages = executor.native.pages.lock().unwrap();
+    assert_eq!(pages.len(), 5);
+    for (revision, page) in pages.iter().enumerate() {
+        assert_eq!(page["content"], format!("fresh revision {revision}"));
+    }
 }
 
 struct NativeReadExecutor {
@@ -1486,7 +1512,7 @@ fn identical_omitted_reads_finish_large_escaped_file_then_trip_only_after_eof() 
         .collect();
     assert_eq!(joined, text);
     assert!(pages.last().unwrap()["next_offset"].is_null());
-    assert_eq!(pages.iter().filter(|p| p["content"] == "").count(), 1);
+    assert_eq!(pages.iter().filter(|p| p["content"] == "").count(), 5);
 }
 
 #[test]
@@ -1514,7 +1540,7 @@ fn empty_file_terminal_repeats_are_bounded_and_new_prompt_restarts() {
         )
         .unwrap();
     assert!(result.failure.is_some(), "{result:?}");
-    assert_eq!(executor.pages.lock().unwrap().len(), 2);
+    assert_eq!(executor.pages.lock().unwrap().len(), 5);
     std::fs::write(&path, "new").unwrap();
     session.push_user("read again");
     let result = Skott::default()
@@ -1797,18 +1823,27 @@ fn reliability_recovery_recording_failure_stops_before_effects() {
 
 #[test]
 fn reliability_successful_distinct_effect_resets_repeat_stalls() {
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::write(root.join("text"), "before").unwrap();
     let repeated = tool_turn("same", "shell", json!({"command":"echo a"}));
     let transport = ScriptedTransport::new(vec![
         repeated.clone(),
         repeated.clone(),
-        repeated.clone(),
-        repeated.clone(),
-        tool_turn("distinct", "shell", json!({"command":"echo b"})),
+        tool_turn(
+            "distinct",
+            "write_file",
+            json!({"path":"/workspace/text","content":"after"}),
+        ),
         repeated.clone(),
         repeated,
         answer_turn("recovered"),
     ]);
-    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let executor = skott::HostExecutor::new(
+        ToolRegistry::new(ToolPolicy::minimum())
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+        root.clone(),
+    );
     let mut session = make_session();
     session.push_user("work");
     let mut context = ContextManager::for_model(8192);
@@ -1821,7 +1856,8 @@ fn reliability_successful_distinct_effect_resets_repeat_stalls() {
         &mut FakeRecorder::default(),
     );
     assert!(summary.success(), "{summary:?}");
-    assert_eq!(executor.executed().len(), 3);
+    assert_eq!(summary.tools_executed, 3);
+    assert_eq!(std::fs::read(root.join("text")).unwrap(), b"after");
 }
 
 #[test]

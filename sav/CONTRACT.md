@@ -25,6 +25,34 @@ steering/replay capabilities are disclosed rather than emulated.
 
 ## Shared native runtime API (ADR 0015)
 
+### Progress-aware tool protection
+
+`sav::loop_detection` exposes `ToolLoopTracker`, `ToolLoopReport`,
+`ToolLoopKind` and `ProgressEvidence`. `propose(intent, repeatable)` checks
+effect recurrence without executing it. `observe(intent, outcome, repeatable,
+progress)` records a completed or refused proposal and checks bounded repeated
+observations, failures and cycles. History retains 128 fingerprints, cycles
+up to 32 actions. Reports contain kind, period and copies, never tool output.
+`feedback(step)` and `exhausted_message()` explain preserved work and safe
+reconciliation without changing sampling or granting tools.
+`is_new_observation(intent, outcome)` identifies an unseen successful complete
+observation without calling it a mutation. Hosts may retain generation continuity
+between accepted tool turns using `StreamLoopDetector::observe_turn_while`;
+clear that continuity on new observations or validated state changes, not
+successful no-op claims. The explicit generation exception also disables this
+continuity inspection.
+
+`ProgressEvidence::None` makes no state-change claim; `StateChanged` is a
+host-validated revision change, not a command's assertion of success.
+`ToolExecutor::progress(intent, outcome)` defaults to `None`; hosts may supply
+validated evidence. New complete observations permit useful pagination/rereads.
+Repeated reads execute before comparing actual output, so changed bytes are
+never hidden by argument-only suppression. Success alone cannot clear history.
+State changes clear local recurrence, not the prompt's spent correction budget.
+Generation and tool stalls share that budget. One assistant batch gets at most
+one intervention; remaining proposals receive paired not-executed results
+before a real opportunity to respond.
+
 ### Generation resilience API
 
 `sav::loop_detection` exposes `StreamLoopDetector`, `RepetitionReport`,

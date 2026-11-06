@@ -505,6 +505,76 @@ fn effect_result(cancelled: bool) -> sandbox::ExecutionResult {
 }
 
 #[test]
+fn phase3_terminal_dispatch_failure_precedes_loop_protection() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    let root = dir.path().canonicalize().expect("absolute workspace");
+    fs::create_dir(root.join("src")).expect("source");
+    ensure_logs_directory(&root).expect("state");
+    let request = tests::test_execution_request(&root);
+    let live = LiveRun::create(
+        &root.join("events.jsonl"),
+        "effects",
+        "fixture",
+        "fixture",
+        &[],
+    )
+    .expect("live");
+    let controls = sav::runtime::ControlMailbox::default();
+    controls.begin_run().expect("begin");
+    let token = CancellationToken::new();
+    let steering = RunControls {
+        mailbox: &controls,
+        cancellation: &token,
+        live: &live,
+        redactions: &[],
+    };
+    let mut turn = effect_turn();
+    turn.tool_intents[1].arguments = turn.tool_intents[0].arguments.clone();
+    let plan = authoring::authorize_turn(&root, &turn, &BrokerPolicy::default());
+    let mut tracker = sav::loop_detection::ToolLoopTracker::default();
+    let mut records = Vec::new();
+    let mut dispatched = 0;
+    let report = apply_authoring_effects_with(
+        &request,
+        &plan,
+        &turn,
+        "failed-effects",
+        &live,
+        &steering,
+        &mut records,
+        Some(&mut tracker),
+        None,
+        |_| {
+            dispatched += 1;
+            let mut result = effect_result(false);
+            result.output.status = std::process::ExitStatus::from_raw(1 << 8);
+            result.output.stderr = b"original terminal dispatcher failure".to_vec();
+            Ok(result)
+        },
+    )
+    .expect("record completed failure");
+    assert!(
+        report.is_none(),
+        "loop protection overrode the hard failure"
+    );
+    assert_eq!(dispatched, 1, "later effects followed a terminal failure");
+    assert_eq!(records.len(), 1);
+    assert!(!records[0].applied);
+    assert!(records[0].uncertain);
+    assert!(
+        records[0]
+            .detail
+            .contains("original terminal dispatcher failure")
+    );
+    assert_eq!(
+        fs::read_dir(root.join(".kvist/authoring"))
+            .expect("staging")
+            .count(),
+        0
+    );
+}
+
+#[test]
 fn partial_effects_and_usage_survive_cancellation_and_later_dispatch_failure() {
     for interruption in [
         "between-effects",
@@ -554,6 +624,8 @@ fn partial_effects_and_usage_survive_cancellation_and_later_dispatch_failure() {
             &live,
             &steering,
             &mut retained.effects,
+            None,
+            None,
             |_| {
                 calls += 1;
                 if interruption == "between-effects" {

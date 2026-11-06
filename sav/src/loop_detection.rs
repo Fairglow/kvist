@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+mod actions;
 mod generation;
+pub use actions::{ProgressEvidence, ToolLoopKind, ToolLoopReport, ToolLoopTracker};
 pub use generation::{
     RecoveryBudget, RecoveryStep, RepetitionChannel, RepetitionReport, RepetitionUnit,
     StreamLoopDetector,

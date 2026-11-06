@@ -10,7 +10,7 @@ review receipt.
 | --- | --- | --- | --- |
 | 1: Correctness | Honest Maerg loop stops; revision-bound read delivery; failed-observation semantics; rejected-proposal recurrence; repair error/decision/digest propagation | Failing regressions first, targeted passing checks, source-only observations and separate source-blind comparison | Complete |
 | 2: Streaming | Bounded incremental exact/near repetition; independent answer/reasoning; 100/150/200-word periods; unbroken character loops; two autonomous corrections; intentional-output exception; no partial effects, sampling changes or reserve growth for loops | Chunk-boundary, false-positive, recovery, budget/cancellation/recording fixtures through both native hosts | Complete |
-| 3: Progress | State-aware repeat protection; discovery/failure/observation tracking; bounded multi-action cycles; no-op resistance; fair batch intervention; pagination/reverification preservation | Alternating/long cycles, repeated refusals, changed-state testing, bulk investigation and compaction regressions | Planned |
+| 3: Progress | State-aware repeat protection; discovery/failure/observation tracking; bounded multi-action cycles; no-op resistance; fair batch intervention; pagination/reverification preservation | Alternating/long cycles, repeated refusals, changed-state testing, bulk investigation and compaction regressions | Complete |
 | 4: Operations | Typed failures/recovery/effect certainty; actionable TUI/headless/transcript output; first-cause resource termination; aggregate authoring/repair model budgets; recurring repair signatures; cancellable backpressure; honest external capabilities | Integrated terminal/headless and protected-task evidence, offline lint/build/tests, independent final observations/comparison | Planned |
 
 Each component phase has ordered `write_tests`, `implement_code`,
@@ -109,6 +109,8 @@ Phase-one implementation and corrective items are complete. Streaming,
 progress-aware protection and operational hardening remain phases 2-4.
 
 Phase-one commit: `31ddf51` (`fix: preserve honest agent outcomes and failure evidence`).
+
+Phase-two commit: `214e209` (`fix: bound repetitive generation with honest recovery accounting`).
 
 ### Phase 2 evidence
 
@@ -227,6 +229,71 @@ supplement, found no established remaining scoped contradiction, and retained
 imported-mechanism and failure-injection limits. All phase-two lifecycle tasks
 are complete; this phase does not certify the planned progress-aware tools,
 aggregate repair budgets or operational diagnostics.
+
+### Phase 3 evidence
+
+Five of six initial native regressions failed before production changes:
+unchanged/failed repeatable reads completed falsely, nine-action cycles escaped,
+successful no-op output cleared protection, and one five-duplicate batch spent
+the entire breaker before any model response. A separate cross-accepted-turn
+150-word passage with unique no-op calls also falsely completed after 11 turns.
+All now pass through shared typed progress/observation/cycle protection and
+transactional generation continuity. New actual observations remain productive.
+
+The source-only observer additionally identified terminal executor failures
+being overridden by tool recovery. Both extra-request and overwritten-cause
+regressions reproduced before the precedence guard, then passed. Current shared
+checks pass 10 tool, six exact-bound/rollback, 17 generation, 19 control, 39 library
+and 14 stream cases, plus strict Clippy. Protected/workspace integration and
+independent final comparisons remain outstanding.
+
+The final shared precedence observer confirms hard errors precede corrective
+budget allocation/exhaustion and that guidance/compaction never reset it.
+The tool-specific late-guidance callback test proves combined delivery with
+distinct correction 1/2 and 2/2 in three real requests; all 11 tool tests pass.
+
+Workspace integration initially passes 57 loop and 38 native-file cases.
+Its independent source observer identified ambiguous identical pending progress
+evidence plus rebinding/cancellation observation gaps; corrective work is in
+progress. An existing explicit-host staged-shell context issue is assigned to
+phase four rather than silently left outside the error-handling plan.
+
+The complete final Sav suite passes 288 tests. Protected implementation and
+fresh source-only observation independently pass 69 agent and 53 authoring
+units, eight agent CLI and five repair cases; ten new progress live cases pass.
+The observer's serial full-live run exits zero after announcing 48 tests but
+its terminal counters were truncated; the implementer's private log explicitly
+reports all 48 passed. Deadline-based red fixtures are distinguished from
+assertion failures in Maerg's record. The applier production change only exposes
+the existing ancestor-validation helper for revision inspection.
+
+Workspace identity/rebinding/cancellation corrections reproduce nine failures
+before fixes; independent selected reruns pass 123 tests. A fresh observation
+identified a sandbox prepared-selection mismatch requiring one further bounded
+correction before closing this phase. Separate protected/workspace security
+reviews found no vulnerabilities. Source-blind comparisons remain pending.
+Executor errors after possible effects, malformed read outcome retention,
+non-atomic external-writer observation, dispatch confirmation versus byte
+certainty, and aggregate cross-repair state are explicitly retained; operational
+error/budget handling is phase-four work, not fabricated completed capability.
+
+The final sandbox correction reproduced three prepared-selection failures
+before binding revision observation to the exact prepared authoring grant.
+A fresh source-only observer independently passes all three prepared cases and
+12 progress cases; a narrow security follow-up finds no vulnerabilities.
+Synthetic closures establish mapping behavior, not sandbox isolation or an
+atomic transaction against external writers. Strict all-target Sav/Skott/Kvist
+lint, affected formatting and whitespace checks pass.
+
+Final `cargo test --offline --locked -p sav -p skott --quiet` passes 830
+tests with three existing ignores. Separate protected and final exact-range
+workspace source-blind comparisons establish no concrete scoped phase-three
+contradiction, while retaining evidence/imported-mechanism limits. The first
+workspace comparator's overly broad locator exposure disqualifies its pristine
+scope claim; only the replacement exact-range comparison closes that lifecycle.
+All phase-three lifecycle tasks are complete, with acceptance intentionally stale.
+This does not complete the operational diagnostics, aggregate sequence budget
+and error-certainty work assigned to phase four.
 
 ## External practice and deliberate limits
 

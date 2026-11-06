@@ -61,6 +61,23 @@ State revisions and new observation ranges permit useful repeated actions;
 unchanged observations and repeated failure/cycle signatures remain evidence
 of stagnation. No-op success cannot clear that evidence.
 
+The progress-aware tracker retains action and fully framed outcome fingerprints,
+including status, cancellation, timeout and stdout/stderr boundaries. Three
+identical same-action observations or failures qualify as stagnation; two exact
+action/outcome cycles of length 2-32 qualify as recurring cycles. Nonrepeatable
+proposals are checked before dispatch, repeatable observations after execution.
+Only host-validated state change clears recurrence history; new observations
+remain usable but do not fabricate mutations. Keep one report per batch, pair
+all skipped proposals, then record and append one correction from the same
+prompt recovery budget used by generation detection.
+Inspect answer/reasoning continuity across accepted tool turns before accepting
+their proposals, using the same bounded stream primitive. New complete
+observations or validated state changes clear this continuity; no-op output
+does not. Inspection and clearing never replenish spent correction opportunities.
+Transactional continuity uses one same-sized bounded rollback snapshot in
+addition to active detector state. Repetitive provisional text restores the
+accepted snapshot instead of biasing the next corrective response.
+
 Generation detection defaults on, with an explicit host-owned exception for
 intentional repetition. This exception cannot disable tool repeat protection,
 authority, recording or budgets. Operator-facing configuration follows in the

@@ -10,6 +10,7 @@ use crate::{
     retry::RetryPolicy,
     sandbox::ToolOutcome,
 };
+pub use sav::loop_detection::ProgressEvidence;
 pub use sav::runtime::{
     ControlMailbox, Event, GuidanceId, GuidanceNotice, GuidanceState, MAX_TOOL_RESULT_BYTES,
     MAX_TURNS, RunLimits, RunSummary, Submission, SubmissionKind, TokenAccounting,
@@ -62,6 +63,12 @@ pub trait ToolExecutor: Send + Sync {
     /// Renders and executes one tool intent inside the sandbox.
     fn execute(&self, intent: &ToolIntent, cancellation: &CancellationToken)
     -> Result<ToolOutcome>;
+
+    /// Returns host-observed state change for this exact execution. Success or
+    /// command output alone is not evidence; generic executors make no claim.
+    fn progress(&self, _intent: &ToolIntent, _outcome: &ToolOutcome) -> Result<ProgressEvidence> {
+        Ok(ProgressEvidence::None)
+    }
 }
 
 /// A durable, pluggable sink for the session record. The production
@@ -196,6 +203,7 @@ impl Skott {
                 &ExecutorBridge {
                     executor,
                     reads: Mutex::new(read_cursor::ReadCursors::default()),
+                    executed: Mutex::new(None),
                 },
                 &SinkBridge(sink),
                 cancellation,
@@ -209,6 +217,8 @@ impl Skott {
 struct ExecutorBridge<'a, E> {
     executor: &'a E,
     reads: Mutex<read_cursor::ReadCursors>,
+    // The shared runtime executes and observes one call at a time.
+    executed: Mutex<Option<(ToolIntent, ProgressEvidence)>>,
 }
 
 impl<E> ExecutorBridge<'_, E> {
@@ -216,6 +226,15 @@ impl<E> ExecutorBridge<'_, E> {
         self.reads.lock().map_err(|_| Error::ToolRender {
             tool: "read_file".into(),
             reason: "prompt read cursor state is poisoned".into(),
+        })
+    }
+
+    fn executed(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Option<(ToolIntent, ProgressEvidence)>>> {
+        self.executed.lock().map_err(|_| Error::SandboxExec {
+            tool: None,
+            reason: "resolved tool observation state is poisoned".into(),
         })
     }
 }
@@ -228,19 +247,34 @@ impl<E: ToolExecutor> sav::runtime::ToolExecutor for ExecutorBridge<'_, E> {
     ) -> sav::runtime::Result<ToolOutcome> {
         let resolved = self.reads()?.resolve(intent)?;
         let outcome = self.executor.execute(&resolved, token)?;
-        self.reads()?.observe(&resolved, &outcome)?;
+        let progress = self.reads()?.observe(&resolved, &outcome)?;
+        *self.executed()? = Some((resolved, progress));
         Ok(outcome)
+    }
+    fn progress(
+        &self,
+        intent: &ToolIntent,
+        outcome: &ToolOutcome,
+    ) -> sav::runtime::Result<ProgressEvidence> {
+        let resolved = self.executed()?.take();
+        let (resolved, read_progress) = resolved
+            .as_ref()
+            .map(|(intent, progress)| (intent, *progress))
+            .unwrap_or((intent, ProgressEvidence::None));
+        let progress = self.executor.progress(resolved, outcome)?;
+        Ok(if read_progress == ProgressEvidence::StateChanged {
+            read_progress
+        } else {
+            progress
+        })
     }
     fn describe(&self, intent: &ToolIntent) -> String {
         crate::tools::describe_tool_call(intent)
     }
     fn repeatable(&self, intent: &ToolIntent) -> bool {
-        if intent.name == "read_file" {
-            return self.reads().is_ok_and(|reads| reads.repeatable(intent));
-        }
         matches!(
             intent.name.as_str(),
-            "list_dir" | "find_files" | "search_files"
+            "read_file" | "list_dir" | "find_files" | "search_files"
         )
     }
 }

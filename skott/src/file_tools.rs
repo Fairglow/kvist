@@ -18,6 +18,7 @@ use sha2::{Digest, Sha256};
 use crate::error::{Error, Result, io_error};
 
 mod patch;
+mod revision;
 
 /// Maximum encoded helper request, checked before parsing.
 pub const MAX_REQUEST_BYTES: usize = 256 * 1024;
@@ -249,9 +250,25 @@ impl FileRequest {
         let root = workdir
             .canonicalize()
             .map_err(|e| io_error("resolve host file-tool workspace", None, e))?;
+        self.mapped_to_scope(&root)
+    }
+
+    /// Maps to the exact host source of the prepared sandbox grant, without
+    /// resolving the original workspace selection again.
+    pub(crate) fn sandbox_mapped(&self, write_root: &str, source: &Path) -> Result<Self> {
+        if write_root != self.write_root {
+            return Err(failure(
+                "prepared sandbox write root differs from the native helper namespace",
+            ));
+        }
+        self.mapped_to_scope(source)
+    }
+
+    fn mapped_to_scope(&self, root: &Path) -> Result<Self> {
         let host_root = root
             .to_str()
             .ok_or_else(|| failure("workspace must be UTF-8"))?;
+        canonical_path(host_root)?;
         let mut mapped = self.clone();
         if within(self.operation.path(), &self.write_root) {
             let relative = self

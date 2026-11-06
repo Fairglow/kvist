@@ -518,6 +518,14 @@ impl AgentSession {
 /// loop so the loop itself needs no process or filesystem access. The executor
 /// owns the working directory and the sandbox configuration.
 pub trait ToolExecutor: Send + Sync {
+    /// Host-validated state change; successful output alone is not evidence.
+    fn progress(
+        &self,
+        _intent: &ToolIntent,
+        _outcome: &ToolOutcome,
+    ) -> Result<crate::loop_detection::ProgressEvidence> {
+        Ok(crate::loop_detection::ProgressEvidence::None)
+    }
     /// Host-facing description, without granting authority.
     fn describe(&self, intent: &ToolIntent) -> String {
         intent.name.clone()

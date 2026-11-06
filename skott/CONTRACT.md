@@ -97,6 +97,18 @@ recording and application error adaptation remain Skott-owned.
 
 ## Run reliability extension
 
+The executor bridge forwards host-validated `ProgressEvidence` to shared
+tool protection. Native filesystem mutations report progress only when their
+observed bytes/revision change; no-op writes and successful shell output cannot
+claim a mutation. Generic embedding executors default to no evidence.
+Repeatable discovery and actual read results participate in bounded stagnation
+detection without suppressing changed revisions or advancing pages.
+Progress observation must correspond to the execution being consumed; ambiguous
+identical pending observations fail rather than falsely claim state change.
+Revision observation remains inside pinned workspace scope and rejects detected
+rebinding with reconciliation guidance. Cancellation is checked around bounded
+revision reads; kernel filesystem I/O remains cooperative, not forcibly timed.
+
 Native repetition detection and two-correction-per-prompt recovery are shared
 Sav mechanisms. Progress clears streaks but cannot replenish corrections;
 guidance/compaction retain spent allowance. A stalled prompt fails explicitly

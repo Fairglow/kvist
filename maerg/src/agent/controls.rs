@@ -66,10 +66,20 @@ impl RunControls<'_> {
         effects: &[EffectRecord],
         session: &mut AgentSession,
     ) -> Result<()> {
-        for intent in
-            intents.filter(|intent| !effects.iter().any(|effect| effect.call_id == intent.id))
-        {
-            let content = "not executed: proposed action superseded by guidance before dispatch";
+        self.skip_calls_with_reason(
+            intents.filter(|intent| !effects.iter().any(|effect| effect.call_id == intent.id)),
+            session,
+            "not executed: proposed action superseded by guidance before dispatch",
+        )
+    }
+
+    pub(super) fn skip_calls_with_reason<'a>(
+        &self,
+        intents: impl Iterator<Item = &'a ToolIntent>,
+        session: &mut AgentSession,
+        content: &str,
+    ) -> Result<()> {
+        for intent in intents {
             self.live.record(
                 &json!({"type":"tool_result","data":{
                     "call_id":intent.id,"name":intent.name,"not_executed":true,"reason":content

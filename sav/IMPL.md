@@ -1,6 +1,68 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped progress protection observations - resilience phase 3
+
+Clean-slate `sav-p3-source-observer` inspected only local tracker/continuity,
+driver, host progress interface and related test source. It excluded intent,
+queues, records/reviews, peers and history, changed nothing and ran no checks.
+
+It observed a 128-record action/outcome history and exact periods 2-32 with two
+copies. Nonrepeatable proposals are checked before effects; repeatable results
+after execution. Three identical same-action observations or classified
+failures produce reports; failures can recur across distinct proposals.
+Outcome hashes frame exit/status/interrupt flags and separate stdout/stderr
+lengths, avoiding concatenation/status aliases. Successful no-op claims cannot
+clear evidence. Only host-supplied validated state change clears tool history.
+New successful complete observations can clear generation continuity without
+claiming mutation. These bounded heuristics can forget evicted evidence or
+miss changing signatures; they do not certify semantic progress.
+
+One batch gets one report; remaining proposals receive paired rejected outcomes
+before the next request. Generation and tool recovery use one nonresettable
+two-step prompt budget. No replay or rollback is implied. The separate old
+read-argument history only supports advisory notices, never cached-result
+substitution. Actual reads precede observation comparison.
+
+Across accepted tool turns, complete answer/reasoning continuity is inspected
+before assistant application/effects. A bounded detector snapshot is restored
+when that turn is repetitive; interrupted predicates latch and require host
+control checks. New observations or validated state change clear continuity,
+not spent corrections. The generation exception disables this inspection too.
+
+The source observer found a terminal-executor error could also produce a loop
+report, causing one extra provider request or replacing the original error at
+exhaustion. Two implementer regressions independently reproduced both failures
+before a precedence guard, then passed. That final guard is supported by
+attributed tests, not a fresh independent source reinspection.
+
+Runner evidence: five of six initial native cases failed, plus the cross-turn
+unique-noop passage separately failed with 11-turn false success. After changes,
+10 native tool, six exact-bound/rollback, 17 generation, 19 control and 39 library
+cases pass; 14 pure stream cases and strict all-target Sav Clippy pass. The full
+Sav suite passed before the final two precedence assertions/guard. Assertions
+cover 32-versus-33 cycles, exact 128 retention, five-duplicate batch fairness,
+changed bytes, 160 productive pages and repeated preambles with new observations.
+No compliance certification, acceptance or receipt is claimed.
+
+Fresh source-only `sav-p3-final-precedence-observer` then inspected the final
+guard and documented that terminal failure is checked before correction
+allocation or exhaustion assignment. It also observed dispatch recording
+before the post-record control gate, outcome folding before progress/tracking,
+paired batch tails, and no reset of the shared budget on guidance or compaction.
+It ran no checks. Its concern about guidance arriving during feedback is
+intentional combined delivery, not silent correction loss: an additional
+tool-specific callback test now asserts request two contains both recorded
+Recovery 1/2 and human guidance, request three contains Recovery 2/2, and only
+three requests occur. All 11 tool regressions pass.
+
+Separate source-blind `sav-p3-intent-comparator` found substantial scoped
+alignment but identified evidence limits, including then-unobserved final
+precedence and control/compaction ordering. The fresh observation and precise
+combined-delivery test address those stated limits without changing the intended
+late-guidance semantics. It read only exact scoped IMPL/intent, no source/tests,
+and ran no checks; no whole-component certification is inferred.
+
 ## Scoped generation observations - resilience phase 2
 
 Clean-slate `sav-generation-source-observer` inspected only local Rust source

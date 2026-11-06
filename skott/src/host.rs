@@ -22,10 +22,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+use sav::loop_detection::ProgressEvidence;
 use sav::{CancellationToken, ToolIntent};
 
 use crate::error::{Error, Result, io_error};
-use crate::executor::{check_cancelled, resolve_file_helper, stage_file_request};
+use crate::executor::{NativeProgress, check_cancelled, resolve_file_helper, stage_file_request};
 use crate::sandbox::ToolOutcome;
 use crate::session::{MAX_TOOL_RESULT_BYTES, ToolExecutor};
 use crate::tools::ToolRegistry;
@@ -41,6 +42,7 @@ const HOST_TOOL_OUTPUT_LIMIT: usize = MAX_TOOL_RESULT_BYTES;
 pub struct HostExecutor {
     registry: ToolRegistry,
     working_directory: PathBuf,
+    progress: NativeProgress,
 }
 
 impl HostExecutor {
@@ -51,6 +53,7 @@ impl HostExecutor {
         HostExecutor {
             registry,
             working_directory,
+            progress: NativeProgress::default(),
         }
     }
 
@@ -87,12 +90,16 @@ impl ToolExecutor for HostExecutor {
                 payload.path().to_string_lossy().into_owned(),
             ];
             check_cancelled(cancellation)?;
-            return run_host_command(
-                &argv,
-                &self.working_directory,
-                cancellation,
-                crate::file_tools::MAX_OUTPUT_BYTES + 1,
-            );
+            return self
+                .progress
+                .execute_prepared(intent, Some(&mapped), cancellation, || {
+                    run_host_command(
+                        &argv,
+                        &self.working_directory,
+                        cancellation,
+                        crate::file_tools::MAX_OUTPUT_BYTES + 1,
+                    )
+                });
         }
 
         // The explicitly UNSANDBOXED shell inherits host authority. Translation
@@ -109,6 +116,10 @@ impl ToolExecutor for HostExecutor {
             cancellation,
             HOST_TOOL_OUTPUT_LIMIT,
         )
+    }
+
+    fn progress(&self, intent: &ToolIntent, outcome: &ToolOutcome) -> Result<ProgressEvidence> {
+        self.progress.progress(intent, outcome)
     }
 }
 

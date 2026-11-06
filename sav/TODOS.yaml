@@ -6,9 +6,9 @@ component:
   parent_contract: null
   revalidation:
     state: stale
-    checked_at: "2026-11-06T09:49:52Z"
+    checked_at: "2026-11-06T10:54:13Z"
     stale_since: "2026-11-06T06:54:17Z"
-    causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:cd06c5851d83e39b324a929430af4d57a7549670f1ca827eb389c8dd2827e5df", "observed_revision": "sha256:750c2db2e20befb9a1c83d5ce99589e936d109e9ba214362db4b469f4b0e3691"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:390728e5867a1a299a56bec93b20373262c46d91339a42eb7f8981570e05c259", "observed_revision": "sha256:b48ffa5dd30f469fe89f9f8c57f90aba213734b9c8272512b4647f69a3270edd"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:7417b300a66353d6feef525d90339a0701247dffc56b790d9115ca8cc9fc74b2", "observed_revision": "sha256:f995db234a5456e3324fc40014263df800cc2b0415576ec306e7f5790ea5055d"}]
+    causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:cd06c5851d83e39b324a929430af4d57a7549670f1ca827eb389c8dd2827e5df", "observed_revision": "sha256:750c2db2e20befb9a1c83d5ce99589e936d109e9ba214362db4b469f4b0e3691"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:390728e5867a1a299a56bec93b20373262c46d91339a42eb7f8981570e05c259", "observed_revision": "sha256:6fde0a828e02351efd7ec594199a927d8af103b6c683b82fb64865214aec7225"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:7417b300a66353d6feef525d90339a0701247dffc56b790d9115ca8cc9fc74b2", "observed_revision": "sha256:c01b93d6ec7cf64784f64d3f3bbf72a9ea7204c58466da40b64b2059e7e550ed"}]
 tasks:
   - id: "resilience-p1-write-tests"
     title: "write_tests: resilience phase 1"
@@ -117,53 +117,53 @@ tasks:
   - id: "resilience-p3-write-tests"
     title: "write_tests: resilience phase 3"
     description: "Write and execute regressions before production changes. Scope: progress-aware tools, recurring failures, cycles and fair batches."
-    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    context: "Five of six initial native behavioral cases failed; cross-turn unique-noop repeated passage separately reproduced success after 11 turns. Runtime and exact-window/rollback regressions now pass."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Required behavioral regressions fail against the prior implementation."
     kind: "test"
-    status: "pending"
+    status: "completed"
     depends_on: ["resilience-p2-compliance-review"]
     requirements: ["REQUIREMENTS.md#AR-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:02:58Z", "completed_at": "2026-11-06T10:02:58Z"}
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-implement-code"
     title: "implement_code: resilience phase 3"
     description: "Implement the approved local phase and validate the exact regressions. Scope: progress-aware tools, recurring failures, cycles and fair batches."
-    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    context: "Shared tracker, actual outcome/revision evidence, fair paired batches and transactional continuity implemented. Six initial/cross-turn behavioral failures plus two observer precedence failures reproduced red then green; 10 tool+6 bounds+17 generation+19 controls+39 lib and strict lint pass."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
     kind: "implementation"
-    status: "pending"
+    status: "completed"
     depends_on: ["resilience-p3-write-tests"]
     requirements: ["REQUIREMENTS.md#AR-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:11:32Z", "completed_at": "2026-11-06T10:11:32Z"}
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-security-audit"
     title: "security_audit: resilience phase 3"
     description: "Independently inspect changed local source/tests and derive scoped observations. Scope: progress-aware tools, recurring failures, cycles and fair batches."
-    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    context: "Clean-slate progress observer record and two corrective precedence dispositions retained in IMPL; separate current scoped security audit found no high-confidence exploitable vulnerabilities."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
     kind: "security-audit"
-    status: "pending"
+    status: "completed"
     depends_on: ["resilience-p3-implement-code"]
     requirements: ["REQUIREMENTS.md#AR-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:12:44Z", "completed_at": "2026-11-06T10:12:44Z"}
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-compliance-review"
     title: "compliance_review: resilience phase 3"
     description: "Compare scoped intent with source-only observations and executed test evidence. Scope: progress-aware tools, recurring failures, cycles and fair batches."
-    context: "Human-directed phased resilience delivery; advisory feedback is not a receipt. Accepted revisions are retained."
+    context: "Separate exact-scope source-blind comparison documented alignment/evidence limits. Fresh final source-only precedence/control/budget observation plus exact late-guidance request test address stated limits; no certification/acceptance."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
     kind: "compliance-review"
-    status: "pending"
+    status: "completed"
     depends_on: ["resilience-p3-security-audit"]
     requirements: ["REQUIREMENTS.md#AR-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T06:47:48Z", "completed_at": null}
+    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:21:00Z", "completed_at": "2026-11-06T10:21:00Z"}
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p4-write-tests"

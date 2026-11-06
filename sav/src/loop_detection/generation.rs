@@ -283,6 +283,7 @@ fn prose_prefix(prefix: &str) -> bool {
             .all(|byte| byte.is_ascii_digit()))
 }
 
+#[derive(Clone)]
 struct ChannelDetector {
     words: VecDeque<Word>,
     scalars: VecDeque<u32>,
@@ -566,7 +567,7 @@ impl ChannelDetector {
 
 /// Incremental, chunk-independent repetition inspection with bounded retention.
 /// Answer and supplied reasoning are independent; tool payloads are never scanned.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct StreamLoopDetector {
     answer: ChannelDetector,
     reasoning: ChannelDetector,
@@ -574,6 +575,56 @@ pub struct StreamLoopDetector {
 }
 
 impl StreamLoopDetector {
+    /// Transactionally inspects complete tool-turn continuity. Rejected text
+    /// does not poison the next correction; interruption still requires a host check.
+    pub fn observe_turn_while(
+        &mut self,
+        turn: &ModelTurn,
+        keep_going: &mut dyn FnMut() -> bool,
+    ) -> Option<RepetitionReport> {
+        if self.interrupted {
+            return None;
+        }
+        let before = self.clone();
+        let report = (|| {
+            for (channel, detector, text) in [
+                (
+                    RepetitionChannel::Answer,
+                    &mut self.answer,
+                    turn.text.as_str(),
+                ),
+                (
+                    RepetitionChannel::Reasoning,
+                    &mut self.reasoning,
+                    turn.reasoning.as_deref().unwrap_or_default(),
+                ),
+            ] {
+                let mut interrupted = false;
+                let mut check = || {
+                    let open = keep_going();
+                    interrupted |= !open;
+                    open
+                };
+                let pattern = detector
+                    .feed_while(text, &mut check)
+                    .or_else(|| detector.feed_while("\n", &mut check))
+                    .or_else(|| detector.finish(false));
+                if interrupted || !keep_going() {
+                    self.interrupted = true;
+                    return None;
+                }
+                if let Some(pattern) = pattern {
+                    return Some(pattern.report(channel));
+                }
+            }
+            None
+        })();
+        if report.is_some() {
+            *self = before;
+        }
+        report
+    }
+
     /// Inspects a decoded provisional event, before accepting any proposal.
     pub fn observe(&mut self, event: &ModelStreamEvent) -> Option<RepetitionReport> {
         self.observe_while(event, &mut || true)

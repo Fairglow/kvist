@@ -1,6 +1,98 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped progress observations - resilience phase 3
+
+Fresh `skott-p3-final-observation` read local executor, native progress/revision,
+host, session/read-cursor source and native/loop test assertions. It excluded
+intent, queues, previous records/reviews, peers and history, changed nothing and
+did not delegate. These are source-derived facts, not certification.
+
+Native mutation progress compares missing/present complete bounded SHA-256
+revisions around writes, edits, appends and patches. Empty-file creation and
+changed bytes count; identical bytes, inode-only replacement and successful
+shell claims do not. Measured changes can remain evidence with a failed tool
+outcome. Pending identity includes complete serialized intent and length-framed
+status/output. Evidence is single-consumption with at most 128 pending entries.
+All value-identical unconsumed entries are marked ambiguous and retrieval fails
+explicitly rather than borrowing another execution's change; later fresh
+executions work after consuming those errors.
+
+Host observation uses the same mapped prepared helper payload as execution.
+The observer holds the root descriptor, compares device/inode with the current
+pathname, and traverses descriptor-relative no-follow paths. Detected ordinary
+or symlink root replacement fails with reconciliation guidance. Revision reads
+poll cancellation before/after bounded 8192-byte chunks and observations.
+Pre-observation failure prevents execution. Post-observation failure preserves
+the original outcome but refuses evidence; completed effects are not replayed.
+Cancellation is cooperative, not asynchronous interruption of a kernel call.
+
+Prompt-local read cursors validate page JSON, metadata, digest and requested
+boundaries. Only a changed prior validated same-path digest counts as state
+change; first/additional unchanged pages do not. Omitted offsets use prior
+continuation and digest; explicit offsets override. Failed/malformed pages do
+not advance state. Retention is bounded to 4096 paths and reset for a new run.
+Executed tests retain 540-page investigations, changed-state verification and
+fair duplicate-batch feedback while stopping unchanged terminal reads/no-ops.
+
+No atomic external-writer transaction or causal attribution is established.
+Descendant namespaces may be reopened independently, and move-and-restore
+races between checks are not comprehensively detected. Executor-level errors
+can bypass post-observation after possible spawning; malformed successful reads
+lose their outcome at the bridge boundary. These error/effect-reporting limits
+are operational-phase work. Sandbox selection was independently mapped after
+request preparation, an additional preparation mismatch assigned a corrective
+follow-up before this phase can close.
+
+Independently executed offline/locked, with `TMPDIR="$PWD"`: 19 selected library
+tests, 57 loop integration, 39 native-file and eight incremental-file tests
+passed (123 total). An unnecessarily broader library/integration rerun also
+passed 248 + 104 tests; incremental/generation test source was not inspected.
+Imported shared fairness/detection mechanics and sandbox backend internals were
+not source-inspected.
+
+Implementer-attributed corrections reproduced four identity/rebinding failures,
+four cancellation failures and one prepared-host scope mismatch before fixes.
+The same 123 tests plus strict all-target lint and formatting then passed.
+Seven corrective logs were byte-verified into private
+`skott-p3-host-20261106-followup.tar.gz`; owned scratch leaves were removed while
+unrelated recovery data was preserved. A separate scoped security reviewer
+found no vulnerabilities in these changed progress paths, not a blanket claim.
+
+### Final prepared sandbox scope observation
+
+Fresh source-only `skott-p3-sandbox-observer` read only the prepared sandbox
+mapping and local progress/helper source, excluding all intent, records,
+reviews, peer internals and history. It observed that revision inspection now
+maps through the prepared request's sole writable authoring grant, checks
+namespace correspondence, and executes that same request without
+recanonicalizing the original selection. Prepared-source traversal rejects
+symlink components; observation pins the root inode and checks its binding.
+
+Its independent three `sandbox_prepared_scope_` cases establish that changing
+the original grant earns state-change evidence while the rebound selection
+stays untouched, changing only the rebound selection earns no evidence, and
+prepared-source symlink replacement fails before effects with reconciliation
+guidance. Twelve executor-progress cases also pass (15 total). These tests use
+closures, not a real sandbox. Imported request/mount enforcement was not
+inspected; pathname preparation and observation are not an atomic namespace
+transaction. No concrete new contradiction was established within this scope.
+
+The implementer first reproduced all three prepared-scope failures, then
+passed 62 selected tests plus strict lint/formatting. Four logs were byte-verified
+into private `skott-p3-sandbox-20261106.tar.gz` and exact owned leaves cleaned.
+A separate narrow prepared-grant security audit found no vulnerabilities,
+retaining the non-atomic namespace and uninspected-runner limits.
+
+The first source-blind comparison exposed unrelated snippets during locator
+search and is provisional, not qualifying fresh-scope evidence. Fresh
+`skott-p3-exact-range-comparator` used only explicit allowed intent/queue,
+provider-contract and observation ranges with no searches, source/tests or
+execution. It established no concrete phase-three contradiction, preserving
+imported-mechanism, overlapping execution-count, closure-based sandbox and
+non-atomic namespace limits. Operational error/presentation/teardown gaps
+remain phase-four obligations. This comparison is not acceptance/certification.
+
 ## Scoped generation adapter observations - resilience phase 2
 
 Clean-slate `skott-generation-source-observer` read local source and integration

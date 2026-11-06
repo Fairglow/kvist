@@ -18,6 +18,7 @@ mod accounting;
 mod cancellation;
 mod context;
 mod generation;
+mod progress;
 mod retry;
 pub(crate) mod review;
 mod startup;
@@ -940,7 +941,9 @@ fn apply_authoring_effects(
     session_id: &str,
     live: &LiveRun,
     records: &mut Vec<EffectRecord>,
-) -> Result<()> {
+    tracker: &mut sav::loop_detection::ToolLoopTracker,
+    accepted_generation: &mut sav::loop_detection::StreamLoopDetector,
+) -> Result<Option<sav::loop_detection::ToolLoopReport>> {
     let kvist_binary =
         std::env::current_exe().map_err(|source| KvistError::SandboxUnavailable {
             runner: sandbox.config.runner.clone(),
@@ -965,6 +968,8 @@ fn apply_authoring_effects(
         live,
         sandbox.steering,
         records,
+        Some(tracker),
+        Some(accepted_generation),
         |staged_path| dispatch_effect(profile, sandbox, request, &program, &arguments, staged_path),
     )
 }
@@ -978,8 +983,10 @@ fn apply_authoring_effects_with(
     live: &LiveRun,
     steering: &RunControls<'_>,
     records: &mut Vec<EffectRecord>,
+    mut tracker: Option<&mut sav::loop_detection::ToolLoopTracker>,
+    mut accepted_generation: Option<&mut sav::loop_detection::StreamLoopDetector>,
     mut dispatch: impl FnMut(&Path) -> Result<sandbox::ExecutionResult>,
-) -> Result<()> {
+) -> Result<Option<sav::loop_detection::ToolLoopReport>> {
     for effect in &plan.effects {
         if steering.cancellation.is_cancelled() {
             return Err(KvistError::Sav(ModelError::Cancelled));
@@ -995,6 +1002,12 @@ fn apply_authoring_effects_with(
                 call_id: effect.call_id.clone(),
                 reason: "the authorized effect lost its originating model intent".to_owned(),
             })?;
+        if let Some(tracker) = tracker.as_deref_mut()
+            && let Some(report) = tracker.propose(raw, false)
+        {
+            return Ok(Some(report));
+        }
+        let before = progress::effect_revision(request.target_dir, effect)?;
         let staged_path =
             authoring::apply::stage_intent(request.target_dir, session_id, effect, raw)?;
         let _staged = StagedIntentCleanup(staged_path.clone());
@@ -1037,8 +1050,38 @@ fn apply_authoring_effects_with(
         if cancelled {
             return Err(KvistError::Sav(sav::Error::Cancelled));
         }
+        if !record.applied {
+            return Ok(None);
+        }
+        let after = progress::effect_revision(request.target_dir, effect)?;
+        let changed = record.applied && before != after;
+        if changed && let Some(detector) = accepted_generation.as_deref_mut() {
+            *detector = sav::loop_detection::StreamLoopDetector::default();
+        }
+        if let Some(tracker) = tracker.as_deref_mut()
+            && let Some(report) = tracker.observe(
+                raw,
+                &sav::runtime::ToolOutcome {
+                    exited: true,
+                    status: Some(if record.applied { 0 } else { 1 }),
+                    stdout: vec![],
+                    stderr: record.detail.as_bytes().to_vec(),
+                    timed_out: record.timed_out,
+                    output_limit_exceeded: record.output_limit_exceeded,
+                    cancelled: false,
+                },
+                false,
+                if changed {
+                    sav::loop_detection::ProgressEvidence::StateChanged
+                } else {
+                    sav::loop_detection::ProgressEvidence::None
+                },
+            )
+        {
+            return Ok(Some(report));
+        }
     }
-    Ok(())
+    Ok(None)
 }
 
 struct StagedIntentCleanup(PathBuf);
@@ -1387,13 +1430,9 @@ fn execute_agent_inner(
         let mut generations = 0u64;
         let mut model_attempts = 0;
         let mut recovery = sav::loop_detection::RecoveryBudget::default();
+        let mut tool_tracker = sav::loop_detection::ToolLoopTracker::default();
+        let mut accepted_generation = sav::loop_detection::StreamLoopDetector::default();
         let mut observed_paths = std::collections::BTreeSet::new();
-        let mut seen_read_hashes: std::collections::BTreeMap<String, usize> =
-            std::collections::BTreeMap::new();
-        let mut duplicate_read_streak = 0usize;
-        let mut total_duplicate_reads = 0usize;
-        let mut repeated_text_streak = 0usize;
-        let mut last_assistant_text: Option<String> = None;
         let mut last_action_label = "init".to_owned();
         let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
 
@@ -1438,19 +1477,13 @@ fn execute_agent_inner(
                 let unique_files = observed_paths.len();
                 let elapsed = budget.started.elapsed().as_secs_f64();
                 let rem = budget.remaining().as_secs_f64();
-                let dup_info = if total_duplicate_reads > 0 {
-                    format!(", {} dup suppressed", total_duplicate_reads)
-                } else {
-                    String::new()
-                };
                 let line = format!(
-                    "⟳ Turn {} │ ~{:.1}k in ({:.1}k rsv) │ reads: {} ({} files{}) · edits: {} │ last: {} │ {:.1}s ({:.0}s rem)",
+                    "⟳ Turn {} │ ~{:.1}k in ({:.1}k rsv) │ reads: {} ({} files) · edits: {} │ last: {} │ {:.1}s ({:.0}s rem)",
                     generations,
                     est_input as f64 / 1000.0,
                     reserve as f64 / 1000.0,
                     total_reads,
                     unique_files,
-                    dup_info,
                     total_edits,
                     last_action_label,
                     elapsed,
@@ -1681,20 +1714,62 @@ fn execute_agent_inner(
                 }));
             }
 
-            // 3b. Deliver bounded, read-only inspections back to the model context,
-            //     suppressing duplicate/redundant reads so the model cannot get stuck
-            //     re-reading the same file slices in an infinite loop.
-            let trimmed_text = turn.text.trim();
-            if !trimmed_text.is_empty() {
-                if last_assistant_text.as_deref() == Some(trimmed_text) {
-                    repeated_text_streak += 1;
-                } else {
-                    repeated_text_streak = 0;
-                    last_assistant_text = Some(trimmed_text.to_owned());
-                }
+            let mut candidate = accepted_generation.clone();
+            let report = candidate.observe_turn_while(&turn, &mut || {
+                !cancellation.is_cancelled() && !controls.is_shutdown() && !controls.has_pending()
+            });
+            if cancellation.is_cancelled() || controls.is_shutdown() {
+                return Err(KvistError::Sav(ModelError::Cancelled));
             }
-            let mut turn_had_new_read = false;
+            if controls.has_pending() {
+                steering.skip_calls(turn.tool_intents.iter(), &[], &mut conversation)?;
+                continue;
+            }
+            accepted_generation = candidate;
+            if let Some(report) = report {
+                progress::interrupt_batch(&run_turns[turn_index], &steering, &mut conversation)?;
+                if cancellation.is_cancelled() || controls.is_shutdown() {
+                    return Err(KvistError::Sav(ModelError::Cancelled));
+                }
+                if controls.has_pending() {
+                    continue;
+                }
+                let Some(step) = recovery.take() else {
+                    live.record(
+                        &serde_json::json!({"type":"generation_stalled","data":{
+                            "report":report,"proposals_executed":false
+                        }}),
+                        true,
+                    )?;
+                    return Ok(Some(TurnFailure {
+                        reason: report.exhausted_message(),
+                        timed_out: false,
+                        output_limit_exceeded: false,
+                        cancelled: false,
+                    }));
+                };
+                let feedback = report.feedback(step);
+                live.record(
+                    &serde_json::json!({"type":"generation_recovery","data":{
+                        "report":report,"attempt":step.attempt,"limit":step.limit,
+                        "proposals_executed":false,"response_reserve":reserve,"feedback":feedback
+                    }}),
+                    true,
+                )?;
+                eprintln!("{}", redact_bounded(&feedback, &redactions, 4096));
+                conversation.push_user(feedback);
+                last_action_label = "generation correction".into();
+                continue;
+            }
+
+            let mut tool_report = None;
             for read in &plan.reads {
+                if cancellation.is_cancelled() || controls.is_shutdown() {
+                    return Err(KvistError::Sav(ModelError::Cancelled));
+                }
+                if controls.has_pending() {
+                    break;
+                }
                 live.record(
                     &serde_json::json!({"type":"tool_dispatch","data":{
                         "call_id":read.call_id,"name":read.tool
@@ -1707,47 +1782,38 @@ fn execute_agent_inner(
                 } else {
                     None
                 };
-                let sig = format!(
-                    "{}:{}:{}",
-                    read.tool,
-                    read.path,
-                    hex::encode(<sha2::Sha256 as sha2::Digest>::digest(
-                        read.content.as_bytes()
-                    ))
-                );
-                // Ranges alone cannot prove that externally editable bytes are
-                // unchanged. Suppress only an exactly identical observation.
-                let already_covered = is_real_file_read && seen_read_hashes.contains_key(&sig);
-                let delivered_content = if already_covered {
-                    let count = seen_read_hashes
-                        .entry(sig)
-                        .and_modify(|c| *c += 1)
-                        .or_insert(2);
-                    duplicate_read_streak += 1;
-                    total_duplicate_reads += 1;
-                    last_action_label = format!("dup-read {}", read.path);
-                    format!(
-                        "[Duplicate observation suppressed — repeat #{count}] This bounded `{}` observation of `{}` exactly matches one already delivered. Unobserved bytes or other state may have changed. Choose a novel inspection or a justified alternate strategy, explicitly report completion with no tool calls if the task is complete, or report a blocker. Do not invent progress or make unnecessary edits.",
-                        read.tool, read.path
-                    )
-                } else {
-                    if is_real_file_read {
-                        seen_read_hashes.insert(sig, 1);
-                        observed_paths.insert(read.path.clone());
-                        if let Some((from, to)) = range_opt {
-                            last_action_label = format!("read {}:{from}..{to}", read.path);
-                        } else {
-                            last_action_label = format!("{} {}", read.tool, read.path);
-                        }
-                        duplicate_read_streak = 0;
-                        repeated_text_streak = 0;
-                        turn_had_new_read = true;
+                if is_real_file_read {
+                    observed_paths.insert(read.path.clone());
+                    last_action_label = if let Some((from, to)) = range_opt {
+                        format!("read {}:{from}..{to}", read.path)
                     } else {
-                        last_action_label = read.path.clone();
-                    }
-                    read.content.clone()
+                        format!("{} {}", read.tool, read.path)
+                    };
+                } else {
+                    last_action_label = read.path.clone();
+                }
+                let raw = turn
+                    .tool_intents
+                    .iter()
+                    .find(|intent| intent.id == read.call_id)
+                    .ok_or_else(|| KvistError::AuthoringEffectFailed {
+                        call_id: read.call_id.clone(),
+                        reason: "broker observation lost its originating model intent".into(),
+                    })?;
+                let outcome = sav::runtime::ToolOutcome {
+                    exited: true,
+                    status: Some(read.outcome.exit_code()),
+                    stdout: read.content.as_bytes().to_vec(),
+                    stderr: vec![],
+                    timed_out: false,
+                    output_limit_exceeded: false,
+                    cancelled: false,
                 };
-                let redacted_content = redact_bounded(&delivered_content, &redactions, 65536);
+                let repeatable = matches!(raw.name.as_str(), "read_file" | "list_files");
+                if repeatable && tool_tracker.is_new_observation(raw, &outcome) {
+                    accepted_generation = sav::loop_detection::StreamLoopDetector::default();
+                }
+                let redacted_content = redact_bounded(&read.content, &redactions, 65536);
                 conversation.record_tool_result_with_limit(
                     &read.call_id,
                     &read.tool,
@@ -1771,6 +1837,41 @@ fn execute_agent_inner(
                     }}),
                     true,
                 )?;
+                if read.outcome != ReadOutcome::Completion {
+                    tool_report = tool_tracker.observe(
+                        raw,
+                        &outcome,
+                        repeatable,
+                        sav::loop_detection::ProgressEvidence::None,
+                    );
+                }
+                if tool_report.is_some() {
+                    break;
+                }
+            }
+            if controls.has_pending() {
+                progress::interrupt_batch(&run_turns[turn_index], &steering, &mut conversation)?;
+                continue;
+            }
+            if let Some(report) = tool_report {
+                progress::interrupt_batch(&run_turns[turn_index], &steering, &mut conversation)?;
+                if cancellation.is_cancelled() || controls.is_shutdown() {
+                    return Err(KvistError::Sav(ModelError::Cancelled));
+                }
+                if controls.has_pending() {
+                    continue;
+                }
+                if let Some(failure) = progress::correct(
+                    &report,
+                    &mut recovery,
+                    &live,
+                    &mut conversation,
+                    &redactions,
+                )? {
+                    return Ok(Some(failure));
+                }
+                last_action_label = "tool correction".into();
+                continue;
             }
 
             // No write effects: if reads or dependency requests occurred, continue
@@ -1791,39 +1892,17 @@ fn execute_agent_inner(
                         .collect::<Vec<_>>()
                         .join("\n");
                 }
-                if !only_completion_note
-                    && !plan.reads.is_empty()
-                    && (duplicate_read_streak >= 4 || repeated_text_streak >= 3)
-                {
-                    // End the in-place progress line so the warning below starts
-                    // on its own line; the post-loop newline still terminates any
-                    // path that breaks or returns without doing this.
-                    eprintln!();
-                    tracing::warn!(
-                        task_id = %request.task_id,
-                        duplicate_read_streak,
-                        repeated_text_streak,
-                        "stalled authoring; repeated observations are not completion"
-                    );
-                    return Ok(Some(TurnFailure {
-                        reason: "authoring stalled: repeated reads or assistant text without useful observation progress; task completion was not reported".into(),
-                        timed_out: false,
-                        output_limit_exceeded: false,
-                        cancelled: false,
-                    }));
-                }
-                if (duplicate_read_streak == 2 || repeated_text_streak == 2) && !turn_had_new_read {
-                    conversation.push_user(
-                        "SYSTEM LOOP WARNING: Repeated observations or assistant text have not produced useful progress. Choose a novel inspection or a justified alternate strategy, explicitly report completion with no tool calls only if the task is complete, or report a blocker. No edit is required merely to escape a loop.",
-                    );
-                }
                 if (!plan.reads.is_empty() && !only_completion_note)
                     || !accepted_requests.is_empty()
                 {
                     continue;
                 }
                 if !controls.finish_if_idle()? {
-                    steering.skip_calls(turn.tool_intents.iter(), &[], &mut conversation)?;
+                    progress::interrupt_batch(
+                        &run_turns[turn_index],
+                        &steering,
+                        &mut conversation,
+                    )?;
                     continue;
                 }
                 let final_text = &run_turns[turn_index].turn.text;
@@ -1865,7 +1944,7 @@ fn execute_agent_inner(
                 steering: &steering,
                 budget: &budget,
             };
-            apply_authoring_effects(
+            let effect_report = apply_authoring_effects(
                 profile,
                 &sandbox_context,
                 &request,
@@ -1874,6 +1953,8 @@ fn execute_agent_inner(
                 &session_id,
                 &live,
                 &mut run_turns[turn_index].effects,
+                &mut tool_tracker,
+                &mut accepted_generation,
             )?;
             let effects = &run_turns[turn_index].effects;
 
@@ -1882,9 +1963,6 @@ fn execute_agent_inner(
             for record in effects {
                 if record.applied {
                     observed_paths.remove(&record.destination);
-                    let prefix = format!("read_file:{}:", record.destination);
-                    seen_read_hashes.retain(|k, _| !k.starts_with(&prefix));
-                    duplicate_read_streak = 0;
                     last_action_label = format!("{} {}", record.tool, record.destination);
                 }
                 let content = if record.applied {
@@ -1906,7 +1984,7 @@ fn execute_agent_inner(
                     },
                 );
             }
-            if effects.len() < plan.effects.len() {
+            if effect_report.is_none() && effects.len() < plan.effects.len() {
                 steering.skip_calls(
                     turn.tool_intents.iter().filter(|intent| {
                         plan.effects
@@ -1929,6 +2007,26 @@ fn execute_agent_inner(
                     output_limit_exceeded: false,
                     cancelled: false,
                 }));
+            }
+            if let Some(report) = effect_report {
+                progress::interrupt_batch(&run_turns[turn_index], &steering, &mut conversation)?;
+                if cancellation.is_cancelled() || controls.is_shutdown() {
+                    return Err(KvistError::Sav(ModelError::Cancelled));
+                }
+                if controls.has_pending() {
+                    continue;
+                }
+                if let Some(failure) = progress::correct(
+                    &report,
+                    &mut recovery,
+                    &live,
+                    &mut conversation,
+                    &redactions,
+                )? {
+                    return Ok(Some(failure));
+                }
+                last_action_label = "tool correction".into();
+                continue;
             }
         }
         Ok(None)

@@ -60,6 +60,15 @@ classified process outcomes in diagnostic events and transcripts. Failed tools
 render as failures with a bounded cause; recovery and resource notices explain
 preserved work and the safe next action. A full channel checks cancellation as
 well as shutdown rather than holding provider callbacks indefinitely.
+Forward shared progress evidence through the executor bridge. Native mutation
+evidence compares actual bounded file revisions around execution, with explicit
+errors for failed observation; shell success is not mutation evidence. No-op
+writes must not clear recurrence. Keep this observation within the existing
+workspace/grant boundary and do not introduce host-wide scans.
+Reject ambiguous value-identical pending evidence instead of assigning another
+execution's change. Retain the observed root descriptor, detect pathname
+rebinding around execution and report possible effects without replay claims.
+Poll cancellation around bounded revision reads and before execution.
 
 When a prompt arrives while a task is active, it is treated as steering rather
 than a replacement task. The steering message is queued and delivered at the

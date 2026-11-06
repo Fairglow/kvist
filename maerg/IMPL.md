@@ -1,6 +1,79 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped progress observations - resilience phase 3
+
+Fresh `maerg-p3-source-observation` read local agent, controls, progress,
+regression, broker and applier source and live-runtime assertions. It excluded
+intent, queues, old records/reviews, peer internals and history, made no edits,
+and did not delegate. The following is its factual record, not certification.
+
+The adapter supplies actual outcomes to the imported tool tracker; failed
+inspections retain nonzero status. Only read/list observations are repeatable.
+Successful no-op advisory writes are not new inspection evidence. Effects
+compare bounded destination revisions before/after dispatch. Missing files have
+no revision; inspection errors propagate. A successful dispatch with differing
+revisions supplies state-change evidence and clears accepted-generation history.
+Recovery, tool and accepted-generation state remain outside the turn loop;
+guidance and compaction do not recreate them. Generation and tool stalls share
+two corrections. The first batch stall pairs withheld results before another
+request; the five-duplicate fixture asserts exactly one result per proposal and
+both distinct correction opportunities.
+
+Hard dispatch failures precede revision/tracker recovery and retain original
+causes. Dispatch errors retain uncertain effect placeholders; completed failed
+dispatches retain diagnostics and stop later effects. Finalization retains
+completed turns, partial effects and known usage on errors. Supplemental
+guidance preserves original task wording and undispatched proposals are
+superseded. Imported compaction is recorded as noncanonical diagnostic evidence.
+
+The applier's ancestor-validation helper is now crate-visible for reuse by
+revision observation; its body, authorization/content identity checks, atomic
+replacement and dispatch semantics are unchanged. Existing applier tests cover
+creation, overwrite, edit, drift and identity mismatch. A successful dispatch's
+`applied` flag is process confirmation, not independent expected-byte
+verification. Post-success revision failure aborts, but the retained effect
+still has that dispatch-confirmed flag. Trajectory mutation conservatively
+includes applied or uncertain effects, including successful no-ops.
+
+Broker filesystem reads occur eagerly during authorization: paired
+"not executed" describes withheld adapter results/effect dispatch, not absence
+of all authorization reads. Broker no-op comparison trims content despite an
+"exact content" message. The actual-change fixture dispatches once and later
+identical content becomes advisory, not a second identical effect dispatch.
+These limits are retained rather than silently changing intent/evidence.
+
+Independently executed, with `TMPDIR="$PWD"` and offline/locked Cargo:
+69 `agent::` units, 53 `authoring::` units (including 13 applier tests), eight
+agent CLI and five repair tests passed. A serial full live-runtime run announced
+48 tests and exited zero; output truncation obscured terminal counters. A
+separate serial `phase3_` run explicitly passed all ten new cases. Shared
+fingerprints/window bounds, session compaction/accounting and sandbox backend
+internals were not inspected.
+
+Implementer-attributed logs in the private session files directory establish
+six initial failures, separate cross-turn, terminal-precedence and linked
+ancestor failures, then 48 live/69 agent/53 authoring/eight agent CLI/five
+task-command resilience passes. Failed-read and alternating-no-op red runs hit
+fixture deadlines, not their intended final assertions. Formatting and strict
+all-target lint passed. Synthetic-gate effects use the real applier but do not
+qualify Bubblewrap isolation; timing-flake elimination is not established.
+Fresh repair invocations still recreate correction/tracker state; sequence
+aggregation is assigned to phase four. No generation exception configuration
+surface is currently exposed by this adapter.
+
+A separate scoped phase-three security reviewer found no vulnerabilities in
+the changed local progress paths. This is neither acceptance nor a universal
+security claim.
+
+The separate source-blind `maerg-p3-source-blind` compared only the scoped
+intent, phase-three queue definitions, this observation and Sav's public
+contract; it did not inspect source/tests or execute checks. It established no
+concrete phase-three contradiction, not full compliance. It retained coverage
+limits for repeated real effects, novel investigations, changed reads and
+imported mechanisms, plus the dispatch/read semantics above. Cross-repair
+history recreation remains a known whole-sequence gap for phase four.
+
 ## Scoped generation observations - resilience phase 2
 
 Clean-slate `maerg-p2-source-observer` read only local agent generation,

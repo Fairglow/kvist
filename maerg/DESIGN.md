@@ -9,6 +9,11 @@ adds Sav's stream detector/recovery state, progress-aware tool recurrence and
 typed operator diagnostics. Keep protected authorization and independent review
 contexts local. A loop is never a completion shortcut, and new read-only
 observations cannot be penalized by a fixed inspection counter.
+Use the shared 128-entry, 32-action-cycle tracker with actual broker outcomes
+and validated component revision changes. Record refused proposals as failures,
+inspect unchanged observations after reads, and stop the remaining batch with
+paired not-executed results when a report occurs. Append one recorded correction
+from the authoring recovery allowance, not one charge per duplicate call.
 
 Bind suppressed read coverage to the observed revision; retain actual failed
 read/edit semantics. The model must receive changed bytes, not an assertion that

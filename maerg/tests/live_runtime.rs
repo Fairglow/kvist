@@ -13,6 +13,8 @@ use sav::observation::JournalFollower;
 
 #[path = "live_runtime/generation.rs"]
 mod generation;
+#[path = "live_runtime/progress.rs"]
+mod progress;
 
 fn profile(endpoint: &str) -> AgentProfile {
     let command = format!("curl --json '{{\"model\":\"fixture\"}}' '{endpoint}/api/chat'");
@@ -562,6 +564,18 @@ fn resilience_run_with_authority(
     mut answer: impl FnMut(usize, &serde_json::Value) -> serde_json::Value + Send,
     gate: Option<&EffectGate>,
 ) -> (kvist::agent::AgentRunResult, usize) {
+    resilience_run_scripted(
+        workdir,
+        |index, request| (answer(index, request), text.to_owned()),
+        gate,
+    )
+}
+
+fn resilience_run_scripted(
+    workdir: &Path,
+    mut answer: impl FnMut(usize, &serde_json::Value) -> (serde_json::Value, String) + Send,
+    gate: Option<&EffectGate>,
+) -> (kvist::agent::AgentRunResult, usize) {
     use std::sync::atomic::{AtomicBool, Ordering};
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
     listener.set_nonblocking(true).expect("nonblocking");
@@ -580,8 +594,8 @@ fn resilience_run_with_authority(
                             continue;
                         };
                         calls += 1;
-                        let tools = answer(calls, &request);
-                        respond_with_tools_and_text(&mut stream, 10, 4, tools, text);
+                        let (tools, text) = answer(calls, &request);
+                        respond_with_tools_and_text(&mut stream, 10, 4, tools, &text);
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(1));
@@ -719,7 +733,11 @@ fn resilience_external_change_reaches_the_model_in_a_covered_range() {
 #[test]
 fn resilience_pseudo_read_errors_have_failed_outcomes_and_no_progress() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
-    let (result, _) = resilience_run(dir.path(), |index, request| {
+    let passage = (0..150)
+        .map(|index| format!("word{index}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let (result, _) = resilience_run_with_text(dir.path(), &passage, |index, request| {
         if index > 1 {
             let content = request["messages"]
                 .as_array()
@@ -729,7 +747,11 @@ fn resilience_pseudo_read_errors_have_failed_outcomes_and_no_progress() {
                 .find(|message| message["role"] == "tool")
                 .and_then(|message| message["content"].as_str())
                 .expect("tool outcome");
-            assert!(content.contains("status=Some(1)"), "{content}");
+            assert!(
+                content.contains("status=Some(1)")
+                    || (content.contains("status=None") && content.contains("not executed")),
+                "{content}"
+            );
         }
         if index <= 6 {
             read_call(&format!("src/missing{index}.rs"))
@@ -753,7 +775,8 @@ fn resilience_pseudo_read_errors_have_failed_outcomes_and_no_progress() {
     assert!(
         results
             .iter()
-            .all(|record| record["event"]["data"]["applied"] == false)
+            .all(|record| record["event"]["data"]["applied"] == false
+                || record["event"]["data"]["not_executed"] == true)
     );
 }
 
@@ -787,7 +810,7 @@ fn resilience_duplicate_feedback_describes_only_observed_bytes_without_forcing_w
                 .find(|message| message["role"] == "tool")
                 .and_then(|message| message["content"].as_str())
                 .expect("tool result");
-            assert!(content.contains("observation"), "{content}");
+            assert!(content.contains("// unchanged page"), "{content}");
             assert!(!content.contains("contents have NOT changed"), "{content}");
             assert!(!content.contains("make required changes"), "{content}");
             serde_json::json!([])
@@ -1092,8 +1115,29 @@ fn protected_run_continues_beyond_64_generations() {
                         last_request = Instant::now();
                         inference += 1;
                         if inference <= 65 {
-                            respond_with_effect(&mut stream, 10, 4);
-                            gate.release(|| {});
+                            respond_with_tools(
+                                &mut stream,
+                                10,
+                                4,
+                                serde_json::json!([{
+                                    "function":{"name":"write_file","arguments":{
+                                        "destination":"src/observed.rs",
+                                        "content":format!("// fixture revision {inference}\n")
+                                    }}
+                                }]),
+                            );
+                            gate.release(|| {
+                                let staged = fs::read_dir(dir.path().join(".kvist/authoring"))
+                                    .expect("staging")
+                                    .map(|entry| entry.expect("entry").path())
+                                    .find(|path| {
+                                        path.extension()
+                                            .is_some_and(|extension| extension == "json")
+                                    })
+                                    .expect("staged effect");
+                                kvist::authoring::apply::apply_intent(dir.path(), &staged)
+                                    .expect("actual authorized revision");
+                            });
                         } else {
                             respond(&mut stream, 10, 4);
                             return inference;
@@ -1128,6 +1172,7 @@ fn protected_run_continues_beyond_64_generations() {
         )
         .expect("recorded outcome");
         stopped.store(true, Ordering::SeqCst);
+        assert!(result.success, "{}", result.stderr);
         let generations = provider.join().expect("provider");
         assert_eq!(generations, 66, "{}", result.stderr);
         result

@@ -192,7 +192,10 @@ fn prove_identity(call_id: &str, bytes: &[u8], expected: &str) -> Result<()> {
 
 /// Verifies every directory component between the component root and the given
 /// directory is a real directory (never a symlink).
-fn verify_no_follow_ancestors(component_root: &Path, ancestor_dir: Option<PathBuf>) -> Result<()> {
+pub(crate) fn verify_no_follow_ancestors(
+    component_root: &Path,
+    ancestor_dir: Option<PathBuf>,
+) -> Result<()> {
     let Some(target) = ancestor_dir else {
         return Err(KvistError::AuthoringEffectFailed {
             call_id: String::new(),
