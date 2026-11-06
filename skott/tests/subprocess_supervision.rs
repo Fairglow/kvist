@@ -1,6 +1,7 @@
 //! Real executor-path regressions using finite, local subprocess fixtures.
 
 use std::collections::BTreeMap;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -173,6 +174,143 @@ fn ordinary_success_and_exact_limit_are_not_overflow() {
     let outcome = host("printf 'ok'", &CancellationToken::new()).unwrap();
     assert_eq!(outcome.stdout, b"ok");
     assert!(!outcome.failed());
+}
+
+#[test]
+fn phase4_host_long_script_is_literal_and_cleans_private_staging() {
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let parent = root.join("stage parent with ' quotes");
+    let work = parent.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let script = format!(
+        "# {}\ncat <<'LITERAL'\n$(touch injected) `touch backtick` $HOME /workspace/literal /context/0\nLITERAL\nprintf '%s' \"$0\"; printf useful-stderr >&2; exit 7",
+        "padding ".repeat(600)
+    );
+    let outcome = HostExecutor::new(ToolRegistry::new(ToolPolicy::minimum()), work.clone())
+        .execute(
+            &ToolIntent {
+                id: "literal".into(),
+                provider_id: None,
+                name: "shell".into(),
+                arguments: json!({"command":script}),
+            },
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    assert_eq!(outcome.status, Some(7), "{outcome:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&outcome.stdout),
+        "$(touch injected) `touch backtick` $HOME /workspace/literal /context/0\nskott"
+    );
+    assert_eq!(outcome.stderr, b"useful-stderr");
+    assert!(!work.join("injected").exists());
+    assert!(!work.join("backtick").exists());
+    assert_eq!(
+        std::fs::read_dir(&root).unwrap().count(),
+        1,
+        "owned staging leaked"
+    );
+    assert_eq!(
+        std::fs::read_dir(parent).unwrap().count(),
+        1,
+        "quoted-path staging leaked"
+    );
+}
+
+#[test]
+fn phase4_host_staged_script_cleanup_survives_supervision_error_and_cancellation() {
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let work = root.join("work");
+    std::fs::create_dir(&work).unwrap();
+    let executor = HostExecutor::new(ToolRegistry::new(ToolPolicy::minimum()), work.clone());
+    let intent = |command: String| ToolIntent {
+        id: "cleanup".into(),
+        provider_id: None,
+        name: "shell".into(),
+        arguments: json!({"command":command}),
+    };
+    let error = executor
+        .execute(
+            &intent(format!("# {}\nsleep 1.5 & exit 0", "padding ".repeat(600))),
+            &CancellationToken::new(),
+        )
+        .unwrap_err();
+    assert!(error.describe().contains("pipe"));
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+    let token = CancellationToken::new();
+    let cancellation = token.clone();
+    let marker = work.join("started");
+    let script = format!(
+        "# {}\nprintf started > started; exec sleep 30",
+        "padding ".repeat(600)
+    );
+    let staging_root = root.clone();
+    let waiter = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !marker.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let started = marker.exists();
+        let observation = (|| -> std::io::Result<_> {
+            let directory = std::fs::read_dir(&staging_root)?
+                .collect::<std::io::Result<Vec<_>>>()?
+                .into_iter()
+                .find(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".skott-payload-")
+                })
+                .ok_or_else(|| std::io::Error::other("owned staged script directory is missing"))?
+                .path();
+            let files = std::fs::read_dir(&directory)?.collect::<std::io::Result<Vec<_>>>()?;
+            if files.len() != 1 {
+                return Err(std::io::Error::other(
+                    "expected exactly one owned staged script",
+                ));
+            }
+            let path = files[0].path();
+            let file = std::fs::symlink_metadata(&path)?;
+            let parent = std::fs::symlink_metadata(&directory)?;
+            if !file.is_file() || !parent.is_dir() {
+                return Err(std::io::Error::other(
+                    "staged script and parent must be non-links",
+                ));
+            }
+            Ok((
+                path,
+                file.permissions().mode() & 0o7777,
+                parent.permissions().mode() & 0o7777,
+                std::fs::read(files[0].path())?,
+            ))
+        })();
+        cancellation.cancel();
+        (started, observation)
+    });
+    let outcome = executor.execute(&intent(script.clone()), &token).unwrap();
+    let (started, observation) = waiter.join().unwrap();
+    assert!(started, "effectful process did not start");
+    let (path, file_mode, parent_mode, bytes) = observation.unwrap();
+    assert_eq!(file_mode, 0o600, "actual host script: {}", path.display());
+    assert_eq!(parent_mode, 0o700, "actual host staging parent");
+    assert_eq!(
+        bytes,
+        script.as_bytes(),
+        "actual staged bytes were not literal"
+    );
+    assert!(!path.starts_with(&work));
+    assert!(!path.exists(), "owned staged script survived cancellation");
+    assert!(outcome.cancelled);
+    assert!(outcome.failed());
+    assert_eq!(
+        std::fs::read_dir(&root).unwrap().count(),
+        1,
+        "cancelled staging leaked"
+    );
+    drop(dir);
+    assert!(!root.exists(), "owned fixture root survived teardown");
 }
 
 #[test]

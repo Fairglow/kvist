@@ -44,6 +44,7 @@ impl ModelRetry<'_> {
             }
             if *attempts >= self.policy.max_attempts {
                 return Err(sav::runtime::Error::RunBudget {
+                    resource: sav::runtime::BudgetResource::ModelAttempts,
                     reason:
                         "model generation attempt limit exhausted, including steering interruptions"
                             .into(),

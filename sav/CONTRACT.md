@@ -25,6 +25,50 @@ steering/replay capabilities are disclosed rather than emulated.
 
 ## Shared native runtime API (ADR 0015)
 
+### Operational diagnostics and stopping causes
+
+`BudgetResource` is a stable snake-case enum: `WallTime`, `ModelTokens`,
+`Turns`, `ModelAttempts`, `Context`. `StopReason` is an adjacent-tagged
+`{kind, resource}` enum: `Completed`, `NoWork`, `Cancelled`, `Limit(resource)`,
+`Stalled`, `Failed`. `RunSummary::stop_reason: Option<StopReason>` records the
+observed terminal cause (`None` before an entered run resolves);
+`Event::PromptEnd` includes `reason` alongside its existing flags.
+`Error::RunBudget` carries the typed resource, not just prose. The first
+observed interruption/failure is frozen before cleanup. Later cleanup errors
+remain failures with both causes, but later deadlines cannot relabel earlier
+cancellation. Missing process status is not evidence of OOM.
+`Error::Cancelled` preserves explicit cancellation through host channel and
+model adapters without disguising it as a transport failure.
+
+`ToolFailureCategory` distinguishes `InvalidRequest`, `Denied`, `Prerequisite`,
+`Timeout`, `OutputLimit`, `Cancelled`, `ProcessExit`, `Unobserved`, `Stalled`.
+`EffectCertainty` distinguishes `NotExecuted` from `MayHaveEffects`.
+`RecoveryAction` distinguishes `ReviseRequest`, `InspectState`,
+`FixPrerequisite`, `ReduceOutput`, `ReviewLimits`, `StopAndReconcile`.
+`ToolFailure` carries `category`, `effects`, bounded printable `message`,
+`recovery`, and `next_step`; `Event::ToolFailure` carries description/name and
+that failure. Known refusals are not executed; dispatched failures and missing
+status may have effects. No failure classification authorizes replay.
+`Error::ToolPrerequisite {tool, reason}` explicitly reports an approved local
+resource unavailable before dispatch; generic I/O errors cannot claim that
+certainty. Missing prerequisites stop for host repair without automatic
+downloads or authority growth.
+`Recorder::tool_failure` defaults to a durable notice; required diagnostic
+failure stops later effects. Hosts apply their own redaction before exposing
+untrusted diagnostics.
+
+Every entered run attempts terminal presentation and terminal recording,
+including error returns, and publishes final known/unknown usage provenance.
+A failed required streaming callback never permits fabricated complete-turn
+recording. Claimed guidance retains actual context-delivery or drop state,
+including when a required recorder fails; presentation of its final state is
+attempted independently, without claiming the failed journal is complete.
+Final control notices are idempotent and may repeat after evidence failure.
+Terminal presentation errors remain explicit returned errors even if the
+earlier execution snapshot was successfully recorded; no correction record or
+presentation acknowledgement is fabricated.
+Productive native defaults and existing grants remain unchanged.
+
 ### Progress-aware tool protection
 
 `sav::loop_detection` exposes `ToolLoopTracker`, `ToolLoopReport`,

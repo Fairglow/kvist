@@ -109,6 +109,12 @@ pub struct Cli {
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=1_048_576))]
     pub response_reserve: Option<u32>,
 
+    /// Explicit native exception for intentional repetitive output. Tool
+    /// protection, budgets and grants remain enabled; external agents do not
+    /// support this native capability.
+    #[arg(long)]
+    pub disable_generation_loop_detection: bool,
+
     /// Optional whole-task wall limit, including requests, retries and tools.
     /// No default cutoff; new idle prompts start fresh budgets.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]

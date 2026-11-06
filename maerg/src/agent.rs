@@ -17,13 +17,17 @@ use redaction::StreamRedactor;
 mod accounting;
 mod cancellation;
 mod context;
+mod failure;
 mod generation;
 mod progress;
 mod retry;
 pub(crate) mod review;
+mod sequence;
 mod startup;
 use accounting::TokenBudget;
 use retry::ModelRetry;
+pub(crate) use sequence::AuthoringSequence;
+pub(crate) use sequence::error_stop;
 #[cfg(test)]
 mod regression_tests;
 
@@ -607,6 +611,10 @@ fn complete_turn_counted<T: ModelTransport>(
             Ok(reservation) => reservation,
             Err(error) => return (Err(error), false),
         };
+        let returned = std::cell::Cell::new(None);
+        let transport = ObservedTransport {
+            transport, live: retry.live, redactions, returned: &returned,
+        };
         let rejection = std::cell::Cell::new(None);
         let (outcome, emitted) = if stream_output {
             run_stream_attempt(
@@ -624,22 +632,35 @@ fn complete_turn_counted<T: ModelTransport>(
             (transport.complete(&request, retry.cancellation), false)
         };
         let rejection = rejection.into_inner();
-        let outcome = match outcome {
-            Ok(turn) => {
-                tokens.finish(reservation, turn.usage);
-                Ok(turn)
-            }
-            Err(source) => {
-                tokens.failed();
-                Err(source)
-            }
-        };
-        if let Some(live) = retry.live
-            && let Err(error) = live.record(
+        let returned = returned.take();
+        let actual = returned.as_ref().map_or(&outcome, |returned| &returned.result);
+        match actual {
+            Ok(turn) => tokens.finish(reservation, turn.usage),
+            Err(_) => tokens.failed(),
+        }
+        let accounting_error = retry.live.and_then(|live| live.record(
                 &serde_json::json!({"type":"model_accounting","data":tokens.accounting()}),
                 false,
-            )
-        {
+            ).err());
+        if let Some(returned) = returned {
+            let recording = outcome.as_ref().err().map_or_else(
+                || "required returned-outcome recording failed".to_owned(),
+                ToString::to_string,
+            );
+            let reason = redact_bounded(&format!(
+                "{recording}; returned outcome was retained for conservative accounting; the proposal was not accepted{}",
+                accounting_error.as_ref().map_or(String::new(), |error|
+                    format!("; required accounting recording also failed: {error}")
+                ),
+            ), redactions, 4096);
+            let error = match returned.result {
+                Err(source) if returned.preserve_model_cause =>
+                    KvistError::AgentModelRequestFailed { reason, source },
+                _ => KvistError::AgentEvidenceFailed { reason },
+            };
+            return (Err(error), emitted);
+        }
+        if let Some(error) = accounting_error {
             let source = match &outcome {
                 Err(source) => Some(source),
                 Ok(_) => rejection.as_ref(),
@@ -768,11 +789,7 @@ fn execute_host_turn(
                     )?
                 };
                 probe_gateway_reachable(&endpoint, budget, cancellation)?;
-                Ok(ObservedTransport {
-                    transport,
-                    live,
-                    redactions,
-                })
+                Ok(transport)
             },
             &model_request,
             request.stream_output,
@@ -878,6 +895,7 @@ struct EffectRecord {
     timed_out: bool,
     /// True when the effect dispatch exceeded its output bound.
     output_limit_exceeded: bool,
+    cancelled: bool,
 }
 
 /// Dispatches one effect: the kvist binary itself runs inside the effect
@@ -1032,6 +1050,7 @@ fn apply_authoring_effects_with(
             detail: "dispatch completion unknown; state may have mutated; do not replay".into(),
             timed_out: false,
             output_limit_exceeded: false,
+            cancelled: false,
         });
         let result = dispatch(&staged_path)?;
         let cancelled = result.cancelled;
@@ -1047,6 +1066,9 @@ fn apply_authoring_effects_with(
             }}),
             true,
         )?;
+        if !record.applied {
+            failure::effect(live, &record, cancelled, steering.redactions)?;
+        }
         if cancelled {
             return Err(KvistError::Sav(sav::Error::Cancelled));
         }
@@ -1142,6 +1164,7 @@ fn summarize_effect(
         detail,
         timed_out: result.timed_out,
         output_limit_exceeded: result.output_limit_exceeded,
+        cancelled: result.cancelled,
     }
 }
 
@@ -1155,11 +1178,17 @@ struct TurnFailure {
     output_limit_exceeded: bool,
     /// True when the run was cancelled (SIGINT/SIGTERM) mid-effect.
     cancelled: bool,
+    stop_reason: sav::runtime::StopReason,
 }
 
 impl TurnFailure {
     fn from_kvist_error(error: &KvistError) -> Self {
         let (timed_out, output_limit_exceeded, cancelled) = match error {
+            KvistError::Runtime(sav::runtime::Error::Cancelled) => (false, false, true),
+            KvistError::Runtime(sav::runtime::Error::RunBudget {
+                resource: sav::runtime::BudgetResource::WallTime,
+                ..
+            }) => (true, false, false),
             KvistError::Sav(model_error)
             | KvistError::AgentModelRequestFailed {
                 source: model_error,
@@ -1180,6 +1209,7 @@ impl TurnFailure {
             timed_out,
             output_limit_exceeded,
             cancelled,
+            stop_reason: sequence::error_stop(error),
         }
     }
 }
@@ -1250,15 +1280,14 @@ pub fn execute_agent_with_controls(
     request: AgentExecutionRequest<'_>,
     allow_control: bool,
 ) -> Result<AgentRunResult> {
-    execute_agent_inner(
+    execute_agent_in_sequence(
         profile,
         sandbox_config,
         expected_runner,
         probe,
         request,
-        &sav::runtime::ControlMailbox::default(),
-        &CancellationToken::new(),
         allow_control,
+        &mut AuthoringSequence::new(profile)?,
     )
 }
 
@@ -1281,6 +1310,33 @@ pub fn execute_agent_controlled(
         controls,
         cancellation,
         false,
+        &mut AuthoringSequence::with_cancellation(profile, cancellation.clone())?,
+    )
+}
+
+/// Continues the original protected authoring allowance during verification repair.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn execute_agent_in_sequence(
+    profile: &AgentProfile,
+    sandbox_config: &SandboxConfig,
+    expected_runner: Option<&crate::sandbox::RunnerIdentity>,
+    probe: Option<&crate::sandbox::SandboxProbe>,
+    request: AgentExecutionRequest<'_>,
+    allow_control: bool,
+    sequence: &mut AuthoringSequence,
+) -> Result<AgentRunResult> {
+    sequence.check()?;
+    let cancellation = sequence.cancellation.clone();
+    execute_agent_inner(
+        profile,
+        sandbox_config,
+        expected_runner,
+        probe,
+        request,
+        &sav::runtime::ControlMailbox::default(),
+        &cancellation,
+        allow_control,
+        sequence,
     )
 }
 
@@ -1294,8 +1350,10 @@ fn execute_agent_inner(
     controls: &sav::runtime::ControlMailbox,
     cancellation: &CancellationToken,
     allow_control: bool,
+    sequence: &mut AuthoringSequence,
 ) -> Result<AgentRunResult> {
-    let _signals = cancellation::SignalCancellation::start(cancellation)?;
+    sequence.current_log_path = None;
+    sequence.last_stop = sav::runtime::StopReason::NoWork;
     let choice = select_model_choice(profile, request.role, None)?;
     eprintln!(
         "{}",
@@ -1327,6 +1385,7 @@ fn execute_agent_inner(
         timestamp.to_string().replace(":", "-")
     );
     let (session_id, log_path, mut log_file) = create_run_log(&logs_dir, &session_stem)?;
+    sequence.current_log_path = Some(log_path.clone());
 
     tracing::debug!(
         task_id = %request.task_id,
@@ -1362,7 +1421,15 @@ fn execute_agent_inner(
         redactions: &redactions,
     };
     let mut run_turns: Vec<RunTurn> = Vec::new();
-    let mut tokens = TokenBudget::new(profile.token_limit);
+    let AuthoringSequence {
+        wall: budget,
+        tokens,
+        recovery,
+        tools: tool_tracker,
+        generation: accepted_generation,
+        corrections_used,
+        ..
+    } = sequence;
     let outcome: Result<Option<TurnFailure>> = (|| {
         let _server = if allow_control {
             let server = sav::observation::bind_runtime_controls(controls, cancellation)?;
@@ -1374,7 +1441,6 @@ fn execute_agent_inner(
         } else {
             None
         };
-        let budget = TurnBudget::new(Duration::from_secs(profile.timeout_seconds));
         let mut conversation = sav::runtime::AgentSession::new(
             sav::runtime::ModelIdentity {
                 id: choice.model.clone(),
@@ -1403,7 +1469,7 @@ fn execute_agent_inner(
         let (mut context, reserve) = startup::model_context(
             choice.native.as_ref(),
             &initial_request,
-            &budget,
+            budget,
             cancellation,
             &live,
             &redactions,
@@ -1429,9 +1495,6 @@ fn execute_agent_inner(
 
         let mut generations = 0u64;
         let mut model_attempts = 0;
-        let mut recovery = sav::loop_detection::RecoveryBudget::default();
-        let mut tool_tracker = sav::loop_detection::ToolLoopTracker::default();
-        let mut accepted_generation = sav::loop_detection::StreamLoopDetector::default();
         let mut observed_paths = std::collections::BTreeSet::new();
         let mut last_action_label = "init".to_owned();
         let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
@@ -1501,13 +1564,13 @@ fn execute_agent_inner(
                 &choice,
                 profile,
                 &request,
-                &budget,
+                budget,
                 &redactions,
                 &model_request,
                 operation.token(),
                 &live,
                 &mut model_attempts,
-                &mut tokens,
+                tokens,
                 Some(generation::Controls {
                     mailbox: controls,
                     interrupted: &inspected_guidance,
@@ -1562,6 +1625,7 @@ fn execute_agent_inner(
                             true,
                         )?;
                         return Ok(Some(TurnFailure {
+                            stop_reason: sav::runtime::StopReason::Stalled,
                             reason: report.exhausted_message(),
                             timed_out: false,
                             output_limit_exceeded: false,
@@ -1569,6 +1633,7 @@ fn execute_agent_inner(
                         }));
                     };
                     let feedback = report.feedback(step);
+                    *corrections_used = corrections_used.saturating_add(1);
                     live.record(
                         &serde_json::json!({"type":"generation_recovery","data":{
                             "report":report,"attempt":step.attempt,"limit":step.limit,
@@ -1704,9 +1769,21 @@ fn execute_agent_inner(
             //    application would misrepresent what the model requested. The model
             //    is told what was refused so it can pursue an authorized path.
             if !plan.dropped.is_empty() {
+                for dropped in &plan.dropped {
+                    failure::record(
+                        &live,
+                        &dropped.tool,
+                        &dropped.call_id,
+                        sav::runtime::ToolFailureCategory::Denied,
+                        sav::runtime::EffectCertainty::NotExecuted,
+                        &dropped.reason,
+                        &redactions,
+                    )?;
+                }
                 let reason = drop_reason(&plan.dropped);
                 tracing::warn!(task_id = %request.task_id, %reason);
                 return Ok(Some(TurnFailure {
+                    stop_reason: sav::runtime::StopReason::Failed,
                     reason,
                     timed_out: false,
                     output_limit_exceeded: false,
@@ -1725,7 +1802,7 @@ fn execute_agent_inner(
                 steering.skip_calls(turn.tool_intents.iter(), &[], &mut conversation)?;
                 continue;
             }
-            accepted_generation = candidate;
+            *accepted_generation = candidate;
             if let Some(report) = report {
                 progress::interrupt_batch(&run_turns[turn_index], &steering, &mut conversation)?;
                 if cancellation.is_cancelled() || controls.is_shutdown() {
@@ -1742,6 +1819,7 @@ fn execute_agent_inner(
                         true,
                     )?;
                     return Ok(Some(TurnFailure {
+                        stop_reason: sav::runtime::StopReason::Stalled,
                         reason: report.exhausted_message(),
                         timed_out: false,
                         output_limit_exceeded: false,
@@ -1749,6 +1827,7 @@ fn execute_agent_inner(
                     }));
                 };
                 let feedback = report.feedback(step);
+                *corrections_used = corrections_used.saturating_add(1);
                 live.record(
                     &serde_json::json!({"type":"generation_recovery","data":{
                         "report":report,"attempt":step.attempt,"limit":step.limit,
@@ -1809,9 +1888,20 @@ fn execute_agent_inner(
                     output_limit_exceeded: false,
                     cancelled: false,
                 };
+                if read.outcome == ReadOutcome::Failed {
+                    failure::record(
+                        &live,
+                        &read.tool,
+                        &read.call_id,
+                        sav::runtime::ToolFailureCategory::InvalidRequest,
+                        sav::runtime::EffectCertainty::NotExecuted,
+                        &read.content,
+                        &redactions,
+                    )?;
+                }
                 let repeatable = matches!(raw.name.as_str(), "read_file" | "list_files");
                 if repeatable && tool_tracker.is_new_observation(raw, &outcome) {
-                    accepted_generation = sav::loop_detection::StreamLoopDetector::default();
+                    *accepted_generation = sav::loop_detection::StreamLoopDetector::default();
                 }
                 let redacted_content = redact_bounded(&read.content, &redactions, 65536);
                 conversation.record_tool_result_with_limit(
@@ -1863,7 +1953,8 @@ fn execute_agent_inner(
                 }
                 if let Some(failure) = progress::correct(
                     &report,
-                    &mut recovery,
+                    recovery,
+                    corrections_used,
                     &live,
                     &mut conversation,
                     &redactions,
@@ -1908,6 +1999,7 @@ fn execute_agent_inner(
                 let final_text = &run_turns[turn_index].turn.text;
                 if crate::authoring::explicit_incomplete_report(final_text) {
                     return Ok(Some(TurnFailure {
+                        stop_reason: sav::runtime::StopReason::Failed,
                         reason: format!(
                             "agent reported incomplete or blocked work instead of completion: {}",
                             redact_bounded(final_text, &redactions, 4096),
@@ -1930,6 +2022,7 @@ fn execute_agent_inner(
                 );
                 tracing::warn!(task_id = %request.task_id, %reason);
                 return Ok(Some(TurnFailure {
+                    stop_reason: sav::runtime::StopReason::Failed,
                     reason,
                     timed_out: false,
                     output_limit_exceeded: false,
@@ -1942,7 +2035,7 @@ fn execute_agent_inner(
                 expected_runner,
                 probe,
                 steering: &steering,
-                budget: &budget,
+                budget,
             };
             let effect_report = apply_authoring_effects(
                 profile,
@@ -1953,8 +2046,8 @@ fn execute_agent_inner(
                 &session_id,
                 &live,
                 &mut run_turns[turn_index].effects,
-                &mut tool_tracker,
-                &mut accepted_generation,
+                tool_tracker,
+                accepted_generation,
             )?;
             let effects = &run_turns[turn_index].effects;
 
@@ -2002,6 +2095,7 @@ fn execute_agent_inner(
                 let reason = apply_reason(effects);
                 tracing::warn!(task_id = %request.task_id, %reason);
                 return Ok(Some(TurnFailure {
+                    stop_reason: sav::runtime::StopReason::Failed,
                     reason,
                     timed_out: false,
                     output_limit_exceeded: false,
@@ -2018,7 +2112,8 @@ fn execute_agent_inner(
                 }
                 if let Some(failure) = progress::correct(
                     &report,
-                    &mut recovery,
+                    recovery,
+                    corrections_used,
                     &live,
                     &mut conversation,
                     &redactions,
@@ -2042,6 +2137,7 @@ fn execute_agent_inner(
             timed_out: failure.timed_out,
             output_limit_exceeded: failure.output_limit_exceeded,
             cancelled: failure.cancelled,
+            stop_reason: failure.stop_reason,
         }),
         Err(error) => Some(TurnFailure::from_kvist_error(error)),
     };
@@ -2056,7 +2152,7 @@ fn execute_agent_inner(
         &redactions,
         &run_turns,
         failure.as_ref(),
-        &tokens,
+        tokens,
     );
     let outcome = match outcome {
         Err(error) => match recorded {
@@ -2070,6 +2166,32 @@ fn execute_agent_inner(
         Ok(_) => recorded,
     };
     let closed = steering.close();
+    sequence.awaiting_decision = outcome.as_ref().is_ok_and(|run| run.surfaced_decision);
+    sequence.last_stop = if run_turns
+        .iter()
+        .flat_map(|turn| &turn.effects)
+        .any(|effect| effect.cancelled)
+    {
+        sav::runtime::StopReason::Cancelled
+    } else if run_turns
+        .iter()
+        .flat_map(|turn| &turn.effects)
+        .any(|effect| effect.timed_out)
+    {
+        sav::runtime::StopReason::Limit(sav::runtime::BudgetResource::WallTime)
+    } else {
+        failure
+            .as_ref()
+            .map_or(sav::runtime::StopReason::Completed, |failure| {
+                failure.stop_reason
+            })
+    };
+    let diagnostics = sequence.diagnostics(sequence.last_stop);
+    eprintln!("{}", diagnostics.message());
+    let sequence_recorded = live.record(
+        &serde_json::json!({"type":"sequence_accounting","data":diagnostics}),
+        true,
+    );
     let disposition = match &outcome {
         Ok(result) if result.surfaced_decision => "awaiting_decision",
         Ok(result) if result.success => "completed",
@@ -2080,7 +2202,7 @@ fn execute_agent_inner(
         Err(_) => "failed",
     };
     let finished = live.finish(disposition);
-    let evidence_failures = [closed, finished]
+    let evidence_failures = [closed, sequence_recorded.map_err(Into::into), finished]
         .into_iter()
         .filter_map(std::result::Result::err)
         .map(|error| error.to_string())
@@ -3488,6 +3610,17 @@ mod tests {
             TurnFailure::from_kvist_error(&KvistError::Sav(ModelError::ModelTransportCancelled));
         assert!(cancelled.cancelled);
         assert!(!cancelled.timed_out);
+        for error in [
+            KvistError::Runtime(sav::runtime::Error::Cancelled),
+            KvistError::AgentModelRequestFailed {
+                reason: "protected phase cancelled".into(),
+                source: ModelError::ModelTransportCancelled,
+            },
+        ] {
+            let failure = TurnFailure::from_kvist_error(&error);
+            assert!(failure.cancelled);
+            assert_eq!(failure.stop_reason, sav::runtime::StopReason::Cancelled);
+        }
 
         let oversized = TurnFailure::from_kvist_error(&KvistError::Sav(
             ModelError::ModelResponseLimitExceeded { max_bytes: 1 },

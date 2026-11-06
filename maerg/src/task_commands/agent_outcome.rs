@@ -18,6 +18,7 @@ impl AgentAttempt<'_> {
         phase: &str,
         execution: Result<AgentRunResult>,
         prior_cause: Option<&str>,
+        sequence: Option<&crate::agent::AuthoringSequence>,
     ) -> Result<AgentRunResult> {
         let at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
         let (success, timed_out, output_limit_exceeded, stdout, stderr) = match &execution {
@@ -53,7 +54,36 @@ impl AgentAttempt<'_> {
                 )
             }
         };
+        let diagnostics = sequence.map(|sequence| {
+            sequence.diagnostics(
+                execution
+                    .as_ref()
+                    .err()
+                    .map_or(sequence.last_stop, |error| match sequence.last_stop {
+                        sav::runtime::StopReason::NoWork | sav::runtime::StopReason::Completed => {
+                            crate::agent::error_stop(error)
+                        }
+                        frozen => frozen,
+                    }),
+            )
+        });
+        let diagnostic_text = diagnostics
+            .as_ref()
+            .map(|diagnostics| diagnostics.message());
+        let stderr = if !success {
+            match diagnostic_text {
+                Some(diagnostic) => format!("{stderr}\n{diagnostic}"),
+                None => stderr,
+            }
+        } else {
+            stderr
+        };
         let reason = self.cause(prior_cause, &stderr);
+        let log_path = execution
+            .as_ref()
+            .ok()
+            .map(|run| run.log_path.as_path())
+            .or_else(|| sequence.and_then(|sequence| sequence.current_log_path.as_deref()));
         append_agent_execution(
             self.journal,
             AgentExecutionRecord {
@@ -67,6 +97,19 @@ impl AgentAttempt<'_> {
                 output_limit_exceeded,
                 stdout,
                 stderr: &reason,
+                cancelled: sequence.is_some_and(|sequence| {
+                    sequence.last_stop == sav::runtime::StopReason::Cancelled
+                }) || execution.as_ref().err().is_some_and(|error| {
+                    crate::agent::error_stop(error) == sav::runtime::StopReason::Cancelled
+                }),
+                surfaced_decision: execution.as_ref().is_ok_and(|run| run.surfaced_decision),
+                model_sequence: diagnostics.map(serde_json::to_value).transpose().map_err(
+                    |error| KvistError::AgentEvidenceFailed {
+                        reason: format!("cannot encode sequence diagnostics: {error}"),
+                    },
+                )?,
+                log_path: log_path
+                    .map(|path| redact_bounded(path.display().to_string(), self.redactions, 4096)),
             },
         )
         .map_err(|recording| {
@@ -80,7 +123,7 @@ impl AgentAttempt<'_> {
         })?;
         match execution {
             Ok(run) => Ok(run),
-            Err(_) => Err(self.block(&reason, None)?),
+            Err(_) => Err(self.block(&reason, log_path)?),
         }
     }
 
@@ -149,6 +192,27 @@ impl AgentAttempt<'_> {
         }
     }
 
+    pub fn completion_boundary(
+        &self,
+        sequence: &crate::agent::AuthoringSequence,
+        prior: &str,
+        log: &Path,
+    ) -> Result<()> {
+        if let Err(error) = sequence.check() {
+            let reason = self.cause(
+                Some(prior),
+                &format!(
+                    "aggregate sequence interrupted at final evidence boundary: {error}\n{}",
+                    sequence
+                        .diagnostics(crate::agent::error_stop(&error))
+                        .message(),
+                ),
+            );
+            return Err(self.block(&reason, Some(log))?);
+        }
+        Ok(())
+    }
+
     pub fn decision(&self, run: &AgentRunResult, kind: TaskKind) -> Result<String> {
         let evidence_dir = if matches!(kind, TaskKind::SecurityAudit | TaskKind::ComplianceReview) {
             self.context.component_dir.join(".kvist/continuous-reviews")
@@ -212,7 +276,7 @@ pub(super) fn repairable(result: &VerificationResult) -> bool {
         && !result.timed_out
         && !result.output_limit_exceeded
         && !result.cancelled
-        && result.exit_code.is_some()
+        && result.exit_code.is_some_and(|code| code != 0)
         && (!result.stdout.trim().is_empty() || !result.stderr.trim().is_empty())
 }
 
@@ -248,6 +312,10 @@ mod tests {
             },
             VerificationResult {
                 exit_code: None,
+                ..result.clone()
+            },
+            VerificationResult {
+                exit_code: Some(0),
                 ..result.clone()
             },
             VerificationResult {

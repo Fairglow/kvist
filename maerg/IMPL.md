@@ -1,6 +1,209 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Final reader observations - resilience phase 4
+
+Fresh `maerg-p4-reader-source-observer` inspected only the local bounded reader/
+budget declarations and private completion assertions, excluding intent, queues,
+records/reviews, history and peers. It changed/delegated nothing. Unix opens use
+no-follow and nonblocking flags, require a regular descriptor and verify lengths
+around the bounded read. The original inclusive file/material/entry thresholds
+are unchanged. Same-length mutation/ancestor races, atomic snapshots and
+interruptible ordinary kernel reads are not established.
+
+Independent offline/locked execution passes 12 distinct completion tests: two
+collection, six inventory, three exact-bound and one FIFO. The FIFO helper is
+not an additional test; its observed response fits two seconds, needs no rescue
+writer, exits zero, is reaped and its exact fixture is removed. Exact 1 MiB/+1
+uses real file reads; exact 8 MiB/+1 material and 4096/4097 use existing budget
+counters, not peak allocator or physical-inventory acceptance claims.
+A separate narrow static security reviewer reports no vulnerabilities.
+
+Implementer-attributed archives retain the one genuine blocking-open red,
+including its safely unblocked/reaped helper before assertion; three boundary
+tests already passed against the old reader. A temporary mistargeted flag patch
+is restored and not a second distinct regression. The final 19 phase-four unit
+cases pass independently in the parent. No API, numerical limit, grant,
+inventory scope or accounting reset changed. Generic cooperative filesystem/
+clock/write limits remain explicit, not silently certified away.
+
+Separate `maerg-p4-final-source-blind` directly compares only scoped requirements
+686-710, contract 422-475, design 5-56 and phase-four observations 4-182 plus
+the canonical task projection/reported execution. It reads no source/tests/
+history, searches or other artifacts, executes/delegates nothing and certifies
+nothing. It supports the chronological recording/sequence/finalization/inventory/
+reader corrections, retaining overlapping and attributed execution, partial
+transition/disposition and cooperative/allocation/mutation evidence limits.
+It identifies one design wording discrepancy: no initial per-file inventory
+exists; initial recursive root hashes are separate from final shallow records.
+Under the user's fix-all-findings authorization, the wording is corrected to
+preserve those existing distinct structures, not invent or expand implementation.
+The comparison finding and its explicit documentation disposition remain here.
+Separate narrow `maerg-p4-inventory-wording-comparator` confirms that the shown
+exclusion of an initial per-file array/before-after diff resolves the concrete
+conflation. Its 45-57 excerpt begins mid-sentence, so it does not independently
+establish the preceding recursive-versus-shallow distinction. The full prior
+source observation and explicit conservative wording disposition remain separate
+evidence; no certification or acceptance is claimed.
+
+Final parent full library passes 696 tests with one existing ignore after the
+reader/boundary corrections; all 476 integration cases passed with six existing
+ignores. Distinct final Maerg coverage is 1172, not a sum of overlapping selectors.
+
+## Final inventory observations - resilience phase 4
+
+Fresh `maerg-p4-inventory-source-observer` inspected only local completion,
+initial/success caller and reused inspection helper source/assertions, without
+intent, queues, records/reviews, history, peers, edits or delegation.
+The existing array observes immediate regular files under component `tests`,
+not root/src/nested files or a VCS diff. Records retain project-relative lexical
+UTF-8 paths, `operation=create`, null pre-digest and byte SHA-256 post-digest;
+unchanged files are not distinguished and deletions are not listed.
+
+Names are UTF-8 validated, budgeted and sorted. Limits are existing 1,048,576
+bytes/file, 8,388,608 material bytes and 4,096 enumerated entries; skipped
+directory names count. File/name/serialized-record material is charged, not
+whole journal events/allocator overhead; one bounded read/serialization occurs
+before its aggregate charge. Final inventory does not recurse or use depth.
+Observed/opened/final lengths must agree within the per-file ceiling, and the
+reader takes at most ceiling+1 bytes. The current Unix open is no-follow; its
+regular-to-FIFO pre-validation blocking window has a final narrow correction
+assigned rather than claimed safe.
+
+Missing selected tests root retains empty semantics; other root/enumeration/
+UTF-8/entry/open/read/reinspection errors fail. Links/nonregular entries fail;
+ordinary directories are skipped. No failed collection returns its prefix.
+Initial source/test recursive root hashes are separate, bounded evidence before
+sequence creation, not the same changes array or its before/after comparison.
+The original tree helper uses depth 64 and charges both name enumerations;
+its entry budget is not a count solely of distinct files.
+
+Final collection checks before/after success. Errors precede construction of
+final success events, are wrapped as evidence failure, block the attempt and
+return; blocking internals were not source-verified here. Appends/canonical
+transition remain separate operations and completed effects are not undone.
+Same-length mutations, ancestor rebinding, synchronous kernel calls and
+non-atomic snapshot/clock/write windows remain explicit limits.
+
+Independent offline/locked executions pass six inventory, two late-collection
+and one protected inventory CLI case (nine distinct). A nonexistent package
+selection and an unqualified exact selector executed nothing. Assertions
+establish observed-file disappearance, retained effects, ceiling+1 rejection,
+nine ceiling-sized file aggregate rejection, invalid/absent roots, sorted
+shallow hashes, exact lexical CLI fields and late cancellation/expiry.
+Entry/exact-aggregate acceptance, read-time growth, enumeration/link/nonregular/
+invalid-name races were not executed here. A separate narrow static security
+reviewer reports no vulnerabilities in this inventory correction.
+
+The implementing-context archive attributes four genuine inventory reds and
+15 phase-four unit/one CLI passes, preserving scope/fields and compilation/path
+fixture failures separately. Parent full normal-temp integration targets pass
+476 distinct tests with six existing ignores; full library with explicit
+absolute external temp passes 692 with one existing ignore. Repo temp ancestry
+and unset relative executable-fixture fallback caused earlier broad validation
+failures, not observed production regressions. No checks were skipped.
+
+## Recording and finalization observations - resilience phase 4
+
+Fresh `maerg-p4-final-source-observer` inspected only local agent, sequence/
+accounting/live/retry/failure/review/regression and completion/outcome/repair/
+success caller source, excluding intent, queues, records/reviews, history and
+peers. It made no edits or delegation and independently passed nine current
+phase-four library tests, with 678 filtered out. Its initial nonexistent
+`-p maerg` selection executed nothing.
+
+The synchronous attempt-local `Cell` hands back the underlying returned outcome
+after required observation rejects it. Failed stream callbacks are latched and
+never re-entered; proposals are not accepted. The counted owner reconciles usage
+before observation failure/exhaustion/generation rejection. Required result
+record failure preserves a typed provider error when already returned;
+callback-first failure prioritizes that observation, with later evidence layers
+possibly flattening errors into strings. Known usage never refunds conservative
+debit; higher actual usage increases it. Missing/failed/zero usage permanently
+loses complete provenance, while known totals remain lower bounds.
+
+Decisions precede this turn's effects; dependency acquisition can precede
+denied-intent rejection. An uncertain placeholder precedes effect dispatch,
+observed completion replaces it and cancellation/non-applied outcomes stop.
+One mutable sequence spans authoring/repairs. Verification retains its separate
+enforcement and is checked for sequence interruption afterward, not preempted by
+the sequence's token/deadline.
+
+Final collection checks before/after synchronous digest/change work. Required
+success appends have preceding checks and a following check; continuous
+completion checks after timestamp acquisition immediately before transition.
+The canonical transition appends prepared, replaces queue state, appends
+committed; no interruption check occurs within or after it. Journal writes
+synchronize, but append/clock errors may propagate rather than guarantee a
+blocked disposition. Clock/cancellation/kernel I/O and hashing are not atomic.
+
+Executed callback/result/provider-usage, conservative debit, recurrence and
+late-collection cancellation/expiry assertions are fixture/helper evidence,
+not end-to-end canonical-transition interruption. The observer identified the
+current change-list collection's silent read/entry errors, ordering/shallow
+scope and unbounded reads; a separate bounded correction is assigned before
+phase closure. Bounded required tree digests are not an atomic change snapshot.
+A separate final scoped static security reviewer finds no vulnerabilities in
+the recording/interruption corrections, without executing tests or assessing
+other implementations.
+
+Implementer-attributed exact archives record nine initial and six corrective
+behavioral reds, excluding fixture compilation failures. The corrected result
+tests use closed-journal injection and actual counted returns, including 10,100
+tokens against an 11,000-token policy and typed HTTP 503. Late-fence tests hash
+real files, then cancel or sleep under a one-second policy, retaining completed
+fixture effects. Its final 78 library/22 live/6 task checks cover 106 distinct
+tests, with chronology and non-atomic limits retained in private evidence.
+The initial 216-test attribution was not one final-source combined invocation.
+
+## Initial scoped sequence observations - resilience phase 4
+
+Fresh source-only observation inspected only local agent sequence/accounting/
+retry/failure/progress, task repair/outcome/authority code and local assertions.
+It excluded intent, queues, records/reviews, root/architecture, peers and
+history, changed nothing and did not delegate or certify implementation.
+
+One mutable sequence owns original start/deadline, cancellation, conservative
+model debit, known/unknown totals, recovery allowance, tool and generation
+history across initial authoring/repairs. New repair conversations/logs do not
+recreate resources. Each dispatched attempt reserves input/output; positive
+reported usage debits at least the reservation and increases debit when larger.
+Missing/failed/zero-usage attempts retain reservations and unavailable
+provenance. Retry/length attempts share the ledger; construction/probe failures
+consume attempts/time, not a model reservation.
+
+Guidance/turns/repairs can reset local model-attempt counters, not elapsed time,
+debit or corrections. Actual changed bytes/new observations can clear generation
+continuity; runner success alone cannot. Verification keeps independent approved
+limits while consuming elapsed sequence time. Four repairs follow at most five
+verification results. Recurrence includes retained command/status/flags/output
+and source/test digests. One unchanged completed repair gets reverification;
+identical recurring evidence then prevents another repair.
+
+Unknown/non-applied effects, dispatch failures, limits, cancellations, retained
+decisions, recording/digest failures stop scheduling. The operation lock spans
+the sequence, effects are sequential and the state has one mutable owner; live
+journaling uses a mutex. Attempt JSONL links original/repair logs, accounting,
+dispositions and causes; verification/trajectory/decision artifacts are
+inspectable filesystem evidence, not chat-only state. Configured redaction
+applies to retained causes and diagnostics identify elapsed/remaining resources.
+
+Initial observation found two local gaps: required live-result recording could
+replace the original model error or conceal returned high known usage before
+accounting; final successful digest/evidence work occurred after the last
+sequence check, permitting late cancellation/expiry to finalize success.
+Both are assigned bounded red-first correction before this phase closes.
+
+Independent offline/locked execution, with `TMPDIR="$PWD"`, passed three
+phase-four library and six integration cases, five resilience-repair cases,
+five accounting units and one verification-repair authority guard (20 executions,
+18 distinct tests). Its initial nonexistent `-p maerg` selection did not execute
+tests. Loopback/fake-runner/direct-revision fixtures do not establish imported
+detector or sandbox behavior; substring assertions do not prove event-specific
+guarantees. Historical nine-red claims were not validated from current source.
+A separate scoped security reviewer found no vulnerabilities in this initial
+sequence work, not blanket certification.
+
 ## Scoped progress observations - resilience phase 3
 
 Fresh `maerg-p3-source-observation` read local agent, controls, progress,

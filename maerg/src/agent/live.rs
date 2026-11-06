@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -106,38 +107,64 @@ pub(super) fn redact_values(value: &mut serde_json::Value, redactions: &[String]
 
 pub(super) struct ObservedTransport<'a, T> {
     pub(super) transport: T,
-    pub(super) live: &'a LiveRun,
+    pub(super) live: Option<&'a LiveRun>,
     pub(super) redactions: &'a [String],
+    pub(super) returned: &'a Cell<Option<RejectedReturn>>,
+}
+
+/// One synchronous attempt's returned outcome, rejected before acceptance.
+pub(super) struct RejectedReturn {
+    pub(super) result: sav::Result<ModelTurn>,
+    pub(super) preserve_model_cause: bool,
 }
 
 impl<T: ModelTransport> ObservedTransport<'_, T> {
+    fn record(&self, event: &serde_json::Value) -> sav::Result<()> {
+        self.live.map_or(Ok(()), |live| live.record(event, false))
+    }
+
     fn request(&self, request: &ModelRequest) -> sav::Result<()> {
-        self.live.record(&json!({"type":"model_request","data":{
+        self.record(&json!({"type":"model_request","data":{
             "model":request.model,"message_count":request.messages.len(),"tool_count":request.tools.len(),
             "estimated_input_tokens":sav::runtime::context::estimate_request(request),
             "response_reserve":request.max_output_tokens
-        }}), false)
+        }}))
     }
 
     fn result(&self, turn: &sav::Result<ModelTurn>) -> sav::Result<()> {
         match turn {
-            Ok(turn) => self.live.record(
-                &json!({"type":"model_result","data":{
-                    "model":turn.model,"text":redact_bounded(&turn.text,self.redactions,8192),
-                    "text_truncated":turn.text.len()>8192,
-                    "reasoning_bytes":turn.reasoning.as_ref().map_or(0, String::len),
-                    "finish_reason":turn.finish_reason,
-                    "tool_count":turn.tool_intents.len(),"usage":turn.usage
-                }}),
-                false,
-            ),
-            Err(error) => self.live.record(
-                &json!({"type":"model_failure","data":{
-                    "message":redact_bounded(&error.to_string(),self.redactions,1024)
-                }}),
-                false,
-            ),
+            Ok(turn) => self.record(&json!({"type":"model_result","data":{
+                "model":turn.model,"text":redact_bounded(&turn.text,self.redactions,8192),
+                "text_truncated":turn.text.len()>8192,
+                "reasoning_bytes":turn.reasoning.as_ref().map_or(0, String::len),
+                "finish_reason":turn.finish_reason,
+                "tool_count":turn.tool_intents.len(),"usage":turn.usage
+            }})),
+            Err(error) => self.record(&json!({"type":"model_failure","data":{
+                "message":redact_bounded(&error.to_string(),self.redactions,1024)
+            }})),
         }
+    }
+
+    fn reject(
+        &self,
+        result: sav::Result<ModelTurn>,
+        recording: sav::Error,
+        preserve_model_cause: bool,
+    ) -> sav::Result<ModelTurn> {
+        let cause = result.as_ref().err().map_or(String::new(), |source| {
+            format!("model operation failed: {source}; ")
+        });
+        let reason = redact_bounded(
+            &format!("{cause}required model result/callback recording failed: {recording}"),
+            self.redactions,
+            4096,
+        );
+        self.returned.set(Some(RejectedReturn {
+            result,
+            preserve_model_cause,
+        }));
+        Err(sav::Error::Observation { reason })
     }
 }
 
@@ -149,7 +176,9 @@ impl<T: ModelTransport> ModelTransport for ObservedTransport<'_, T> {
     ) -> sav::Result<ModelTurn> {
         self.request(request)?;
         let result = self.transport.complete(request, cancellation);
-        self.result(&result)?;
+        if let Err(error) = self.result(&result) {
+            return self.reject(result, error, true);
+        }
         result
     }
 
@@ -162,27 +191,52 @@ impl<T: ModelTransport> ModelTransport for ObservedTransport<'_, T> {
         self.request(request)?;
         let mut redactor = StreamRedactor::new(self.redactions);
         let mut record_error = None;
+        let mut callback_stopped = false;
         let mut relay = |event: ModelStreamEvent| {
+            if callback_stopped {
+                return Err(sav::Error::ModelTransportCancelled);
+            }
             if let ModelStreamEvent::TextDelta(text) = &event {
                 let text = redactor.absorb(text);
                 if !text.is_empty()
-                    && let Err(error) = self.live.record_text(&text)
+                    && let Some(live) = self.live
+                    && let Err(error) = live.record_text(&text)
                 {
+                    callback_stopped = true;
                     record_error = Some(error);
                     return Err(sav::Error::ModelTransportCancelled);
                 }
             }
-            on_event(event)
+            match on_event(event) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    callback_stopped = true;
+                    if matches!(
+                        error,
+                        sav::Error::Cancelled | sav::Error::ModelTransportCancelled
+                    ) {
+                        Err(error)
+                    } else {
+                        record_error = Some(error);
+                        Err(sav::Error::ModelTransportCancelled)
+                    }
+                }
+            }
         };
         let result = self.transport.stream(request, cancellation, &mut relay);
         if let Some(error) = record_error {
-            return Err(error);
+            return self.reject(result, error, false);
         }
         let tail = redactor.finish();
-        if !tail.is_empty() {
-            self.live.record_text(&tail)?;
+        if !tail.is_empty()
+            && let Some(live) = self.live
+            && let Err(error) = live.record_text(&tail)
+        {
+            return self.reject(result, error, true);
         }
-        self.result(&result)?;
+        if let Err(error) = self.result(&result) {
+            return self.reject(result, error, true);
+        }
         result
     }
 
@@ -195,6 +249,75 @@ impl<T: ModelTransport> ModelTransport for ObservedTransport<'_, T> {
 mod tests {
     use super::*;
     use sav::observation::JournalFollower;
+
+    #[test]
+    fn phase4_failed_stream_callback_is_latched_before_later_callbacks() {
+        struct IgnoresCallbackFailure;
+        impl ModelTransport for IgnoresCallbackFailure {
+            fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
+                unreachable!("stream fixture")
+            }
+            fn stream(
+                &self,
+                _: &ModelRequest,
+                _: &CancellationToken,
+                on_event: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+            ) -> sav::Result<ModelTurn> {
+                assert!(on_event(ModelStreamEvent::TextDelta("first".into())).is_err());
+                assert!(on_event(ModelStreamEvent::TextDelta("later".into())).is_err());
+                Ok(ModelTurn {
+                    model: "fixture".into(),
+                    text: "not accepted".into(),
+                    reasoning: None,
+                    tool_intents: vec![],
+                    usage: None,
+                    finish_reason: sav::FinishReason::Stop,
+                    provider: sav::LocalModelProvider::Ollama,
+                    response_id: None,
+                    provider_request_id: None,
+                })
+            }
+            fn deadline(&self) -> Duration {
+                Duration::from_secs(5)
+            }
+        }
+        let fixture = tempfile::tempdir_in(".").unwrap();
+        let path = fixture.path().join("callback.events.jsonl");
+        let live = LiveRun::create(&path, "failed-callback", "task", "fixture", &[]).unwrap();
+        let observed = ObservedTransport {
+            transport: IgnoresCallbackFailure,
+            live: Some(&live),
+            redactions: &[],
+            returned: &Cell::new(None),
+        };
+        let request = ModelRequest {
+            model: "fixture".into(),
+            messages: vec![],
+            tools: vec![],
+            tool_choice: sav::ToolChoice::None,
+            reasoning_effort: None,
+            output_schema: None,
+            max_output_tokens: Some(256),
+        };
+        let mut callbacks = 0;
+        let result = observed.stream(&request, &CancellationToken::new(), &mut |_| {
+            callbacks += 1;
+            Err(sav::Error::Observation {
+                reason: "injected required callback record failure".into(),
+            })
+        });
+        assert_eq!(callbacks, 1, "broken callback was called again");
+        assert!(
+            result.is_err(),
+            "ignored callback failure fabricated completion"
+        );
+        live.finish("failed").unwrap();
+        assert!(
+            !std::fs::read_to_string(path)
+                .unwrap()
+                .contains("\"type\":\"model_result\"")
+        );
+    }
 
     #[test]
     fn cancelled_journaled_stream_event_is_not_presented() {
@@ -236,8 +359,9 @@ mod tests {
         let live = LiveRun::create(&path, "cancelled-event", "task", "model", &[]).unwrap();
         let observed = ObservedTransport {
             transport: CancelBeforeEvent { controls: None },
-            live: &live,
+            live: Some(&live),
             redactions: &[],
+            returned: &Cell::new(None),
         };
         let cancellation = CancellationToken::new();
         let budget = super::super::TurnBudget::new(Duration::from_secs(5));
@@ -298,8 +422,9 @@ mod tests {
             transport: CancelBeforeEvent {
                 controls: Some(&controls),
             },
-            live: &live,
+            live: Some(&live),
             redactions: &[],
+            returned: &Cell::new(None),
         };
         let cancellation = CancellationToken::new();
         let interrupted = std::sync::atomic::AtomicBool::new(false);

@@ -3,6 +3,9 @@
 /// Failures that can occur at the reusable native runtime boundary.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// An explicit cancellation, not a transport or resource guess.
+    #[error("prompt cancelled")]
+    Cancelled,
     /// Internal operation handoff; never whole-prompt cancellation.
     #[doc(hidden)]
     #[error("generation interrupted for guidance")]
@@ -40,7 +43,10 @@ pub enum Error {
     InvalidModelTurn { reason: String },
     /// Shared prompt resource exhaustion.
     #[error("prompt budget exhausted: {reason}")]
-    RunBudget { reason: String },
+    RunBudget {
+        resource: super::BudgetResource,
+        reason: String,
+    },
     /// Required recording failure.
     #[error("runtime recording failed: {reason}")]
     Recording { reason: String },
@@ -50,6 +56,9 @@ pub enum Error {
     /// Host could not render a tool before effects.
     #[error("could not render tool `{tool}`: {reason}")]
     ToolRender { tool: String, reason: String },
+    /// A required approved local resource was unavailable before dispatch.
+    #[error("tool `{tool}` requires a local prerequisite: {reason}")]
+    ToolPrerequisite { tool: String, reason: String },
     /// Other terminal host execution failure; effects may have occurred.
     #[error("host execution failed: {reason}")]
     Host { reason: String },
@@ -86,15 +95,16 @@ impl Error {
 
 impl From<crate::Error> for Error {
     fn from(error: crate::Error) -> Self {
-        if let crate::Error::RepetitiveGeneration { report } = error {
-            return Self::RepetitiveGeneration {
+        match error {
+            crate::Error::ModelTransportCancelled => Self::Cancelled,
+            crate::Error::RepetitiveGeneration { report } => Self::RepetitiveGeneration {
                 report,
                 usage: None,
-            };
-        }
-        Self::ModelTransport {
-            model: None,
-            reason: error.to_string(),
+            },
+            error => Self::ModelTransport {
+                model: None,
+                reason: error.to_string(),
+            },
         }
     }
 }

@@ -26,7 +26,9 @@ use sav::loop_detection::ProgressEvidence;
 use sav::{CancellationToken, ToolIntent};
 
 use crate::error::{Error, Result, io_error};
-use crate::executor::{NativeProgress, check_cancelled, resolve_file_helper, stage_file_request};
+use crate::executor::{
+    NativeProgress, check_cancelled, resolve_file_helper, stage_bytes, stage_file_request,
+};
 use crate::sandbox::ToolOutcome;
 use crate::session::{MAX_TOOL_RESULT_BYTES, ToolExecutor};
 use crate::tools::ToolRegistry;
@@ -81,7 +83,10 @@ impl ToolExecutor for HostExecutor {
 
         if let Some(request) = &rendered.file_request {
             let helper =
-                resolve_file_helper(rendered.file_helper.as_deref(), &self.working_directory)?;
+                resolve_file_helper(rendered.file_helper.as_deref(), &self.working_directory)
+                    .map_err(|error| {
+                        crate::executor::prerequisite_error(intent, error, cancellation)
+                    })?;
             let mapped = request.host_mapped(&self.working_directory)?;
             check_cancelled(cancellation)?;
             let payload = stage_file_request(&mapped, &self.working_directory, cancellation)?;
@@ -110,6 +115,29 @@ impl ToolExecutor for HostExecutor {
             .iter()
             .map(|element| translate_host_element(element, &write_root, &self.working_directory))
             .collect();
+        let script = rendered
+            .shell_script
+            .as_ref()
+            .map(|script| stage_bytes(script.as_bytes(), &self.working_directory, cancellation))
+            .transpose()?;
+        let mut argv = argv;
+        if let Some(script) = &script {
+            // Only the host-rendered wrapper is mapped; model-authored bytes stay
+            // literal, and the staged path is a quoted positional argument.
+            let wrapper = argv.get_mut(2).ok_or_else(|| Error::ToolRender {
+                tool: "shell".into(),
+                reason: "staged shell wrapper is missing".into(),
+            })?;
+            if !wrapper.contains("$(cat /context/0)") {
+                return Err(Error::ToolRender {
+                    tool: "shell".into(),
+                    reason: "staged shell context reference is missing".into(),
+                });
+            }
+            *wrapper = wrapper.replace("$(cat /context/0)", "$(cat -- \"$1\")");
+            argv.push("skott".into());
+            argv.push(script.path().to_string_lossy().into_owned());
+        }
         run_host_command(
             &argv,
             &self.working_directory,

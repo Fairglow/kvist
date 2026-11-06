@@ -47,8 +47,20 @@ impl EventSink for OutputSink {
         if self.json {
             self.emit(&event)
         } else {
-            if let Event::Note(text) = event {
-                eprintln!("{}", crate::error::terminal_text(&text));
+            let text = match event {
+                Event::Note(text) | Event::Failed(text) => {
+                    Some(crate::operational::printable(&text))
+                }
+                Event::ToolFailure {
+                    description,
+                    failure,
+                    ..
+                } => Some(crate::operational::failure_text(&description, &failure)),
+                Event::PromptEnd { reason, .. } => Some(crate::operational::stop_text(reason).1),
+                _ => None,
+            };
+            if let Some(text) = text {
+                eprintln!("{text}");
             }
             Ok(())
         }
@@ -331,6 +343,7 @@ pub fn run_with_controls(
         None
     };
     let result = Skott::with_retry(overrides.max_turns, model.retry_policy())
+        .with_generation_loop_detection(!overrides.disable_generation_loop_detection)
         .with_limits(budgets.limits)?
         .run_controlled(
             &mut session,
@@ -348,10 +361,25 @@ pub fn run_with_controls(
         Ok(summary) => summary.clone(),
         Err(error) => {
             sink.send(Event::Failed(error.describe()))?;
-            RunSummary {
-                failure: Some(error.describe()),
-                ..RunSummary::default()
-            }
+            let mut summary = log
+                .terminal_summary()
+                .cloned()
+                .unwrap_or_else(|| RunSummary {
+                    failure: Some(error.describe()),
+                    stop_reason: Some(match error {
+                        Error::RunBudget { resource, .. } => {
+                            crate::session::StopReason::Limit(*resource)
+                        }
+                        Error::ContextBudget { .. } => crate::session::StopReason::Limit(
+                            crate::session::BudgetResource::Context,
+                        ),
+                        Error::Cancelled => crate::session::StopReason::Cancelled,
+                        _ => crate::session::StopReason::Failed,
+                    }),
+                    ..RunSummary::default()
+                });
+            summary.failure = Some(error.describe());
+            summary
         }
     };
     if json_output {

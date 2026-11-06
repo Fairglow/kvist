@@ -88,6 +88,30 @@ deadline expiring during cancelled-run cleanup cannot relabel earlier user
 cancellation. Diagnostics identify explicit wall/token/turn allowance rather
 than guessing OOM or provider slot state from a signal or missing exit code.
 
+Operational types live beside the runtime outcome types. Derive bounded
+printable tool diagnostics from explicit refusal/error domains and outcome
+flags, not inferred OOM or stdout success claims. Retain stderr (or bounded
+stdout when no stderr exists) with an actionable typed recovery recommendation.
+Pair completed/refused outcomes before diagnostic publication; observation
+failure after dispatch reports possible effects and never authorizes replay.
+Keep dispatch and observation errors distinct so a hard execution cause wins.
+
+Freeze a stop snapshot at loop exit before cleanup; deadline watchers observe
+existing cancellation before assigning expiry. Add a typed resource to every
+explicit budget rejection and preserve it when the inner loop folds an error.
+Move final dirty usage publication outside the fallible inner-loop body.
+Resolve the shared stopping snapshot before that final publication as well as
+cleanup, retaining hard/progress/stall causes on secondary evidence failures.
+Always attempt terminal presentation after terminal-record failure, retaining
+original and cleanup/recording causes. Successful inference cannot conceal
+failed required evidence.
+
+The bounded mailbox retains claimed identities and actual context-delivery
+state until final notice completion. Cleanup drains outstanding dispositions;
+final notice presentation is attempted even when its durable callback fails.
+No subsequent inference/effect may follow a failed required callback. This
+does not repair or fabricate a broken journal.
+
 ## Long-running conversations
 
 Represent absent run caps with `Option`, not magic zero values. A prompt

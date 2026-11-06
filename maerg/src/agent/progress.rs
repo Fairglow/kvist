@@ -53,6 +53,7 @@ pub(super) fn interrupt_batch(
 pub(super) fn correct(
     report: &ToolLoopReport,
     recovery: &mut RecoveryBudget,
+    corrections_used: &mut u8,
     live: &LiveRun,
     session: &mut AgentSession,
     redactions: &[String],
@@ -65,6 +66,7 @@ pub(super) fn correct(
             true,
         )?;
         return Ok(Some(TurnFailure {
+            stop_reason: sav::runtime::StopReason::Stalled,
             reason: report.exhausted_message(),
             timed_out: false,
             output_limit_exceeded: false,
@@ -72,6 +74,7 @@ pub(super) fn correct(
         }));
     };
     let feedback = report.feedback(step);
+    *corrections_used = corrections_used.saturating_add(1);
     live.record(
         &serde_json::json!({"type":"tool_recovery","data":{
             "kind":report.kind,"period":report.period,"copies":report.copies,

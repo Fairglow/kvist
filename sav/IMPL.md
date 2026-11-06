@@ -1,6 +1,85 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped operational observations - resilience phase 4
+
+Fresh `sav-p4-source-observer` inspected only local runtime diagnostics, errors,
+outcomes, session, controls, driver and four runtime test suites. It excluded
+intent, queues, records/reviews, architecture/root, peers and history; it
+changed nothing, did not delegate and did not certify implementation.
+
+Failure metadata distinguishes explicit refusal/prerequisite nonexecution
+from possible effects of generic host/I/O errors. Status/flags classify
+cancellation, timeout, output limit, missing status and nonzero exit without
+guessing OOM. Recovery is advisory, not replay, download or grant authority.
+Tool messages escape controls and retain at most 4096 bytes; error descriptions
+bound input characters before escaping. Hosts still own redaction.
+
+Each returned attempt contributes known saturating usage or permanently
+unavailable provenance. Unknown reservations are not refunded; larger known
+usage increases debit. Dirty final accounting is published on error exits.
+Broken streaming recording latches the failure and cancels only the provider
+operation; ignored/repeated callback failures cannot permit complete-turn
+recording or returned tool proposals. Known returned usage still counts.
+
+Once run ownership succeeds, errors attempt control cleanup, terminal recording
+and presentation. Earlier validation/watcher/ownership failures are outside
+that entered-run boundary. Required record failures prevent further effects and
+success presentation; a broken journal is not repaired or called complete.
+Actual context delivery remains delivered after its required notice fails;
+unprocessed claimed IDs retain drops. Cleanup may repeat delivered notices.
+Claims/pending retention remains bounded; guidance cannot reset prompt budgets.
+
+Completed outcomes enter conversation/recording before progress observation.
+Generic execution errors remain uncertain and do not receive synthetic progress.
+Hard execution failures stop further tool recovery. Initial inspection found
+hard/progress/cancellation causes could be replaced by secondary evidence errors;
+three exact regressions reproduced these combinations before correction.
+The implementing context additionally reproduced generation/tool exhaustion
+notice loss and final accounting/terminal presentation cause loss separately.
+
+Fresh `sav-p4-final-cause-observer` inspected only those local paths and
+assertions, independently passing 22 cases. It confirmed corrected evidence
+precedence, discarded ignored-callback tools, session-start finalization and
+guidance states, then identified two remaining final-presentation combinations.
+Both reproduced before centralized stopping resolution and terminal cause
+preservation.
+
+Fresh narrow `sav-p4-stopping-helper-observation` inspected only the final
+helper, exit/terminal paths and local assertions. It independently passed all
+24 operational cases. Central resolution now freezes the cause before final
+accounting; cleanup reuses it. Terminal-sink errors retain summary-held execution
+causes. Each merged error description is clipped to 1800 characters, preserving
+space for both current causes; repeated merging can lose older suffixes.
+Source ordering is accounting, cleanup, terminal-record attempt, terminal send.
+Tests assert selected outcome-before-uncertainty, terminal-last and record
+counts, not comprehensive ordering across every callback.
+
+This is a stopping snapshot, not a timestamped ledger of competing foreign
+causes. Cooperative watchers cannot force blocked provider/executor/recorder/
+sink calls to return. Failed terminal presentation leaves the earlier recorded
+execution snapshot; the API returns an explicit presentation error and does not
+fabricate a correction record. In-memory fixtures do not qualify fsync, live
+provider behavior or actual downstream consumption.
+
+Independent initial execution passed 14 operational, 17 generation, 19 controls
+and 11 tools; final narrow execution passed 24 operational tests. Parent final
+targeted execution passes 24/17/19/11; complete `cargo test --offline --locked
+-p sav --quiet` passes 312 tests. Strict all-target lint and formatting pass.
+Private red logs distinguish five initial behavioral failures, original-cause
+and executor-cancellation followups, three observer evidence combinations, two
+exhaustion and two final-presentation failures from test-fixture compilation
+and invalid-reserve setup mistakes. A separate scoped security reviewer found
+no vulnerabilities, not blanket security or compliance certification.
+
+The separate final cause-boundary security follow-up also found no
+vulnerabilities. Fresh exact-range `sav-p4-source-blind-comparator` read only
+scoped intent/queue definitions and this observation, without source/tests,
+searches or execution. It established no concrete scoped contradiction and
+retained missing enum/assertion coverage, cooperative timing, bounded merging,
+execution/presentation distinction and attribution limits. Host and protected
+repair work were not credited. No acceptance or certification is claimed.
+
 ## Scoped progress protection observations - resilience phase 3
 
 Clean-slate `sav-p3-source-observer` inspected only local tracker/continuity,

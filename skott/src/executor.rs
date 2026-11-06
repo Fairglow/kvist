@@ -114,10 +114,10 @@ impl ToolExecutor for SandboxExecutor {
         let context = ExecContext::new(self.working_directory.clone(), intent.id.clone());
         let rendered = self.registry.render(intent, &context)?;
         let helper = if rendered.file_request.is_some() {
-            Some(resolve_file_helper(
-                rendered.file_helper.as_deref(),
-                &self.working_directory,
-            )?)
+            Some(
+                resolve_file_helper(rendered.file_helper.as_deref(), &self.working_directory)
+                    .map_err(|error| prerequisite_error(intent, error, cancellation))?,
+            )
         } else {
             None
         };
@@ -158,7 +158,8 @@ impl ToolExecutor for SandboxExecutor {
             &build,
             self.registry.rust_environment(),
             cancellation,
-        )?;
+        )
+        .map_err(|error| prerequisite_error(intent, error, cancellation))?;
         check_cancelled(cancellation)?;
         self.execute_prepared(
             intent,
@@ -185,6 +186,30 @@ pub(crate) fn check_cancelled(cancellation: &CancellationToken) -> Result<()> {
         })
     } else {
         Ok(())
+    }
+}
+
+pub(crate) fn prerequisite_error(
+    intent: &ToolIntent,
+    error: Error,
+    cancellation: &CancellationToken,
+) -> Error {
+    if cancellation.is_cancelled()
+        || matches!(
+            error,
+            Error::SandboxUnavailable { .. }
+                | Error::SandboxBuild { .. }
+                | Error::ToolchainUnavailable { .. }
+        )
+    {
+        // Direct callers retain established domains; the native bridge owns
+        // their adaptation to its typed prerequisite diagnostic.
+        error
+    } else {
+        Error::ToolPrerequisite {
+            tool: intent.name.clone(),
+            reason: error.describe(),
+        }
     }
 }
 

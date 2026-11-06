@@ -56,6 +56,8 @@ impl PromptSender {
 struct ChannelSink {
     sender: mpsc::SyncSender<Event>,
     shutdown: Arc<AtomicBool>,
+    cancellation: CancellationToken,
+    terminal: Arc<Mutex<Vec<Event>>>,
 }
 
 impl EventSink for ChannelSink {
@@ -68,7 +70,36 @@ impl EventSink for ChannelSink {
             match self.sender.try_send(pending) {
                 Ok(()) => return Ok(()),
                 Err(mpsc::TrySendError::Disconnected(_)) => return Err(Error::ChannelClosed),
-                Err(mpsc::TrySendError::Full(event)) => pending = event,
+                Err(mpsc::TrySendError::Full(event)) => {
+                    if self.cancellation.is_cancelled() {
+                        if matches!(
+                            event,
+                            Event::PromptEnd { .. }
+                                | Event::Finished { .. }
+                                | Event::Failed(_)
+                                | Event::Progress { .. }
+                        ) {
+                            let mut terminal =
+                                self.terminal.lock().map_err(|_| Error::EventDelivery {
+                                    reason: "terminal handoff lock unavailable".into(),
+                                })?;
+                            // One stopped prompt can retain one event of each terminal
+                            // kind, independently of the bounded streaming channel.
+                            let event = match event {
+                                Event::Failed(message) => Event::Failed(format!(
+                                    "terminal event delivery failed: cancelled while the event channel was full; {message}"
+                                )),
+                                other => other,
+                            };
+                            terminal.retain(|prior| {
+                                std::mem::discriminant(prior) != std::mem::discriminant(&event)
+                            });
+                            terminal.push(event);
+                        }
+                        return Err(Error::Cancelled);
+                    }
+                    pending = event;
+                }
             }
             thread::sleep(Duration::from_millis(10));
         }
@@ -83,9 +114,20 @@ pub struct SessionHandle {
     controls: ControlMailbox,
     recording: bool,
     control_server: Arc<Mutex<Option<sav::observation::ControlServer>>>,
+    terminal: Arc<Mutex<Vec<Event>>>,
 }
 
 impl SessionHandle {
+    /// Takes terminal events retained when cancellation interrupted a full event
+    /// channel. Drain queued events first to preserve presentation order.
+    pub fn take_terminal_events(&self) -> Result<Vec<Event>> {
+        self.terminal
+            .lock()
+            .map(|mut events| std::mem::take(&mut *events))
+            .map_err(|_| Error::EventDelivery {
+                reason: "terminal handoff lock unavailable".into(),
+            })
+    }
     /// Requests cancellation of the running turn.
     pub fn cancel(&self) {
         if let Err(error) = self.controls.cancel_active(&self.cancellation) {
@@ -202,11 +244,11 @@ where
 /// Starts a worker with an explicitly supplied private control capability.
 #[allow(clippy::too_many_arguments)]
 pub fn start_with_controls<M, E>(
-    mut session: AgentSession,
+    session: AgentSession,
     transport: M,
     executor: E,
-    mut context: ContextManager,
-    mut recorder: Option<Box<dyn Recorder>>,
+    context: ContextManager,
+    recorder: Option<Box<dyn Recorder>>,
     retry: RetryPolicy,
     max_turns: impl Into<Option<u32>>,
     limits: RunLimits,
@@ -216,7 +258,31 @@ where
     M: ModelTransport + Send + 'static,
     E: ToolExecutor + Send + 'static,
 {
-    let max_turns = max_turns.into();
+    start_configured(
+        session,
+        transport,
+        executor,
+        context,
+        recorder,
+        Skott::with_retry(max_turns, retry).with_limits(limits)?,
+        controls,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn start_configured<M, E>(
+    mut session: AgentSession,
+    transport: M,
+    executor: E,
+    mut context: ContextManager,
+    mut recorder: Option<Box<dyn Recorder>>,
+    runner: Skott,
+    controls: ControlMailbox,
+) -> Result<(SessionHandle, mpsc::Receiver<Event>, PromptSender)>
+where
+    M: ModelTransport + Send + 'static,
+    E: ToolExecutor + Send + 'static,
+{
     let prompt_tx = PromptSender {
         controls: controls.clone(),
         lifetime: Arc::new(()),
@@ -231,12 +297,16 @@ where
     let worker_shutdown = Arc::clone(&shutdown);
     let control_server = Arc::new(Mutex::new(None::<sav::observation::ControlServer>));
     let worker_server = Arc::clone(&control_server);
+    let terminal = Arc::new(Mutex::new(Vec::new()));
+    let worker_terminal = terminal.clone();
     let thread = thread::Builder::new()
         .name("agent-session".into())
         .spawn(move || {
             let sink = ChannelSink {
                 sender: tx,
                 shutdown: Arc::clone(&worker_shutdown),
+                cancellation: cancellation.clone(),
+                terminal: worker_terminal,
             };
             // The worker stays alive until shutdown or prompt disconnection.
             // `Skott::run` records each prompt's session
@@ -260,25 +330,21 @@ where
                     break;
                 }
                 session.push_user(text);
-                let runner = Skott::with_retry(max_turns, retry);
                 // Borrow the recorder only for this run; the borrow ends before the
                 // next iteration, and each run starts and finishes its own record.
-                let result = runner.with_limits(limits).and_then(|runner| {
-                    runner.run_controlled(
-                        &mut session,
-                        &transport,
-                        &executor,
-                        &sink,
-                        &cancellation,
-                        &mut context,
-                        borrow_recorder(&mut recorder),
-                        &worker_controls,
-                    )
-                });
+                let result = runner.run_controlled(
+                    &mut session,
+                    &transport,
+                    &executor,
+                    &sink,
+                    &cancellation,
+                    &mut context,
+                    borrow_recorder(&mut recorder),
+                    &worker_controls,
+                );
                 if worker_shutdown.load(Ordering::SeqCst) {
                     break;
                 }
-                cancellation.reset();
                 if let Err(error) = result {
                     if !worker_shutdown.load(Ordering::SeqCst)
                         && let Err(send_error) = sink.send(Event::Failed(error.describe()))
@@ -288,6 +354,7 @@ where
                     // A failed recorder or broken channel must not drive later effects.
                     break;
                 }
+                cancellation.reset();
             }
             worker_controls.shutdown();
             if let Ok(mut server) = worker_server.lock() {
@@ -302,6 +369,7 @@ where
             controls,
             recording,
             control_server,
+            terminal,
         },
         rx,
         prompt_tx,
@@ -447,18 +515,7 @@ You may use any Markdown in your results, including tables, lists, links, refere
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn control_capability_presentation_rejects_unprintable_paths_before_filesystem_access() {
-        use std::os::unix::ffi::OsStrExt;
-        let workdir = std::path::Path::new(".");
-        for path in [
-            std::path::Path::new("\u{1b}bad/control.sock"),
-            std::path::Path::new(std::ffi::OsStr::from_bytes(b"/bad-\xff/control.sock")),
-        ] {
-            assert!(matches!(validate_control_path(path,workdir),
-                Err(Error::Control{reason}) if reason.contains("printable")));
-        }
-    }
+    mod operations;
     use std::sync::mpsc::RecvTimeoutError;
     use std::time::Duration;
 

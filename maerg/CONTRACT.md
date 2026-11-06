@@ -452,6 +452,25 @@ consumes the aggregate deadline. There are at most four repair rounds.
 Only a known completed verification failure is automatically repairable;
 unknown effects, cancellation, timeout and output overflow fence recovery.
 
+The two corrections are stall-correction opportunities; verification repair
+has its separately bounded four outer rounds. Neither a repair invocation nor
+guidance resets sequence stall protection. All model attempts share monotonic
+known usage and conservative unknown reservations. Known usage above a
+reservation increases debit; unknown attempts never refund or restore
+availability. Sequence diagnostics identify elapsed time, model charges and
+remaining approved allowance without treating verification as model tokens.
+Repeated identical verification diagnostics without a changed source/test
+revision stop repair with a focused blocker and reconciliation guidance.
+Changed revisions permit useful reverification but do not replenish corrections.
+Required final change-detail collection preserves its existing local inventory
+scope, applies bounded deterministic inspection, and fails explicitly on
+observation errors rather than silently recording partial successful evidence.
+Final collection/evidence and canonical completion recheck original sequence
+interruption; filesystem operations remain cooperative, not an atomic snapshot.
+All repair outcomes, retained decisions, unknown effects and digest failures
+retain their original task disposition; no limit broadening or automatic
+effectful external-agent restart is implied.
+
 Protected inference calls use automatic transient retries: the selected native
 profile's `max_attempts` (1-32, default 3), exponential
 backoff capped by `retry_max_delay_secs`, and jitter between half and all of

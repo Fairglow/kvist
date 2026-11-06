@@ -3,6 +3,7 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::{
     Arc,
@@ -22,6 +23,7 @@ const TERMINAL_COLUMNS: u16 = 120;
 
 struct Provider {
     endpoint: String,
+    tool_failure: bool,
     release: mpsc::Sender<()>,
     requests: mpsc::Receiver<(String, Value)>,
     stop: Arc<AtomicBool>,
@@ -96,9 +98,24 @@ impl Provider {
                     ]})
                     .to_string(),
                     "/v1/chat/completions" => {
-                        let delta = json!({"model":body["model"],"choices":[{"index":0,"delta":{"content":"answer-ready"},"finish_reason":null}]});
+                        let failure = block_path == "phase4-tool-failure"
+                            && !body["messages"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .any(|message| message["role"] == "tool");
+                        let content = if block_path == "phase4-repetition" {
+                            json!({"content":"intentional repeated output ".repeat(150)})
+                        } else if failure {
+                            json!({"tool_calls":[{"index":0,"id":"failed-call","type":"function",
+                                "function":{"name":"shell","arguments":"{\"command\":\"true\"}"}}]})
+                        } else {
+                            json!({"content":"answer-ready"})
+                        };
+                        let delta = json!({"model":body["model"],"choices":[{"index":0,"delta":content,"finish_reason":null}]});
+                        let finish = if failure { "tool_calls" } else { "stop" };
                         format!(
-                            "data: {delta}\n\ndata: {{\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
+                            "data: {delta}\n\ndata: {{\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"{finish}\"}}]}}\n\ndata: [DONE]\n\n"
                         )
                     }
                     path if path.starts_with("/props?model=") => {
@@ -121,6 +138,7 @@ impl Provider {
         });
         Self {
             endpoint,
+            tool_failure: block_path == "phase4-tool-failure",
             release,
             requests: received,
             stop,
@@ -148,6 +166,33 @@ struct Tui {
     output: Vec<u8>,
     _root: tempfile::TempDir,
     control_logs: Option<tempfile::TempDir>,
+}
+
+#[test]
+fn phase4_real_pty_failed_tool_displays_cause_certainty_and_safe_next_step() {
+    let provider = Provider::blocked("phase4-tool-failure");
+    let mut tui = Tui::start(&provider, Some("a"), false);
+    tui.wait_for("Context:");
+    tui.type_text(b"run one command\r\r");
+    tui.wait_for("permission fixture");
+    tui.wait_for("may_have_effects");
+    tui.wait_for("inspect");
+    let screen = visible_text(&tui.output);
+    assert!(!screen.contains("✓toolshell"), "{screen}");
+    tui.quit();
+}
+
+#[test]
+fn phase4_real_pty_cli_generation_exception_reaches_native_worker_builder() {
+    for flags in [&[][..], &["--disable-generation-loop-detection"][..]] {
+        let provider = Provider::blocked("phase4-repetition");
+        let mut tui =
+            Tui::start_options_with_flags(&provider, Some("a"), false, false, false, flags);
+        tui.wait_for("Context:");
+        tui.type_text(b"intentional repetitive output\r\r");
+        tui.wait_for(if flags.is_empty() { "stalled" } else { "done" });
+        tui.quit();
+    }
 }
 
 // Model the screen operations used by the TUI, not just the printable byte history.
@@ -393,8 +438,27 @@ impl Tui {
         fifo: bool,
         allow_control: bool,
     ) -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let control_logs = allow_control.then(|| tempfile::tempdir().unwrap());
+        Self::start_options_with_flags(
+            provider,
+            explicit,
+            discover_capacity,
+            fifo,
+            allow_control,
+            &[],
+        )
+    }
+
+    fn start_options_with_flags(
+        provider: &Provider,
+        explicit: Option<&str>,
+        discover_capacity: bool,
+        fifo: bool,
+        allow_control: bool,
+        flags: &[&str],
+    ) -> Self {
+        let fixture_parent = std::env::current_dir().unwrap();
+        let root = tempfile::tempdir_in(&fixture_parent).unwrap();
+        let control_logs = allow_control.then(|| tempfile::tempdir_in(&fixture_parent).unwrap());
         if fifo {
             nix::unistd::mkfifo(
                 &root.path().join(".gitignore"),
@@ -403,6 +467,36 @@ impl Tui {
             .unwrap();
         }
         let config = root.path().join("skott.toml");
+        let workdir = if provider.tool_failure {
+            let work = root.path().join("work");
+            std::fs::create_dir(&work).unwrap();
+            work
+        } else {
+            root.path().to_owned()
+        };
+        let sandbox = if provider.tool_failure {
+            let runner = root.path().canonicalize().unwrap().join("runner");
+            let launcher = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/subprocess_runner.sh");
+            std::fs::copy(&launcher, &runner).unwrap();
+            assert_eq!(
+                std::fs::read(&runner).unwrap(),
+                std::fs::read(&launcher).unwrap()
+            );
+            assert_ne!(
+                std::fs::metadata(&runner).unwrap().permissions().mode() & 0o111,
+                0,
+                "copied fixture launcher must remain executable"
+            );
+            std::fs::write(
+                root.path().join("script"),
+                "cat >/dev/null; printf 'permission fixture' >&2; exit 7\n",
+            )
+            .unwrap();
+            format!("[sandbox]\nrunner={runner:?}\nbackend='/usr/bin/true'\n")
+        } else {
+            String::new()
+        };
         let capacity = if discover_capacity {
             ""
         } else {
@@ -410,11 +504,11 @@ impl Tui {
         };
         std::fs::write(&config, format!(
             "schema_version=1\nworking_directory={:?}\ndefault_provider='llama-server'\n\
-             default_thinking_effort='none'\n[tool_profiles]\n\
+             default_thinking_effort='none'\n{sandbox}[tool_profiles]\n\
              rust='off'\npython='off'\njavascript='off'\ngo='off'\nc='off'\n\
              [[models]]\nid='a'\nprovider='llama-server'\nmodel='Model-A'\nbase_url={:?}\nis_default=true\n{capacity}\
              [[models]]\nid='b'\nprovider='llama-server'\nmodel='Model-B'\nbase_url={:?}\n{capacity}",
-             root.path().to_str().unwrap(), provider.endpoint, provider.endpoint,
+             workdir.to_str().unwrap(), provider.endpoint, provider.endpoint,
         )).unwrap();
         let pty = openpty(
             Some(&Winsize {
@@ -439,6 +533,7 @@ impl Tui {
             .arg("--config")
             .arg(config)
             .env("TERM", "xterm-256color")
+            .env("TMPDIR", &fixture_parent)
             .stdin(Stdio::from(slave.try_clone().unwrap()))
             .stdout(Stdio::from(slave.try_clone().unwrap()))
             .stderr(Stdio::from(slave));
@@ -453,6 +548,7 @@ impl Tui {
         if let Some(id) = explicit {
             command.args(["--model", id]);
         }
+        command.args(flags);
         let child = command.spawn().unwrap();
         Self {
             child,

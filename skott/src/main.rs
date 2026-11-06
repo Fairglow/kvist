@@ -111,6 +111,7 @@ fn run() -> skott::Result<ExitCode> {
         log_dir: cli.log_dir.clone(),
         context_limit: cli.context_limit,
         response_reserve: cli.response_reserve,
+        disable_generation_loop_detection: cli.disable_generation_loop_detection,
         no_logs: cli.no_logs,
         config_path: Some(config_path.clone()),
         allow_host_execution: cli.allow_host_execution,

@@ -928,7 +928,10 @@ fn sandbox_executor_fails_closed_without_a_valid_runner() {
             &CancellationToken::new(),
         )
         .expect_err("executor must fail closed");
-    assert!(matches!(outcome, Error::SandboxUnavailable { .. }));
+    assert!(
+        matches!(outcome, Error::SandboxUnavailable { .. }),
+        "expected direct-executor SandboxUnavailable, got {outcome:?}"
+    );
 }
 
 #[test]

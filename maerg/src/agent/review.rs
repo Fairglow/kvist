@@ -4,7 +4,7 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use super::live::{LiveRun, ObservedTransport};
+use super::live::LiveRun;
 
 /// Observations are never a human acceptance or an authorization to change files.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -653,11 +653,7 @@ impl<'a> ReviewSession<'a> {
                         )?,
                     };
                     probe_gateway_reachable(&endpoint, &self.budget, &self.cancellation)?;
-                    Ok(ObservedTransport {
-                        transport,
-                        live: &self.live,
-                        redactions: &self.redactions,
-                    })
+                    Ok(transport)
                 },
                 &request,
                 self.stream,

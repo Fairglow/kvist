@@ -615,7 +615,18 @@ impl App {
                 } else {
                     self.theme.ok
                 };
-                self.note(style, &format!("✓ tool {description} finished"));
+                let (mark, state) = if failed {
+                    ("✗", "failed")
+                } else {
+                    ("✓", "finished")
+                };
+                self.note(
+                    style,
+                    &format!(
+                        "{mark} tool {} {state}",
+                        crate::operational::printable(&description)
+                    ),
+                );
             }
             Event::Finished { message } => {
                 self.flush_pending();
@@ -628,37 +639,33 @@ impl App {
             // keep showing "working…" forever once the single-turn cap (or the
             // multi-turn limit) returns control, so the user cannot tell the
             // agent stopped. A clear, distinct state removes that ambiguity.
-            Event::PromptEnd {
-                exhausted,
-                cancelled,
-            } => {
+            Event::PromptEnd { reason, .. } => {
+                self.flush_pending();
                 self.quit_running();
-                if cancelled {
-                    self.status = "cancelled".to_owned();
-                    self.note(self.theme.warn, "cancelled — type a prompt to continue");
-                } else if exhausted {
-                    self.status = "exhausted".to_owned();
-                    self.note(
-                        self.theme.warn,
-                        "prompt limit reached with no answer — send a follow-up to continue",
-                    );
-                } else {
-                    self.status = "awaiting".to_owned();
-                    self.note(
-                        self.theme.warn,
-                        "no answer this turn — send a follow-up to continue",
-                    );
-                }
+                let (status, text) = crate::operational::stop_text(reason);
+                self.status = status.into();
+                self.note(self.theme.warn, &text);
             }
             Event::Failed(text) => {
                 self.flush_pending();
                 self.quit_running();
                 self.status = "error".to_owned();
-                self.note(self.theme.err, &text);
+                self.note(self.theme.err, &crate::operational::printable(&text));
             }
             Event::Note(text) => {
                 self.flush_pending();
                 self.note(self.theme.dim, &text);
+            }
+            Event::ToolFailure {
+                description,
+                failure,
+                ..
+            } => {
+                self.flush_pending();
+                self.note(
+                    self.theme.err,
+                    &crate::operational::failure_text(&description, &failure),
+                );
             }
             Event::Progress {
                 token_accounting,
@@ -2781,8 +2788,8 @@ mod tests {
         assert_eq!(foreground_for("→ tool: ls"), Some(theme.info));
         assert_eq!(background_for("✓ tool ls finished"), Some(theme.panel_bg));
         assert_eq!(foreground_for("✓ tool ls finished"), Some(theme.ok));
-        assert_eq!(background_for("✓ tool cat finished"), Some(theme.panel_bg));
-        assert_eq!(foreground_for("✓ tool cat finished"), Some(theme.err));
+        assert_eq!(background_for("✗ tool cat failed"), Some(theme.panel_bg));
+        assert_eq!(foreground_for("✗ tool cat failed"), Some(theme.err));
         assert_eq!(background_for("✓ done"), Some(theme.panel_bg));
         // The "✓ done" line is rendered as markdown (not a note), so it has no
         // explicit foreground color (it inherits the panel's default text color).
@@ -3238,6 +3245,78 @@ table_sep = { fg = "gray" }
         let mut app = app();
         app.push_event(Event::Failed("boom".to_owned()));
         assert_eq!(app.status, "error");
+        assert!(!app.running);
+    }
+
+    #[test]
+    fn phase4_failed_tool_has_no_success_checkmark() {
+        let mut app = app();
+        app.push_event(Event::ToolResult {
+            description: "shell command".into(),
+            name: "shell".into(),
+            failed: true,
+        });
+        let text = app
+            .lines
+            .iter()
+            .map(|row| row.line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("failed"), "{text}");
+        assert!(!text.contains('✓'), "{text}");
+    }
+
+    #[test]
+    fn phase4_typed_failure_is_printable_bounded_and_explains_effects() {
+        let mut app = app();
+        app.push_event(Event::ToolFailure {
+            description: "opaque command".into(),
+            name: "shell".into(),
+            failure: sav::runtime::ToolFailure {
+                category: sav::runtime::ToolFailureCategory::ProcessExit,
+                effects: sav::runtime::EffectCertainty::MayHaveEffects,
+                message: format!("useful cause \u{1b}]52;c;unsafe\u{7}{}", "x".repeat(40_000)),
+                recovery: sav::runtime::RecoveryAction::InspectState,
+                next_step: "inspect state before retrying".into(),
+            },
+        });
+        let text = app
+            .lines
+            .iter()
+            .map(|row| row.line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for part in [
+            "process_exit",
+            "may_have_effects",
+            "useful cause",
+            "inspect state",
+        ] {
+            assert!(text.contains(part), "{text}");
+        }
+        assert!(!text.contains('\u{1b}'));
+        assert!(!text.contains('\u{7}'));
+        assert!(text.len() < 12_000);
+    }
+
+    #[test]
+    fn phase4_prompt_resource_is_not_an_undifferentiated_limit() {
+        let mut app = app();
+        app.push_event(Event::PromptEnd {
+            exhausted: true,
+            cancelled: false,
+            reason: sav::runtime::StopReason::Limit(sav::runtime::BudgetResource::ModelTokens),
+        });
+        let text = app
+            .lines
+            .iter()
+            .map(|row| row.line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("model_tokens") && text.contains("review"),
+            "{text}"
+        );
         assert!(!app.running);
     }
 

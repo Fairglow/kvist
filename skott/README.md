@@ -70,6 +70,29 @@ not-executed results. Acceptance, claim and model-context delivery have distinct
 statuses. Wall/token/attempt budgets are not reset. A locally submitted prompt
 after completion is a new task; late remote guidance is rejected.
 
+## Recovery and failures
+
+Native prompts inspect answer/reasoning repetition and repeated tools, failed
+observations and bounded action cycles. Long repeated passages are detected
+without waiting for resource exhaustion. New pages and changed file revisions
+remain usable; successful no-ops do not count as progress. Each prompt receives
+at most two stall corrections, with one intervention per batch. Guidance and
+compaction preserve the spent allowance, original goal and completed effects.
+These are bounded heuristics, not proof of semantic progress.
+
+Failures show a category, bounded diagnostics and a safe next step rather than
+a success checkmark. Explicit limits identify the exhausted resource. When a
+tool may have effects, inspect the current files/results before choosing another
+action; cancellation and failed recording do not undo completed work. Restore
+missing approved local tools/vendor resources separately, not by silently
+downloading dependencies or expanding permissions.
+
+For deliberately repetitive native output, use
+`--disable-generation-loop-detection`. This explicit exception leaves tool
+protection, budgets and sandbox authority intact. External agents own opaque
+loops: native detection/steering are unsupported and possibly effectful
+invocations are never automatically restarted.
+
 ## Headless mode
 
 `skott --headless "..."` runs one sandboxed prompt without a terminal,

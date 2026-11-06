@@ -33,8 +33,8 @@ use crate::context::ContextManager;
 use crate::error::{Error, Result};
 use crate::executor::SandboxExecutor;
 use crate::host::HostExecutor;
-use crate::run::{self, start};
-use crate::session::{AgentSession, MAX_TURNS, Recorder, ToolExecutor};
+use crate::run::{self, start_configured};
+use crate::session::{AgentSession, MAX_TURNS, Recorder, Skott, ToolExecutor};
 use crate::session_transcript::SessionTranscript;
 use crate::tools::ToolRegistry;
 
@@ -55,6 +55,8 @@ pub struct Overrides {
     pub context_limit: Option<usize>,
     /// Generation reserve override; absence uses model configuration/default.
     pub response_reserve: Option<u32>,
+    /// Explicit intentional-output exception; tool protection and limits remain.
+    pub disable_generation_loop_detection: bool,
     /// Disable durable session logging entirely.
     pub no_logs: bool,
     /// The resolved configuration path, shown in the help overlay.
@@ -368,6 +370,7 @@ impl Discovery {
                 tool_defs,
                 context_limit: overrides.context_limit,
                 response_reserve: overrides.response_reserve,
+                disable_generation_loop_detection: overrides.disable_generation_loop_detection,
                 log_dir: overrides.log_dir,
                 no_logs: overrides.no_logs,
                 working_directory,
@@ -425,6 +428,7 @@ struct SessionBuilder {
     tool_defs: Vec<sav::ToolDefinition>,
     context_limit: Option<usize>,
     response_reserve: Option<u32>,
+    disable_generation_loop_detection: bool,
     log_dir: Option<PathBuf>,
     no_logs: bool,
     working_directory: PathBuf,
@@ -444,6 +448,7 @@ impl Clone for SessionBuilder {
             tool_defs: self.tool_defs.clone(),
             context_limit: self.context_limit,
             response_reserve: self.response_reserve,
+            disable_generation_loop_detection: self.disable_generation_loop_detection,
             log_dir: self.log_dir.clone(),
             no_logs: self.no_logs,
             working_directory: self.working_directory.clone(),
@@ -541,15 +546,16 @@ impl SessionBuilder {
             }
         }
         crate::executor::check_cancelled(token)?;
-        let (handle, rx, prompt_tx) = start(
+        let (handle, rx, prompt_tx) = start_configured(
             session,
             transport,
             Arc::clone(&self.executor),
             context,
             recorder,
-            retry,
-            self.max_turns,
-            budgets.limits,
+            Skott::with_retry(self.max_turns, retry)
+                .with_generation_loop_detection(!self.disable_generation_loop_detection)
+                .with_limits(budgets.limits)?,
+            crate::session::ControlMailbox::default(),
         )?;
         let control_path = if self.allow_control {
             let path = handle.enable_controls()?;
@@ -720,6 +726,9 @@ fn run_ui<M: std::io::Write>(
         // Drain loop events without blocking.
         if let Some(current) = worker.as_ref() {
             app.pump(&current.rx)?;
+            for event in current.handle.take_terminal_events()? {
+                app.push_event(event);
+            }
         }
 
         // Install a finished session worker (initial start, a model/effort

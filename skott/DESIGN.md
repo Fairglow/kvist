@@ -70,6 +70,24 @@ execution's change. Retain the observed root descriptor, detect pathname
 rebinding around execution and report possible effects without replay claims.
 Poll cancellation around bounded revision reads and before execution.
 
+Consume shared typed failure and stop metadata in TUI, headless adapters and
+private journals; keep error rendering bounded and control-safe, with stderr
+and recovery guidance. Track failed tools independently of successful completion.
+Prompt cancellation wakes bounded-channel producers, including when no consumer
+is currently draining; retain a terminal handoff for later UI consumption.
+Preserve completed outcomes when read validation fails. If execution itself
+errors after possible effects, retain that uncertainty and reconciliation cause.
+Wire the explicit generation exception through CLI/native construction; never
+interpret model text as an exception or emulate unsupported external steering.
+Announce external capability limits before subprocess execution and never
+automatically replay an opaque potentially effectful invocation.
+
+For explicit host shell execution, stage the existing rendered script payload
+with private owned temporary resources, map only the prepared context argument
+to its staged path, execute literal bytes without interpolation, and clean up
+owned resources on success/error. Reuse existing staging/supervision facilities;
+keep the authority opt-out explicit and headless refusal unchanged.
+
 When a prompt arrives while a task is active, it is treated as steering rather
 than a replacement task. The steering message is queued and delivered at the
 next safe interruption point during generation, backoff waits, or between tool

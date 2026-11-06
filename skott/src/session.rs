@@ -12,8 +12,9 @@ use crate::{
 };
 pub use sav::loop_detection::ProgressEvidence;
 pub use sav::runtime::{
-    ControlMailbox, Event, GuidanceId, GuidanceNotice, GuidanceState, MAX_TOOL_RESULT_BYTES,
-    MAX_TURNS, RunLimits, RunSummary, Submission, SubmissionKind, TokenAccounting,
+    BudgetResource, ControlMailbox, EffectCertainty, Event, GuidanceId, GuidanceNotice,
+    GuidanceState, MAX_TOOL_RESULT_BYTES, MAX_TURNS, RecoveryAction, RunLimits, RunSummary,
+    StopReason, Submission, SubmissionKind, TokenAccounting, ToolFailure, ToolFailureCategory,
 };
 use sav::{
     CancellationToken, ModelRequest, ModelTransport, ModelTurn, ModelUsage, ReasoningEffort,
@@ -88,6 +89,10 @@ pub trait Recorder: Send {
     /// Records a bounded operational notice; never authorizes an effect.
     fn notice(&mut self, _message: &str) -> Result<()> {
         Ok(())
+    }
+    /// Records a bounded typed failure before any later effects.
+    fn tool_failure(&mut self, failure: &ToolFailure) -> Result<()> {
+        self.notice(&crate::operational::failure_text("call", failure))
     }
     /// Called once per prompt as it is received by the worker, before any turn.
     /// The durable session log uses it to label the transcript after the first
@@ -218,7 +223,22 @@ struct ExecutorBridge<'a, E> {
     executor: &'a E,
     reads: Mutex<read_cursor::ReadCursors>,
     // The shared runtime executes and observes one call at a time.
-    executed: Mutex<Option<(ToolIntent, ProgressEvidence)>>,
+    executed: Mutex<Option<ExecutedObservation>>,
+}
+
+struct ExecutedObservation {
+    intent: ToolIntent,
+    progress: Result<ProgressEvidence>,
+}
+
+fn observation_error(intent: &ToolIntent, error: Error) -> Error {
+    Error::SandboxExec {
+        tool: Some(intent.name.clone()),
+        reason: format!(
+            "completed executor outcome retained; observation validation failed: {}; inspect state and reconcile before further work; no automatic replay",
+            error.describe()
+        ),
+    }
 }
 
 impl<E> ExecutorBridge<'_, E> {
@@ -229,9 +249,7 @@ impl<E> ExecutorBridge<'_, E> {
         })
     }
 
-    fn executed(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, Option<(ToolIntent, ProgressEvidence)>>> {
+    fn executed(&self) -> Result<std::sync::MutexGuard<'_, Option<ExecutedObservation>>> {
         self.executed.lock().map_err(|_| Error::SandboxExec {
             tool: None,
             reason: "resolved tool observation state is poisoned".into(),
@@ -246,9 +264,29 @@ impl<E: ToolExecutor> sav::runtime::ToolExecutor for ExecutorBridge<'_, E> {
         token: &CancellationToken,
     ) -> sav::runtime::Result<ToolOutcome> {
         let resolved = self.reads()?.resolve(intent)?;
-        let outcome = self.executor.execute(&resolved, token)?;
-        let progress = self.reads()?.observe(&resolved, &outcome)?;
-        *self.executed()? = Some((resolved, progress));
+        let mut executed = self.executed()?;
+        let outcome = self
+            .executor
+            .execute(&resolved, token)
+            .map_err(|error| match error {
+                Error::SandboxUnavailable { .. }
+                | Error::ToolchainUnavailable { .. }
+                | Error::SandboxBuild { .. } => Error::ToolPrerequisite {
+                    tool: resolved.name.clone(),
+                    reason: error.describe(),
+                },
+                other => other,
+            })?;
+        // Validation belongs to observation, after the completed outcome is folded
+        // and recorded. It cannot replace actual process bytes with a refusal.
+        let progress = self
+            .reads()
+            .and_then(|mut reads| reads.observe(&resolved, &outcome))
+            .map_err(|error| observation_error(&resolved, error));
+        *executed = Some(ExecutedObservation {
+            intent: resolved,
+            progress,
+        });
         Ok(outcome)
     }
     fn progress(
@@ -256,12 +294,14 @@ impl<E: ToolExecutor> sav::runtime::ToolExecutor for ExecutorBridge<'_, E> {
         intent: &ToolIntent,
         outcome: &ToolOutcome,
     ) -> sav::runtime::Result<ProgressEvidence> {
-        let resolved = self.executed()?.take();
-        let (resolved, read_progress) = resolved
-            .as_ref()
-            .map(|(intent, progress)| (intent, *progress))
-            .unwrap_or((intent, ProgressEvidence::None));
-        let progress = self.executor.progress(resolved, outcome)?;
+        let (resolved, read_progress) = match self.executed()?.take() {
+            Some(ExecutedObservation { intent, progress }) => (intent, progress?),
+            None => (intent.clone(), ProgressEvidence::None),
+        };
+        let progress = self
+            .executor
+            .progress(&resolved, outcome)
+            .map_err(|error| observation_error(&resolved, error))?;
         Ok(if read_progress == ProgressEvidence::StateChanged {
             read_progress
         } else {
@@ -281,6 +321,19 @@ impl<E: ToolExecutor> sav::runtime::ToolExecutor for ExecutorBridge<'_, E> {
 struct SinkBridge<'a, S>(&'a S);
 impl<S: EventSink> sav::runtime::EventSink for SinkBridge<'_, S> {
     fn send(&self, event: Event) -> sav::runtime::Result<()> {
+        let event = match event {
+            Event::ToolFailure {
+                description,
+                name,
+                failure,
+            } => Event::ToolFailure {
+                description: crate::operational::printable(&description),
+                name: crate::operational::printable(&name),
+                failure: crate::operational::safe_failure(&failure),
+            },
+            Event::Failed(message) => Event::Failed(crate::operational::printable(&message)),
+            other => other,
+        };
         self.0.send(event).map_err(Into::into)
     }
 }
@@ -291,6 +344,11 @@ impl sav::runtime::Recorder for RecordBridge<'_> {
     }
     fn notice(&mut self, message: &str) -> sav::runtime::Result<()> {
         self.0.notice(message).map_err(Into::into)
+    }
+    fn tool_failure(&mut self, failure: &ToolFailure) -> sav::runtime::Result<()> {
+        self.0
+            .tool_failure(&crate::operational::safe_failure(failure))
+            .map_err(Into::into)
     }
     fn control(&mut self, notice: &GuidanceNotice) -> sav::runtime::Result<()> {
         self.0.control(notice).map_err(Into::into)

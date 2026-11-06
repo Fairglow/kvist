@@ -24,6 +24,7 @@ pub struct SessionTranscript {
     transcript: TranscriptWriter,
     live: Option<RunJournal>,
     live_number: u64,
+    terminal_summary: Option<RunSummary>,
 }
 
 impl SessionTranscript {
@@ -44,6 +45,7 @@ impl SessionTranscript {
             transcript,
             live: None,
             live_number: 0,
+            terminal_summary: None,
         })
     }
 
@@ -51,6 +53,10 @@ impl SessionTranscript {
     pub fn with_metadata(mut self, metadata: crate::session_log::SessionMetadata) -> Self {
         self.log = self.log.with_metadata(metadata);
         self
+    }
+
+    pub(crate) fn terminal_summary(&self) -> Option<&RunSummary> {
+        self.terminal_summary.as_ref()
     }
 
     /// Location of the version-one journal.
@@ -140,6 +146,20 @@ impl SessionTranscript {
 }
 
 impl Recorder for SessionTranscript {
+    fn tool_failure(&mut self, failure: &crate::session::ToolFailure) -> Result<()> {
+        let failure = crate::operational::safe_failure(failure);
+        self.log.tool_failure(&failure)?;
+        self.live_record(
+            json!({"type":"tool_failure","data":{"failure":failure}}),
+            true,
+        )?;
+        self.transcript
+            .record_notice(&crate::operational::failure_text("call", &failure))
+            .map_err(|error| {
+                crate::error::io_error("record transcript tool failure", None, error)
+            })?;
+        Ok(())
+    }
     fn model_event(&mut self, event: &sav::ModelStreamEvent) -> Result<()> {
         match event {
             sav::ModelStreamEvent::TextDelta(text) | sav::ModelStreamEvent::ReasoningDelta(text) => {
@@ -185,6 +205,7 @@ impl Recorder for SessionTranscript {
     }
 
     fn session_start(&mut self) -> Result<()> {
+        self.terminal_summary = None;
         self.start_live()?;
         self.log.session_start()
     }
@@ -254,6 +275,7 @@ impl Recorder for SessionTranscript {
                 "call_id":call_id,"name":tool,"exited":outcome.exited,"status":outcome.status,
                 "timed_out":outcome.timed_out,"cancelled":outcome.cancelled,
                 "output_limit_exceeded":outcome.output_limit_exceeded
+                ,"stderr":crate::operational::printable(&outcome.error_text(8192))
             }}),
             true,
         )?;
@@ -263,11 +285,34 @@ impl Recorder for SessionTranscript {
                 .record_tool_result(tool, &output)
                 .map_err(|e| crate::error::io_error("record transcript tool result", None, e))?;
         }
+        if !outcome.stderr.is_empty() {
+            self.transcript
+                .record_tool_result(
+                    tool,
+                    &format!(
+                        "stderr: {}",
+                        crate::operational::printable(&outcome.error_text(8192))
+                    ),
+                )
+                .map_err(|error| {
+                    crate::error::io_error("record transcript tool stderr", None, error)
+                })?;
+        }
         Ok(())
     }
 
     fn session_finish(&mut self, summary: &RunSummary) -> Result<()> {
+        // Preserve the actual observed cause and completed counts even when a
+        // later required write fails and the native run returns only an error.
+        self.terminal_summary = Some(summary.clone());
         self.log.session_finish(summary)?;
+        self.live_record(
+            json!({"type":"prompt_end","data":{
+                "stop_reason":summary.stop_reason,"failure":summary.failure,
+                "cancelled":summary.cancelled,"exhausted":summary.exhausted
+            }}),
+            true,
+        )?;
         if let Some(answer) = summary.answer.as_deref() {
             self.transcript
                 .record_assistant(answer, true)

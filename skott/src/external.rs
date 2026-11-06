@@ -13,6 +13,7 @@ use serde_json::json;
 use crate::{Error, Result};
 
 static NEXT_RUN: AtomicU64 = AtomicU64::new(1);
+const CAPABILITY_NOTICE: &str = "HOST UNCONFINED opaque external agent: native generation loop detection and steering are unsupported (including --disable-generation-loop-detection); completed or uncertain effects are not rolled back and are not replayed. Inspect state and reconcile before another invocation.";
 
 /// Host-supplied inputs, independent of any provider's internal permission flags.
 pub struct ExternalRequest<'a> {
@@ -134,10 +135,12 @@ pub fn start(request: ExternalRequest<'_>) -> Result<ExternalRun> {
             "execution_scope":"host_unconfined","canonical_evidence":false,"steering":"unsupported",
         }),
     )?;
+    journal.record(&json!({"type":"notice","data":CAPABILITY_NOTICE}))?;
     journal.record(
         &json!({"type":"external_dispatch","data":{"opaque":true,"automatic_retries":false}}),
     )?;
     journal.checkpoint()?;
+    eprintln!("{CAPABILITY_NOTICE}");
     let cancellation = CancellationToken::new();
     let token = cancellation.clone();
     let worker = thread::Builder::new()
@@ -208,9 +211,6 @@ pub fn run_profile(
         effort: overrides.effort,
         acknowledged_host: overrides.allow_host_execution,
     })?;
-    eprintln!(
-        "HOST UNCONFINED external agent; internal tools and token accounting belong to the selected CLI."
-    );
     crate::inspection::inspect_owned(run.journal_path(), run.cancellation())?;
     if run
         .worker

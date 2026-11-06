@@ -6,6 +6,10 @@ use std::{
 use kvist::init::initialize;
 use tempfile::TempDir;
 
+#[cfg(target_os = "linux")]
+#[path = "task_commands/phase4.rs"]
+mod phase4;
+
 const GENERATED_REQUIREMENTS_REVISION: &str =
     "sha256:bd53663c2dc76fdcbe58b111c0174a7550a3e3fe773a1c3e4a14196c1089dfa0";
 const GENERATED_CONTRACT_REVISION: &str =
@@ -3522,7 +3526,12 @@ fn continuous_run_interrupt_cancels_quiet_inference_without_scheduling_later_tas
 #[cfg(target_os = "linux")]
 fn task_run_runtime_budgets_allow_large_wire_responses_and_text_deltas() {
     for streaming in [false, true] {
-        let generated = format!("fresh result{}", "\"\\\n\t\u{03bb}".repeat(16_000));
+        let generated = format!(
+            "fresh result{}",
+            (0..16_000)
+                .map(|index| format!("result{index}\"\\\n\t\u{03bb}"))
+                .collect::<String>()
+        );
         let expected = generated.clone();
         let gateway = MockGateway::serve_raw(
             move |request| {
@@ -4766,6 +4775,14 @@ fn resilience_repair_decision_uses_the_initial_awaiting_decision_disposition() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("awaiting-decision"));
     let queue = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("queue");
     assert!(queue.contains("status: awaiting-decision"), "{queue}");
+    let recorded = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl"),
+    )
+    .expect("attempt");
+    assert!(recorded.contains("\"surfaced_decision\":true"));
+    assert!(recorded.contains("\"stop_reason\":null"));
     fs::remove_file(fake_galla_path(&project)).expect("clean runner");
 }
 

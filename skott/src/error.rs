@@ -88,6 +88,12 @@ pub enum Error {
         /// The reason it could not be rendered.
         reason: String,
     },
+    /// A required local resource failed validation before tool dispatch.
+    ToolPrerequisite { tool: String, reason: String },
+    /// Required event delivery failed; retained terminal handoff is not success.
+    EventDelivery { reason: String },
+    /// Explicit prompt or event-producer cancellation, not connection failure.
+    Cancelled,
     /// The model transport failed.
     ModelTransport {
         /// The provider or model selector, when known.
@@ -111,6 +117,8 @@ pub enum Error {
     },
     /// The shared prompt resource budget has been spent.
     RunBudget {
+        /// Stable identity of the exhausted resource.
+        resource: sav::runtime::BudgetResource,
         /// The exhausted resource.
         reason: String,
     },
@@ -159,6 +167,7 @@ impl Error {
     /// The process exit code to use for this error.
     pub fn exit_code(&self) -> u8 {
         match self {
+            Error::Cancelled => 130,
             Error::ExternalAgent {
                 source: sav::Error::Cancelled,
             } => 130,
@@ -241,7 +250,15 @@ impl Error {
                  exceeding the {limit}-token context; shorten the prompt or increase --context-limit"
             ),
             Error::InvalidModelTurn { reason } => format!("invalid model turn: {reason}"),
-            Error::RunBudget { reason } => format!("prompt budget exhausted: {reason}"),
+            Error::ToolPrerequisite { tool, reason } => format!(
+                "tool `{tool}` prerequisite failed before dispatch: {reason}; repair the installed resource before continuing"
+            ),
+            Error::EventDelivery { reason } => format!("session event delivery failed: {reason}"),
+            Error::Cancelled => "prompt cancelled".into(),
+            Error::RunBudget { resource, reason } => format!(
+                "prompt budget exhausted [{}]: {reason}; review this resource limit and inspect completed work before continuing",
+                crate::operational::resource_label(*resource)
+            ),
             Error::Recording { reason } => format!("session recording failed: {reason}"),
             Error::Io {
                 operation,
@@ -314,9 +331,12 @@ pub fn io_error(operation: &str, path: Option<&str>, source: std::io::Error) -> 
 
 impl From<sav::Error> for Error {
     fn from(source: sav::Error) -> Self {
-        Error::ModelTransport {
-            model: None,
-            reason: source.to_string(),
+        match source {
+            sav::Error::ModelTransportCancelled => Error::Cancelled,
+            source => Error::ModelTransport {
+                model: None,
+                reason: source.to_string(),
+            },
         }
     }
 }
@@ -336,10 +356,12 @@ impl From<sav::runtime::Error> for Error {
                 reserve,
             },
             Runtime::InvalidModelTurn { reason } => Self::InvalidModelTurn { reason },
-            Runtime::RunBudget { reason } => Self::RunBudget { reason },
+            Runtime::RunBudget { resource, reason } => Self::RunBudget { resource, reason },
             Runtime::Recording { reason } => Self::Recording { reason },
             Runtime::ToolPolicy { tool, reason } => Self::ToolPolicy { tool, reason },
             Runtime::ToolRender { tool, reason } => Self::ToolRender { tool, reason },
+            Runtime::ToolPrerequisite { tool, reason } => Self::ToolPrerequisite { tool, reason },
+            Runtime::Cancelled => Self::Cancelled,
             Runtime::ChannelClosed => Self::ChannelClosed,
             Runtime::Control { reason } => Self::Control { reason },
             Runtime::Io(source) => source.into(),
@@ -366,10 +388,12 @@ impl From<Error> for sav::runtime::Error {
                 reserve,
             },
             Error::InvalidModelTurn { reason } => Self::InvalidModelTurn { reason },
-            Error::RunBudget { reason } => Self::RunBudget { reason },
+            Error::RunBudget { resource, reason } => Self::RunBudget { resource, reason },
             Error::Recording { reason } => Self::Recording { reason },
             Error::ToolPolicy { tool, reason } => Self::ToolPolicy { tool, reason },
             Error::ToolRender { tool, reason } => Self::ToolRender { tool, reason },
+            Error::ToolPrerequisite { tool, reason } => Self::ToolPrerequisite { tool, reason },
+            Error::Cancelled => Self::Cancelled,
             Error::ChannelClosed => Self::ChannelClosed,
             Error::Control { reason } => Self::Control { reason },
             other => Self::Host {

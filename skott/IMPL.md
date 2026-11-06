@@ -1,6 +1,145 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped operational observations - resilience phase 4
+
+### Final direct-error and fixture boundary observation
+
+Fresh `skott-p4-final-boundary-observer` independently inspected only local
+executor/error/operational source and the relevant test/helper paths, excluding
+intent, queues, records/reviews, history and peers. It made no edits/delegation.
+The direct executor preserves sandbox-unavailable/build and toolchain-unavailable
+domains; native tests still require prerequisite/not-executed/fix-prerequisite.
+There is no local host fallback. Direct cooperative cancellation checks retain
+the existing sandbox-execution error/exit 1, distinct from explicit cancelled/
+exit 130. Imported native adaptation is tested, not source-derived here.
+
+Prepared observation tests bind the original directory, reject a later symlink
+before the execution closure and attribute no unrelated rebound change.
+Executed operations retain malformed completed reads/results, fence a second
+dispatch after notice-record failure and preserve all five resource identities.
+Synthetic post-dispatch failure retains possible effects/reconciliation, not a
+fabricated not-executed result.
+
+The PTY fixture copies the launcher, asserts byte identity/executable mode and
+owns its directory/workspace through RAII. Ambient runner `TMPDIR` is unset;
+child scratch is explicitly fixture-owned. The launcher executes a fixture
+script, not the requested sandbox command. Actual PTY/error/quit/restoration
+assertions pass; the source and current directories share a device, so this is
+not an empirical cross-filesystem trial. Copy removes the hard-link dependency;
+Unix PTYs, executable mounts and system utilities remain prerequisites.
+
+Independent offline/locked executions pass one direct-domain, seven operations,
+four executor, one terminal-error and one actual PTY case (14 distinct).
+No concrete local bug is established. Staging still lacks a local byte cap/
+interruptible write or fsync; field rendering is bounded, not whole-message
+secrecy. Tests do not prove imported sandbox/detector behavior, rollback,
+hostile-race resistance, durable disk recording or exhaustive replay counts.
+A separate narrow security reviewer reports no vulnerabilities.
+
+Parent broad serial execution first reproduced the wrong direct missing-runner
+domain and PTY hard-link cross-device failure. The implementing-context index
+attributes preservation of the domain and portable executable copying, 65
+selected passes and unchanged strict checks. Final parent full Sav/Skott
+execution, with ordinary ambient `TMPDIR`, passes 876 tests with three existing
+ignores. This follows rather than replaces the earlier 435 targeted evidence.
+
+Separate `skott-p4-final-source-blind` directly reads only requirements
+262-282, contract 110-145, design 56-89, and this phase-four observation, plus
+the scoped task projection/reported execution. It establishes no concrete
+contradiction, retaining direct-cancellation, copy-versus-cross-device-trial,
+imported behavior, staging/blocking/content and partial-assertion limits.
+Its contract excerpt ends mid-sentence and it claims nothing about the omitted
+continuation; the earlier operational comparison remains separate evidence.
+It performs no searches/source/tests/execution/delegation and certifies nothing.
+
+Fresh `skott-p4-source-observer` read only local operational, CLI, executor,
+host/external, session/recording, worker/TUI and relevant test source, excluding
+intent, queues, records/reviews, history and peer internals. It made no edits,
+did not delegate and did not certify implementation.
+
+Operational rendering preserves typed category, effect certainty, recovery
+and stopping-resource metadata. Diagnostic fields are UTF-8 bounded to 4096
+bytes before/after control escaping, plus a truncation marker. Failed tools
+render a cross, not a success checkmark; terminal events clear working state.
+Headless plain output exposes cause/next action on stderr; JSON retains events.
+Cancellation denies rollback, and failure guidance requires reconciliation
+instead of blind replay. Exact tests establish process-exit/prerequisite
+categories, not exhaustive backend classification.
+
+Private journal files are descriptor-held, no-follow, exclusive mode 0600.
+Dispatch and typed failure records synchronize; finish records retain stop,
+counts, failure and usage completeness. Base dispatch/results omit argument
+values/raw output, retaining shape/hashes and outcome metadata. This is not
+universal redaction: readable/structured transcripts contain content, live
+records include diagnostics, external journals retain text/raw hex. Printable
+helpers escape/bound output rather than recognizing arbitrary secrets.
+
+The transcript retains the observed summary before required finish writes.
+Headless error handling preserves turn/tool counts and original stopping
+metadata while displaying the returned failure. Executed saturation establishes
+durable cancellation plus a later delivery-failure presentation, not exhaustive
+first-cause precedence inside the imported runtime.
+
+Worker delivery uses a 128-event synchronous channel with 10-ms full-send
+polling. Prompt cancellation releases blocked producers without shutdown or
+draining. Failed cancelled sends return typed cancellation rather than success.
+A separate handoff retains at most one terminal/progress event per kind, four
+events total, drained after queued events. This bounds event counts, not all
+queued bytes. Shutdown/disconnection reports channel closure.
+
+Prompt-local read cursors retain at most 4096 paths. Failed/malformed pages
+do not advance them; completed executor outcomes return before validation
+failure is exposed through progress. Tests preserve stdout/stderr, recorded
+outcomes, completed counts and prevent another model request. Detailed native
+revision and sandbox enforcement implementations were outside this scope.
+
+The native generation exception reaches TUI/headless construction. Tests
+retain default detection, explicit opt-out, token limits and effect-repeat
+protection. Long explicit-host shell scripts remain literal staged bytes;
+only the generated wrapper is translated and the path is quoted through `$1`.
+RAII staging is outside the canonical workspace. Real subprocess assertions
+cover quoted parent paths, heredocs, status/stderr and cleanup after ordinary
+failure, supervision error and started-process cancellation. Intentional shell
+semantics are not disabled by literal staging.
+
+External dispatch requires explicit host acknowledgement and announces opaque
+native detection/steering, no rollback/replay. Local policy selects zero retries
+and disabled native loop detection; nonterminal/headless external execution is
+refused. Imported supervision/mount internals were not inspected.
+
+Independent offline/locked execution passes 21 new cases: five library, six
+loop, four operational CLI, two external, two PTY and two subprocess tests.
+Fifteen cursor/journal/terminal/control units and one external cancellation
+test also pass (37 distinct tests). Selected exact queue/content/count tests are
+strong; other checks use non-success or substring assertions rather than
+exhaustive cross-record consistency.
+
+The implementer-attributed private execution index reports 435 serial passes,
+strict lint/formatting and genuine diagnostic/backpressure/read/headless/CLI/
+external/staged-script reds. Executor uncertainty became green from shared
+changes, not a local red. Mid-edit API and fixture mistakes are excluded.
+Two existing parallel IPC/startup timeouts passed serially with unchanged
+deadlines and no skips; they were not independently reproduced here.
+A separate scoped security reviewer found no vulnerabilities. No concrete new
+defect was established by this source observation; no acceptance is implied.
+
+The separate exact-range `skott-p4-source-blind-comparator` inspected only
+scoped intent/queues, this observation and Sav's public operational API, with
+no searches, source/tests or execution. It established no concrete scoped
+contradiction, retaining content/redaction, count-versus-byte, imported/cooperative
+and partial-assertion limits. It did not infer staged-script privacy from
+journal permissions; that specific permission evidence gap has a bounded
+follow-up. Protected repair received no credit. No certification is claimed.
+
+The bounded follow-up strengthened actual staged-script assertions without
+changing production: implementing-context provenance identifies `stage_bytes`
+setting directory 0700 and payload 0600 before writing. Parent independently
+reran two real host-script cases plus the private-outside-workspace staging unit;
+all three pass. Assertions cover actual modes, non-links, literal bytes and
+exact owned cleanup. This supplies the missing permission evidence, not a
+privacy claim inferred from journal files or blanket certification.
+
 ## Scoped progress observations - resilience phase 3
 
 Fresh `skott-p3-final-observation` read local executor, native progress/revision,

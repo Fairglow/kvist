@@ -31,8 +31,10 @@ use crate::{
 mod agent_outcome;
 mod attention;
 mod checkpoint;
+mod completion;
 mod continuous;
 pub mod decisions;
+mod repair;
 
 /// Selects the first ready task in declared queue order, using the same
 /// definition as the overview, the shell, and the blank-task `task run`
@@ -1107,6 +1109,10 @@ struct AgentExecutionRecord<'a> {
     output_limit_exceeded: bool,
     stdout: &'a str,
     stderr: &'a str,
+    cancelled: bool,
+    surfaced_decision: bool,
+    model_sequence: Option<serde_json::Value>,
+    log_path: Option<String>,
 }
 
 fn append_agent_execution(path: &Path, record: AgentExecutionRecord<'_>) -> Result<()> {
@@ -4396,7 +4402,7 @@ fn read_bounded_regular_file(
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(nix::libc::O_NOFOLLOW);
+        options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
     }
     let mut file = options.open(path).map_err(|source| KvistError::Io {
         operation: "open approved write scope without following links",
@@ -4758,24 +4764,17 @@ fn execute_task_under_lock(
         // The approved runner identity and capability-confirmed probe are passed
         // so a successful non-loopback turn can be authorized and applied as a
         // bounded authoring sandbox request.
-        let execution = if matches!(
+        let review = matches!(
             task.kind,
             TaskKind::SecurityAudit | TaskKind::ComplianceReview
-        ) {
-            continuous::execute_review(
-                &context,
-                &config,
-                task,
-                agent_profile,
-                role,
-                continuous::ReviewOptions {
-                    attempt_id: &attempt_id,
-                    stream,
-                    allow_control,
-                },
-            )
+        );
+        let mut sequence = if review {
+            None
         } else {
-            crate::agent::execute_agent_with_controls(
+            Some(crate::agent::AuthoringSequence::new(agent_profile)?)
+        };
+        let execution = if let Some(sequence) = sequence.as_mut() {
+            crate::agent::execute_agent_in_sequence(
                 agent_profile,
                 sandbox_config,
                 Some(&approved_runner),
@@ -4793,6 +4792,20 @@ fn execute_task_under_lock(
                     policy_identity: &policy_identity,
                 },
                 allow_control,
+                sequence,
+            )
+        } else {
+            continuous::execute_review(
+                &context,
+                &config,
+                task,
+                agent_profile,
+                role,
+                continuous::ReviewOptions {
+                    attempt_id: &attempt_id,
+                    stream,
+                    allow_control,
+                },
             )
         };
         let redactions = evidence_redactions(&config);
@@ -4804,7 +4817,7 @@ fn execute_task_under_lock(
             journal: &agent_attempt_path,
             redactions: &redactions,
         };
-        let run_result = attempt.record("agent-execution", execution, None)?;
+        let run_result = attempt.record("agent-execution", execution, None, sequence.as_ref())?;
         *explanation = Some(run_result.stdout.clone());
 
         // 7. Transition task status depending on outcome
@@ -4812,9 +4825,28 @@ fn execute_task_under_lock(
             attempt.decision(&run_result, task.kind)
         } else if run_result.success {
             if task.kind == TaskKind::Implementation {
+                let sequence =
+                    sequence
+                        .as_mut()
+                        .ok_or_else(|| KvistError::AgentEvidenceFailed {
+                            reason: "implementation authoring sequence was not retained".into(),
+                        })?;
                 const MAX_VERIFICATION_REPAIR_ROUNDS: usize = 4;
                 let mut repair_round = 0usize;
+                let mut history = repair::RepairHistory::default();
                 let verify_outcome = loop {
+                    if let Err(error) = sequence.check() {
+                        let reason = attempt.cause(
+                            Some(&history.cause()),
+                            &format!(
+                                "{error}\n{}",
+                                sequence
+                                    .diagnostics(crate::agent::error_stop(&error))
+                                    .message()
+                            ),
+                        );
+                        return Err(attempt.block(&reason, Some(&run_result.log_path))?);
+                    }
                     tracing::info!(
                         task_id = %task_id,
                         repair_round,
@@ -4832,17 +4864,70 @@ fn execute_task_under_lock(
                     let Ok(verify_res) = res else {
                         break res;
                     };
-                    if !agent_outcome::repairable(&verify_res)
-                        || repair_round >= MAX_VERIFICATION_REPAIR_ROUNDS
-                    {
+                    let verification_cause = agent_outcome::verification_cause(&verify_res);
+                    if !verify_res.success {
+                        history.remember(&verification_cause, &redactions);
+                    }
+                    if !agent_outcome::repairable(&verify_res) {
+                        if verify_res.success
+                            && let Err(error) = sequence.check()
+                        {
+                            let reason = attempt.cause(Some(&history.cause()), &format!(
+                                "clean verification completed after sequence interruption: {error}\n{}",
+                                sequence.diagnostics(crate::agent::error_stop(&error)).message()
+                            ));
+                            return Err(attempt.block(&reason, Some(&run_result.log_path))?);
+                        }
                         break Ok(verify_res);
                     }
+                    if let Err(error) = sequence.check() {
+                        let reason = attempt.cause(
+                            Some(&history.cause()),
+                            &format!(
+                                "{error}\n{}",
+                                sequence
+                                    .diagnostics(crate::agent::error_stop(&error))
+                                    .message()
+                            ),
+                        );
+                        return Err(attempt.block(&reason, Some(&run_result.log_path))?);
+                    }
+                    let pre_digests = attempt.digests(&history.cause(), &run_result.log_path)?;
+                    let recurring = history.recurring(&verify_res, &pre_digests);
+                    if recurring || repair_round >= MAX_VERIFICATION_REPAIR_ROUNDS {
+                        let focused = if recurring {
+                            "identical verification outcome with no source/test progress; reconcile retained failures and choose a genuinely different approved strategy"
+                        } else {
+                            "four repair rounds exhausted; reconcile retained verification and repair evidence before explicitly approving new work"
+                        };
+                        let reason = attempt.cause(
+                            Some(&history.cause()),
+                            &format!(
+                                "{focused}\n{}",
+                                sequence
+                                    .diagnostics(sav::runtime::StopReason::Stalled)
+                                    .message()
+                            ),
+                        );
+                        return Err(attempt.block(&reason, Some(&run_result.log_path))?);
+                    }
+                    if let Err(error) = sequence.check() {
+                        let reason = attempt.cause(
+                            Some(&history.cause()),
+                            &format!(
+                                "{error}\n{}",
+                                sequence
+                                    .diagnostics(crate::agent::error_stop(&error))
+                                    .message()
+                            ),
+                        );
+                        return Err(attempt.block(&reason, Some(&run_result.log_path))?);
+                    }
                     repair_round += 1;
+                    sequence.repairs_started = repair_round;
                     eprintln!(
                         "Verification failed (repair round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS}); feeding test failure diagnostics back to the agent to investigate and fix..."
                     );
-                    let verification_cause = agent_outcome::verification_cause(&verify_res);
-                    let pre_digests = attempt.digests(&verification_cause, &run_result.log_path)?;
                     let stdout_tail = redact_bounded(
                         verify_res.stdout.clone(),
                         &evidence_redactions(&config),
@@ -4864,7 +4949,7 @@ fn execute_task_under_lock(
                          --- Verification Stderr ---\n{stderr_tail}\n",
                         verify_res.command, verify_res.exit_code
                     );
-                    let repair_execution = crate::agent::execute_agent_with_controls(
+                    let repair_execution = crate::agent::execute_agent_in_sequence(
                         agent_profile,
                         sandbox_config,
                         Some(&approved_runner),
@@ -4882,55 +4967,74 @@ fn execute_task_under_lock(
                             policy_identity: &policy_identity,
                         },
                         allow_control,
+                        sequence,
                     );
                     let repair_run = attempt.record(
                         "verification-repair",
                         repair_execution,
-                        Some(&verification_cause),
+                        Some(&history.cause()),
+                        Some(sequence),
                     )?;
                     *explanation = Some(repair_run.stdout.clone());
                     if repair_run.surfaced_decision {
                         return attempt.decision(&repair_run, task.kind);
                     }
                     if !repair_run.success {
-                        let reason = attempt.cause(Some(&verification_cause), &repair_run.stderr);
-                        return Err(attempt.block(&reason, Some(&repair_run.log_path))?);
-                    }
-                    let post_digests =
-                        attempt.digests(&verification_cause, &repair_run.log_path)?;
-                    if pre_digests == post_digests {
                         let reason = attempt.cause(
-                            Some(&verification_cause),
-                            "no source/test progress; verification remains failed",
+                            Some(&history.cause()),
+                            &format!(
+                                "{}\n{}",
+                                repair_run.stderr,
+                                sequence.diagnostics(sequence.last_stop).message()
+                            ),
                         );
                         return Err(attempt.block(&reason, Some(&repair_run.log_path))?);
                     }
+                    attempt.digests(&history.cause(), &repair_run.log_path)?;
+                    history.remember(
+                        &format!(
+                            "Repair round {repair_round}: {}; evidence: {}",
+                            repair_run.stdout,
+                            repair_run.log_path.display(),
+                        ),
+                        &redactions,
+                    );
                 };
                 match verify_outcome {
                     Ok(verify_res) => {
                         if verify_res.success {
-                            let mut changes = Vec::new();
-                            let scope_dir = context.component_dir.join("tests");
-                            if let Ok(entries) = fs::read_dir(&scope_dir) {
-                                for entry in entries.flatten() {
-                                    let path = entry.path();
-                                    if path.is_file()
-                                        && let Ok(rel) = path.strip_prefix(project_dir)
-                                        && let Ok(bytes) = fs::read(&path)
-                                    {
-                                        let post_digest = format!(
-                                            "sha256:{}",
-                                            hex::encode(sha2::Sha256::digest(&bytes))
-                                        );
-                                        changes.push(serde_json::json!({
-                                            "path": rel.to_string_lossy(),
-                                            "operation": "create",
-                                            "pre_digest": serde_json::Value::Null,
-                                            "post_digest": post_digest,
-                                        }));
-                                    }
+                            let collected = completion::collect(sequence, || {
+                                let verified_digests =
+                                    agent_outcome::source_test_digests(&context.component_dir)
+                                        .map_err(|error| KvistError::AgentEvidenceFailed {
+                                            reason: format!(
+                                                "source/test digest evidence failed: {error}"
+                                            ),
+                                        })?;
+                                let changes =
+                                    completion::changes(project_dir, &context.component_dir)
+                                        .map_err(|error| KvistError::AgentEvidenceFailed {
+                                            reason: format!(
+                                                "final change-detail observation failed: {error}"
+                                            ),
+                                        })?;
+                                Ok((verified_digests, changes))
+                            });
+                            let (verified_digests, changes) = match collected {
+                                Ok(collected) => collected,
+                                Err(error) => {
+                                    let reason = attempt.cause(
+                                        Some(&history.cause()),
+                                        &format!(
+                                            "{error}\n{}",
+                                            sequence
+                                                .diagnostics(crate::agent::error_stop(&error))
+                                                .message()
+                                        ),
+                                    );
+                                    return Err(attempt.block(&reason, Some(&run_result.log_path))?);
                                 }
-                            }
+                            };
 
                             let exec_fin = serde_json::json!({
                                 "schema_version": 1,
@@ -4948,11 +5052,12 @@ fn execute_task_under_lock(
                                 "result": "success",
                                 "command": verify_res.command,
                                 "source_scopes": {
-                                    "src": digest_path_tree(&context.component_dir.join("src"))?,
-                                    "tests": digest_path_tree(&context.component_dir.join("tests"))?,
+                                    "src": verified_digests.0,
+                                    "tests": verified_digests.1,
                                 },
                                 "stdout": redact_bounded(verify_res.stdout.clone(), &evidence_redactions(&config), 16384),
                                 "stderr": redact_bounded(verify_res.stderr.clone(), &evidence_redactions(&config), 16384)
+                                ,"model_sequence": sequence.diagnostics(sav::runtime::StopReason::Completed)
                             });
                             let pend_disp = serde_json::json!({
                                 "schema_version": 1,
@@ -4965,16 +5070,31 @@ fn execute_task_under_lock(
                                 events.push(pend_disp);
                             }
                             for event in events {
+                                attempt.completion_boundary(
+                                    sequence,
+                                    &history.cause(),
+                                    &run_result.log_path,
+                                )?;
                                 append_json_attempt(
                                     &agent_attempt_path,
                                     &event,
                                     "append successful execution evidence",
                                 )?;
                             }
+                            attempt.completion_boundary(
+                                sequence,
+                                &history.cause(),
+                                &run_result.log_path,
+                            )?;
 
                             if continuous {
                                 let at = Timestamp::now()
                                     .map_err(|source| KvistError::TaskClock { source })?;
+                                attempt.completion_boundary(
+                                    sequence,
+                                    &history.cause(),
+                                    &run_result.log_path,
+                                )?;
                                 transition_locked(
                                     &context,
                                     lock,
@@ -4991,15 +5111,12 @@ fn execute_task_under_lock(
                             }
 
                             let token_summary =
-                                match (run_result.tokens_input, run_result.tokens_output) {
-                                    (Some(in_tok), Some(out_tok)) => {
-                                        format!(
-                                            " [Tokens used - Input: {}, Output: {}]",
-                                            in_tok, out_tok
-                                        )
-                                    }
-                                    _ => "".to_owned(),
-                                };
+                                sequence.known_usage().map_or_else(String::new, |usage| {
+                                    format!(
+                                        " [Known model tokens - Input: {}, Output: {}]",
+                                        usage.input_tokens, usage.output_tokens
+                                    )
+                                });
                             Ok(format!(
                                 "task `{task_id}` executed and verified successfully; it is not completed yet. Awaiting human finalization.{}\nAttempt: {attempt_id}\nLogs written to: {}\nNext Step: `kvist task finalize {} {task_id} {attempt_id} accept` after reviewing the changes and evidence.",
                                 token_summary,
@@ -5012,7 +5129,7 @@ fn execute_task_under_lock(
                             } else {
                                 ""
                             };
-                            let blocker_reason = redact_bounded(
+                            let blocker_reason = attempt.cause(Some(&history.cause()), &redact_bounded(
                                 format!(
                                     "test-command verification failed{}. Command: '{}', Exit code: {:?}.\n---\nStdout:\n{}\n---\nStderr:\n{}",
                                     timed_out_msg,
@@ -5023,7 +5140,7 @@ fn execute_task_under_lock(
                                 ),
                                 &evidence_redactions(&config),
                                 MAX_VERIFICATION_EVIDENCE_BYTES,
-                            );
+                            ));
                             let transition_at = Timestamp::now()
                                 .map_err(|source| KvistError::TaskClock { source })?;
                             let _ = transition_locked(
@@ -5059,8 +5176,15 @@ fn execute_task_under_lock(
                             &evidence_redactions(&config),
                             MAX_VERIFICATION_EVIDENCE_BYTES,
                         );
-                        let blocker_reason =
-                            format!("test-command verification blocked: {verification_error}");
+                        let blocker_reason = attempt.cause(
+                            Some(&history.cause()),
+                            &format!(
+                                "test-command verification blocked: {verification_error}\n{}",
+                                sequence
+                                    .diagnostics(crate::agent::error_stop(&err))
+                                    .message()
+                            ),
+                        );
                         let transition_at =
                             Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
                         let _ = transition_locked(

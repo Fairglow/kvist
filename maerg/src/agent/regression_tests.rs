@@ -2,6 +2,124 @@ use super::*;
 use std::os::unix::{fs::symlink, process::ExitStatusExt};
 
 #[test]
+fn phase4_result_record_failure_keeps_successful_unary_usage() {
+    result_record_failure(false, false);
+}
+
+#[test]
+fn phase4_result_record_failure_keeps_successful_stream_usage() {
+    result_record_failure(true, false);
+}
+
+#[test]
+fn phase4_result_record_failure_preserves_provider_error() {
+    result_record_failure(false, true);
+    result_record_failure(true, true);
+}
+
+fn result_record_failure(streaming: bool, failed: bool) {
+    struct ReturnedAfterJournalFailure<'a> {
+        live: &'a LiveRun,
+        calls: &'a std::cell::Cell<u32>,
+        failed: bool,
+    }
+    impl ModelTransport for ReturnedAfterJournalFailure<'_> {
+        fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
+            self.calls.set(self.calls.get() + 1);
+            self.live.finish("injected-result-record-failure").unwrap();
+            if self.failed {
+                Err(ModelError::ModelProviderStatus { status: 503 })
+            } else {
+                let mut turn = effect_turn();
+                turn.text = "A complete returned proposal, not authorized.".into();
+                turn.usage = Some(sav::ModelUsage {
+                    input_tokens: 10000,
+                    output_tokens: 100,
+                    total_tokens: 10100,
+                });
+                Ok(turn)
+            }
+        }
+        fn stream(
+            &self,
+            request: &ModelRequest,
+            cancellation: &CancellationToken,
+            _: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+        ) -> sav::Result<ModelTurn> {
+            self.complete(request, cancellation)
+        }
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(5)
+        }
+    }
+    let fixture = tempfile::tempdir_in(".").unwrap();
+    let path = fixture.path().join("result-record.events.jsonl");
+    let live = LiveRun::create(&path, "record-failed", "task", "fixture", &[]).unwrap();
+    let calls = std::cell::Cell::new(0);
+    let budget = TurnBudget::new(Duration::from_secs(30));
+    let cancellation = CancellationToken::new();
+    let request = ModelRequest {
+        model: "fixture".into(),
+        messages: vec![sav::ModelMessage::User("task".into())],
+        tools: vec![],
+        tool_choice: sav::ToolChoice::None,
+        reasoning_effort: None,
+        output_schema: None,
+        max_output_tokens: Some(256),
+    };
+    let mut tokens = TokenBudget::new(Some(11000));
+    let result = complete_turn_counted(
+        || {
+            Ok(ReturnedAfterJournalFailure {
+                live: &live,
+                calls: &calls,
+                failed,
+            })
+        },
+        &request,
+        streaming,
+        &[],
+        &mut 0,
+        &ModelRetry {
+            policy: sav::runtime::RetryPolicy::default(),
+            budget: &budget,
+            cancellation: &cancellation,
+            controls: None,
+            live: Some(&live),
+            phase: "inference",
+            model: "fixture",
+            endpoint: "fixture",
+            redactions: &[],
+        },
+        &mut tokens,
+    );
+    let error = result.expect_err("required result recording must fence acceptance");
+    assert_eq!(calls.get(), 1, "broken journal allowed another attempt");
+    let accounting = tokens.accounting();
+    assert_eq!(accounting.returned_attempts, 1);
+    if failed {
+        assert!(error.to_string().contains("503"), "{error}");
+        assert!(error.to_string().contains("record"), "{error}");
+        assert!(!accounting.provenance_complete);
+        assert_eq!(accounting.uncertain_attempts, 1);
+        assert!(accounting.charged_tokens.unwrap() > 256);
+    } else {
+        assert_eq!(
+            tokens.known_usage().map(|usage| usage.total_tokens),
+            Some(10100)
+        );
+        assert_eq!(accounting.charged_tokens, Some(10100));
+        assert_eq!(accounting.known_attempts, 1);
+        assert_eq!(accounting.uncertain_attempts, 0);
+        assert!(accounting.provenance_complete);
+    }
+    let events = fs::read_to_string(&path).unwrap();
+    assert!(!events.contains("\"type\":\"model_result\""));
+    assert!(!events.contains("\"type\":\"tool_dispatch\""));
+    assert!(!fixture.path().join("src").exists());
+}
+
+#[test]
 fn generation_completed_stream_repetition_retains_known_usage() {
     assert_completed_repetitive_stream(false);
 }
@@ -79,13 +197,9 @@ fn assert_completed_repetitive_stream(later_callback: bool) {
     let mut tokens = TokenBudget::new(Some(11000));
     let result = complete_turn_counted(
         || {
-            Ok(live::ObservedTransport {
-                transport: CompletedDespiteInterruption {
-                    calls: &calls,
-                    later_callback,
-                },
-                live: &live,
-                redactions: &[],
+            Ok(CompletedDespiteInterruption {
+                calls: &calls,
+                later_callback,
             })
         },
         &request,

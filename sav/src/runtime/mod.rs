@@ -5,6 +5,7 @@
 
 pub mod context;
 pub mod control;
+mod diagnostics;
 mod driver;
 mod error;
 mod outcome;
@@ -16,6 +17,9 @@ pub use context::{
 };
 pub use control::{
     ControlMailbox, Guidance, GuidanceId, GuidanceNotice, GuidanceState, Submission, SubmissionKind,
+};
+pub use diagnostics::{
+    BudgetResource, EffectCertainty, RecoveryAction, StopReason, ToolFailure, ToolFailureCategory,
 };
 pub use driver::{NativeRuntime, Operation};
 pub use error::{Error, Result};

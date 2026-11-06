@@ -59,6 +59,7 @@ struct State {
     closed: bool,
     tasks: VecDeque<Guidance>,
     guidance: VecDeque<Guidance>,
+    claimed: Vec<(GuidanceId, bool)>,
     withdrawn: VecDeque<GuidanceId>,
     dropped: VecDeque<GuidanceId>,
     bytes: usize,
@@ -117,7 +118,7 @@ impl ControlMailbox {
         if state.active {
             validate(&text, MAX_MESSAGE_BYTES)?;
         }
-        if state.guidance.len() + state.tasks.len() >= CAPACITY
+        if state.guidance.len() + state.tasks.len() + state.claimed.len() >= CAPACITY
             || state.bytes.saturating_add(text.len()) > MAX_QUEUED_BYTES
         {
             return Err(rejected("pending control queue is full"));
@@ -290,8 +291,47 @@ impl ControlMailbox {
         let messages: Vec<_> = state.guidance.drain(..).collect();
         for message in &messages {
             state.bytes -= message.text.len();
+            state.claimed.push((message.id, false));
         }
         Ok(messages)
+    }
+
+    pub(super) fn mark_delivered(&self, id: GuidanceId) -> Result<()> {
+        let mut state = self.lock()?;
+        let entry = state
+            .claimed
+            .iter_mut()
+            .find(|(claimed, _)| *claimed == id)
+            .ok_or_else(|| rejected("guidance is not claimed"))?;
+        entry.1 = true;
+        Ok(())
+    }
+
+    pub(super) fn complete_claim(&self, id: GuidanceId) -> Result<()> {
+        let mut state = self.lock()?;
+        let index = state
+            .claimed
+            .iter()
+            .position(|(claimed, _)| *claimed == id)
+            .ok_or_else(|| rejected("guidance is not claimed"))?;
+        state.claimed.remove(index);
+        Ok(())
+    }
+
+    pub(super) fn finish_claims(&self) -> Result<Vec<GuidanceNotice>> {
+        Ok(self
+            .lock()?
+            .claimed
+            .drain(..)
+            .map(|(id, delivered)| GuidanceNotice {
+                id,
+                state: if delivered {
+                    GuidanceState::Delivered
+                } else {
+                    GuidanceState::Dropped
+                },
+            })
+            .collect())
     }
 
     /// Drains bounded withdrawal notices for the current owner to record.
@@ -311,6 +351,12 @@ impl ControlMailbox {
             state.bytes -= message.text.len();
         }
         let mut dropped: Vec<_> = state.dropped.drain(..).collect();
+        dropped.extend(
+            state
+                .claimed
+                .drain(..)
+                .filter_map(|(id, delivered)| (!delivered).then_some(id)),
+        );
         dropped.extend(messages.into_iter().map(|message| message.id));
         Ok(dropped)
     }

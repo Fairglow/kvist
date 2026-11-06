@@ -129,6 +129,22 @@ first. Cancellation can wake a full worker event channel. External-agent
 execution reports that its internal loop is opaque, native steering/detection
 are unsupported and completed effects are not rolled back or replayed.
 
+The adapter renders shared `ToolFailure` category, effect certainty and safe
+next step; a failed result never receives a success checkmark. Private structured
+and readable records retain bounded stderr and typed resource identity.
+Cancelled full-channel producers terminate cooperatively without requiring
+shutdown or consumer drainage; failed terminal delivery is explicit, not a
+silently dropped success. Terminal state is still visible when the UI resumes.
+Failed native read validation retains the completed executor outcome before
+reporting observation failure. Executor errors after possible dispatch report
+possible effects rather than claiming "not executed".
+`--disable-generation-loop-detection` is an explicit native intentional-output
+exception, retaining tool protection, budgets and authority. External profiles
+disclose that this native capability and steering are unsupported.
+Explicit host shell execution materializes separately rendered script context
+literally and passes its real staged path to the shell; long scripts cannot
+lose their content or reference an unstaged `/context/0`.
+
 Models may declare `context_limit` and `response_reserve`. CLI values take
 precedence; otherwise context is discovered for the selected provider/model,
 and generation reserves up to 8192 tokens, at most one quarter of a small

@@ -406,6 +406,15 @@ impl SessionLog {
 }
 
 impl Recorder for SessionLog {
+    fn tool_failure(&mut self, failure: &crate::session::ToolFailure) -> Result<()> {
+        let failure = crate::operational::safe_failure(failure);
+        self.record(json!({"type":"tool_failure","prompt":self.prompt,"failure":failure}))?;
+        self.text(
+            "tool failure",
+            &crate::operational::failure_text("call", &failure),
+        )?;
+        self.synchronize()
+    }
     fn notice(&mut self, message: &str) -> Result<()> {
         self.record(json!({"type":"notice", "prompt":self.prompt, "message":bounded(message)}))?;
         self.text("notice", message)
@@ -536,9 +545,13 @@ impl Recorder for SessionLog {
             json!({"type":"session_finish", "session_id":self.session_id,
             "prompt":self.prompt, "disposition":summary.disposition(), "turns":summary.turns,
             "tools_executed":summary.tools_executed, "success":summary.success(),
+            "stop_reason":summary.stop_reason,
             "failure":summary.failure, "total_tokens":self.usage_complete.then(||self.total_tokens()),
             "usage_complete":self.usage_complete, "estimated_budget_tokens":self.estimated_tokens}),
         )?;
+        if let Some(reason) = summary.stop_reason {
+            self.text("stop reason", &crate::operational::stop_text(reason).1)?;
+        }
         writeln!(
             self.transcript,
             "== session {} finished: {} turns, {} tokens, {}s, prompt {}, {} ==",

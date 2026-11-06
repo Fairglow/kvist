@@ -31,6 +31,7 @@ pub(super) struct TokenBudget {
 
 fn exhausted() -> crate::KvistError {
     sav::runtime::Error::RunBudget {
+        resource: sav::runtime::BudgetResource::ModelTokens,
         reason: "cumulative token limit exhausted (including conservative unknown-attempt charges)"
             .into(),
     }
@@ -51,11 +52,9 @@ impl TokenBudget {
     }
 
     pub(super) fn reserve(&mut self, request: &mut ModelRequest) -> Result<u64> {
-        let Some(limit) = self.limit else {
-            self.uncertain_attempts = self.uncertain_attempts.saturating_add(1);
-            return Ok(0);
-        };
-        let remaining = limit.checked_sub(self.charged).ok_or_else(exhausted)?;
+        let remaining = self.limit.map_or(Ok(u64::MAX), |limit| {
+            limit.checked_sub(self.charged).ok_or_else(exhausted)
+        })?;
         request.max_output_tokens = Some(request.max_output_tokens.unwrap_or(1024));
         let input = sav::runtime::context::estimate_request(request) as u64;
         let available = remaining
@@ -96,12 +95,9 @@ impl TokenBudget {
             known.total_tokens = known.total_tokens.saturating_add(total);
             if total > 0 {
                 self.known_attempts = self.known_attempts.saturating_add(1);
-                if self.limit.is_some() {
-                    self.charged = self
-                        .charged
-                        .saturating_sub(reservation)
-                        .saturating_add(total);
-                }
+                self.charged = self
+                    .charged
+                    .saturating_add(total.saturating_sub(reservation));
                 self.uncertain_attempts = self.uncertain_attempts.saturating_sub(1);
             } else {
                 self.provenance_lost = true;
@@ -129,12 +125,20 @@ impl TokenBudget {
                 None
             },
             provenance_complete,
-            charged_tokens: self.limit.map(|_| self.charged),
+            charged_tokens: Some(self.charged),
         }
     }
 
     pub(super) fn known_usage(&self) -> Option<ModelUsage> {
         self.known
+    }
+
+    pub(super) fn charge(&self) -> u64 {
+        self.charged
+    }
+
+    pub(super) fn remaining(&self) -> Option<u64> {
+        self.limit.map(|limit| limit.saturating_sub(self.charged))
     }
 
     pub(super) fn check(&self) -> Result<()> {
@@ -149,6 +153,54 @@ impl TokenBudget {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phase4_known_usage_below_reservation_never_refunds_model_charge() {
+        let mut request = ModelRequest {
+            model: "fixture".into(),
+            messages: vec![sav::ModelMessage::User("task".into())],
+            tools: vec![],
+            tool_choice: sav::ToolChoice::None,
+            reasoning_effort: None,
+            output_schema: None,
+            max_output_tokens: Some(256),
+        };
+        let mut budget = TokenBudget::new(Some(1000));
+        let reservation = budget.reserve(&mut request).expect("reserve");
+        budget.finish(
+            reservation,
+            Some(ModelUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+                total_tokens: 2,
+            }),
+        );
+        assert_eq!(budget.charged, reservation);
+        assert_eq!(
+            budget.known_usage().map(|usage| usage.total_tokens),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn phase4_unlimited_policy_still_records_conservative_unknown_debit() {
+        let mut request = ModelRequest {
+            model: "fixture".into(),
+            messages: vec![sav::ModelMessage::User("task".into())],
+            tools: vec![],
+            tool_choice: sav::ToolChoice::None,
+            reasoning_effort: None,
+            output_schema: None,
+            max_output_tokens: Some(256),
+        };
+        let mut budget = TokenBudget::new(None);
+        let reservation = budget.reserve(&mut request).expect("reserve");
+        budget.failed();
+        let accounting = budget.accounting();
+        assert!(reservation > 256);
+        assert_eq!(accounting.charged_tokens, Some(reservation));
+        assert!(!accounting.provenance_complete);
+    }
 
     #[test]
     fn unavailable_and_zero_usage_do_not_replenish_the_budget() {

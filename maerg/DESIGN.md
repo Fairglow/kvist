@@ -27,6 +27,33 @@ and does not spend model tokens. Four repair rounds are the outer bound;
 unknown verification outcomes never authorize replay. Fresh review contexts
 remain separate.
 
+Own one sequence state across authoring and verification-repair calls: original
+start/deadline, cumulative conservative model debit and known/unknown usage,
+shared tool/accepted-generation history and the nonrenewable stall budget.
+Clip each model invocation to remaining role resources, including elapsed
+verification time, without changing verification's independent approved ceiling.
+Hash complete verification outcome/status and source/test revisions for
+bounded recurring-repair detection. Repeated unchanged evidence stops with
+focused diagnostics; actual changes permit reverification, not a fresh budget.
+Keep at most four outer repairs and never schedule after cancellation, timeout,
+overflow, missing outcome, uncertain effects or retained decision.
+Source/test digest failures propagate before scheduling. Sequence state and
+diagnostics belong to the attempt, not a global mutable singleton or chat-only
+continuation. Separate compliance contexts remain fresh.
+
+Preserve the separate initial recursive source/test root hashes and final shallow
+test-file inventory; do not introduce an initial per-file array or a before/after
+diff. Reuse applicable bounded local inspection/hash limits, stable ordering
+and fallible reads; propagate selected-directory/entry/file observation errors
+instead of dropping them into successful evidence. Keep original interruption
+checks before/after slow collection and around required success appends/transition.
+Do not expand into peers, promise an atomic filesystem snapshot or roll back
+already completed effects/evidence.
+On Unix, open observed regular files nonblocking and no-follow, then validate
+the opened descriptor as regular before reading. A substitution with a FIFO
+must fail rather than wait indefinitely for a writer. This does not promise
+preemption of unavoidable regular-file/kernel I/O or an atomic namespace.
+
 Share explicit incomplete-report and alternatives checks between completion
 and routine-note classification. Inspect all proposal fields for blockers and
 recognized alternatives rather than discarding a contradictory optional patch.

@@ -13,6 +13,7 @@ mod cli;
 mod host;
 mod logging;
 mod markdown;
+mod operational;
 mod process;
 mod run;
 
@@ -54,8 +55,9 @@ pub use run::{
 };
 pub use sandbox::ToolOutcome;
 pub use session::{
-    AgentSession, ControlMailbox, Event, EventSink, GuidanceId, GuidanceNotice, GuidanceState,
-    MAX_TURNS, Recorder, RunLimits, RunSummary, Skott, Submission, SubmissionKind, ToolExecutor,
+    AgentSession, BudgetResource, ControlMailbox, EffectCertainty, Event, EventSink, GuidanceId,
+    GuidanceNotice, GuidanceState, MAX_TURNS, Recorder, RecoveryAction, RunLimits, RunSummary,
+    Skott, StopReason, Submission, SubmissionKind, ToolExecutor, ToolFailure, ToolFailureCategory,
 };
 pub use session_log::{DEFAULT_LOG_DIR, SessionLog};
 pub use toolchain::{ProfileSetting, ToolProfile, ToolchainProbe};

@@ -29,6 +29,8 @@ use skott::{
 
 #[path = "loop_integration/generation.rs"]
 mod generation;
+#[path = "loop_integration/operations.rs"]
+mod operations;
 #[path = "loop_integration/progress.rs"]
 mod progress;
 

@@ -1200,6 +1200,23 @@ allowlisted environment values) and are capped at 65,536 bytes per retained
 field. Agent logs are written under `.kvist/logs`; attempt and verification
 records are durable JSONL files.
 
+### Recovery and aggregate model limits
+
+Initial authoring, transport retries and verification repairs share the
+original approved model deadline, conservative token debit and stall history.
+Reported usage above its reservation increases the debit; unknown usage cannot
+refund resources. Verification retains its separately approved enforcement
+limits and uses no model tokens, but its elapsed time reduces the sequence's
+remaining time. Diagnostics and attempt records expose those charges and bounds.
+
+Two stall corrections and at most four outer verification repairs are allowed.
+Changed bytes/new observations permit useful reverification, not new budgets.
+Repeated unchanged verification failures stop with a focused blocker rather
+than endlessly asking for the same repair. Cancellation, retained decisions,
+unknown effects and failed evidence/digests stop scheduling. Inspect recorded
+results and reconcile possible effects before continuing; recovery never
+silently expands grants or substitutes task completion for a loop stop.
+
 **Safety status:** agent and test programs require an external sandbox runner
 that attests network denial, one writable component mount, and the required
 read-only root/parent context mounts. Every execution-sensitive input must

@@ -221,6 +221,12 @@ pub enum Event {
         name: String,
         failed: bool,
     },
+    /// A categorized failure and safe next step, not replay authorization.
+    ToolFailure {
+        description: String,
+        name: String,
+        failure: super::ToolFailure,
+    },
     /// The session produced a final answer.
     Finished { message: String },
     /// The prompt loop has exited and control has returned to the caller, even
@@ -230,7 +236,11 @@ pub enum Event {
     /// returned and stops showing "working…"; without it `running` would stay
     /// `true` forever and the UI looks stuck after the single-turn cap cuts a
     /// prompt off. `exhausted` marks a cap cutoff; `cancelled` marks a cancel.
-    PromptEnd { exhausted: bool, cancelled: bool },
+    PromptEnd {
+        exhausted: bool,
+        cancelled: bool,
+        reason: super::StopReason,
+    },
     /// The session failed before producing an answer.
     Failed(String),
     /// A non-terminal notice (for example, a compaction that trimmed the model
@@ -550,6 +560,10 @@ pub trait ToolExecutor: Send + Sync {
 /// full reasoning trace here is what keeps thinking inspectable even after
 /// compaction removes it from the model context.
 pub trait Recorder: Send {
+    /// Persists a categorized tool diagnostic before any subsequent effect.
+    fn tool_failure(&mut self, failure: &super::ToolFailure) -> Result<()> {
+        self.notice(&failure.describe())
+    }
     /// Persists a provisional decoded provider event before presentation.
     /// Failure stops the loop before a complete proposal can cause effects.
     fn model_event(&mut self, _event: &crate::ModelStreamEvent) -> Result<()> {
@@ -601,6 +615,8 @@ pub trait Recorder: Send {
 /// The outcome of running a session loop.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct RunSummary {
+    /// Frozen observed stopping cause, supplied on every entered run's exit.
+    pub stop_reason: Option<super::StopReason>,
     /// The final answer text, when the loop produced one.
     pub answer: Option<String>,
     /// The number of model turns performed.
@@ -743,6 +759,7 @@ pub(super) fn record_notice<S: EventSink>(
     sink.send(Event::Note(message))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn fold_outcome<S: EventSink, E: ToolExecutor>(
     session: &mut AgentSession,
     recorder: &mut Option<&mut dyn Recorder>,
@@ -751,16 +768,54 @@ pub(super) fn fold_outcome<S: EventSink, E: ToolExecutor>(
     turn: usize,
     intent: &ToolIntent,
     outcome: &ToolOutcome,
+    failure: Option<super::ToolFailure>,
 ) -> Result<()> {
     session.record_tool_result(&intent.id, &intent.name, outcome);
     if let Some(recorder) = recorder.as_mut() {
-        recorder.tool_result(turn, &intent.id, &intent.name, &intent.arguments, outcome)?;
+        recorder
+            .tool_result(turn, &intent.id, &intent.name, &intent.arguments, outcome)
+            .map_err(|error| Error::Recording {
+                reason: format!(
+                    "{}; tool result evidence is incomplete; reconcile any dispatched effects before continuing",
+                    error.describe()
+                ),
+            })?;
     }
     sink.send(Event::ToolResult {
         description: executor.describe(intent),
         name: intent.name.clone(),
         failed: outcome.failed(),
-    })
+    })?;
+    if let Some(failure) = failure.or_else(|| super::ToolFailure::from_outcome(outcome)) {
+        publish_tool_failure(sink, recorder, executor, intent, failure)?;
+    }
+    Ok(())
+}
+
+pub(super) fn publish_tool_failure<S: EventSink, E: ToolExecutor>(
+    sink: &S,
+    recorder: &mut Option<&mut dyn Recorder>,
+    executor: &E,
+    intent: &ToolIntent,
+    failure: super::ToolFailure,
+) -> Result<()> {
+    let recorded = recorder
+        .as_mut()
+        .map_or(Ok(()), |recorder| recorder.tool_failure(&failure));
+    let presented = sink.send(Event::ToolFailure {
+        description: executor.describe(intent),
+        name: intent.name.clone(),
+        failure,
+    });
+    match (recorded, presented) {
+        (Err(first), Err(next)) => Err(super::driver::merge_errors(
+            first,
+            next,
+            "tool diagnostic presentation",
+        )),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+        _ => Ok(()),
+    }
 }
 
 pub(super) struct PromptBudget {
@@ -793,6 +848,9 @@ impl PromptBudget {
             .name("prompt-deadline".into())
             .spawn(move || {
                 loop {
+                    if token.is_cancelled() {
+                        break;
+                    }
                     let remaining = deadline.map_or(Duration::MAX, |deadline| {
                         deadline.saturating_duration_since(Instant::now())
                     });
@@ -824,6 +882,21 @@ impl PromptBudget {
         self.deadline.map_or(Duration::MAX, |deadline| {
             deadline.saturating_duration_since(Instant::now())
         })
+    }
+
+    pub(super) fn stop_reason(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Option<super::StopReason> {
+        if self.expired.load(Ordering::SeqCst) {
+            Some(super::StopReason::Limit(super::BudgetResource::WallTime))
+        } else if cancellation.is_cancelled() {
+            Some(super::StopReason::Cancelled)
+        } else if self.remaining().is_zero() {
+            Some(super::StopReason::Limit(super::BudgetResource::WallTime))
+        } else {
+            None
+        }
     }
 }
 

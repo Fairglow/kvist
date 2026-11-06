@@ -57,6 +57,66 @@ fn external_profile_runs_opaquely_once_with_explicit_authority_and_live_diagnost
 }
 
 #[test]
+fn phase4_external_discloses_unsupported_capabilities_before_dispatch() {
+    let workdir = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    let logs = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    let profile = profile();
+    let run = start(ExternalRequest {
+        profile: &profile,
+        prompt: "one opaque invocation",
+        working_directory: workdir.path(),
+        log_directory: &logs.path().join("private"),
+        wall_time: Duration::from_secs(3),
+        effort: None,
+        acknowledged_host: true,
+    })
+    .unwrap();
+    let path = run.journal_path().to_owned();
+    assert_eq!(run.wait().unwrap().attempts, 1);
+    let text = fs::read_to_string(path).unwrap();
+    let disclosure = text
+        .find("native generation loop detection")
+        .expect("pre-dispatch capability notice");
+    assert!(disclosure < text.find("external_dispatch").unwrap());
+    for fragment in ["unsupported", "steering", "not rolled back", "not replayed"] {
+        assert!(text.contains(fragment), "{text}");
+    }
+}
+
+#[test]
+fn phase4_opaque_effectful_failure_is_never_automatically_restarted() {
+    let workdir = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    let logs = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    let mut profile = profile();
+    if let Backend::ExternalAgent(backend) = &mut profile.profile.backend {
+        backend.arguments = vec![
+            "-c".into(),
+            "printf 'one-dispatch\\n' >> effects; printf effectful-failure >&2; exit 7".into(),
+        ];
+    }
+    let run = start(ExternalRequest {
+        profile: &profile,
+        prompt: "one effectful invocation",
+        working_directory: workdir.path(),
+        log_directory: &logs.path().join("private"),
+        wall_time: Duration::from_secs(3),
+        effort: None,
+        acknowledged_host: true,
+    })
+    .unwrap();
+    let journal = run.journal_path().to_owned();
+    assert!(run.wait().is_err());
+    assert_eq!(
+        fs::read_to_string(workdir.path().join("effects")).unwrap(),
+        "one-dispatch\n"
+    );
+    let journal = fs::read_to_string(journal).unwrap();
+    assert!(journal.contains("effectful-failure"));
+    assert_eq!(journal.matches("\"type\":\"external_dispatch\"").count(), 1);
+    assert!(journal.contains("\"automatic_retries\":false"));
+}
+
+#[test]
 fn an_external_profile_is_not_a_grant_and_cancellation_is_not_rollback() {
     let workdir = tempfile::tempdir().expect("workspace");
     let logs = tempfile::tempdir().expect("logs");
