@@ -816,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "galla"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "hex",
  "libc",
@@ -1170,7 +1170,7 @@ dependencies = [
 
 [[package]]
 name = "kvist"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "clap",
@@ -2284,7 +2284,7 @@ dependencies = [
 
 [[package]]
 name = "sav"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "clap",
  "hex",
@@ -2499,7 +2499,7 @@ checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
 name = "skott"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "clap",
  "crossterm",
@@ -3144,9 +3144,9 @@ checksum = "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6"
 
 [[package]]
 name = "uuid"
-version = "1.29.0"
+version = "1.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
+checksum = "4a06f08a856b009bc7bbaf7d3e79808595d032dd19074c0c2ef26e49e03e6bdc"
 dependencies = [
  "atomic",
  "getrandom 0.4.3",
