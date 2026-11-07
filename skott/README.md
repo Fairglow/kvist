@@ -27,9 +27,9 @@ run the test suite.
 `llama-server` or `Ollama` endpoint — must be configured. For sandboxed work
 (the default) a verified `galla-runner` and a Bubblewrap backend must be
 installed; skott fails closed rather than falling back to host execution.
-Rust builds additionally need a matching `Cargo.lock` and a vendored
-`.kvist/vendored` registry provisioned on the host when external dependencies
-are locked. Dependency-free Rust does not require a populated registry.
+Rust builds use available native Cargo registry/Git data from explicit
+`CARGO_HOME`, otherwise `HOME/.cargo`. Missing external sources must be
+provisioned explicitly on the host; dependency-free Rust needs no cache data.
 
 ## Quick start
 
@@ -42,10 +42,10 @@ skott --list-models         # print configured models and exit
 skott --setup               # shared discover/test/configure wizard; no config needed
 skott --setup --registry ./providers.toml
 skott --registry ./providers.toml -m local-coder
-skott --vendor --cwd /path/to/project    # explicit host Rust vendoring; no config needed
-skott --vendor --check                  # process-free, read-only metadata check
+skott --vendor --cwd /path/to/project    # explicit missing-only native cache provisioning
+skott --vendor --check                  # cheap catalogue or offline native source admission
 skott --vendor --offline                # reuse only existing Cargo cache
-skott --vendor --offline --force        # explicit cached-only repair/rebuild
+skott --vendor --offline --force        # explicit cached-only reconciliation
 ```
 
 Interactive execution requires a terminal; use `--headless` for unattended
@@ -54,41 +54,42 @@ native workspace execution.
 ## Offline dependencies
 
 From an ordinary Rust workspace with an existing `Cargo.lock`, run
-`skott --vendor`, then `skott --vendor --check`, and start Skott normally.
+`skott --vendor`, optionally use `skott --vendor --check`, and start Skott normally.
 If the lock is absent, resolve it explicitly on the host first. `--cwd`
 selects the workspace; `--config` and model/run flags are deliberately
 incompatible with this operation, so another project's config cannot redirect
 dependency writes.
 
-Vendoring is a human/operator host capability, **not a model tool or a
+Provisioning is a human/operator host capability, **not a model tool or a
 sandboxed install**. It may read host Cargo configuration and acquire the
 exact locked packages. `--offline` restricts Cargo to its existing cache; it
 does not promise OS network isolation of the host command. Toolchain/component
 installation, lock resolution and sandbox networking are not enabled by this
 command. Package-manager failure stops without automatic retries or fallback.
 
-Kvist and Skott use the same headless `kvist-dependencies` library and existing
-`.kvist/vendored`, `.kvist/sandbox-cargo/config.toml`, and
-`.kvist/vendor.json` minimal receipt. Both load optional `.kvist/vendor.toml`
-limits with shared defaults. The generated resolver accepts source
-replacements only, including locked Git sources; your `.cargo/config.toml`
-is not rewritten. Readiness checks package/native metadata presence and coherent
-lock/resolver/receipt state, without hashing source files. Cargo retains and
-checks its own required checksum metadata when consuming packages. Provisioning
-stages privately, rejects conflicting
-writers and lock drift, and preserves previous material before publication.
-Interrupted publication or a remaining `.kvist/vendor-operation.lock`
-requires inspecting the recorded state and reconciling it explicitly; never
-blindly remove the lock while another operator may be active.
+Skott uses the headless `kvist-dependencies::rust::cache` backend. Complete
+native material is reused without project vendor trees, source copies or file
+inventories. Canonical `--check` is a cheap process-free catalogue observation,
+not source integrity or origin attestation. Git/alternate-source mappings use
+explicitly disclosed bounded host Cargo metadata (`--offline --locked`): it may
+update Cargo administration or extract cached sources, but never acquires missing
+dependencies, compiles, changes the project lock or mints a receipt. Source
+admission failures do not gate live workspace resources or independent tools.
+Your project Cargo configuration
+is not overwritten and host configuration/credentials are not mounted.
 
-Agent execution stays network-denied and mounts the same shared tree read-only
-at `/rust/vendor`, without copying packages; its writable workspace vendor alias remains
-masked. **Restart the session after provisioning or dependency changes**
-to refresh directory/lock identities and runtime config. Per-tool read locks
-prevent publication while used, but idle sessions do not block it. Direct host
-edits are outside that lock protocol. Use `--force` for damaged source; `--check`
-does not attest full source integrity. See
-[shared limits and rationale](../docs/sandbox-toolchains-and-vendoring.md#shared-configurable-limits).
+Agent execution stays network-denied. Available registry and Git roots are
+mounted read-only at `/rust/cargo-registry` and `/rust/cargo-git`; only sandbox
+links expose them through private writable `/tmp/cargo-home` administration.
+Portable directory vendoring is a separate explicitly selected shared-provider
+export capability, not `skott --vendor` or the workspace default.
+Cargo locks and global-cache usage writes stay in sandbox scratch. No whole
+host Cargo home, credential store or configuration is exposed. Host edits remain
+live, and root changes refresh on the next tool without restart or a receipt
+gate. Workspace Cargo is offline but may resolve its writable lock; explicit
+`--locked` remains available. Missing sources affect dependency-using commands,
+not the installed compiler or independent tools. No automatic fetch or host
+fallback occurs.
 Availability does not guarantee that arbitrary
 build scripts, system libraries, or out-of-workspace path dependencies work.
 The shared backend and Skott command support **Rust first**. Other languages
@@ -101,7 +102,7 @@ wait for validated tools and model readiness. Without `--model`, Skott reuses
 the default provider's already-loaded model, including llama-server router
 mode. A manual model choice is never overwritten by late discovery.
 
-Startup shows a short toolchain list, Rust selection/vendor status, and model
+Startup shows a short toolchain list, Rust selection/native-cache status, and model
 context budget. Exact resource identities stay in private session logs rather
 than cluttering the live transcript. **Ctrl+Q** restores the terminal first,
 cancels initialization or active provider work, and then joins owned workers;
@@ -134,7 +135,7 @@ Failures show a category, bounded diagnostics and a safe next step rather than
 a success checkmark. Explicit limits identify the exhausted resource. When a
 tool may have effects, inspect the current files/results before choosing another
 action; cancellation and failed recording do not undo completed work. Restore
-missing approved local tools/vendor resources separately, not by silently
+missing approved local tools/cache resources separately, not by silently
 downloading dependencies or expanding permissions.
 
 Sandbox preparation uses the tool's wall-time budget, capped at 120 seconds
@@ -302,7 +303,7 @@ above rather than copying another project's whole execution configuration.
 Inside the sandbox the selected workspace appears at `/workspace`, regardless
 of its host location. The whole selected directory is writable; Skott does not
 apply Kvist task-level protected-path authority. Rust projects additionally
-need host-provisioned locked/vendor resources; referencing provider profiles
+need available host native dependency-cache data; referencing provider profiles
 does not provision them or authorize dependency downloads.
 
 ## Theming
@@ -403,15 +404,15 @@ than a guarantee of exact provider-token accounting.
 For Rust, startup resolves an already installed standard rustup toolchain from
 the workspace's `rust-toolchain.toml`/`rust-toolchain` pin or the user's default.
 The concrete installation and trusted Cargo wrappers are mounted read-only,
-without mounting the home directory, rustup configuration, Cargo credentials,
-or host caches. Missing tools/components must be provisioned separately.
-Workspace `.kvist/vendored` dependencies are copied into a bounded private
-read-only snapshot; normal PATH Cargo forces `--offline --locked`, uses
-sandbox-local source paths and private scratch. Provision a matching
-`Cargo.lock` before building; a missing or stale lock fails without changing it.
+without mounting the home directory, rustup configuration or Cargo credentials.
+Only native registry/Git data roots are granted read-only; Cargo administration
+stays private. Missing tools/components must be provisioned separately.
+Normal PATH Cargo forces `--offline`, not `--locked`, and uses native cache
+sources without package copies or a vendor receipt prerequisite.
 Explicit alternate Cargo paths are not rewritten, and the standalone workspace
-remains writable. Changes to the pin require restarting the session; changes to
-vendored dependencies require reprovisioning on the host and restarting.
+remains writable. Pin and native cache root changes refresh at subsequent tools;
+host source edits are live. Missing sources require explicit host provisioning,
+never automatic acquisition or a session restart.
 
 ## Authority and safety
 

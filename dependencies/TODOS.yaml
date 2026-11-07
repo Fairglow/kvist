@@ -14,6 +14,56 @@ component:
         expected_revision: sha256:b4faacbb8b257350cddba894cbc3383c914600bcf7fa6e9cad6d8ff5eb2877f3
         observed_revision: sha256:599801ba008e862798464d6511ac9236a4a87fc6764d507cb83aaefe6386cd38
 tasks:
+  - id: native-cache-write-tests
+    title: "write_tests: native Cargo cache reuse"
+    description: "Pin cold/partial registry/Git acquisition classification, request-bound private-home metadata aliases, native admission and zero-copy warm reuse."
+    context: "User-approved zero-copy native backend; explicit local advisory exception while review receipts are unavailable."
+    purpose: "Specify useful native reuse before implementation."
+    expected_outcome: "Focused native regressions fail before the cache API exists."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#DEP-REQ-NATIVE-ADMISSION", "REQUIREMENTS.md#DEP-REQ-NATIVE-CACHE", "REQUIREMENTS.md#DEP-REQ-NATIVE-PROVISION"]
+    timestamps: {created_at: "2026-11-07T21:40:00Z", updated_at: "2026-11-07T22:34:56Z", completed_at: "2026-11-07T22:34:56Z"}
+  - id: native-cache-implement-code
+    title: "implement_code: shared native Cargo cache"
+    description: "Add process-backed native admission and typed source-only runtime selection; configured callbacks validate exact native metadata without host fallback."
+    context: >-
+      Operator selects cache roots; native Cargo establishes otherwise unsupported
+      source mapping and coordinates cache writes. The owned 12,000-package native
+      fixture measured view 0.342711s, initial receipt provision 1.178752s, and
+      matching-receipt provision 0.339955s; acquisition callbacks 0, receipt 112
+      bytes, legacy state unchanged. Syscall traces observed no child/copy calls
+      and only registry/index namespace enumeration. Fixture and traces cleaned.
+    purpose: "Replace routine vendor export with missing-only native work."
+    expected_outcome: "Focused native tests pass without redundant package walks/copies."
+    kind: implementation
+    status: completed
+    depends_on: [native-cache-write-tests]
+    requirements: ["REQUIREMENTS.md#DEP-REQ-EXECUTION", "REQUIREMENTS.md#DEP-REQ-NATIVE-ADMISSION", "REQUIREMENTS.md#DEP-REQ-NATIVE-CACHE", "REQUIREMENTS.md#DEP-REQ-NATIVE-PROVISION"]
+    timestamps: {created_at: "2026-11-07T21:40:00Z", updated_at: "2026-11-07T22:34:56Z", completed_at: "2026-11-07T22:34:56Z"}
+  - id: native-cache-security-audit
+    title: "security_audit: native cache boundaries"
+    description: "Independently inspect cache authority, source identity, native coordination limits and failure recovery."
+    context: "Implementer must not certify its own work or write IMPL."
+    purpose: "Retain independent source-only evidence."
+    expected_outcome: "Scoped findings and concrete authority limits recorded separately."
+    kind: security-audit
+    status: completed
+    depends_on: [native-cache-implement-code]
+    requirements: ["REQUIREMENTS.md#DEP-REQ-NATIVE-ADMISSION", "REQUIREMENTS.md#DEP-REQ-NATIVE-CACHE", "REQUIREMENTS.md#DEP-REQ-NATIVE-PROVISION"]
+    timestamps: {created_at: "2026-11-07T21:40:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
+  - id: native-cache-compliance-review
+    title: "compliance_review: native offline reuse"
+    description: "Compare approved local intent with independent source-derived evidence and attributed tests without source access."
+    context: "Independent source-only and separate source-blind records are linked from IMPL.md; scoped correspondence and evidence limits do not certify or accept the component."
+    purpose: "Preserve discrepancies for explicit arbitration."
+    expected_outcome: "Source-blind comparison persisted by separate reviewer."
+    kind: compliance-review
+    status: completed
+    depends_on: [native-cache-security-audit]
+    requirements: ["REQUIREMENTS.md#DEP-REQ-NATIVE-ADMISSION", "REQUIREMENTS.md#DEP-REQ-NATIVE-CACHE", "REQUIREMENTS.md#DEP-REQ-NATIVE-PROVISION"]
+    timestamps: {created_at: "2026-11-07T21:40:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
   - id: shared-area-write-tests
     title: "write_tests: one shared vendor area"
     description: "Pin lightweight readiness, minimal receipt, configurable quotas and shared use/publication exclusion."

@@ -12,7 +12,8 @@ use crate::error::{Error, Result};
 ///
 /// This is not an agent tool. Acquisition uses host operator authority;
 /// subsequent agent execution remains network-denied and uses the shared
-/// read-only vendor area. `check` does not resolve a compiler or start a process.
+/// read-only native data. Canonical checks are process-free; otherwise the
+/// operator check uses acquisition-free native offline Cargo admission.
 pub fn run(
     project: &Path,
     check: bool,
@@ -30,13 +31,47 @@ pub fn run(
     let project = project.as_path();
     let limits = kvist_dependencies::VendorLimits::load(project).map_err(from_error)?;
     if check {
-        return rust::check(project, cancellation).map_err(from_error);
+        let home = rust::cache::home().map_err(from_error)?;
+        let sources = rust::cache::sources(project, &home, cancellation).map_err(from_error)?;
+        let report = match sources.admission {
+            rust::cache::SourceAdmission::Catalogue(report) => report,
+            rust::cache::SourceAdmission::NoLock => {
+                return Err(failure(
+                    &"Cargo.lock is required for an explicit locked dependency check",
+                ));
+            }
+            rust::cache::SourceAdmission::CargoOfflineRequired { .. } => {
+                eprintln!(
+                    "Explicit host Rust source admission for `{}`: metadata --offline --locked --format-version 1 --all-features. Cargo may read host configuration, update native cache administration or extract cached sources; no acquisition, compilation, lock resolution or receipt minting.",
+                    crate::error::terminal_text(&project.to_string_lossy()),
+                );
+                let cargo = crate::toolchain::rust_environment::host_cargo(project, cancellation)?;
+                rust::cache::admit(
+                    project,
+                    &home,
+                    &rust::ProvisionOptions {
+                        cargo,
+                        offline: true,
+                        vendored_dir: None,
+                        timeout: Duration::from_secs(limits.timeout_secs),
+                        force: false,
+                    },
+                    cancellation,
+                )
+                .map_err(from_error)?
+                .report
+            }
+        };
+        if !report.ready() {
+            return Err(failure(&report.missing_human_readable()));
+        }
+        return Ok(report);
     }
     // Require a bounded lock before resolving a toolchain or creating state.
     let lock = project.join("Cargo.lock");
     let metadata = std::fs::symlink_metadata(&lock).map_err(|error| {
         failure(&format!(
-            "cannot read existing Cargo.lock: {error}; vendoring currently supports Rust only"
+            "cannot read existing Cargo.lock: {error}; provisioning currently supports Rust only"
         ))
     })?;
     if !metadata.is_file() || metadata.len() > limits.max_lockfile_bytes {
@@ -45,7 +80,7 @@ pub fn run(
         ));
     }
     let cargo = crate::toolchain::rust_environment::host_cargo(project, cancellation)?;
-    rust::provision(
+    rust::cache::provision(
         project,
         rust::ProvisionOptions {
             cargo,
@@ -56,6 +91,7 @@ pub fn run(
         },
         cancellation,
     )
+    .map(|view| view.report)
     .map_err(from_error)
 }
 
@@ -70,7 +106,7 @@ pub(crate) fn failure(error: &impl std::fmt::Display) -> Error {
     Error::ToolPrerequisite {
         tool: "Rust offline dependencies".into(),
         reason: format!(
-            "{error}. Resolve Cargo.lock explicitly on the host if required by this explicit provision/check; run `skott --vendor [--cwd DIR]` (or add --offline for an existing cache), then `skott --vendor --check`. Live workspace tools notice provisioned changes on subsequent invocations without restart. Interrupted publication requires inspection, never blind replay"
+            "{error}. Resolve Cargo.lock explicitly on the host if required by this explicit provision/check; run `skott --vendor [--cwd DIR]` (or add --offline for cached-only acquisition). `--check` never acquires sources: canonical checks are process-free, while Git/alternate admission uses explicitly disclosed offline Cargo metadata. Admission failure does not gate live workspace resources or independent tools. Host changes refresh on subsequent invocations without restart or automatic replay. Inspect partial native acquisition before explicitly retrying; never delete operator locks or cache data as a recovery shortcut"
         ),
     }
 }

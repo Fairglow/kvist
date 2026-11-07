@@ -416,7 +416,7 @@ fn cargo_identities() -> Value {
     })
 }
 
-/// A network-enabled `<cargo> fetch` acquisition request in the exact v1 shape:
+/// A network-enabled `<cargo> fetch --locked` export acquisition request:
 /// a Cargo toolchain rooted at an immutable directory that contains `cargo`, a
 /// writable Cargo home, an isolated writable lockfile workspace, target
 /// scratch, and pre-execution promotion intent.
@@ -425,7 +425,7 @@ fn cargo_acquisition_request() -> Value {
         "protocol": "kvist-sandbox-request-v1",
         "protocol_version": 1,
         "phase": "dependency-acquisition",
-        "argv": ["/workspace/toolchain/cargo", "fetch"],
+        "argv": ["/workspace/toolchain/cargo", "fetch", "--locked"],
         "working_directory": "/workspace/lockfile",
         "environment": {
             "HOME": "/workspace/scratch/home",
@@ -512,7 +512,7 @@ fn cargo_acquisition_request() -> Value {
     })
 }
 
-/// An offline `<cargo> test --locked` verification request in the exact v1
+/// An offline `<cargo> test --offline --locked` export verification request:
 /// shape: a Cargo toolchain, a read-only approved Cargo-home generation, target
 /// scratch, and a read-only verification workspace.
 fn cargo_verification_request() -> Value {
@@ -520,7 +520,7 @@ fn cargo_verification_request() -> Value {
         "protocol": "kvist-sandbox-request-v1",
         "protocol_version": 1,
         "phase": "verification",
-        "argv": ["/workspace/toolchain/cargo", "test", "--locked"],
+        "argv": ["/workspace/toolchain/cargo", "test", "--offline", "--locked"],
         "working_directory": "/workspace/component",
         "environment": {
             "HOME": "/workspace/scratch/home",
@@ -611,6 +611,21 @@ fn cargo_verification_request() -> Value {
             "identity": digest(b"verification-scratch")
         }
     })
+}
+
+#[test]
+fn portable_export_verification_does_not_authorize_metadata() {
+    let mut request = cargo_verification_request();
+    request["argv"] = json!([
+        "/workspace/toolchain/cargo",
+        "metadata",
+        "--offline",
+        "--locked",
+        "--format-version",
+        "1",
+        "--all-features"
+    ]);
+    assert!(validation::parse_and_validate(&encode(&request)).is_err());
 }
 
 fn encode(value: &Value) -> Vec<u8> {
@@ -1238,14 +1253,14 @@ fn cargo_phase_topology_is_exact() {
         "destination": "/workspace/cargo-home",
         "identity": digest(b"approved-cargo-home")
     });
-    let mut locked_fetch = cargo_acquisition_request();
-    locked_fetch["argv"] = json!(["/workspace/toolchain/cargo", "fetch", "--locked"]);
+    let mut unlocked_fetch = cargo_acquisition_request();
+    unlocked_fetch["argv"] = json!(["/workspace/toolchain/cargo", "fetch"]);
     for request in [
         no_lockfile,
         wrong_working_directory,
         extra_grant,
         verification_cache,
-        locked_fetch,
+        unlocked_fetch,
     ] {
         assert!(validation::parse_and_validate(&encode(&request)).is_err());
     }
@@ -1561,9 +1576,12 @@ fn schema_mirrors_parser_enumerants_and_required_fields() {
         purposes,
         [
             "authoring",
+            "cargo-config",
             "context",
             "dependency-cache",
             "lockfile",
+            "registry",
+            "runtime",
             "scratch",
             "toolchain",
             "verification"

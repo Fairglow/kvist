@@ -262,12 +262,9 @@ fn offline_cargo_verification_builds_tested_project_denied_network() {
 
 #[test]
 #[ignore = "requires live sandbox environment and network access"]
-fn acquisition_sandbox_provisions_vendored_registry_before_verification() {
-    // End-to-end: a stale registry is re-provisioned by the in-sandbox
-    // acquisition phase (network-allow `cargo fetch`), repacked into the
-    // vendored registry offline, and then the project verifies offline. The
-    // network step is the allowlisted `cargo fetch` inside the sandbox; the
-    // host never resolves crate sources.
+fn configured_native_preparation_reuses_registry_before_offline_verification() {
+    // Configured native preparation reuses cached sources or acquires missing
+    // material through the sandbox, without a directory export.
     let Some(runner) = locate_runner() else {
         eprintln!("skip: no built sandbox runner; build it first");
         return;
@@ -318,8 +315,7 @@ fn acquisition_sandbox_provisions_vendored_registry_before_verification() {
         acquisition: AcquisitionConfig::default(),
     };
 
-    // The in-sandbox acquisition path provisions the registry; the host
-    // `cargo vendor` pass is the fallback (never failing the live test).
+    // Configured acquisition never falls back to host resolution.
     let report = match vendor_project(
         project.path(),
         VendorOptions {
@@ -340,15 +336,8 @@ fn acquisition_sandbox_provisions_vendored_registry_before_verification() {
         "in-sandbox acquisition must leave the project ready for offline builds"
     );
 
-    // The vendored registry is populated (the fetched material was repacked).
-    let vendored = project.path().join(".kvist").join("vendored");
-    assert!(
-        vendored.is_dir()
-            && std::fs::read_dir(&vendored)
-                .map(|mut d| d.next().is_some())
-                .unwrap_or(false),
-        "the acquisition sandbox must have repacked the registry into the vendored dir"
-    );
+    assert!(!project.path().join(".kvist/vendored").exists());
+    assert!(project.path().join(".kvist/cargo-cache.json").is_file());
 
     // Now verify offline: the network-denied effect sandbox must build and test.
     let approved_runner = runner_identity(&config, project.path(), VcsSelection::Git)

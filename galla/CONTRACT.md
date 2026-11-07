@@ -87,8 +87,9 @@ runner constructs a complete Bubblewrap command line that establishes user,
 IPC, PID, UTS, cgroup, and network namespace boundaries. Resource limits are
 enforced via the `prlimit` system call. Network egress is proxied through a
 source-aware guard that restricts connections to allowlisted registries and
-Git sources. Immutable cache promotion uses `RENAME_NOREPLACE` to guarantee
-atomicity.
+Git sources. The separate portable-export generation primitive uses
+`RENAME_NOREPLACE` for atomic publication; native acquisition writes directly
+to approved data roots without generation construction.
 
 ## Required interfaces
 
@@ -113,9 +114,10 @@ canonical absolute working directory, portable environment entries, a network
 profile (`deny`, or `package-sources` for mediated acquisition), bounded
 resources (including an optional `max_cache_bytes`), approval-bound identities,
 typed mount grants, a `system` or `cargo` toolchain, an optional mediated
-dependency cache (`cargo_home`/`registry`/`git`, a `writable` or `approved`
-endpoint, an acquisition lockfile workspace, and result-bound promotion
-metadata), and scratch. Cargo phases have exact allowlisted environments, exact
+dependency cache (`cargo_home`/`registry`/`git`, either explicit `native` data
+endpoints or export-mode `writable`/`approved` whole-home endpoints, an
+acquisition lockfile workspace, and export promotion intent), and scratch.
+Cargo phases have exact allowlisted environments, exact
 argv, and exact toolchain/grant/cache topology. The runner independently
 derives source identities using documented domain-separated encodings and
 rejects a mismatch. Network egress is strictly mediated via the source-aware proxy,
@@ -150,6 +152,146 @@ Rust parser governs. The retired version-one request shape is not recognized.
 
 ## Behavioral guarantees
 
+### Native Cargo source mode
+
+`Cache.native: Option<NativeCache>` explicitly selects native mode when present.
+`NativeCache` is a closed object with optional `registry` and `git`
+`CacheEndpoint` fields and optional `registries` descriptors (omission/null is
+allowed). `Cache.registry` is exactly
+`/workspace/cargo-registry`; `Cache.git` is exactly `/workspace/cargo-git`.
+Present native registry/Git endpoints must name those destinations and bind
+exact grant identities with `Purpose::Registry` / `Purpose::DependencyCache`.
+Their grants are read-only during verification and read-write only during
+dependency acquisition. The backend requires ordinary pinned data directories,
+not file origins. Missing endpoints have no corresponding data grant.
+`Cache.cargo_home` and `CARGO_HOME` are exactly
+`scratch.destination + "/cargo-home"`; writable/approved whole-home endpoints
+and promotion must be absent. There is no data promotion: acquisition writes
+directly to the provider/caller-approved persistent data grants.
+
+Test verification is exactly `<cargo> test --offline --locked`, with denied network
+and exactly `HOME=scratch/home`, `PATH=/workspace/bin`,
+`CARGO_HOME=scratch/cargo-home`, `CARGO_TARGET_DIR=scratch/target`,
+`CARGO_NET_OFFLINE=true`. Runtime is one read-only grant at `/workspace/bin`.
+Acquisition is exactly `<cargo> fetch --locked`, with approved package sources,
+the same HOME/PATH/CARGO_HOME/target values, and
+`CARGO_NET_GIT_FETCH_WITH_CLI=false` instead of `CARGO_NET_OFFLINE`.
+Its exact writable Lockfile grant is bound to the before identity and equals
+the working directory. Before payload launch the native backend reads
+`Cargo.lock` through that pinned workspace without following links and verifies
+its content matches the before identity; mismatch fails without scratch
+initialization. This is a per-call precondition, not a frozen workspace.
+Scratch and toolchain identities remain exact.
+Native mode requires no whole-home cache-size bound or data manifest.
+Native writer/GC coordination belongs to the shared provider; Galla's private
+Cargo admin locks do not synchronize unrelated host cache actors.
+
+After binds the backend creates a private Cargo administrative directory under
+scratch and sandbox-only `registry`/`git` symlinks to declared data destinations.
+Absent endpoints get no links and have empty read-only namespace-local data
+directories, so acquisition cannot silently retain undeclared data in admin
+scratch instead of an approved persistent root. Conflicting paths fail without
+replacing them.
+Native cache data is not copied or mounted below the private Cargo home.
+`native` absent/null deliberately retains the explicitly approved export mode:
+approved read-only whole Cargo home plus Registry `/workspace/vendored` and
+CargoConfig `/workspace/.cargo` for genuine vendor/export verification.
+Export acquisition retains its explicit whole-home endpoint and promotion
+intent; it too uses `fetch --locked`. This is not a fallback or migration.
+
+### Native named registry aliases
+
+`NativeCache.registries: Option<Vec<NativeRegistryAlias>>` is optional
+(omission/null/empty array generate no config). Each closed
+`NativeRegistryAlias` has `name: String`, `index_origin: String`, and
+`protocol: NativeRegistryProtocol`. The closed enum `NativeRegistryProtocol`
+has `Git` / `Sparse` variants serialized as `"git"` / `"sparse"`. An omitted
+`protocol` defaults to `Sparse`; explicit null/unknown values are rejected.
+At most 64 aliases are accepted. Names are unique, 1–64 ASCII bytes from
+letters/digits/`-`/`_`, excluding `crates-io` and Cargo-invalid dotted names.
+Index origins are exact
+canonical production HTTPS URLs; sparse origins must end in `/`, while Git
+origins need not. Credentials, query, fragment,
+percent/path aliases and private/loopback origins are rejected. The wire origin
+does not include Cargo's `sparse+` prefix.
+The caller can choose protocol from exact locked source prefixes matching the
+configured origin: `registry+https` means Git; `sparse+https` or
+`registry+sparse+https` means sparse. Conflicting matches require an explicit
+ambiguity error; an unused alias can conservatively use sparse. Galla does not
+infer protocol from host configuration or acquire additional authority.
+
+For native acquisition, aliases equal the additional `AllowedSource::CargoRegistry`
+name/index-origin set, excluding built-in `crates-io`. Every alias must match,
+and every additional registry source must have its alias. Verification has no
+network sources; its caller-approved aliases do not grant network authority.
+No environment, argv, endpoint or source-replacement capability is added.
+
+The backend writes only name-sorted `[registries."<name>"]` tables with
+`index = "<index_origin>"` for Git or `index = "sparse+<index_origin>"` for
+sparse into read-only
+`CARGO_HOME/config.toml` within private namespace-local admin. Names/values are
+escaped as TOML strings, not interpolated as syntax. Only these generated
+settings are present: no host credentials/config, `[source]`, replacement,
+tokens or downloader settings. The small generated buffer is passed through
+an owned backend-consumed memory descriptor, never a host data/config
+mount or a descriptor exposed to the payload. Native alias-free and portable
+export behavior remain unchanged.
+
+### Native Cargo metadata admission
+
+`Phase::Verification` with `Toolchain::Cargo` and present `Cache.native`
+additionally accepts exactly this seven-element argv:
+`[cargo, "metadata", "--offline", "--locked", "--format-version", "1", "--all-features"]`.
+The `cargo` element must still equal the exact approval-bound toolchain path.
+All native test verification constraints are unchanged: read-only verification
+workspace at the exact working directory; optional fixed read-only registry/Git
+endpoints; one read-only Runtime `/workspace/bin`; exact scratch/toolchain
+identities; no whole-home endpoint, lockfile workspace or promotion; and exactly
+`HOME=scratch/home`, `PATH=/workspace/bin`, `CARGO_HOME=scratch/cargo-home`,
+`CARGO_TARGET_DIR=scratch/target`, `CARGO_NET_OFFLINE=true`. Network is denied
+with no allowed sources. Metadata does not execute build scripts or compile.
+Portable export verification still accepts only the test operation; acquisition
+still accepts only `fetch --locked`.
+
+No request field, report envelope or readiness claim is added. On success,
+stdout is actual Cargo metadata JSON in format version 1, bounded by the existing
+resource/output policy. Cargo may spell native manifest paths through its
+private-home links: `scratch/cargo-home/registry/src/...` and
+`scratch/cargo-home/git/checkouts/...`, which alias the declared fixed data
+mounts. The caller must map only these exact request-bound aliases to its
+declared native roots before source-admission validation; Galla does not rewrite
+JSON or authorize arbitrary path aliases. The caller supervises execution and
+accepts stdout only on success
+before handing it to its source-admission validator. Input/validation and
+enforcement failures keep status 2/3 and non-secret stderr diagnostics;
+Cargo failures retain existing payload exit/stream behavior. Metadata output
+is evidence for caller validation, not a Galla cache readiness or content
+attestation report.
+
+### Bounded package-source transport
+
+The package-source proxy admits at most 16 active clients per request; excess
+clients are closed after a best-effort 503 response rather than entering an
+unbounded queue. Proxy
+headers are limited to 16 KiB and five seconds from admission. Upstream
+resolution and TCP establishment each have a five-second deadline; an inactive
+relay closes after 30 seconds without bytes making progress in either direction.
+CONNECT preserves opaque bidirectional bytes and TCP half-close; encrypted paths
+remain uninspectable and authorization remains exact scheme/host/port authority.
+Plain HTTP retains the source path-prefix check. No protocol fields or consumer
+APIs are added. Guard startup failure prevents payload launch; request teardown
+stops admission and joins owned relay workers, with up to five seconds allowed
+for an in-progress TCP establishment. Standard-library DNS cannot be interrupted:
+one bounded resolver helper may finish its outstanding lookup after cancellation,
+but it holds no client/upstream sockets and creates no extra lookup threads.
+Authoring and verification retain their denied-network semantics.
+Before establishing a tunnel, failures use 400 for malformed headers, 403 for
+denied sources/addresses, 408 for header timeout, 431 for oversized headers,
+502 for failed upstream connection/resolution and 504 for upstream deadlines.
+These responses have empty bodies. After CONNECT success, transport failures
+close the stream rather than inject plaintext into TLS. Diagnostics are bounded
+and never contain submitted headers or tunneled bytes.
+
 `max_processes` is sampled descendant/process-group task accounting, including
 threads; it is not a kernel admission ceiling and may overshoot between samples.
 Process names containing spaces or parentheses must not corrupt accounting.
@@ -163,11 +305,12 @@ limit that is zero or exceeds its explicit safe maximum (wall time, output,
 processes, files, file bytes, scratch bytes, and cache bytes), a read-write
 grant to a read-only purpose or phase, traversal or overlapping destinations,
 invalid Cargo cache, scratch, or lockfile endpoint topology, and every retired
-request shape. Acquisition additionally rejects anything but `<cargo> fetch`,
+request shape. Acquisition additionally rejects anything but `<cargo> fetch --locked`,
 a mismatched Cargo toolchain/grant, wrong Cargo home, lockfile workspace,
-scratch target/HOME, path, source identity, or result-bound promotion metadata.
-Verification rejects anything but `<cargo> test --locked`, non-denied network,
-non-offline environment, mutable Cargo home, or wrong cache/scratch/workspace
+scratch target/HOME, path, source identity, or export promotion intent.
+Cargo verification rejects anything but the exact test operation or, only in
+native mode, the exact metadata admission operation. It rejects non-denied network,
+non-offline environment, mutable cache data, or wrong cache/scratch/workspace
 topology. The runner exposes validated transport-policy value types and
 descriptor-relative immutable generation construction, and enforces namespace,
 mount, resource, and network isolation via Bubblewrap and a local source-aware proxy;
@@ -176,13 +319,15 @@ back to host execution.
 
 ## Errors and failure semantics
 
-The request's promotion intent does not authorize a host destination. The CLI
+Portable-export promotion intent does not authorize a host destination. The CLI
 must not infer a mutable sibling `project-cache`. Until its provider integration
 supplies a trusted generation-parent descriptor, a successful fetch retains its
 attempt-local files and reports promotion unavailable, without publishing or
 replaying the payload. Providers can use the existing descriptor-relative
 `cache::open_trusted_generation_parent`, `open_isolated_attempt_root` and
-immutable-generation API after authorizing the destination.
+immutable-generation API after authorizing the destination. Native acquisition
+has no promotion intent or generation-parent requirement: its declared
+read-write data grants are the persistent destinations.
 
 Galla reserves `/.galla-sandbox` as a read-only namespace-local marker in every
 execution phase; grant destinations cannot cover it or its descendants.
@@ -213,10 +358,11 @@ independently, bounds untrusted input before parsing, and must be installed as
 a regular non-link file outside the selected project and worktree. The runner
 exercises process, namespace, and network authority exclusively via Bubblewrap
 and the network guard proxy according to validated request constraints.
-the cache primitive with provider-opened root capabilities — no-follow bounded
-immutable-generation construction. The current command boundary never invokes
-it; selecting or changing a project's current cache generation is not
-implemented.
+Portable-export generation construction requires provider-opened root
+capabilities and no-follow bounded immutable-generation construction. The
+current command boundary never invokes that primitive; selecting or changing
+a project's export generation is not implemented. Native acquisition instead
+uses the exact approved data-root grants and private Cargo administration.
 
 ## Compatibility and verification
 

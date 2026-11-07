@@ -17,10 +17,8 @@ pub enum KvistError {
         /// Actionable explanation, including backup location on partial failure.
         reason: String,
     },
-    /// The required external isolation boundary is absent or did not attest its capability.
-    #[error(
-        "sandbox runner `{runner}` is unavailable or cannot provide required isolation: {reason}"
-    )]
+    /// Sandbox preparation or execution failed, including isolation availability.
+    #[error("sandbox runner `{runner}` preparation or execution failed: {reason}")]
     SandboxUnavailable { runner: String, reason: String },
     /// A command-line syntax or help error produced by the parser.
     #[error(transparent)]

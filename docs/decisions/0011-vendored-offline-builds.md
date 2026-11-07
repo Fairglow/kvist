@@ -2,6 +2,11 @@
 
 ## Status
 
+Historical decision. [ADR 0020](0020-native-offline-dependency-caches.md)
+supersedes the default directory-source backend with native cache reuse.
+The directory-export description below is retained as historical rationale;
+it does not describe the current default or recognize retired receipt formats.
+
 Accepted. The decision is in place: `kvist vendor` provisions and enforces an
 offline vendored dependency registry, and the `maerg` vendoring module records
 and re-checks a versioned manifest so a sandbox build can resolve dependencies

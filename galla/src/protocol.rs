@@ -52,7 +52,7 @@ pub const MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 pub enum Phase {
     /// An authoring agent.
     Authoring,
-    /// A network-denied build/test verification.
+    /// A network-denied build/test verification or native source-only admission.
     Verification,
     /// A non-compiling Cargo dependency acquisition.
     DependencyAcquisition,
@@ -86,8 +86,8 @@ pub enum Purpose {
     DependencyCache,
     /// Isolated writable workspace containing the acquisition lockfile.
     Lockfile,
-    /// Read-only vendored dependency material (for example a `cargo vendor`
-    /// registry) that a locked build resolves dependencies from offline.
+    /// Registry data: read-only for verification, writable only for native
+    /// dependency acquisition; also explicit read-only vendor exports.
     Registry,
     /// Read-only language offline configuration that directs the resolver at
     /// the vendored material (for example a `.cargo/config.toml`).
@@ -270,10 +270,13 @@ pub struct CachePromotion {
 pub struct Cache {
     /// The actual `CARGO_HOME`, not an unrelated staging cache.
     pub cargo_home: String,
-    /// Must be `${cargo_home}/registry`.
+    /// Native fixed data destination, or `${cargo_home}/registry` in export mode.
     pub registry: String,
-    /// Must be `${cargo_home}/git`.
+    /// Native fixed data destination, or `${cargo_home}/git` in export mode.
     pub git: String,
+    /// Explicit native data mode with private scratch-owned Cargo admin state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<NativeCache>,
     /// Writable Cargo-home endpoint in acquisition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub writable: Option<CacheEndpoint>,
@@ -286,6 +289,45 @@ pub struct Cache {
     /// Bound acquisition result ready for immutable generation creation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promotion: Option<CachePromotion>,
+}
+
+/// Native Cargo data grants, excluding whole-home administration/configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeCache {
+    /// Optional registry index, archives and expanded source data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<CacheEndpoint>,
+    /// Optional Git databases and checkouts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<CacheEndpoint>,
+    /// Approved named registry aliases, excluding ambient configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registries: Option<Vec<NativeRegistryAlias>>,
+}
+
+/// One explicitly approved native registry name, index origin and protocol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeRegistryAlias {
+    /// Unique safe non-built-in registry name.
+    pub name: String,
+    /// Canonical HTTPS index origin, without Cargo's `sparse+` prefix.
+    pub index_origin: String,
+    /// Index transport semantics; omission selects sparse.
+    #[serde(default)]
+    pub protocol: NativeRegistryProtocol,
+}
+
+/// Cargo index semantics, independent of source networking authority.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NativeRegistryProtocol {
+    /// Preserve an HTTPS Git index URL without a sparse prefix.
+    Git,
+    /// Prefix an HTTPS index URL ending in `/` with `sparse+`.
+    #[default]
+    Sparse,
 }
 
 /// Writable target/HOME scratch endpoint.

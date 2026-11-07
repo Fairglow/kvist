@@ -185,3 +185,27 @@ correction and operational queue updates. Both freshly built release frontends
 reported the same ready root tree: 365 registry, zero Git and six local packages.
 Kvist reused it with host offline policy, without acquisition. These results
 remain attributed execution, not accepted intent revisions or certification.
+
+## Native cache observation (2026-11-07 UTC)
+
+Independent source-only observer `d38462f8-d2f9-4d78-a5bb-c512f6458890`
+derived the Dependencies section of
+[`native-cache-observation.md`](../docs/reviews/native-cache-observation.md).
+Its excluded inputs and source/test references are recorded there; no checks
+were executed by that observer.
+
+Observed native preparation publishes only schema version and lock digest,
+reuses registry/Git data and acquires at most once when incomplete. Canonical
+inspection hashes neither archives nor source-file contents; `force` refreshes
+the receipt rather than reacquiring apparently complete material. Source
+admission validates exact locked metadata beneath selected data roots. Native
+catalogues do not enforce directory-export aggregate-content quotas or attest
+source integrity. Historical export observations above are not the native
+backend's storage model. No acceptance or certification is inferred.
+
+Source-blind comparer `a6add327-2a55-4006-b3f6-b2750041ff26` independently
+compared scoped intent and these observations. Its correspondence, original
+documentation discrepancies, re-observed closure and execution limits are
+persisted in
+[`native-cache-comparison.md`](../docs/reviews/native-cache-comparison.md).
+No source was read by that comparer; broader failures remain unresolved.

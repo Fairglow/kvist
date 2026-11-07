@@ -1097,3 +1097,19 @@ The separate Skott lost-update qualification and linked-root snapshot gap
 remain for explicit human arbitration; they are not resolved by wrapper string
 tests or attributed consumer success. No acceptance, receipt, certification or
 accepted-revision/revalidation update is implied by completed review work.
+
+## Native wrapper observation (2026-11-07 UTC)
+
+Independent source-only observer `d38462f8-d2f9-4d78-a5bb-c512f6458890`
+derived the Sav section of
+[`native-cache-observation.md`](../docs/reviews/native-cache-observation.md).
+It excluded intent, queues, prior records/reviews and history and executed no
+checks. Observed initialization copies only rustup settings into private
+administration and links read-only installations/native data. Protected wrappers
+inject offline/locked resolution; workspace wrappers inject offline only.
+Callers retain validation, mounting and execution authority. Scripts alone
+provide no supervision or installation authority. No acceptance is inferred.
+
+Separate source-blind comparer `a6add327-2a55-4006-b3f6-b2750041ff26`
+established scoped script correspondence, not execution/isolation certification,
+in [`native-cache-comparison.md`](../docs/reviews/native-cache-comparison.md).

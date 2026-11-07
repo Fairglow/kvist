@@ -22,7 +22,7 @@ reference the named format without claiming conformance in unrelated areas.
 | RFC 2119 and RFC 8174 (BCP 14) | Adopted for normative prose                              | Uppercase MUST, SHOULD, MAY, and related terms have BCP 14 meanings only where the document includes the interpretation statement. Ordinary lowercase prose is not treated as a requirement level.                                                                                                         |
 | Architecture Decision Records  | Adopted practice                                         | Significant decisions use numbered Markdown files containing status, context, decision, alternatives, and consequences. Superseding decisions create a new ADR rather than rewriting history.                                                                                                              |
 | Semantic Versioning 2.0.0      | Intended for released public contracts                   | A public API or artifact format must be explicitly declared before SemVer compatibility claims are meaningful. Pre-release internal schemas remain independently versioned.                                                                                                                                |
-| Reproducible, offline builds   | Tailored local practice                                  | Dependencies are vendored, per supported language (Rust, Python/uv, Node/npm, Conan), from the exact locked versions on the host, recorded in a versioned manifest, and resolved offline inside the network-denied sandbox; network toolchain operations run as a bounded, approved host phase (ADR 0011). |
+| Reproducible, offline builds   | Tailored local practice                                  | Approved native dependency caches and required installation artifacts are reused per language, with explicit missing-only acquisition and network-denied read-only source consumption. Rust uses Cargo.lock; readiness is not per-file integrity attestation. Portable vendor exports remain explicit (ADR 0020). |
 
 ISO/IEC/IEEE 15288 and 12207 informed the recursive lifecycle, role separation,
 configuration management, traceability, verification, and review gates. Kvist
@@ -30,12 +30,12 @@ does not claim process conformance to either lifecycle standard because doing
 so would require a broader organizational assessment with no current product
 benefit.
 
-Rust uses one shared project vendor tree. Explicit protected provisioning keeps
-its minimal lock-bound receipt (ADR 0018); Skott workspace runtime does not
-require that receipt, reader leases or a frozen lock/resource view (ADR 0019).
-Cargo's native checksum metadata remains required when resolving sources.
-Neither application maintains a second source-file inventory or claims
-independent source-content attestation or build success from readiness.
+Rust reuses native registry/Git cache data read-only, with private writable Cargo
+administrative state. Small lock-bound preparation metadata is not a file
+inventory. Skott does not require a frozen lock/resource view (ADR 0019).
+Cargo owns native archive verification; directory-source checksum metadata is
+required only for deliberate directory exports, never fabricated for native
+cache use. No readiness check claims source-content attestation or build success.
 
 IEEE 1016 software design description guidance was considered. Its enduring
 view-based separation of design information is useful, but Kvist uses

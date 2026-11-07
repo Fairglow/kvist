@@ -27,11 +27,12 @@ pub struct Cli {
     ])]
     pub vendor: bool,
 
-    /// Verify existing locked dependencies without running Cargo or writing files.
+    /// Check canonical cached dependencies cheaply, or admit native Git/alternate
+    /// sources through offline Cargo metadata without acquisition or compilation.
     #[arg(long, requires = "vendor", conflicts_with = "offline")]
     pub check: bool,
 
-    /// Restrict explicit vendoring to Cargo's existing local cache.
+    /// Restrict explicit native cache provisioning to Cargo's existing material.
     /// This is Cargo's offline mode, not an OS sandbox.
     #[arg(long, requires = "vendor", conflicts_with = "check")]
     pub offline: bool,
@@ -78,7 +79,7 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub registry: Option<PathBuf>,
 
-    /// Save an unqualified setup profile, or explicitly rebuild vendor material.
+    /// Save an unqualified setup profile, or explicitly reconcile cached dependencies.
     #[arg(long, requires = "force_target", conflicts_with = "check")]
     pub force: bool,
 

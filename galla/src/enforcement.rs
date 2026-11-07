@@ -9,13 +9,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::origin::{self, OriginPolicy};
 use crate::probe::locate_backend;
 use crate::protocol::{Access, Grant, NetworkMode, Phase, Purpose, SandboxRequest};
 
 mod host_code;
+mod native_cache;
 pub mod source;
 pub(crate) mod system_layout;
+mod transport;
+use transport::start as start_network_guard_proxy;
+#[cfg(test)]
+mod transport_tests;
 
 fn add_workspace_vendor_mask(
     arguments: &mut Vec<String>,
@@ -45,300 +49,6 @@ fn add_workspace_vendor_mask(
         "/workspace/.kvist/vendored".to_owned(),
     ]);
     Ok(Some(vendor))
-}
-
-/// The parsed form of a network-guard request line.
-///
-/// The guard accepts two request shapes: an absolute-form request URI (used for
-/// plain HTTP, e.g. `GET http://host/path HTTP/1.1`) and the CONNECT method
-/// used to tunnel HTTPS through the proxy (e.g. `CONNECT host:443 HTTP/1.1`).
-enum ParsedRequestLine {
-    /// An absolute-form request targeting a plain-`http` upstream.
-    HttpAbsolute {
-        /// The upstream host.
-        host: String,
-        /// The upstream port (defaults to 80 when absent).
-        port: u16,
-        /// The request path forwarded verbatim to the upstream.
-        path: String,
-    },
-    /// A CONNECT tunnel request targeting an HTTPS upstream.
-    ConnectTunnel {
-        /// The upstream host.
-        host: String,
-        /// The upstream port (defaults to 443 when absent).
-        port: u16,
-    },
-}
-
-/// Parses the first line of an HTTP request received by the network guard.
-///
-/// Returns [`ParsedRequestLine::HttpAbsolute`] for an absolute-form request URI
-/// (plain HTTP) and [`ParsedRequestLine::ConnectTunnel`] for a `CONNECT`
-/// request line (HTTPS tunneling). Any other method, an empty authority, or a
-/// malformed authority/port yields `Err`.
-fn parse_request_line(first_line: &str) -> Result<ParsedRequestLine, ()> {
-    let parts: Vec<&str> = first_line.split_whitespace().collect();
-    if parts.len() != 3 {
-        return Err(());
-    }
-    let method = parts[0];
-    let target = parts[1];
-
-    if method.eq_ignore_ascii_case("CONNECT") {
-        let (host, port) = match target.split_once(':') {
-            Some((host, port)) => {
-                if host.is_empty() {
-                    return Err(());
-                }
-                let Ok(port) = port.parse::<u16>() else {
-                    return Err(());
-                };
-                validate_connect_host(host)?;
-                (host.to_owned(), port)
-            }
-            // A bare `host` defaults to the HTTPS port.
-            None => {
-                validate_connect_host(target)?;
-                (target.to_owned(), 443)
-            }
-        };
-        return Ok(ParsedRequestLine::ConnectTunnel { host, port });
-    }
-
-    if (method.eq_ignore_ascii_case("GET") || method.eq_ignore_ascii_case("HEAD"))
-        && let Some(stripped) = target.strip_prefix("http://")
-    {
-        let (authority, path) = match stripped.split_once('/') {
-            Some((auth, path)) => (auth, format!("/{}", path)),
-            None => (stripped, "/".to_owned()),
-        };
-        let (host, port) = match authority.split_once(':') {
-            Some((host, port)) if !host.is_empty() => {
-                let Ok(port) = port.parse::<u16>() else {
-                    return Err(());
-                };
-                (host.to_owned(), port)
-            }
-            // A bare `host` defaults to the HTTP port.
-            _ if !authority.is_empty() => (authority.to_owned(), 80),
-            _ => return Err(()),
-        };
-        return Ok(ParsedRequestLine::HttpAbsolute { host, port, path });
-    }
-
-    Err(())
-}
-
-/// Validates a `CONNECT` authority host: a registered name or IP literal that
-/// cannot contain path separators, userinfo, or characters that would let a
-/// malformed host masquerade as a different origin.
-fn validate_connect_host(host: &str) -> Result<(), ()> {
-    if host.is_empty() {
-        return Err(());
-    }
-    if host.contains(['/', '@', ' ']) {
-        return Err(());
-    }
-    // A colon is only legal inside a bracketed IPv6 literal, which the
-    // `split_once(':')` caller would have already rejected as malformed.
-    if host.contains(':') {
-        return Err(());
-    }
-    if !host
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
-    {
-        return Err(());
-    }
-    if host.starts_with('.') || host.ends_with('.') || host.contains("..") {
-        return Err(());
-    }
-    Ok(())
-}
-
-impl ParsedRequestLine {
-    /// The policy target string the origin matcher authorizes against.
-    ///
-    /// CONNECT tunnels are reauthorized as canonical HTTPS origins that always
-    /// carry an explicit port. Absolute-form HTTP requests are reauthorized as
-    /// canonical HTTP origins whose default port (80) is omitted so the matcher
-    /// sees the same canonical shape it validates elsewhere.
-    fn policy_target(&self) -> String {
-        match self {
-            ParsedRequestLine::ConnectTunnel { host, port } => {
-                format!("https://{host}:{port}/")
-            }
-            ParsedRequestLine::HttpAbsolute { host, port, path } => {
-                let port_suffix = if *port == 80 {
-                    String::new()
-                } else {
-                    format!(":{port}")
-                };
-                format!("http://{host}{port_suffix}{path}")
-            }
-        }
-    }
-}
-
-fn start_network_guard_proxy(
-    sources: &[crate::protocol::AllowedSource],
-) -> Option<(u16, std::sync::mpsc::Sender<()>)> {
-    use std::io::{Read, Write};
-    use std::net::{TcpListener, TcpStream};
-
-    let listener = TcpListener::bind("127.0.0.1:0").ok()?;
-    let port = listener.local_addr().ok()?.port();
-    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
-
-    // Select the transport policy mode that can represent the declared sources.
-    // A request whose every origin is loopback is a controlled local test
-    // endpoint and needs the test-loopback policy; anything else uses the
-    // production policy. An empty source list admits nothing in either mode.
-    let all_loopback = !sources.is_empty()
-        && sources.iter().all(|source| match source {
-            crate::protocol::AllowedSource::CargoRegistry {
-                index_origin,
-                download_origin,
-                ..
-            } => {
-                origin::is_loopback_origin_url(index_origin)
-                    && origin::is_loopback_origin_url(download_origin)
-            }
-            crate::protocol::AllowedSource::CargoGit { repository, .. } => {
-                origin::is_loopback_origin_url(repository)
-            }
-        });
-    let mut policy = if all_loopback {
-        OriginPolicy::test_loopback()
-    } else {
-        OriginPolicy::new()
-    };
-    for source in sources {
-        match source {
-            crate::protocol::AllowedSource::CargoRegistry {
-                index_origin,
-                download_origin,
-                ..
-            } => {
-                if policy.allow_url(index_origin).is_ok() {
-                    let _ = policy.allow_url(download_origin);
-                }
-            }
-            crate::protocol::AllowedSource::CargoGit { repository, .. } => {
-                let _ = policy.allow_url(repository);
-            }
-        }
-    }
-
-    listener.set_nonblocking(true).ok()?;
-
-    std::thread::spawn(move || {
-        while shutdown_rx.try_recv().is_err() {
-            let (mut client, _) = match listener.accept() {
-                Ok(conn) => conn,
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                    continue;
-                }
-                Err(_) => break,
-            };
-
-            let mut buffer = [0u8; 4096];
-            let count = match client.read(&mut buffer) {
-                Ok(n) if n > 0 => n,
-                _ => return,
-            };
-            let request_text = String::from_utf8_lossy(&buffer[..count]);
-            let first_line = request_text.lines().next().unwrap_or("");
-            let parsed = match parse_request_line(first_line) {
-                Ok(parsed) => parsed,
-                Err(()) => return,
-            };
-
-            let policy_target = parsed.policy_target();
-            let authorized = match &parsed {
-                ParsedRequestLine::HttpAbsolute { .. } => policy.permits(&policy_target),
-                // A CONNECT tunnel forwards an encrypted stream whose request
-                // path the proxy cannot inspect, so it is authorized on
-                // authority alone (scheme, host, port) rather than path-prefix.
-                ParsedRequestLine::ConnectTunnel { .. } => {
-                    policy.authorizes_authority(&policy_target)
-                }
-            };
-
-            if !authorized {
-                let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 14\r\nConnection: close\r\n\r\n403 Forbidden\n");
-                let _ = client.flush();
-                return;
-            }
-
-            match parsed {
-                ParsedRequestLine::ConnectTunnel { host, port } => {
-                    // HTTPS tunnel: complete the CONNECT handshake, then
-                    // bidirectionally forward the encrypted stream. When the
-                    // upstream connection fails, reject the client with a clear
-                    // error instead of silently dropping the connection.
-                    if let Ok(mut upstream) = TcpStream::connect((host.as_str(), port)) {
-                        let _ = client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n");
-                        let _ = client.flush();
-                        let mut sink = [0u8; 4096];
-                        let mut source = [0u8; 4096];
-                        loop {
-                            let read = match upstream.read(&mut sink) {
-                                Ok(0) => break,
-                                Ok(n) => (n, true),
-                                Err(_) => break,
-                            };
-                            if client.write_all(&sink[..read.0]).is_err() {
-                                break;
-                            }
-                            let read = match client.read(&mut source) {
-                                Ok(0) => break,
-                                Ok(n) => (n, false),
-                                Err(_) => break,
-                            };
-                            if upstream.write_all(&source[..read.0]).is_err() {
-                                break;
-                            }
-                        }
-                    } else {
-                        let _ = client.write_all(
-                            b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 19\r\nConnection: close\r\n\r\n502 Bad Gateway\n",
-                        );
-                        let _ = client.flush();
-                    }
-                }
-                ParsedRequestLine::HttpAbsolute { host, port, path } => {
-                    if let Ok(mut upstream) = TcpStream::connect((host.as_str(), port)) {
-                        let mut forward_header = format!("{} {} HTTP/1.1\r\n", "GET", path);
-                        for line in request_text.lines().skip(1) {
-                            if line.is_empty() {
-                                forward_header.push_str("\r\n");
-                                break;
-                            }
-                            if !line.to_lowercase().starts_with("proxy-") {
-                                forward_header.push_str(line);
-                                forward_header.push_str("\r\n");
-                            }
-                        }
-                        let _ = upstream.write_all(forward_header.as_bytes());
-                        let mut resp_buf = [0u8; 4096];
-                        while let Ok(n) = upstream.read(&mut resp_buf) {
-                            if n == 0 {
-                                break;
-                            }
-                            if client.write_all(&resp_buf[..n]).is_err() {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    Some((port, shutdown_tx))
 }
 
 fn inspect_and_promote_cache(request: &SandboxRequest) -> Result<(), String> {
@@ -495,29 +205,33 @@ pub fn run(request: SandboxRequest) -> ExitCode {
                 bwrap_args.push(path.to_owned());
             }
         }
-        if let Some((port, tx)) = start_network_guard_proxy(&request.network.allowed_sources) {
-            let proxy_url = format!("http://127.0.0.1:{port}");
-            bwrap_args.push("--setenv".to_owned());
-            bwrap_args.push("http_proxy".to_owned());
-            bwrap_args.push(proxy_url.clone());
-            bwrap_args.push("--setenv".to_owned());
-            bwrap_args.push("HTTP_PROXY".to_owned());
-            bwrap_args.push(proxy_url.clone());
-            bwrap_args.push("--setenv".to_owned());
-            bwrap_args.push("https_proxy".to_owned());
-            bwrap_args.push(proxy_url.clone());
-            bwrap_args.push("--setenv".to_owned());
-            bwrap_args.push("HTTPS_PROXY".to_owned());
-            bwrap_args.push(proxy_url.clone());
-            bwrap_args.push("--setenv".to_owned());
-            bwrap_args.push("all_proxy".to_owned());
-            bwrap_args.push(proxy_url.clone());
-            bwrap_args.push("--setenv".to_owned());
-            bwrap_args.push("ALL_PROXY".to_owned());
-            bwrap_args.push(proxy_url);
-            Some(tx)
-        } else {
-            None
+        match start_network_guard_proxy(&request.network.allowed_sources) {
+            Ok(guard) => {
+                let proxy_url = format!("http://127.0.0.1:{}", guard.port());
+                bwrap_args.push("--setenv".to_owned());
+                bwrap_args.push("http_proxy".to_owned());
+                bwrap_args.push(proxy_url.clone());
+                bwrap_args.push("--setenv".to_owned());
+                bwrap_args.push("HTTP_PROXY".to_owned());
+                bwrap_args.push(proxy_url.clone());
+                bwrap_args.push("--setenv".to_owned());
+                bwrap_args.push("https_proxy".to_owned());
+                bwrap_args.push(proxy_url.clone());
+                bwrap_args.push("--setenv".to_owned());
+                bwrap_args.push("HTTPS_PROXY".to_owned());
+                bwrap_args.push(proxy_url.clone());
+                bwrap_args.push("--setenv".to_owned());
+                bwrap_args.push("all_proxy".to_owned());
+                bwrap_args.push(proxy_url.clone());
+                bwrap_args.push("--setenv".to_owned());
+                bwrap_args.push("ALL_PROXY".to_owned());
+                bwrap_args.push(proxy_url);
+                Some(guard)
+            }
+            Err(error) => {
+                eprintln!("galla-runner: required package-source proxy unavailable: {error}");
+                return ExitCode::from(3);
+            }
         }
     } else {
         None
@@ -624,6 +338,13 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         bwrap_args.push(source.as_raw_fd().to_string());
         bwrap_args.push(grant.destination.clone());
     }
+    let _native_configuration = match native_cache::add(&mut bwrap_args, &request, &sources) {
+        Ok(configuration) => configuration,
+        Err(error) => {
+            eprintln!("galla-runner: {error}");
+            return ExitCode::from(3);
+        }
+    };
     let _vendor_origin = match add_workspace_vendor_mask(
         &mut bwrap_args,
         request.phase,
@@ -867,6 +588,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use super::transport::{ParsedRequestLine, parse_request_line};
     use super::*;
     use crate::origin::{OriginPolicy, RequestKind};
     use std::fs;
@@ -1040,8 +762,6 @@ mod tests {
         }
     }
 
-    // -- Network guard HTTPS CONNECT handling and URL parsing -----------------
-
     #[test]
     fn parses_https_connect_tunnel_request_line() {
         let parsed = parse_request_line("CONNECT example.com:443 HTTP/1.1").expect("connect");
@@ -1214,11 +934,8 @@ mod tests {
         // The CONNECT policy target carries only the authority (root path).
         let target = "https://static.crates.io:443/";
         assert!(policy.authorizes_authority(target));
-        // The same authority with a different port is denied.
         assert!(!policy.authorizes_authority("https://static.crates.io:8443/"));
     }
-
-    // -- Full URL parsing through the validated origin matcher ------------------
 
     #[test]
     fn connect_tunnel_authorizes_by_full_url_parsing() {
@@ -1230,8 +947,6 @@ mod tests {
             .allow_url("https://index.crates.io/")
             .expect("allow index");
 
-        // A CONNECT tunnel to the allowed authority is authorized even though
-        // the CONNECT target carries no path.
         assert!(
             policy.authorizes_request(RequestKind::CargoCrateDownload, "https://index.crates.io/")
         );

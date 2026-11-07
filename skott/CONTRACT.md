@@ -2,6 +2,36 @@
 
 # Skott — Contract
 
+## Native Cargo cache resources
+
+Under ADR 0020, Rust resources use `dependencies::rust::cache`: `home` selects
+explicit operator `CARGO_HOME`, otherwise `HOME/.cargo`; process-free `view`
+observes available native data, not integrity or implementation attestation.
+Available approved `registry` and `git` roots are mounted read-only at
+`/rust/cargo-registry` and `/rust/cargo-git`, respectively, never the whole Cargo
+home. Host configuration, credentials and cache administration are not mounted.
+Private sandbox Cargo administration owns locks, usage state and configuration,
+with sandbox-only links to those data mounts. No package copying or inventory,
+stale vendor receipt gate, source replacement, automatic fetch or host fallback
+is added. Live root topology refreshes at the next tool. Missing material is an
+offline dependency-using Cargo error, not compiler unavailability.
+
+`--vendor` now explicitly provisions the native cache through `rust::cache::provision`;
+`--check` uses process-free `sources` canonical catalogue observations and shared
+`admit` for otherwise unmapped Git/alternate sources. Admission runs bounded
+literal `cargo metadata --offline --locked --format-version 1 --all-features`
+through explicitly selected host Cargo, validating exact locked identities and
+native manifest roots. It cannot acquire sources or mint a receipt; missing or
+unsafe mappings fail nonzero. Such admission failure does not gate workspace
+execution or independently available tools.
+Existing locked material is reused,
+`--offline` permits cached-only explicit acquisition, and `--force` requests
+explicit provider reconciliation. These operations do not publish project vendor
+trees or overwrite project Cargo configuration. Shared vendor export helpers are
+not this Skott operation. Generic System/Authoring requests retain denied network,
+read-only compiler/runtime grants and existing writable/context boundaries.
+Workspace Cargo remains offline without forced `--locked`.
+
 ## Live workspace policy (ADR 0019)
 
 This user-directed consumer contract supersedes the older file-size/frozen
@@ -12,8 +42,8 @@ read/write/edit/append/patch; exact matching, atomic writes and lost-update
 protection remain. Large-file search exposes resumable scan offsets in addition
 to collected-result pagination, never implying complete unscanned coverage.
 
-Host changes to installed tools, project locks, vendored sources and selection/
-source configuration are legitimate. Existing mounts expose live data; changed
+Host changes to installed tools, project locks, native sources and selection
+are legitimate. Existing mounts expose live data; changed
 mount topology and generated configuration refresh on subsequent tools without
 a restart or drift error. Workspace Rust uses available installed/read-only
 resources without an application manifest or reader lease prerequisite. Cargo
@@ -23,16 +53,15 @@ Native Cargo source metadata remains a language-tool requirement, not isolation.
 The workspace requests no process file-write cap. Operator-added shell filters
 remain supported; default command substrings and recursive host-side symlink
 scans do not substitute for OS grants. Read-only system resources, outside-write
-denial, masked writable vendor aliases, private scratch, network policy and
+denial, read-only native dependency data, private scratch, network policy and
 bounded working memory/output/process supervision remain.
-The reserved workspace vendor alias is readable but read-only; it need not be
-hidden from ordinary inspection. Missing/unusable vendor material affects actual
+Missing/unusable native source material affects actual
 dependency resolution, not installed compiler/version/local-path operations.
-Native Cargo configuration tables are preserved; directory-source locations
-are retargeted to the approved vendor view. Invalid/unreadable configuration
-is reported explicitly and remains a Cargo configuration failure, not a
-reason to hide the installed compiler. Structured configuration parsing stays
-memory-bounded; this is not a general source-file quota.
+Project Cargo configuration remains workspace data consumed by Cargo, not a
+source of additional host grants. Host Cargo configuration is not copied into
+private administration. Invalid/unreadable project configuration remains a
+Cargo-local failure, not a reason to hide the installed compiler. No default
+source-replacement configuration or empty directory-source fallback is emitted.
 Named host registrations, including custom/linked toolchains, are supported
 when their resolved roots are outside the writable scope. No model-supplied
 host path becomes a grant. Auto Rust can become available after host provisioning
@@ -65,22 +94,32 @@ Cargo.lock and supports Rust only in this delivery.
 The operator command is explicit host package-management authority: Cargo may
 read project/user source configuration and use network sources. It is not a
 sandboxed agent command. `--offline` asks Cargo to use cached material with
-`--locked --offline`; it is not OS network isolation. `--check` starts no
-process and writes no files, fails nonzero on incomplete/stale managed metadata,
-and requires no provider or Rust installation. No automatic fallback/retry,
+`--locked --offline`; it is not OS network isolation. Canonical `--check` starts
+no process, writes no files and requires no provider or Rust installation.
+Git/alternate-source `--check` may use disclosed bounded host Cargo metadata,
+reading host configuration and updating native cache administration or extracting
+cached archives. It never downloads, compiles, changes the project lock or mints
+the native receipt. It needs an installed selected Cargo only for this admission.
+Missing sources or unsafe mappings fail explicitly.
+No automatic fallback/retry,
 toolchain installation, lock resolution or model-requested acquisition occurs.
 
-The common provider is `dependencies/CONTRACT.md`. Data remains in shared
-`.kvist` storage. Complete material is reused; provisioning publishes validated
-material without overwriting project `.cargo/config.toml`. Diagnostics identify
-scope, recovery and `skott --vendor --cwd DIR`; no raw package-manager output
-or credentials are printed. `--force` explicitly rebuilds otherwise reusable
-material and conflicts with `--check`. Both applications read the optional shared
+The common provider is `dependencies/CONTRACT.md`. Dependency data remains in the
+operator-selected native Cargo registry/Git roots. Complete material is reused;
+explicit missing-only provisioning does not overwrite project `.cargo/config.toml`.
+The shared provider retains only small native operation/lock-bound receipt metadata
+under project `.kvist`; `.kvist/cargo-cache.json` contains only `schema_version`
+and `lockfile_digest`. Matching recorded lock admission is not current source
+presence, origin integrity, runtime readiness or source-content attestation.
+Diagnostics identify scope, recovery and `skott --vendor --cwd DIR`; no raw package-manager output
+or credentials are printed. `--force` explicitly reconciles native receipt
+metadata without rebuilding complete reusable material and conflicts with
+`--check`. Both applications read the optional shared
 `.kvist/vendor.toml` limits, not model configuration. Cargo's own checksum
 metadata remains necessary; no independent file inventory is required.
-Runtime mounts the shared project vendor tree read-only without copying package
-contents. Its existing workspace alias is also readable read-only. Runtime
-consumption requires no shared reader lease, receipt or lock-digest gate.
+Runtime mounts present native registry/Git roots read-only without copying package
+contents or exposing a whole Cargo home. Runtime consumption requires no shared
+reader lease, receipt or lock-digest gate.
 Host edits remain live and replacement nodes/configuration are refreshed on
 subsequent tool boundaries without restart or automatic replay.
 Installed Rust resource preparation has a 180-second cooperative budget;
@@ -288,17 +327,17 @@ reads remain bounded and mutation link restrictions are unchanged.
 
 Rust resource selection occurs on the host before tools and consumes only
 installed resources. The effect sandbox receives a validated concrete
-toolchain and vendored resolver read-only, with private scratch and denied
+toolchain and native dependency data read-only, with private scratch and denied
 network. It never receives the user's home, rustup settings or credentials.
 These resources are not maerg task approval or compliance evidence.
 
-Prepared PATH Cargo resolves dependencies through the read-only `/rust/vendor`
-mount of the same host `.kvist/vendored` tree. Build output is written to
+Prepared PATH Cargo resolves dependencies through read-only `/rust/cargo-registry`
+and `/rust/cargo-git` mounts of selected host data roots. Build output is written to
 `/workspace/target` in the writable workspace and persists across invocations;
-Cargo cache, HOME and rustup selection settings remain invocation-local scratch.
-The runner overlays existing `/workspace/.kvist/vendored` contents read-only
-without hiding their data. Both views remain live. This does not change the
-host registry or sibling `.kvist` files.
+Cargo administrative state, HOME and rustup selection settings remain
+invocation-local scratch. Private Cargo-home links target only those sandbox
+data mounts; host configuration, credentials and cache administration are not
+exposed. Data views remain live, without modifying host cache or sibling project files.
 
 Journals retain bounded notices and request estimates, nullable provider usage,
 capacity provenance and terminal failures. Readable terminal records use
@@ -869,8 +908,8 @@ All hunks validate before the existing per-file atomic replacement.
   the writable project lock. Acquire missing packages separately. This wrapper is not a promise
   to rewrite explicit alternate Cargo paths or prevent authorized workspace
   edits to lockfiles.
-  The shared `.kvist/vendored` view uses sandbox-native paths rather than
-  trusting host-absolute paths in project configuration. Host pin/configuration
+  The native registry/Git views use sandbox-native paths rather than
+  trusting host-absolute paths in project configuration. Host pin/cache-root
   changes trigger live preparation at the next tool boundary without restart;
   unavailable Rust does not block independent tools. Old `resolve` remains System-only.
   Rustup queries see usable host-installed standard/custom-linked registrations
@@ -889,7 +928,7 @@ All hunks validate before the existing per-file atomic replacement.
   resources fail only their own operations, not compiler preparation.
   `cargo +<name>`, `rustc +<name>`, `rustdoc +<name>`, `rustup run <name> ...`
   and invocation-local `RUSTUP_TOOLCHAIN` may select another installed version.
-  PATH Cargo retains offline vendored resolution for those selections;
+  PATH Cargo retains offline native-cache resolution for those selections;
   its compiler and rustdoc follow the selected version rather than a fixed
   default compiler. PATH rustc/rustdoc and `RUSTC`/`RUSTDOC` use trusted
   selection-aware wrappers under `/rust/runtime/bin`.

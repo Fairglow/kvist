@@ -2,6 +2,11 @@
 
 ## Status
 
+Superseded for default storage/resource selection by
+[ADR 0020](0020-native-offline-dependency-caches.md). Native cache reuse removes
+the routine project vendor tree; the no-inventory principle and explicit
+portable export remain. The decision below is historical.
+
 Human-directed change on 2026-11-07. Supersedes ADR 0017's private vendor-copy
 and content-attestation choices, not its shared library or authority boundaries.
 

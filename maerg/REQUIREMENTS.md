@@ -2,6 +2,158 @@
 
 # Kvist Maerg Requirements
 
+## REQ-NATIVE-CARGO-ADMISSION
+
+Fetch/admission snapshots MUST select only bounded declared Cargo manifests,
+locks and empty explicit/auto-discovered target placeholders, not recursively
+inventory implementation/unrelated root subtrees. Unrelated sockets and files
+are outside this snapshot; selected targets and metadata retain no-link/type
+checks. Admission is read-only/offline and MUST NOT apply fetch-only origin
+approval to already-cached source identities. Acquisition retains its strict
+approved-source policy. Native registry alias configuration comes only from
+bounded explicit request descriptors, not copied workspace/host configuration.
+
+Canonical complete native-cache preparation MUST remain subprocess-free.
+Git/alternate sources requiring resolver admission MUST use actual bounded
+`cargo metadata --offline --locked --format-version 1 --all-features`.
+Configured admission MUST use the closed network-denied native Galla topology,
+private administrative home and read-only selected cache data, never host
+fallback. Admission stages manifests/locks/empty targets, not build source,
+executes no dependency build scripts, and preserves native errors.
+Source-only authoring selection MUST distinguish catalogue readiness, required
+native resolver admission and absent locks; it MUST NOT interpret a matching
+receipt as current source readiness, provenance or content attestation.
+The accepted native-cache bundle's advisory exception also covers this bounded
+admission operation; independent reviews remain separate.
+
+## REQ-NATIVE-PACKAGE-ACQUISITION
+
+Package-manager execution MUST be supervised with explicit time/output bounds,
+no automatic retries, retained native exit/timeout/I/O causes, and bounded
+redacted inert diagnostics. Optional accelerators MAY be absent; a present
+accelerator's failed operation MUST NOT silently trigger another installer.
+pnpm MUST populate the persistent project-native store directly with a frozen
+lockfile, not recursively copy the global store (including unrelated packages
+or links). Required installation of project `node_modules` remains useful work.
+This does not claim direct reuse of an arbitrary global pnpm store.
+Focused tests MUST distinguish direct native store selection, no unrelated
+source copy, preserved cached artifacts, optional absence and process failure.
+This human-approved scoped bundle has an explicit advisory exception while
+review receipts are unavailable; independent review does not imply acceptance.
+
+## REQ-NATIVE-GO-OFFLINE-CACHE
+
+Go preparation MUST reuse the operator's native module cache without copying
+module sources into `vendor/` or generating application checksum inventories.
+Explicit `GOMODCACHE` MUST be absolute; otherwise a bounded native `go env
+GOMODCACHE` query selects it. Selection MUST reject parent traversal and resolve
+existing ancestors of missing cache paths before checking broad-root authority.
+Explicit host acquisition MUST invoke native
+`go mod download`, without skipping it on a coarse application marker.
+The combined regular `go.mod`/`go.sum` identity MUST remain unchanged across
+preparation; changed input fails without deleting cached downloads or pretending
+rollback. Native process calls MUST have bounded time/output and no retries.
+
+Offline Go verification MUST mount only the module cache read-only at
+`/workspace/go-modules`, use writable scratch for compiler cache/output, run
+`go test -mod=readonly ./...`, and set `GOPROXY=off`, `GOSUMDB=off` and
+`GOTOOLCHAIN=local`. Host credentials/configuration and home MUST NOT be mounted.
+Verification MUST keep Go compilation concurrency within the existing runner
+process ceiling without increasing it: serialize package compilation and use
+two Go scheduling threads as a conservative native profile default.
+Native catalogue checks MAY inspect declared module metadata and native
+`ziphash`/extraction state without hashing all source files; they MUST NOT claim
+exact transitive completeness or integrity attestation. Unsupported replacement
+layouts MUST fail explicitly rather than broaden source mounts.
+
+Focused tests MUST cover cache selection, no-copy preparation, lock drift,
+optional empty graphs, missing native material and offline profile settings.
+Real native validation MUST be distinguished from unavailable sandbox checks.
+This human-approved Go backend has an explicit scoped advisory exception;
+independent safety observation, compliance comparison and acceptance remain
+separate.
+The approved local Go, package-manager and configuration changes are scoped
+exceptions to the shared Rust extraction's unchanged non-Rust baseline.
+General shared-library consolidation of non-Rust backends remains deferred.
+
+## REQ-NATIVE-RUST-LANGUAGE-CACHE
+
+The default Rust language strategy MUST obtain its native source selection from
+`dependencies/CONTRACT.md`'s `rust::cache::home` and `sources` APIs. It MUST NOT
+require or inspect legacy directory-export receipts, configuration or fences.
+Its report MUST retain the native view's lock identity and counts. Read-only
+mounts MUST expose only present native registry/Git data roots at the fixed
+sandbox paths, never the entire Cargo home, host configuration or credentials.
+Protected-task receipt gating remains a separate caller obligation. Explicit
+directory-export APIs remain available independently.
+Canonical catalogue results MAY supply readiness reports. Noncanonical graphs
+MUST receive actual native offline source admission through the parent's helper
+with the supplied sandbox configuration, never a recorded-admission shortcut
+or configured-to-host fallback. Direct context-free inspection MUST refuse
+noncanonical admission rather than infer host execution authority. The
+config-aware strategy hook MUST preserve existing non-Rust enforcement.
+
+Focused tests MUST use isolated operator-selected homes, prove path-only native
+catalogues need no export receipt/configuration, and check optional data mounts,
+incomplete catalogue reporting and invalid explicit home errors. They MUST NOT
+manufacture Cargo package archives/checksum files or inspect real operator
+interruption state. This human-directed integration has an explicit scoped
+advisory exception; independent review and acceptance remain separate.
+
+## REQ-NON-RUST-OFFLINE-CACHE-REUSE
+
+Non-Rust offline preparation MUST preserve package-manager-native cache and
+artifact semantics rather than fabricate Cargo-style per-file checksum
+inventories. JavaScript readiness and mount identities MUST select the same
+lock file as provisioning: pnpm first, then yarn, then npm. Generated Python,
+JavaScript and Conan offline configuration MUST reuse identical regular files
+without rewriting them; changed configuration MUST be replaced atomically.
+Selected configuration links and special files MUST fail without writing
+through them. Tests MUST cover manager precedence, unchanged reuse, repair of
+changed configuration and linked configuration refusal.
+
+Offline verification MUST inspect existing dependency material without
+automatically invoking host installers or project lifecycle scripts. Missing
+material MUST fail with explicit operator preparation guidance. Only the
+operator-facing provisioning command authorizes host non-Rust installation;
+selecting a sandbox is not host-installation authority.
+
+User documentation MUST distinguish native stores, downloaded archives,
+installed environments, materialization writes and current readiness limits.
+It MUST NOT claim exact non-Rust package completeness, lock-drift detection or
+transactional acquisition when only directory presence is checked. Native
+package acquisition changes, including direct pnpm stores, belong to separate
+provisioning work, outside this local preparation repair.
+
+This human-approved cache-backed design bundle has an explicit scoped advisory
+exception while intent-review receipts are unavailable. It is not acceptance;
+independent source observation and source-blind comparison remain pending.
+
+## REQ-FAILURE-DIAGNOSTICS
+
+Failures MUST retain the underlying cause through domain wrappers, including
+the affected path for filesystem/metadata failures and the original OS or
+parser diagnostic when available. Validation failures MUST identify the
+observed invalid condition (such as socket, FIFO, symbolic link, hard-link
+count or excessive size), not only repeat the expected invariant. Recovery
+guidance SHOULD state a safe next action without weakening isolation, deleting
+operator data, exposing credentials or authorizing fallback.
+
+Cargo context preparation and shared Rust resource inspection MUST satisfy
+these diagnostics for source entries, manifests, lock parsing, metadata reads,
+resource bounds and changed inputs. Preparation failures MUST NOT assert that
+the runner is absent when no such absence was established. Configured Cargo
+fetch failures MUST distinguish cancellation, timeout, capture overflow and
+unsuccessful exit, report applicable configured limits/status, and retain
+bounded captured diagnostics. Environment values explicitly allowed by sandbox
+configuration MUST be redacted before bounding/sanitizing those diagnostics.
+Existing exclusions,
+non-link checks, bounds and configured-acquisition no-host-fallback behavior
+MUST remain unchanged. Focused tests MUST cover special entries, linked paths,
+metadata validation, malformed locks and missing paths.
+This human-requested repair has an explicit local advisory exception while
+receipts are unavailable; independent observation and comparison remain separate.
+
 ## REQ-SHARED-OFFLINE-DEPENDENCIES
 
 Rust catalogue/provisioning/readiness MUST consume the common dependency
@@ -20,24 +172,30 @@ links, broaden grants, build code or silently fall back to host acquisition.
 Existing workspace/path-source discovery and bounds MUST be reused.
 Approved alternate registry definitions MAY be generated from acquisition
 policy, not inherited host configuration. Changed acquisition lock bytes MUST
-fail before repack/publication. Native tests MUST exercise locked workspace
+fail before readiness publication. Native tests MUST exercise locked workspace
 fetch with the installed enforcement boundary without downloading packages.
 
-Protected readiness and Rust runtime preparation MUST honor shared coherent
-readiness and publication/operation fences. Tests MUST cover interrupted
-same-lock publication, missing metadata and unchanged protected fulfillment
+Protected readiness and Rust runtime preparation MUST honor shared native
+readiness and active native-operation exclusion. Legacy portable-export fences
+MUST remain untouched and MUST NOT block an independently selected native cache.
+Tests MUST cover active operations, missing metadata and unchanged protected fulfillment
 refusal. These human-requested repairs use the existing local advisory exception.
 Configured acquisition MUST reject unsupported Git transports and unapproved
 repository/revision bindings in local manifests and Cargo.lock before fetching.
 Only exact approved canonical HTTPS Git repositories with immutable revisions
 are supported there; native Git/SSH transports must not bypass proxy policy.
 Standalone child authoring without root Cargo.lock or managed Rust state remains
-supported with the existing empty offline registry.
-Kvist MUST use the same `.kvist/vendored` tree, minimal lock receipt and
-configurable vendor limits as Skott, without independent file-content
-attestation. Authoring/verification MUST hold shared vendor read ownership
-through execution so library publication cannot retire an in-use tree.
-Explicit `kvist vendor --force` MAY rebuild otherwise reusable source material.
+supported with an empty native offline source view.
+Kvist and Skott MUST reuse the selected native Cargo registry/Git data, not
+create routine `.kvist/vendored` copies. They MUST mount source data read-only
+and provide private writable Cargo administrative state without credentials or
+host configuration. Acquisition MUST retain completed downloads in explicitly
+granted persistent data roots; `cargo vendor` repack and blanket per-file sync
+MUST NOT occur on this path. Missing material MAY require explicit useful fetch
+or extraction work. Host cache changes are live inputs, not immutable snapshots.
+Explicit `kvist vendor --force` MAY refresh native readiness, not erase an
+operator cache or silently select host fallback. A custom vendored destination
+remains deliberate portable export authority.
 This user-directed simplification uses the existing local advisory exception.
 
 ## Shared registry configuration acceptance (ADR 0015)
@@ -493,32 +651,27 @@ exclusions above; everything outside it is refused.
 
 Dependency acquisition MUST be a distinct approved phase. Cargo MUST be able to
 resolve and download new or changed dependencies from exact configured
-supported sources into a real bounded attempt-local writable `CARGO_HOME`, an
-isolated writable lockfile workspace, and separate target scratch without
-receiving the user's Cargo home. Acquisition is exactly non-compiling
-`cargo fetch`, not `cargo fetch --locked`; a changed lockfile is an expected
-result and its exact before/after content identities are bound to promotion.
+supported sources into explicitly granted persistent native cache data roots,
+with a private writable administrative `CARGO_HOME`, isolated writable lockfile
+workspace and separate target scratch. No complete user Cargo home, host
+configuration or credentials are mounted. Acquisition is exactly non-compiling
+`cargo fetch --locked`; changed lock bytes fail rather than become readiness.
 Initial source support MUST cover canonical crates.io sparse-index and crate
 download origins. Additional registries MUST declare exact index and download
 origins. Git dependencies MUST initially require an exact approved repository
 URL and immutable revision.
 
 The acquisition phase MUST NOT execute dependency build scripts. Successful
-cache promotion MUST validate source policy, checksums, lockfile changes,
-bounds, paths, links, and concurrent preconditions. It MUST construct a new
-immutable cache generation beneath a trusted provider-owned parent rather than
-mutating an arbitrary project-cache pathname. Verification MUST run exactly
-`cargo test --locked`, with network denied and offline true, using the approved
-generation as a read-only `CARGO_HOME` and separate writable target scratch.
+acquisition MUST retain native Cargo verification, exact source policy and
+approved write roots, without a per-file promotion inventory. No arbitrary
+publication destination may be inferred. Verification MUST run exactly
+`cargo test --offline --locked`, with denied network, read-only native source
+data and private writable administrative/target scratch.
 
-Current implementation status: the maerg implements typed, bounded planning
-with distinct host and sandbox paths, full source-config parity, and
-attempt-local lockfile identities. The independently installed runner validates
-the exact Cargo phase shapes, independently derives source identities, and
-provides an immutable-generation primitive and transport-policy value types.
-These are primitives only: OS mount, process, DNS/address-pinning, redirect,
-and network enforcement, live `task run` wiring, and final project-cache
-generation selection remain deferred. An otherwise valid request fails closed.
+Current implementation status: the maerg implements typed, bounded planning with distinct host/sandbox paths and isolated lockfile
+identities. Galla independently validates exact source/phase/grant topology and
+enforces namespaces and transport. Protected model request fulfillment remains
+separate and unsupported; explicit operator cache preparation is not fulfillment.
 
 ### REQ-DEPENDENCY-REQUEST
 
@@ -538,7 +691,7 @@ until the human approves it, rejects it, or narrows the policy.
 
 Current delivery limitation, exposed by the independent ADR 0015 source review:
 the broker evaluates requests, but exact request-to-lock identity binding and
-mediated vendor repacking are unavailable. The former automatic host-provisioning
+automatic fulfillment is unavailable. The former automatic host-provisioning
 fallback is not an implementation of the protected requirement above. Protected
 requests now fail explicitly before provisioning effects, even if unrelated
 vendoring is ready. Explicit human `kvist vendor` remains separate. Automatic
@@ -599,16 +752,13 @@ asserting a successful run; legacy language tests MAY self-skip on hosts without
 the live sandbox. Supported languages and their limitations MUST be documented in the
 component README and this component's contract.
 
-The current support state is: Rust first-class for verification (exact
-vendored registry, pinned toolchain pending `REQ-RUST-TOOLCHAIN`); C/C++, Go,
-Python, and JavaScript through the generic approved-test-command path against
-host system toolchains (network denied, no vendored mounts); JVM and Ruby for
-zero-dependency projects only. The intended order is the easy languages first
-(Go, JavaScript), then the important ones (Python, C/C++), with the existing
-non-Rust vendoring strategies (lock-file match plus presence) wired into
-`kvist vendor` provisioning and the verification mount plan before any of them
-is claimed as vendored-supported; per-package verification MUST land before
-that claim. Container-based builds, toolchains without an offline/locked mode,
+Rust uses native read-only Cargo sources and pinned installed toolchains.
+Go uses the native read-only module cache. Python and JavaScript retain useful
+installed environments/project-native caches; C/C++ uses the native Conan home
+or installed vcpkg root. These strategies are wired into explicit `kvist vendor`
+and the shared network-denied verification topology. Evidence MUST distinguish
+cheap catalogue/presence checks from executed offline builds and source-integrity
+attestation. JVM and Ruby remain zero-dependency/system-only. Container-based builds, toolchains without an offline/locked mode,
 toolchains requiring ambient home/global mutable state, and GPU/accelerator
 toolchains MUST be documented as explicitly unsupported.
 

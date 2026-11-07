@@ -1,13 +1,12 @@
 //! Installed-only Rust resources for protected authoring, not Cargo verification.
 
 use super::*;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 
 pub(super) type Fingerprint = (u64, u64, u64, i64, i64, i64, i64);
 
 pub(super) struct RustEnvironment {
     _staging: tempfile::TempDir,
-    _vendor_read: Option<kvist_dependencies::rust::ReadLease>,
     grants: Vec<SandboxGrant>,
     selected: String,
     pinned: bool,
@@ -23,11 +22,35 @@ fn failure(config: &SandboxConfig, reason: impl Into<String>) -> KvistError {
     }
 }
 
+pub(super) fn resource_kind(metadata: &fs::Metadata) -> &'static str {
+    let kind = metadata.file_type();
+    if kind.is_file() {
+        "regular file"
+    } else if kind.is_dir() {
+        "directory"
+    } else if kind.is_symlink() {
+        "symbolic link"
+    } else if kind.is_socket() {
+        "Unix socket"
+    } else if kind.is_fifo() {
+        "FIFO"
+    } else if kind.is_block_device() {
+        "block device"
+    } else if kind.is_char_device() {
+        "character device"
+    } else {
+        "unknown filesystem type"
+    }
+}
+
 pub(super) fn inspect(config: &SandboxConfig, path: &Path) -> Result<fs::Metadata> {
     if !path.is_absolute() || path.to_str().is_none() {
         return Err(failure(
             config,
-            "Rust resources must have absolute UTF-8 paths",
+            format!(
+                "Rust resource `{}` must have an absolute UTF-8 path",
+                path.display()
+            ),
         ));
     }
     let mut prefix = PathBuf::from("/");
@@ -35,18 +58,32 @@ pub(super) fn inspect(config: &SandboxConfig, path: &Path) -> Result<fs::Metadat
         match part {
             std::path::Component::RootDir => continue,
             std::path::Component::Normal(name) => prefix.push(name),
-            _ => return Err(failure(config, "Rust resource path must be canonical")),
+            _ => {
+                return Err(failure(
+                    config,
+                    format!(
+                        "Rust resource path `{}` must be canonical; remove . or .. segments",
+                        path.display()
+                    ),
+                ));
+            }
         }
-        let metadata = fs::symlink_metadata(&prefix)
-            .map_err(|e| sandbox_error(config, "inspect installed Rust resource", e))?;
+        let metadata = fs::symlink_metadata(&prefix).map_err(|e| {
+            sandbox_path_error(config, "inspect Rust resource ancestor", &prefix, e)
+        })?;
         if metadata.is_symlink() {
             return Err(failure(
                 config,
-                "Rust resources and ancestors must not be symbolic links",
+                format!(
+                    "Rust resource `{}` has a symbolic link at `{}`; replace the link with a regular file/directory before retrying",
+                    path.display(),
+                    prefix.display()
+                ),
             ));
         }
     }
-    fs::symlink_metadata(path).map_err(|e| sandbox_error(config, "inspect Rust resource", e))
+    fs::symlink_metadata(path)
+        .map_err(|e| sandbox_path_error(config, "inspect Rust resource", path, e))
 }
 
 pub(super) fn fingerprint(metadata: &fs::Metadata) -> Fingerprint {
@@ -98,8 +135,12 @@ fn query(config: &SandboxConfig, home: &Path, args: &[&str], started: Instant) -
             format!("cannot query installed Rust; provision on the host: {e}"),
         )
     })?;
-    String::from_utf8(output.stdout)
-        .map_err(|_| failure(config, "installed Rust query must return UTF-8"))
+    String::from_utf8(output.stdout).map_err(|e| {
+        failure(
+            config,
+            format!("installed Rust query {args:?} must return UTF-8: {e}"),
+        )
+    })
 }
 
 fn track_tree(
@@ -115,23 +156,34 @@ fn track_tree(
     if tracked.len() >= 100_000 || *path_bytes > 32 << 20 || depth > 128 {
         return Err(failure(
             config,
-            "installed Rust inventory exceeds its entry/path/depth bounds",
+            format!(
+                "installed Rust inventory at `{}` exceeds its bounds: entries={} (limit 100000), path bytes={} (limit 33554432), depth={} (limit 128); narrow host material",
+                path.display(),
+                tracked.len(),
+                *path_bytes,
+                depth
+            ),
         ));
     }
     let metadata = inspect(config, path)?;
     if !metadata.is_file() && !metadata.is_dir() {
         return Err(failure(
             config,
-            "installed Rust runtime contains a special entry",
+            format!(
+                "installed Rust runtime at `{}` contains a {}; only regular non-link files/directories are allowed; move runtime data outside the installed toolchain after stopping its owner",
+                path.display(),
+                resource_kind(&metadata)
+            ),
         ));
     }
     tracked.push((path.into(), fingerprint(&metadata)));
     if metadata.is_dir() {
         for entry in fs::read_dir(path)
-            .map_err(|e| sandbox_error(config, "enumerate installed Rust runtime", e))?
+            .map_err(|e| sandbox_path_error(config, "enumerate installed Rust runtime", path, e))?
         {
-            let entry =
-                entry.map_err(|e| sandbox_error(config, "read installed Rust runtime entry", e))?;
+            let entry = entry.map_err(|e| {
+                sandbox_path_error(config, "read installed Rust runtime entry", path, e)
+            })?;
             track_tree(
                 config,
                 &entry.path(),
@@ -152,39 +204,12 @@ impl RustEnvironment {
         component: &Path,
     ) -> Result<Self> {
         let started = Instant::now();
-        let limits = kvist_dependencies::VendorLimits::load(project)?;
-        let mut vendor_read = match fs::symlink_metadata(project.join(".kvist/vendored")) {
-            Ok(_) => Some(kvist_dependencies::rust::read_lease(
-                &project.join(".kvist/vendored"),
-                &sav::CancellationToken::new(),
-            )?),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => {
-                return Err(sandbox_error(
-                    config,
-                    "inspect shared vendor directory",
-                    error,
-                ));
-            }
-        };
-        // A standalone child can have no root lock or managed Rust state.
-        for path in [
-            "Cargo.lock",
-            ".kvist/vendor.json",
-            ".kvist/vendor-operation.lock",
-            ".kvist/vendor-publication",
-            ".kvist/vendored",
-            ".kvist/sandbox-cargo",
-        ] {
-            match fs::symlink_metadata(project.join(path)) {
-                Ok(_) => {
-                    kvist_dependencies::rust::check(project, &sav::CancellationToken::new())?;
-                    break;
-                }
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                Err(e) => return Err(sandbox_error(config, "inspect managed Rust readiness", e)),
-            }
-        }
+        let cache_home = kvist_dependencies::rust::cache::home()?;
+        let native_sources = kvist_dependencies::rust::cache::sources(
+            project,
+            &cache_home,
+            &sav::CancellationToken::new(),
+        )?;
         check_budget(config, started)?;
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -290,67 +315,6 @@ impl RustEnvironment {
         fs::create_dir_all(staging.path().join("runtime/bin"))
             .and_then(|_| fs::create_dir_all(staging.path().join("rustup-home/toolchains")))
             .map_err(|e| sandbox_error(config, "create private Rust runtime", e))?;
-        let resolver = project.join(".kvist/sandbox-cargo/config.toml");
-        match fs::symlink_metadata(&resolver) {
-            Ok(_) => {
-                let before = inspect(config, &resolver)?;
-                if !before.is_file()
-                    || before.len() > limits.max_metadata_bytes
-                    || before.nlink() != 1
-                {
-                    return Err(failure(
-                        config,
-                        "offline source config must be a bounded regular single-link file",
-                    ));
-                }
-                let opened = fs::OpenOptions::new()
-                    .read(true)
-                    .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
-                    .open(&resolver)
-                    .map_err(|error| sandbox_error(config, "open offline source config", error))?;
-                let identity = opened.metadata().map_err(|error| {
-                    sandbox_error(config, "inspect opened source config", error)
-                })?;
-                if fingerprint(&before) != fingerprint(&identity) || !identity.is_file() {
-                    return Err(failure(
-                        config,
-                        "offline source config changed while opening",
-                    ));
-                }
-                let mut bytes = Vec::new();
-                opened
-                    .take(limits.max_metadata_bytes.saturating_add(1))
-                    .read_to_end(&mut bytes)
-                    .map_err(|error| sandbox_error(config, "read bounded source config", error))?;
-                if bytes.len() as u64 > limits.max_metadata_bytes {
-                    return Err(failure(
-                        config,
-                        "offline source config exceeded configured metadata limit",
-                    ));
-                }
-                let text = std::str::from_utf8(&bytes)
-                    .map_err(|_| failure(config, "offline source config must be UTF-8"))?;
-                let contents = kvist_dependencies::rust::resolver_config_with_limits(
-                    text,
-                    "/rust/vendor",
-                    &limits,
-                )?;
-                let staged = staging.path().join("runtime/vendor-config.toml");
-                fs::write(&staged, contents)
-                    .and_then(|_| fs::set_permissions(&staged, fs::Permissions::from_mode(0o400)))
-                    .map_err(|error| {
-                        sandbox_error(config, "stage private offline resolver", error)
-                    })?;
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(sandbox_error(
-                    config,
-                    "inspect offline source config",
-                    error,
-                ));
-            }
-        }
         fs::write(
             staging.path().join("runtime/initialize"),
             sav::offline_rust::INITIALIZE,
@@ -490,44 +454,20 @@ impl RustEnvironment {
                 ),
             });
         }
-        let vendor = project.join(".kvist/vendored");
-        let vendor = match fs::symlink_metadata(&vendor) {
-            Ok(_) => {
-                if !inspect(config, &vendor)?.is_dir() {
-                    return Err(failure(config, "vendor must be a non-link directory"));
-                }
-                vendor
+        for (origin, destination) in [
+            (native_sources.registry, "/rust/cargo-registry"),
+            (native_sources.git, "/rust/cargo-git"),
+        ] {
+            if let Some(origin) = origin {
+                grants.push(SandboxGrant {
+                    identity: digest_label(origin.as_os_str().as_encoded_bytes()),
+                    source: origin.to_string_lossy().into_owned(),
+                    destination: destination.into(),
+                    access: "read-only",
+                    purpose: "toolchain",
+                });
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                let empty = staging.path().join("vendor");
-                fs::create_dir(&empty).map_err(|error| {
-                    sandbox_error(config, "create empty offline authoring vendor", error)
-                })?;
-                empty
-            }
-            Err(error) => {
-                return Err(sandbox_error(config, "inspect authoring vendor", error));
-            }
-        };
-        let canonical_vendor = vendor
-            .canonicalize()
-            .map_err(|e| sandbox_error(config, "canonicalize authoring vendor", e))?;
-        if canonical_vendor == project.join(".kvist/vendored") && vendor_read.is_none() {
-            vendor_read = Some(kvist_dependencies::rust::read_lease(
-                &canonical_vendor,
-                &sav::CancellationToken::new(),
-            )?);
         }
-        if let Some(owner) = &vendor_read {
-            owner.check(&sav::CancellationToken::new())?;
-        }
-        grants.push(SandboxGrant {
-            source: canonical_vendor.to_string_lossy().into_owned(),
-            destination: "/rust/vendor".into(),
-            access: "read-only",
-            purpose: "toolchain",
-            identity: digest_label(b"offline-authoring-vendor"),
-        });
         for name in [
             "Cargo.toml",
             "Cargo.lock",
@@ -575,7 +515,6 @@ impl RustEnvironment {
         tracked.extend(context.tracked);
         Ok(Self {
             _staging: staging,
-            _vendor_read: vendor_read,
             grants,
             selected: selected_name,
             pinned: pin.pinned,
@@ -598,7 +537,10 @@ impl RustEnvironment {
             if fingerprint(&inspect(config, path)?) != *expected {
                 return Err(failure(
                     config,
-                    "installed Rust inventory changed during preparation; restart after host provisioning",
+                    format!(
+                        "installed Rust inventory resource `{}` changed during preparation; restart after host provisioning",
+                        path.display()
+                    ),
                 ));
             }
         }
@@ -690,21 +632,32 @@ mod tests {
         fs::create_dir(root.join("directory")).unwrap();
         fs::write(root.join("directory/file"), b"resource").unwrap();
         symlink(root.join("directory"), root.join("link")).unwrap();
-        assert!(inspect(&config(), &root.join("link/file")).is_err());
+        let error = inspect(&config(), &root.join("link/file"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(root.join("link").to_str().unwrap()),
+            "{error}"
+        );
+        assert!(error.contains("symbolic link"), "{error}");
         assert!(inspect(&config(), &root.join("directory/../directory/file")).is_err());
         assert!(inspect(&config(), Path::new("relative")).is_err());
         nix::unistd::mkfifo(&root.join("fifo"), nix::sys::stat::Mode::S_IRUSR).unwrap();
+        let error = track_tree(
+            &config(),
+            &root.join("fifo"),
+            &mut Vec::new(),
+            &mut 0,
+            Instant::now(),
+            0,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(
-            track_tree(
-                &config(),
-                &root.join("fifo"),
-                &mut Vec::new(),
-                &mut 0,
-                Instant::now(),
-                0
-            )
-            .is_err()
+            error.contains(root.join("fifo").to_str().unwrap()),
+            "{error}"
         );
+        assert!(error.contains("FIFO"), "{error}");
     }
 
     #[test]
@@ -727,7 +680,6 @@ mod tests {
             )],
             _staging: staging,
             selected: "stable-x86_64-unknown-linux-gnu".into(),
-            _vendor_read: None,
             pinned: false,
             component: path.join("component"),
             build_directory: "/rust/project/component".into(),

@@ -2,11 +2,24 @@
 
 # Sav Requirements
 
+## SAV-REQ-NATIVE-CARGO-CACHE
+
+Under ADR 0020, Rust wrappers MUST use native offline Cargo sources by default, retaining
+locked protected and unlocked workspace variants. Only a deliberately staged
+fixed vendor configuration MAY select an explicit export. Initialization MUST
+create private writable Cargo administrative state and sandbox-only links to
+present read-only `/rust/cargo-registry` and `/rust/cargo-git` data mounts.
+No host home/configuration/credentials, downloads or source copies are added.
+Tests MUST cover both variants, absence of default replacement and private
+administration/data links. Hosts retain resource and network authority.
+This scoped human-requested intent/task bundle has an explicit local advisory
+exception; no receipt, acceptance or implementer certification is recorded.
+
 ## SAV-REQ-WORKSPACE-OFFLINE
 
 Provide a workspace Rust wrapper with offline but not forced-locked Cargo/
 Clippy resolution. Retain the existing locked wrapper for protected consumers.
-Selection, fixed source configuration, private homes, literal arguments and
+Selection, explicitly staged export configuration, private homes, literal arguments and
 network authority MUST remain unchanged. Test actual wrapper arguments and
 consumer native offline lock resolution. This user-directed ADR 0019 bundle
 has an explicit local advisory exception while receipts are unavailable.
@@ -14,9 +27,9 @@ has an explicit local advisory exception while receipts are unavailable.
 ## SAV-REQ-OFFLINE-SOURCE-CONFIG
 
 Cargo and Clippy wrappers MUST consume an optional caller-staged fixed
-read-only `/rust/runtime/vendor-config.toml` in addition to the existing
-crates.io replacement. Absence MUST preserve existing behavior. This permits
-offline locked Git/alternate-source configuration without accepting model
+read-only `/rust/runtime/vendor-config.toml` only for explicit export sources.
+Absence MUST retain native cache resolution. This permits
+explicit portable exports containing locked Git/alternate sources without accepting model
 paths or adding execution/network authority. The caller validates the file;
 Sav only supplies the fixed wrapper. This requested consolidation has an
 explicit advisory exception while receipt enforcement is unavailable.
@@ -202,7 +215,10 @@ The library MUST provide fixed offline Rust runtime scripts reusable by Skott
 and maerg without owning mount authority or discovering host installations.
 The scripts MUST initialize private sandbox selection settings from read-only
 templates, preserve installed-only selection and align Cargo/compiler/doc and
-companion selection. Cargo wrappers MUST retain offline/locked vendor flags.
+companion selection. Protected Cargo wrappers MUST retain offline/locked flags;
+workspace wrappers MUST remain offline without forced locking. Native cache
+resolution is the default; only explicitly staged portable-export configuration
+may select directory-source replacement.
 Callers MUST validate and mount the resources; scripts confer no isolation.
 When the embedding host supplies a private component build-view directory,
 Cargo MUST use that directory and compiler/formatter source arguments MUST

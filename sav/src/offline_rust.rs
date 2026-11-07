@@ -1,7 +1,7 @@
 //! Fixed sandbox-native Rust runtime scripts; callers own validation and grants.
 
 /// Initialize private selection state without copying or making installations writable.
-pub const INITIALIZE: &str = "set -eu\nmkdir -p /tmp/rustup-home\ncp /rust/rustup-home/settings.toml /tmp/rustup-home/settings.toml\nln -sf /rust/rustup-home/toolchains /tmp/rustup-home/toolchains\nln -sf /rust/toolchain /rust/toolchains/default\n";
+pub const INITIALIZE: &str = "set -eu\nmkdir -p /tmp/rustup-home\ncp /rust/rustup-home/settings.toml /tmp/rustup-home/settings.toml\nln -sf /rust/rustup-home/toolchains /tmp/rustup-home/toolchains\nln -sf /rust/toolchain /rust/toolchains/default\ncargo_home=\"${CARGO_HOME:-/tmp/cargo-home}\"\nmkdir -p \"$cargo_home\"\nif test -d /rust/cargo-registry; then ln -sfn /rust/cargo-registry \"$cargo_home/registry\"; fi\nif test -d /rust/cargo-git; then ln -sfn /rust/cargo-git \"$cargo_home/git\"; fi\n";
 
 /// Closed runtime executable set, including optional installed companions.
 pub const TOOLS: &[RustTool] = &[
@@ -87,9 +87,9 @@ fn render_wrapper(tool: RustTool, locked: bool) -> String {
     // injected here or clippy would resolve against the empty scratch registry.
     let arguments = if matches!(tool, RustTool::Cargo | RustTool::CargoClippy) {
         if locked {
-            " --offline --locked --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/rust/vendor\"'"
+            " --offline --locked"
         } else {
-            " --offline --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/rust/vendor\"'"
+            " --offline"
         }
     } else {
         ""
@@ -126,6 +126,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_cache_is_default_and_administration_is_private() {
+        for tool in [RustTool::Cargo, RustTool::CargoClippy] {
+            for script in [wrapper(tool), workspace_wrapper(tool)] {
+                assert!(!script.contains("replace-with"));
+                assert!(!script.contains("/rust/vendor"));
+                assert!(script.contains("/rust/runtime/vendor-config.toml"));
+            }
+        }
+        assert!(INITIALIZE.contains("/rust/cargo-registry"));
+        assert!(INITIALIZE.contains("/rust/cargo-git"));
+        assert!(INITIALIZE.contains("CARGO_HOME"));
+    }
+
+    #[test]
     fn workspace_resolution_is_offline_without_an_injected_lock_requirement() {
         for tool in [RustTool::Cargo, RustTool::CargoClippy] {
             let script = workspace_wrapper(tool);
@@ -151,7 +165,7 @@ mod tests {
             assert!(!script.contains("/home/"));
         }
         assert!(wrapper(RustTool::Cargo).contains("--offline --locked"));
-        assert!(wrapper(RustTool::Cargo).contains("/rust/vendor"));
+        assert!(!wrapper(RustTool::Cargo).contains("/rust/vendor"));
         assert!(!wrapper(RustTool::Cargo).contains("/workspace/.kvist/vendored"));
         // The clippy companion must force the same vendored resolution as
         // cargo, because cargo does not forward its own flags to the
@@ -163,7 +177,7 @@ mod tests {
         assert!(
             wrapper(RustTool::CargoClippy).contains("if [[ \"${1-}\" == clippy ]]; then shift; fi")
         );
-        assert!(wrapper(RustTool::CargoClippy).contains("/rust/vendor"));
+        assert!(!wrapper(RustTool::CargoClippy).contains("/rust/vendor"));
         for tool in [RustTool::Cargo, RustTool::CargoClippy] {
             let script = wrapper(tool);
             assert!(script.contains("[[ -f /rust/runtime/vendor-config.toml ]]"));
@@ -172,7 +186,7 @@ mod tests {
         }
         assert!(!wrapper(RustTool::Rustc).contains("vendor-config.toml"));
         assert!(
-            wrapper(RustTool::CargoClippy)
+            !wrapper(RustTool::CargoClippy)
                 .contains("source.crates-io.replace-with=\"vendored-sources\"")
         );
         assert!(!wrapper(RustTool::CargoClippy).contains("/workspace/.kvist/vendored"));

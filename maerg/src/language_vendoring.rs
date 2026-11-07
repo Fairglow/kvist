@@ -3,11 +3,10 @@
 //! Kvist owns vendoring for every supported language. Each strategy treats its
 //! lock file as the *authoritative catalogue* of the exact locked content:
 //!
-//! - The lock file is provisioned once, on the host and outside the effect
-//!   sandbox, into a vendored directory holding the exact locked material
-//!   (`cargo vendor`, `pip download`, `npm pack`/`npm ci`, `conan download`).
-//! - Verification re-checks that the lock file still matches and that the vendored
-//!   material is present before it allows an offline build, failing closed.
+//! - Host provisioning uses native Cargo/npm/Conan caches, Python distribution
+//!   archives and installed environments, or a language's native vendor output.
+//! - Default Rust inspection uses the shared native Cargo cache catalogue.
+//!   Explicit directory exports remain a separate interface.
 //!
 //! The lock-file digest is the identity of every read-only vendored-directory
 //! mount. This is deliberate: the lock file already catalogs every locked entry,
@@ -16,10 +15,9 @@
 //! build-time claim bound to the approved mount plan and are not re-verified at
 //! execution, so the lock-file digest is the catalogue and is sufficient.
 //!
-//! Rust enforces each locked registry and Git entry exactly. The other languages
-//! enforce catalogue match plus vendored-content presence; exact per-package
-//! verification for them is follow-up work, and this is the honest, cheap
-//! guarantee the lock file provides.
+//! Native Rust catalogue inspection is not integrity attestation; protected
+//! readiness is a separate caller obligation. Other languages check coarse
+//! material presence, without a persisted lock-match or per-package guarantee.
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -29,6 +27,10 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{KvistError, Result};
 use crate::vendoring as rust_vendoring;
+
+mod config;
+#[path = "vendor_command/go_cache.rs"]
+pub(crate) mod go_cache;
 
 /// Identity prefix, matching the digest shape used everywhere else in Kvist.
 pub const DIGEST_PREFIX: &str = "sha256:";
@@ -73,14 +75,15 @@ pub struct VendoringReport {
     pub lockfile_digest: String,
     /// Vendored-content directory that was inspected.
     pub vendored_dir: String,
-    /// Locked dependencies present in the vendored material.
+    /// Observed dependency count; non-Rust strategies report approximate counts.
     pub present_dependencies: usize,
     /// Locked dependencies not found in the vendored material.
     pub missing_dependencies: Vec<String>,
 }
 
 impl VendoringReport {
-    /// Whether the vendored material satisfies the lock file.
+    /// Whether inspection reported no missing material. This does not attest
+    /// package integrity or exact non-Rust completeness.
     pub fn ready(&self) -> bool {
         self.missing_dependencies.is_empty()
     }
@@ -129,9 +132,10 @@ pub trait LanguageStrategy {
     fn vendored_mount_dest(&self) -> &'static str;
     /// Fixed sandbox destination of the offline-config directory.
     fn sandbox_config_dest(&self) -> &'static str;
-    /// The on-disk vendored-content directory. Defaults to the Kvist-owned
-    /// `.kvist/<vendored_dirname>`; Go overrides it because its vendored
-    /// material is the committed `vendor/` directory inside the project.
+    /// The on-disk export/artifact directory. Defaults to the Kvist-owned
+    /// `.kvist/<vendored_dirname>`; Go uses its conventional project `vendor/`
+    /// export location. Default Rust/Go runtime storage instead comes from
+    /// their reports and mount plans.
     fn vendored_dir(&self, project_dir: &Path) -> PathBuf {
         project_dir.join(".kvist").join(self.vendored_dirname())
     }
@@ -146,9 +150,18 @@ pub trait LanguageStrategy {
     fn detects(&self, project_dir: &Path) -> bool {
         self.lockfile_path(project_dir).is_some()
     }
-    /// Enforce vendoring readiness; returns an error when the project cannot
-    /// build offline (material missing, lock drifted, or not provisioned).
+    /// Inspect native/artifact readiness. Missing material may be reported in
+    /// the result; unreadable or unsupported inspection inputs return errors.
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport>;
+    /// Inspect with the caller's selected sandbox context. Native Rust source
+    /// admission uses this context rather than falling back to host execution.
+    fn enforce_with_sandbox(
+        &self,
+        project_dir: &Path,
+        _sandbox: Option<&crate::config::SandboxConfig>,
+    ) -> Result<VendoringReport> {
+        self.enforce(project_dir)
+    }
     /// The read-only directory mounts an offline build needs, each identified by
     /// the lock-file digest.
     fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>>;
@@ -203,13 +216,16 @@ pub struct VendoringEnforcement {
 /// Enforce that a project's vendored material satisfies its lock file and return
 /// what verification must mount for an offline build. If `auto_vendor` is true and
 /// vendoring is not ready, automatically runs the vendor command to fix it.
+/// That flag is explicit operator acquisition authority, including host non-Rust
+/// installation; sandbox selection does not mediate those installers.
+/// Offline verification must pass `false`.
 pub fn enforce_vendoring(
     project_dir: &Path,
     auto_vendor: bool,
     sandbox_config: Option<&crate::config::SandboxConfig>,
 ) -> Result<VendoringEnforcement> {
     let strategy = detect_language_strategy(project_dir)?;
-    let report = strategy.enforce(project_dir)?;
+    let mut report = strategy.enforce_with_sandbox(project_dir, sandbox_config)?;
     if !report.ready() {
         if auto_vendor {
             tracing::warn!(
@@ -232,7 +248,7 @@ pub fn enforce_vendoring(
                 reason: format!("automatic vendoring failed: {source}"),
             })?;
             // Re-check after vendoring
-            let report = strategy.enforce(project_dir)?;
+            report = strategy.enforce_with_sandbox(project_dir, sandbox_config)?;
             if !report.ready() {
                 return Err(KvistError::VendoringIncomplete {
                     path: report.project_root.clone(),
@@ -252,7 +268,7 @@ pub fn enforce_vendoring(
     Ok(VendoringEnforcement {
         language: report.language,
         lockfile_digest: report.lockfile_digest,
-        vendored_dir: strategy.vendored_dir(project_dir),
+        vendored_dir: PathBuf::from(report.vendored_dir),
         mounts,
     })
 }
@@ -293,9 +309,76 @@ pub fn now_unix_secs() -> u64 {
         .unwrap_or_default()
 }
 
-/// A locked Rust project: exact per-dependency readiness plus a recorded,
-/// non-stale manifest.
+/// A locked Rust project's native cache catalogue; protected readiness is
+/// enforced separately by its execution owner.
 struct RustStrategy;
+
+enum RustAdmission<'a> {
+    InspectionOnly,
+    Selected(Option<&'a crate::config::SandboxConfig>),
+}
+
+impl RustStrategy {
+    fn native_sources(project_dir: &Path) -> Result<kvist_dependencies::rust::cache::SourceView> {
+        let home = kvist_dependencies::rust::cache::home().map_err(|source| {
+            KvistError::VendoringUnavailable {
+                path: project_dir.to_string_lossy().into_owned(),
+                reason: format!(
+                    "cannot resolve native Cargo home (CARGO_HOME or HOME/.cargo): {source}"
+                ),
+            }
+        })?;
+        kvist_dependencies::rust::cache::sources(project_dir, &home, &sav::CancellationToken::new())
+            .map_err(|source| KvistError::VendoringUnavailable {
+                path: project_dir.to_string_lossy().into_owned(),
+                reason: format!("cannot inspect native Cargo cache: {source}"),
+            })
+    }
+
+    fn report(project_dir: &Path, context: RustAdmission<'_>) -> Result<VendoringReport> {
+        use kvist_dependencies::rust::cache::SourceAdmission;
+
+        let sources = Self::native_sources(project_dir)?;
+        let report = match sources.admission {
+            SourceAdmission::Catalogue(report) => report,
+            SourceAdmission::CargoOfflineRequired { .. } => match context {
+                RustAdmission::InspectionOnly => {
+                    return Err(KvistError::VendoringUnavailable {
+                        path: project_dir.to_string_lossy().into_owned(),
+                        reason: "noncanonical Rust sources require an explicit native source admission context; use configured offline admission or explicit operator provisioning".into(),
+                    });
+                }
+                RustAdmission::Selected(sandbox) => {
+                    crate::vendor_command::native_cargo_admission(
+                        project_dir,
+                        &sources.cargo_home,
+                        sandbox,
+                        &sav::CancellationToken::new(),
+                    )?
+                    .report
+                }
+            },
+            SourceAdmission::NoLock => {
+                return Err(KvistError::VendoringUnavailable {
+                    path: project_dir.to_string_lossy().into_owned(),
+                    reason: "Cargo.lock is missing; source-only selection is not a locked readiness report".into(),
+                });
+            }
+        };
+        let present_dependencies =
+            (report.registry_dependencies + report.git_dependencies + report.path_dependencies)
+                .saturating_sub(report.missing_dependencies.len());
+        Ok(VendoringReport {
+            language: "rust".to_owned(),
+            project_root: report.project_root,
+            lockfile_path: report.lockfile_path,
+            lockfile_digest: report.lockfile_digest,
+            vendored_dir: report.vendored_dir,
+            present_dependencies,
+            missing_dependencies: report.missing_dependencies,
+        })
+    }
+}
 
 impl LanguageStrategy for RustStrategy {
     fn id(&self) -> &'static str {
@@ -308,102 +391,56 @@ impl LanguageStrategy for RustStrategy {
         rust_vendoring::DEFAULT_VENDORED_DIRNAME
     }
     fn vendored_mount_dest(&self) -> &'static str {
-        rust_vendoring::VENDOR_SANDBOX_MOUNT
+        "/workspace/cargo-registry"
     }
     fn sandbox_config_dest(&self) -> &'static str {
-        rust_vendoring::SANDBOX_CARGO_CONFIG_MOUNT
+        ""
     }
 
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
-        let vendored = self.vendored_dir(project_dir);
-        let report = rust_vendoring::enforce_offline_readiness(project_dir, &vendored).map_err(
-            |source| KvistError::VendoringUnavailable {
-                path: project_dir.to_string_lossy().into_owned(),
-                reason: format!("cannot check Rust vendoring readiness: {source}"),
-            },
-        )?;
-        if !report.ready() {
-            return Err(KvistError::VendoringIncomplete {
-                path: report.project_root.clone(),
-                count: report.missing_dependencies.len(),
-                missing: report.missing_human_readable(),
-            });
-        }
-        let manifest = rust_vendoring::VendorManifest::load(project_dir)
-            .map_err(|source| KvistError::VendoringUnavailable {
-                path: project_dir.to_string_lossy().into_owned(),
-                reason: format!("cannot read vendoring manifest: {source}"),
-            })?
-            .ok_or_else(|| KvistError::VendoringUnavailable {
-                path: project_dir.to_string_lossy().into_owned(),
-                reason: "no vendoring manifest found; run `kvist vendor` to provision \
-                         offline dependencies"
-                    .to_owned(),
-            })?;
-        // Re-check staleness against the recorded manifest; also confirms the
-        // vendored layout still matches the current lock file.
-        manifest
-            .assert_ready(project_dir)
-            .map_err(|source| KvistError::VendoringUnavailable {
-                path: project_dir.to_string_lossy().into_owned(),
-                reason: format!("Rust vendoring is not ready: {source}"),
-            })?;
-        Ok(VendoringReport {
-            language: "rust".to_owned(),
-            project_root: report.project_root,
-            lockfile_path: report.lockfile_path,
-            lockfile_digest: report.lockfile_digest,
-            vendored_dir: report.vendored_dir,
-            present_dependencies: report.registry_dependencies
-                + report.git_dependencies
-                + report.path_dependencies,
-            missing_dependencies: report.missing_dependencies,
-        })
+        Self::report(project_dir, RustAdmission::InspectionOnly)
+    }
+
+    fn enforce_with_sandbox(
+        &self,
+        project_dir: &Path,
+        sandbox: Option<&crate::config::SandboxConfig>,
+    ) -> Result<VendoringReport> {
+        Self::report(project_dir, RustAdmission::Selected(sandbox))
     }
 
     fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
-        // The manifest must exist (provisioning ran); its recorded absolute
-        // paths are ignored for resolution (see below).
-        let _manifest = rust_vendoring::VendorManifest::load(project_dir)
-            .map_err(|source| KvistError::VendoringUnavailable {
-                path: project_dir.to_string_lossy().into_owned(),
-                reason: format!("cannot read vendoring manifest: {source}"),
-            })?
+        let view = Self::native_sources(project_dir)?;
+        let current = view
+            .lockfile_digest
             .ok_or_else(|| KvistError::VendoringUnavailable {
                 path: project_dir.to_string_lossy().into_owned(),
-                reason: "no vendoring manifest found; run `kvist vendor` to provision \
-                         offline dependencies"
-                    .to_owned(),
+                reason: "Cargo.lock disappeared before native source mount preparation".into(),
             })?;
-        // The registry and sandbox-config locations are fixed relative to the
-        // project root, so resolve them from `project_dir` (the location cargo
-        // and the sandbox actually see) rather than the absolute paths the
-        // manifest recorded on the host that produced it. Using the recorded
-        // paths would break any checkout at a different root with
-        // `No such file or directory`.
-        let vendored = self.vendored_dir(project_dir);
-        let sandbox_cargo = project_dir
-            .join(".kvist")
-            .join(rust_vendoring::SANDBOX_CARGO_CONFIG_DIRNAME);
-        Ok(vec![
-            VendoredMount {
-                source: vendored,
-                destination: self.vendored_mount_dest().to_owned(),
+        if current != lockfile_digest {
+            return Err(KvistError::VendoringStale {
+                path: project_dir.to_string_lossy().into_owned(),
+                current,
+                expected: lockfile_digest.to_owned(),
+            });
+        }
+        Ok([
+            (view.registry, "/workspace/cargo-registry"),
+            (view.git, "/workspace/cargo-git"),
+        ]
+        .into_iter()
+        .filter_map(|(source, destination)| {
+            source.map(|source| VendoredMount {
+                source,
+                destination: destination.to_owned(),
                 identity: lockfile_digest.to_owned(),
-            },
-            VendoredMount {
-                source: sandbox_cargo,
-                destination: self.sandbox_config_dest().to_owned(),
-                identity: lockfile_digest.to_owned(),
-            },
-        ])
+            })
+        })
+        .collect())
     }
 }
 
-/// A locked Go project (`go mod`). The vendored material is the committed
-/// `vendor/` directory beside `go.sum`: `go test -mod=vendor` builds entirely
-/// from it, so no separate vendored mount is needed (it travels with the
-/// component mount) and no offline resolver config exists for Go.
+/// A locked Go project's native module cache and declared-module catalogue.
 struct GoStrategy;
 
 impl LanguageStrategy for GoStrategy {
@@ -417,56 +454,44 @@ impl LanguageStrategy for GoStrategy {
         "vendor"
     }
     fn vendored_mount_dest(&self) -> &'static str {
-        ""
+        go_cache::MOUNT
     }
     fn sandbox_config_dest(&self) -> &'static str {
         ""
     }
-    /// Go's vendored material is the committed `vendor/` directory inside the
-    /// project, not a Kvist-owned `.kvist/` directory.
+    /// The conventional Go export location, not the native runtime cache.
     fn vendored_dir(&self, project_dir: &Path) -> PathBuf {
         project_dir.join(self.vendored_dirname())
     }
 
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
-        let (lockfile, digest) = lockfile_digest_for(self, project_dir)?;
-        let vendored = self.vendored_dir(project_dir);
-        let modules_txt = vendored.join("modules.txt");
-        if !modules_txt.is_file() || !directory_non_empty(&vendored) {
-            return Ok(VendoringReport {
-                language: "go".to_owned(),
-                project_root: project_dir.to_string_lossy().into_owned(),
-                lockfile_path: lockfile.to_string_lossy().into_owned(),
-                lockfile_digest: digest,
-                vendored_dir: vendored.to_string_lossy().into_owned(),
-                present_dependencies: 0,
-                missing_dependencies: vec![
-                    "go: vendor/ not provisioned; run `go mod vendor` on the host so \
-                     `go test -mod=vendor` can build offline"
-                        .to_owned(),
-                ],
-            });
-        }
-        Ok(VendoringReport {
-            language: "go".to_owned(),
-            project_root: project_dir.to_string_lossy().into_owned(),
-            lockfile_path: lockfile.to_string_lossy().into_owned(),
-            lockfile_digest: digest,
-            vendored_dir: vendored.to_string_lossy().into_owned(),
-            present_dependencies: count_lock_entries(&modules_txt),
-            missing_dependencies: Vec::new(),
-        })
+        go_cache::report(project_dir)
     }
 
-    /// No extra mounts: the committed `vendor/` directory is part of the
-    /// component mount, and Go needs no offline resolver configuration.
-    fn mounts(&self, _project_dir: &Path, _lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
-        Ok(Vec::new())
+    fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
+        let current = go_cache::identity(project_dir)?;
+        if current != lockfile_digest {
+            return Err(KvistError::VendoringStale {
+                path: project_dir.to_string_lossy().into_owned(),
+                current,
+                expected: lockfile_digest.to_owned(),
+            });
+        }
+        let cache = go_cache::cache_root(project_dir)?;
+        Ok(cache
+            .is_dir()
+            .then(|| VendoredMount {
+                source: cache,
+                destination: go_cache::MOUNT.into(),
+                identity: lockfile_digest.to_owned(),
+            })
+            .into_iter()
+            .collect())
     }
 }
 
-/// A locked Python project (`pip`/`uv`). Present-and-matching catalogue with a
-/// vendored wheels/sdists directory, a `pip.conf` that resolves offline, and a
+/// A locked Python project (`pip`/`uv`). Coarse presence inspection of a
+/// wheels/sdists directory, a `pip.conf` that resolves offline, and a
 /// provisioned virtualenv that makes the locked material importable in the
 /// sandbox (the venv is the offline runtime; the wheels catalogue it).
 struct PythonStrategy;
@@ -531,13 +556,6 @@ impl LanguageStrategy for PythonStrategy {
 
     fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
         let vendored = self.vendored_dir(project_dir);
-        let config_dir = project_dir.join(".kvist").join("sandbox-pip");
-        fs::create_dir_all(&config_dir).map_err(|source| KvistError::Io {
-            operation: "create python sandbox config dir",
-            path: config_dir.clone(),
-            source,
-        })?;
-        let config_path = config_dir.join("pip.conf");
         let contents = format!(
             "# Managed by `kvist vendor` (ADR-0011). Do not edit by hand.\n\
              [global]\n\
@@ -545,11 +563,7 @@ impl LanguageStrategy for PythonStrategy {
              find-links = {}\n",
             self.vendored_mount_dest()
         );
-        fs::write(&config_path, contents).map_err(|source| KvistError::Io {
-            operation: "write python sandbox pip.conf",
-            path: config_path.clone(),
-            source,
-        })?;
+        let config_dir = config::prepare(project_dir, "sandbox-pip", "pip.conf", &contents)?;
         let venv = project_dir.join(".kvist").join(PYTHON_VENV_DIRNAME);
         Ok(vec![
             VendoredMount {
@@ -597,8 +611,8 @@ fn javascript_package_manager(project_dir: &Path) -> &'static str {
     }
 }
 
-/// A locked JavaScript/Node project (`npm`/`yarn`/`pnpm`). Present-and-matching
-/// catalogue (tarball cache or pnpm store) and an offline `.npmrc`.
+/// A locked JavaScript/Node project's native cache/store presence and offline
+/// `.npmrc`; this is not package-by-package completeness verification.
 struct JavaScriptStrategy;
 
 impl LanguageStrategy for JavaScriptStrategy {
@@ -606,7 +620,7 @@ impl LanguageStrategy for JavaScriptStrategy {
         "javascript"
     }
     fn lockfile_names(&self) -> &'static [&'static str] {
-        &["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]
+        &["pnpm-lock.yaml", "yarn.lock", "package-lock.json"]
     }
     fn vendored_dirname(&self) -> &'static str {
         JS_PACKAGE_CACHE_DIRNAME
@@ -621,8 +635,8 @@ impl LanguageStrategy for JavaScriptStrategy {
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
         let (lockfile, digest) = lockfile_digest_for(self, project_dir)?;
         let vendored = self.vendored_dir(project_dir);
-        // The vendored catalogue shape differs per manager (npm/yarn tarball
-        // cache, pnpm content-addressable store) but its readiness contract is
+        // The native catalogue shape differs per manager (npm cache, yarn
+        // cache, pnpm content-addressable store) but its presence check is
         // the same: non-empty and lock-file digest identified.
         let catalogue = match javascript_package_manager(project_dir) {
             "pnpm" => "pnpm store",
@@ -655,13 +669,6 @@ impl LanguageStrategy for JavaScriptStrategy {
 
     fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
         let vendored = self.vendored_dir(project_dir);
-        let config_dir = project_dir.join(".kvist").join("sandbox-npm");
-        fs::create_dir_all(&config_dir).map_err(|source| KvistError::Io {
-            operation: "create javascript sandbox config dir",
-            path: config_dir.clone(),
-            source,
-        })?;
-        let config_path = config_dir.join(".npmrc");
         // npm/yarn consume `cache=` for the offline tarball cache; pnpm uses a
         // content-addressable store referenced by `store-path`. The file is
         // bound to the lock-file digest identity and documents the offline
@@ -682,11 +689,7 @@ impl LanguageStrategy for JavaScriptStrategy {
                 self.vendored_mount_dest()
             ),
         };
-        fs::write(&config_path, contents).map_err(|source| KvistError::Io {
-            operation: "write javascript sandbox .npmrc",
-            path: config_path.clone(),
-            source,
-        })?;
+        let config_dir = config::prepare(project_dir, "sandbox-npm", ".npmrc", &contents)?;
         Ok(vec![
             VendoredMount {
                 source: vendored,
@@ -739,9 +742,7 @@ impl LanguageStrategy for CConanStrategy {
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
         let (lockfile, digest) = lockfile_digest_for(self, project_dir)?;
         let vendored = self.vendored_dir(project_dir);
-        // A provisioned Conan home holds its package cache at the home root
-        // under `p/` (both the Conan 1.x and 2.x layouts keep it there; the
-        // `~/.conan2` default is a home directory name, not a subdirectory).
+        // Conan 2 keeps its native package cache under the home's `p/`.
         if !directory_non_empty(&vendored.join("p")) {
             return Ok(VendoringReport {
                 language: "c".to_owned(),
@@ -770,13 +771,6 @@ impl LanguageStrategy for CConanStrategy {
 
     fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
         let vendored = self.vendored_dir(project_dir);
-        let config_dir = project_dir.join(".kvist").join("sandbox-conan");
-        fs::create_dir_all(&config_dir).map_err(|source| KvistError::Io {
-            operation: "create conan sandbox config dir",
-            path: config_dir.clone(),
-            source,
-        })?;
-        let config_path = config_dir.join("OFFLINE.md");
         let contents = format!(
             "# Managed by `kvist vendor` (ADR-0011/ADR-0013). Do not edit by hand.\n\n\
              Offline provisioning for this locked project:\n\n\
@@ -786,11 +780,7 @@ impl LanguageStrategy for CConanStrategy {
  component mount.\n",
             vendored.display()
         );
-        fs::write(&config_path, contents).map_err(|source| KvistError::Io {
-            operation: "write conan sandbox OFFLINE.md",
-            path: config_path.clone(),
-            source,
-        })?;
+        let config_dir = config::prepare(project_dir, "sandbox-conan", "OFFLINE.md", &contents)?;
         // The Conan home is mounted at its own absolute host path (source ==
         // destination): the generated conan toolchain file embeds absolute
         // cache paths, so the sandbox sees them unchanged.
@@ -1180,159 +1170,12 @@ mod tests {
     }
 
     #[test]
-    fn detects_go_lock_file_and_reports_vendor_presence() {
-        let tmp = project_with(&[("go.sum", "example.com/mod v1.0.0 h1:abc=\n")]);
-        let project = tmp.path();
-        let strategy = detect_language_strategy(project).expect("go");
-        assert_eq!(strategy.id(), "go");
-
-        // Without the committed vendor/ directory the project is not ready.
-        let report = strategy.enforce(project).expect("report");
-        assert_eq!(report.language, "go");
-        assert!(!report.ready());
-
-        // `go mod vendor` output makes it ready; the committed vendor/ needs
-        // no extra sandbox mounts.
-        let vendor = project.join("vendor");
-        fs::create_dir_all(&vendor).expect("vendor dir");
-        fs::write(
-            vendor.join("modules.txt"),
-            "# example.com/mod v1.0.0\n## explicit; go 1.21\nexample.com/mod\n\
-             # example.com/other v2.0.0\n## explicit; go 1.21\nexample.com/other\n",
-        )
-        .expect("modules.txt");
-        let report = strategy.enforce(project).expect("report");
-        assert!(report.ready());
-        assert_eq!(report.present_dependencies, 2);
-        assert!(
-            strategy
-                .mounts(project, &report.lockfile_digest)
-                .expect("mounts")
-                .is_empty()
-        );
-    }
-
-    #[test]
     fn rejects_project_without_any_supported_lock_file() {
         let tmp = project_with(&[("README.md", "no lock here")]);
         assert!(matches!(
             detect_language_strategy(tmp.path()),
             Err(KvistError::VendoringUnavailable { .. })
         ));
-    }
-
-    #[test]
-    fn rust_enforcement_requires_manifest_and_fails_closed() {
-        let tmp = project_with(&[(
-            "Cargo.lock",
-            "version = 4\n\n[[package]]\nname = \"serde_json\"\nversion = \"1.0.151\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n",
-        )]);
-        let project = tmp.path();
-        let strategy = detect_language_strategy(project).unwrap();
-        // Complete vendored material (the locked registry dep present), but no
-        // recorded manifest: enforcement must still fail closed.
-        let pkg_dir = project.join(".kvist").join("vendored").join("serde_json");
-        fs::create_dir_all(&pkg_dir).expect("vendored package");
-        fs::write(
-            pkg_dir.join("Cargo.toml"),
-            "[package]\nname = \"serde_json\"\nversion = \"1.0.151\"",
-        )
-        .expect("Cargo.toml");
-        assert!(matches!(
-            strategy.enforce(project),
-            Err(KvistError::VendoringUnavailable { .. })
-        ));
-    }
-
-    #[test]
-    fn rust_mounts_resolve_from_current_root_not_recorded_host_path() {
-        use sha2::{Digest, Sha256};
-        let tmp = project_with(&[(
-            "Cargo.lock",
-            "version = 4\n\n[[package]]\nname = \"serde_json\"\nversion = \"1.0.151\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n",
-        )]);
-        let project = tmp.path();
-        let strategy = detect_language_strategy(project).unwrap();
-
-        // Provision the material under the CURRENT root.
-        let pkg_dir = project.join(".kvist").join("vendored").join("serde_json");
-        fs::create_dir_all(&pkg_dir).expect("vendored package");
-        fs::write(
-            pkg_dir.join("Cargo.toml"),
-            "[package]\nname = \"serde_json\"\nversion = \"1.0.151\"",
-        )
-        .expect("Cargo.toml");
-        let digest = hex::encode(Sha256::digest(
-            fs::read(pkg_dir.join("Cargo.toml")).unwrap(),
-        ));
-        fs::write(
-            pkg_dir.join(".cargo-checksum.json"),
-            serde_json::to_vec(&serde_json::json!({
-                "package": "a".repeat(64), "files": {"Cargo.toml": digest}
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        fs::create_dir(project.join(".kvist/sandbox-cargo")).unwrap();
-        fs::write(
-            project.join(".kvist/sandbox-cargo/config.toml"),
-            rust_vendoring::offline_cargo_config(rust_vendoring::VENDOR_SANDBOX_MOUNT),
-        )
-        .unwrap();
-
-        // Record a manifest whose absolute paths name a DIFFERENT host root
-        // (the path the manifest recorded on the machine that produced it).
-        // This is the real-world layout: `kvist vendor` writes the producing
-        // host's absolute paths, and the project is later checked out at a
-        // different root.
-        let lockfile_digest = rust_vendoring::lockfile_digest(
-            &fs::read(project.join("Cargo.lock")).expect("lockfile"),
-        );
-        let manifest = rust_vendoring::VendorManifest {
-            schema_version: rust_vendoring::VENDOR_SCHEMA_VERSION,
-            lockfile_digest: lockfile_digest.clone(),
-        };
-        manifest.save(project).expect("save manifest");
-
-        // Enforcement must resolve the registry from the CURRENT root (where
-        // the material is), not the recorded host path (which does not exist
-        // here). A stale absolute path must not produce "No such file or
-        // directory".
-        let report = strategy
-            .enforce(project)
-            .expect("enforce with foreign-root manifest");
-        assert!(report.ready());
-
-        // The mounts the offline build will make must point at the current
-        // root's directories, not the recorded `/opt/proj/kvist` paths.
-        let mounts = strategy.mounts(project, &lockfile_digest).expect("mounts");
-        let registry = mounts
-            .iter()
-            .find(|mount| mount.destination == rust_vendoring::VENDOR_SANDBOX_MOUNT)
-            .expect("registry mount");
-        assert_eq!(registry.source, project.join(".kvist").join("vendored"));
-        assert!(
-            !registry
-                .source
-                .to_string_lossy()
-                .starts_with("/opt/proj/kvist")
-        );
-        let cargo_config = mounts
-            .iter()
-            .find(|mount| mount.destination == rust_vendoring::SANDBOX_CARGO_CONFIG_MOUNT)
-            .expect("cargo-config mount");
-        assert_eq!(
-            cargo_config.source,
-            project
-                .join(".kvist")
-                .join(rust_vendoring::SANDBOX_CARGO_CONFIG_DIRNAME)
-        );
-        assert!(
-            !cargo_config
-                .source
-                .to_string_lossy()
-                .starts_with("/opt/proj/kvist")
-        );
     }
 
     #[test]

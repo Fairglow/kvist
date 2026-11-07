@@ -10,6 +10,270 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:1339c23f9bfbeacaf136e951c4f62ecec394c932101691fdc241a19402cc62c5", "observed_revision": "sha256:91d5b83ce9c19639c2d381062413d6e60c4e6f06a3e889589e2d6661cf4dddd5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:2bceb93227d8669a775839cc66a3551913d53273c8917973b2fe447399bbd300", "observed_revision": "sha256:f9c3f0229bc4968cc099e3a139ea7dd8fc75933cd7ac6465a01596ff4a3a0029"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:e18eae35428b3e86a5aed9f4feaff20b3d7aff10c1bdb652f5d23b25f0fe4206", "observed_revision": "sha256:0ca9db51d23c506aad7f648c9ceca5784d613846b1d109ea618f6a2dfac64c2c"}]
 tasks:
+  - id: native-package-write-tests
+    title: "write_tests: bounded incremental native package acquisition"
+    description: "Pin actual manager error/timeout causes, optional absence and direct pnpm store selection without global copies."
+    context: "Human-approved native-cache implementation; explicit scoped advisory exception."
+    purpose: "Keep useful installation work while removing redundant copies and silent fallback."
+    expected_outcome: "Focused regressions fail against unbounded and global-copy behavior."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"]
+    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
+  - id: native-package-implement-code
+    title: "implement_code: bounded native package acquisition"
+    description: "Reuse the supervisor/diagnostic helper for host managers and uv export, select uv explicitly and use the native project pnpm store directly."
+    context: "No arbitrary global store source grants or checksum inventories are introduced."
+    purpose: "Make acquisition incremental and failure-transparent."
+    expected_outcome: "Focused native package regressions pass."
+    kind: implementation
+    status: completed
+    depends_on: [native-package-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"]
+    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
+  - id: native-package-security-audit
+    title: "security_audit: native package-manager authority"
+    description: "Independently inspect bounded captures, safe diagnostics and removed global-store link traversal."
+    context: "Source-only observations are separate from intent and human acceptance."
+    purpose: "Retain independent authority/safety evidence."
+    expected_outcome: "Scoped observations and findings are persisted."
+    kind: security-audit
+    status: completed
+    depends_on: [native-package-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"]
+    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+  - id: native-package-compliance-review
+    title: "compliance_review: native package preparation"
+    description: "Compare scoped intent with independent implementation observations and executed tests without source access."
+    context: "Independent source-only observation and separate source-blind comparison are linked from IMPL.md; reported cold host-installer path was reproduced, fixed and independently re-observed. No acceptance."
+    purpose: "Separate native preparation claims from evidence."
+    expected_outcome: "Scoped source-blind comparison and limitations are persisted."
+    kind: compliance-review
+    status: completed
+    depends_on: [native-package-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"]
+    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+  - id: native-go-cache-write-tests
+    title: "write_tests: native Go offline cache"
+    description: "Pin isolated Go cache selection including missing-path traversal/ancestor aliases, no-copy preparation, native missing material, combined lock identity and readonly offline profile."
+    context: "Human-approved Go cache-backed backend; explicit scoped advisory exception; no fake native archives/checksums."
+    purpose: "Reuse native Go modules without repeated directory vendoring."
+    expected_outcome: "Focused Go regressions precede production changes; initial behavioral red was blocked by concurrent parent compilation, while concurrency and missing-path guards have executed red regressions."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:51:09Z", updated_at: "2026-11-07T22:28:22Z", completed_at: "2026-11-07T22:28:22Z"}
+  - id: native-go-cache-implement-code
+    title: "implement_code: native Go offline cache"
+    description: "Use native GOMODCACHE and go mod download, preserve locked input identity and mount readonly module data with writable compiler scratch."
+    context: "Only Go-specific operator adapter changes; preserve other language materialization and parent Rust work."
+    purpose: "Eliminate Go module-source copies without inventing completeness evidence."
+    expected_outcome: "Focused tests and available real offline Go checks pass; limitations documented."
+    kind: implementation
+    status: completed
+    depends_on: [native-go-cache-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:51:09Z", updated_at: "2026-11-07T22:38:20Z", completed_at: "2026-11-07T22:38:20Z"}
+  - id: native-go-cache-security-audit
+    title: "security_audit: native Go offline cache"
+    description: "Independently observe native cache authority, locked acquisition, no-copy behavior and scratch separation."
+    context: "Parent coordinates clean-slate source-only evidence; no implementation self-certification."
+    purpose: "Retain independent safety observations."
+    expected_outcome: "Scoped findings and remaining native/sandbox limits are recorded."
+    kind: security-audit
+    status: completed
+    depends_on: [native-go-cache-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:51:09Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+  - id: native-go-cache-compliance-review
+    title: "compliance_review: native Go offline cache"
+    description: "Compare scoped intended behavior with independent observed/test evidence without source access."
+    context: "Independent observations/comparison are linked from IMPL.md; coarse catalogue and fixed native budget limits remain explicit. Acceptance and arbitration remain human."
+    purpose: "Distinguish native cache implementation from compliance."
+    expected_outcome: "Independent source-blind comparison retains limitations and discrepancies."
+    kind: compliance-review
+    status: completed
+    depends_on: [native-go-cache-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:51:09Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+  - id: native-cache-write-tests
+    title: "write_tests: native Rust cache topology"
+    description: "Pin warm reuse, source-only mounts, writable private administrative state and locked incremental acquisition."
+    context: "Human-approved ADR 0020; exact local advisory exception while review receipts are unavailable."
+    purpose: "Avoid source duplication without weakening protected authority."
+    expected_outcome: "Focused regressions reject the old whole-home/repack topology."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
+  - id: native-cache-implement-code
+    title: "implement_code: native Rust cache preparation"
+    description: "Reuse shared native cache roots and remove routine empty-cache fetch, repack, full-home mounts and unsupported promotion."
+    context: "Keep configured acquisition fail-closed and protected fulfillment unsupported; preserve explicit exports."
+    purpose: "Make ordinary offline preparation fast and incremental."
+    expected_outcome: "Focused native cache and sandbox regressions pass."
+    kind: implementation
+    status: completed
+    depends_on: [native-cache-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
+  - id: native-cache-security-audit
+    title: "security_audit: native cache authority"
+    description: "Independently inspect cache roots, private administrative links, exact argv and absence of fallback."
+    context: "No self-certification; retain source-only observations and concrete limitations."
+    purpose: "Preserve data/write/network boundaries during native reuse."
+    expected_outcome: "Independent findings and observations are persisted."
+    kind: security-audit
+    status: completed
+    depends_on: [native-cache-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+  - id: native-cache-compliance-review
+    title: "compliance_review: native offline preparation"
+    description: "Compare scoped intent with independently derived implementation and executed evidence without source."
+    context: "Independent records are linked from IMPL.md. Three obsolete-documentation conflicts were retained, corrected under the approved design and independently re-observed closed. Broad failures are not passing evidence; no acceptance."
+    purpose: "Separate implementation observations from intended behavior."
+    expected_outcome: "A source-blind comparison and evidence limits are persisted."
+    kind: compliance-review
+    status: completed
+    depends_on: [native-cache-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+  - id: native-rust-language-write-tests
+    title: "write_tests: native Rust language strategy"
+    description: "Replace default-runtime export assumptions with isolated native-home, optional mount, lock-identity and context-free noncanonical admission regressions; native export gating and noncanonical admission checks have executed red."
+    context: "Human-directed module integration; explicit scoped advisory exception. Do not inspect actual operator caches or interruption state."
+    purpose: "Bind the language strategy to native catalogue semantics without fabricated package metadata."
+    expected_outcome: "Native default-runtime regressions fail before implementation."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:37:00Z", updated_at: "2026-11-07T22:28:22Z", completed_at: "2026-11-07T22:28:22Z"}
+  - id: native-rust-language-implement-code
+    title: "implement_code: native Rust language strategy"
+    description: "Use shared native home/sources, adapt catalogue reports, perform required admission through the selected frontend helper and mount only present registry/Git data roots. Seven native integrations including selected-context no-fallback coverage pass."
+    context: "Protected readiness is separate; preserve explicit export APIs and legacy operator state untouched."
+    purpose: "Remove implicit default directory-export receipt/config requirements."
+    expected_outcome: "Focused native/non-Rust checks pass with accurate runtime paths and no full-home mount."
+    kind: implementation
+    status: completed
+    depends_on: [native-rust-language-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:37:00Z", updated_at: "2026-11-07T22:38:20Z", completed_at: "2026-11-07T22:38:20Z"}
+  - id: native-rust-language-security-audit
+    title: "security_audit: native Rust language strategy"
+    description: "Independently observe native selection, mount separation and absence of legacy export gating."
+    context: "Parent coordinates clean-slate source-only observation; no self-certification."
+    purpose: "Keep implementation observations independent."
+    expected_outcome: "Scoped source observations and limitations are recorded."
+    kind: security-audit
+    status: completed
+    depends_on: [native-rust-language-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:37:00Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+  - id: native-rust-language-compliance-review
+    title: "compliance_review: native Rust language strategy"
+    description: "Compare scoped intent with independent observations and focused test evidence without source access."
+    context: "Independent observations/comparison are linked from IMPL.md; actual configured cached-Git metadata and denied-network registry build pass. No acceptance or fabricated receipts."
+    purpose: "Separate intended native strategy behavior from source evidence."
+    expected_outcome: "Scoped source-blind comparison is retained."
+    kind: compliance-review
+    status: completed
+    depends_on: [native-rust-language-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:37:00Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+  - id: non-rust-cache-write-tests
+    title: "write_tests: non-Rust offline cache preparation"
+    description: "Pin JavaScript manager/lock consistency, unchanged config reuse, atomic repair and linked config refusal before production changes."
+    context: "Human-approved cache-backed design; explicit scoped advisory exception while review receipts are unavailable."
+    purpose: "Reuse native dependency stores without inventing file checksum inventories."
+    expected_outcome: "Focused regressions fail before the local preparation repair."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"]
+    timestamps: {created_at: "2026-11-07T21:34:36Z", updated_at: "2026-11-07T21:34:36Z", completed_at: "2026-11-07T21:34:36Z"}
+  - id: non-rust-cache-implement-code
+    title: "implement_code: non-Rust offline cache preparation"
+    description: "Align JavaScript lock identity with provisioning and reuse/atomically repair generated Python, JavaScript and Conan configuration."
+    context: "Do not modify native package trees, operator caches or Rust acquisition."
+    purpose: "Avoid redundant preparation writes while preserving offline isolation."
+    expected_outcome: "Focused tests pass and dedicated user documentation identifies actual and deferred semantics."
+    kind: implementation
+    status: completed
+    depends_on: [non-rust-cache-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"]
+    timestamps: {created_at: "2026-11-07T21:34:36Z", updated_at: "2026-11-07T22:28:22Z", completed_at: "2026-11-07T22:28:22Z"}
+  - id: non-rust-cache-security-audit
+    title: "security_audit: non-Rust offline cache preparation"
+    description: "Independently observe scoped source/tests, configuration path safety and unchanged package-cache authority."
+    context: "Source-only observation excludes intent, queue, prior IMPL and history; parent coordinates independent evidence."
+    purpose: "Retain independent safety observations without self-certification."
+    expected_outcome: "Scoped independent observations and limitations are recorded."
+    kind: security-audit
+    status: completed
+    depends_on: [non-rust-cache-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"]
+    timestamps: {created_at: "2026-11-07T21:34:36Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+  - id: non-rust-cache-compliance-review
+    title: "compliance_review: non-Rust offline cache preparation"
+    description: "Compare scoped intent with independent source observations and executed test evidence without source access."
+    context: "Independent observations/comparison are linked from IMPL.md; configuration limits, coarse readiness and the closed cold-host-installer path are explicit. No acceptance."
+    purpose: "Separate observed implementation from intended behavior."
+    expected_outcome: "Source-blind comparison retains discrepancies and limitations."
+    kind: compliance-review
+    status: completed
+    depends_on: [non-rust-cache-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"]
+    timestamps: {created_at: "2026-11-07T21:34:36Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+  - id: failure-diagnostics-write-tests
+    title: "write_tests: actionable Cargo and Rust resource failures"
+    description: "Reproduce lost paths/types and parser/OS causes before production changes."
+    context: "User-requested diagnostic repair; explicit local advisory exception while receipts are unavailable."
+    purpose: "Pin useful error causes without relaxing source validation."
+    expected_outcome: "Focused diagnostics regressions fail against existing behavior."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"]
+    timestamps: {created_at: "2026-11-07T19:43:56Z", updated_at: "2026-11-07T19:52:32Z", completed_at: "2026-11-07T19:52:32Z"}
+  - id: failure-diagnostics-implement-code
+    title: "implement_code: actionable Cargo and Rust resource failures"
+    description: "Retain paths, observed validation conditions and native causes through sandbox/vendor errors."
+    context: "Keep existing isolation, resource bounds and no-host-fallback behavior."
+    purpose: "Make preparation failures diagnosable without claiming runner absence."
+    expected_outcome: "Focused and affected checks pass with actionable diagnostics."
+    kind: implementation
+    status: completed
+    depends_on: [failure-diagnostics-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"]
+    timestamps: {created_at: "2026-11-07T19:43:56Z", updated_at: "2026-11-07T19:52:32Z", completed_at: "2026-11-07T19:52:32Z"}
+  - id: failure-diagnostics-security-audit
+    title: "security_audit: diagnostic source observations"
+    description: "Independently derive scoped IMPL evidence from changed source/tests without intent or history."
+    context: "Check retained validation and no automatic cleanup/fallback; do not certify compliance."
+    purpose: "Keep source observations independent of implementation intent."
+    expected_outcome: "Persist scoped observed behavior and limitations."
+    kind: security-audit
+    status: completed
+    depends_on: [failure-diagnostics-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"]
+    timestamps: {created_at: "2026-11-07T19:43:56Z", updated_at: "2026-11-07T19:54:20Z", completed_at: "2026-11-07T19:54:20Z"}
+  - id: failure-diagnostics-compliance-review
+    title: "compliance_review: diagnostic intent comparison"
+    description: "Compare scoped intent with independent observed/test evidence without source access."
+    context: "Record discrepancies and limitations for human arbitration, not acceptance."
+    purpose: "Separate intent comparison from source observation."
+    expected_outcome: "Persist an independent source-blind comparison."
+    kind: compliance-review
+    status: completed
+    depends_on: [failure-diagnostics-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"]
+    timestamps: {created_at: "2026-11-07T19:43:56Z", updated_at: "2026-11-07T19:55:29Z", completed_at: "2026-11-07T19:55:29Z"}
   - id: shared-area-write-tests
     title: "write_tests: shared Rust vendor ownership"
     description: "Pin shared metadata, limits and read ownership through native authoring/verification."

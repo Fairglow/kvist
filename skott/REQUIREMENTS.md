@@ -2,6 +2,49 @@
 
 # Skott — Requirements
 
+## RUN-REQ-NATIVE-SOURCE-ADMISSION
+
+Explicit `--vendor --check` MUST retain process-free canonical catalogue checks.
+When native Git/alternate-source mapping cannot be established cheaply, it MUST
+use the shared bounded offline/locked Cargo metadata admission with an explicitly
+selected installed host Cargo. This operator check MAY update native Cargo
+administration or extract already cached sources, but MUST NOT acquire missing
+dependencies, compile, resolve a lock or mint a receipt. Disclose that authority
+before the process. Missing sources and unsafe source mappings MUST fail clearly;
+matching lock-only receipts MUST NOT substitute for current native admission.
+Provisioning MUST retain shared missing-only native acquisition and admission.
+Runtime remains live/read-only and MUST NOT become source-content attestation or
+depend on successful Git/alternate-source admission to enable independent tools.
+Tests MUST cover actual Git check success, offline failure after cache removal
+despite a matching receipt, and unchanged project lock/receipt.
+
+This human-requested admission followup has an explicit scoped advisory exception;
+no acceptance/receipt or implementer certification is recorded. Independent
+observation/security/comparison remain parent-arranged.
+
+## RUN-REQ-NATIVE-CARGO-CACHE
+
+Under ADR 0020, workspace Rust MUST reuse the explicitly selected host
+Cargo cache (`CARGO_HOME`, otherwise `HOME/.cargo`) through the shared dependency
+provider. Available registry and Git data roots MUST be live read-only resources
+at disjoint sandbox destinations; no package copies, file inventories, receipt
+gate, automatic acquisition or host-cache fallback are permitted.
+The host home, cache credentials/configuration and administrative files MUST
+remain unexposed. Cargo administrative writes MUST use private sandbox state.
+Resource-root changes MUST refresh on the next tool without a restart. Missing
+sources MUST produce offline Cargo-local diagnostics without disabling installed
+compiler or independent tools. Cargo remains offline, not forcibly locked.
+Explicit dependency provisioning MUST call the shared native-cache backend and
+acquire only missing material; export remains a separate provider operation.
+Tests MUST cover read-only grants/privacy, private administrative writes, reuse,
+live root replacement, missing-source failure and real offline compilation.
+Pinned toolchains, context/write scope and generic denied-network System/
+Authoring topology remain unchanged.
+
+This exact scoped human-requested intent/task bundle has a deliberate local
+advisory exception while receipts are unavailable. No acceptance or receipt is
+recorded; independent observation/security/comparison remain pending.
+
 ## RUN-REQ-LIVE-WORKSPACE
 
 ADR 0019 deliberately replaces this component's earlier complete-file limits,
@@ -20,10 +63,10 @@ Digest guards for edits/append/patch MUST be optional, not mandatory boilerplate
 
 Host resource edits MUST be visible without fingerprint/digest violations,
 manifest readiness gates, reader leases or mandatory restart. Changed installed
-selection/inventory/vendor/configuration topology MUST refresh automatically at
+selection/inventory/native-cache topology MUST refresh automatically at
 the next tool. Missing packages MUST affect only actual dependency-using tools.
 Workspace Cargo MUST remain offline without forcibly adding locked resolution.
-Read-only vendor aliases and non-writable installed enforcement resources MUST
+Read-only dependency data and non-writable installed enforcement resources MUST
 remain protected from sandbox writes. OS confinement replaces recursive
 host-symlink inspections and categorical command-name filters.
 
@@ -41,22 +84,24 @@ receipt enforcement is unavailable; no compliance/acceptance is implied.
 
 `--vendor` MUST provision existing locked Rust dependencies through the common
 dependency library without model configuration or Kvist project artifacts.
-`--check` MUST be offline/read-only; `--offline` MUST select cached-only Cargo
+`--check` MUST be offline and acquisition-free, with process-free canonical
+checks and explicitly disclosed native metadata admission otherwise; `--offline` MUST select cached-only Cargo
 provisioning. Host authority, network behavior, scope and recovery MUST be
 disclosed before effects; no model tool or automatic startup download is added.
 Unsupported languages MUST fail explicitly. Future language support needs
 shared provisioning and actual tested offline environment wiring, not just
 language-tool discovery.
 
-Explicit provisioning/checks retain their shared metadata validation. Workspace
-runtime MUST use available vendor/source configuration without a mandatory
-receipt or locked-catalogue gate. Safe generated source configuration MUST
-support native registry/Git replacements without trusting host paths.
-Existing dependency-free/local builds, read-only vendor aliases, offline Cargo, no host
+Explicit provisioning/checks retain their shared native-cache validation. Workspace
+runtime MUST use available native registry/Git roots without a mandatory
+receipt or locked-catalogue gate. No default directory-source replacement or
+host Cargo configuration is generated or copied into the sandbox.
+Existing dependency-free/local builds, read-only dependency data, offline Cargo, no host
 credentials, no auto-installation and toolchain selection MUST remain intact.
 Provisioned dependency changes MUST refresh at tool boundaries without restart
 or prompt replay.
-Tests MUST cover real CLI provisioning, checks with no effects, offline native
+Tests MUST cover real CLI provisioning, canonical checks with no effects,
+acquisition-free native admission, offline native
 compilation/tests, stale/malformed inputs and failures.
 Rust preparation timeout diagnostics MUST state the actual 180-second budget,
 separately from per-tool preflight and execution. Native Rust verification MUST
@@ -64,12 +109,15 @@ exercise installed compiler/target selection, build/run, unit/integration/doc
 tests, formatting, Clippy, documentation, locked registry/Git dependencies and
 the existing isolation assertions; availability is not a promise of arbitrary
 system libraries, credentials or out-of-workspace path dependencies.
-Skott MUST NOT copy vendor package contents or hash their file inventory.
-The shared vendor tree MUST be read-only at `/rust/vendor`, with its writable
-workspace alias also readable read-only. Runtime MUST NOT require a shared read
-owner or reject directory/lock replacement; direct host source edits are left
-to Cargo's native checks. Explicit provisioning uses shared vendor limits/defaults. Explicit `--force`
-rebuilds damaged material without automatic downloads or fallback.
+Skott MUST NOT copy dependency package contents or hash their file inventory.
+Available native registry/Git roots MUST be read-only at `/rust/cargo-registry`
+and `/rust/cargo-git`, outside the writable workspace. Runtime MUST NOT require
+a shared read owner or reject legitimate directory/lock replacement; direct
+host source edits are left to Cargo's native checks. Explicit provisioning uses
+shared policy limits/defaults. Explicit `--force` reconciles native receipt
+metadata; complete cached sources remain reusable and missing-only acquisition
+retains the explicitly selected offline/network authority. Portable directory
+exports are separate shared-provider operations, not the Skott default.
 
 This human-requested Rust consolidation has a local advisory exception while
 receipts are unavailable; observations/reviews are not acceptance.
@@ -283,18 +331,18 @@ their own operation rather than block an available compiler or source work.
 
 Native tests MUST exercise selection, PATH discovery, rustup queries, compilation,
 linking, executable execution, unit/integration/doctests, formatting, Clippy,
-documentation, vendored resolution, missing/stale locks, pin drift, credential
+documentation, native registry/Git resolution, writable/explicitly locked
+project resolution, pin changes, credential
 exclusion, read-only mounts and network denial inside the actual sandbox.
 Isolation assertions MUST fail on a violation, not mask it with shell fallbacks.
 Optional Cargo-installed tools remain host-provisioned; tests MUST NOT silently
 claim their presence.
 
 Build output MUST use the writable workspace's `/workspace/target` so it
-survives shell invocations. Cargo cache and selection settings remain private
-invocation scratch. Vendored resolution MUST consume the shared read-only
-vendor tree without per-tool reader leases. The existing workspace alias MUST
-also be readable read-only during sandbox execution
-without changing the host registry or concealing unrelated project state.
+survives shell invocations. Cargo administrative state and selection settings
+remain private invocation scratch. Native resolution MUST consume the shared
+read-only registry/Git data without per-tool reader leases, host cache writes,
+source copies or concealment of unrelated project state.
 
 Native inventory tests MUST compare exposed installed names, versions, target
 catalogues and installed targets/components against host queries, account for
@@ -436,7 +484,7 @@ from forbidden symbolic links without weakening mutation protection.
 An installed Rust toolchain MUST be usable through validated read-only
 host-selected resources, without user-home/configuration/credential mounts,
 toolchain installation, network access, or an maerg dependency. Offline
-vendored resolution MUST use sandbox-native paths and bounded private scratch.
+native cache resolution MUST use sandbox-native paths and bounded private scratch.
 The normal sandbox Cargo entry point MUST force `--offline`, but not `--locked`.
 Native Cargo MAY create/update the writable project lock. Explicitly requested
 locked builds and unavailable dependency resolution MUST fail actionably.
@@ -925,7 +973,7 @@ newlines, mutation bounds and sandbox/host helper routing.
 
 Networked dependency installation remains deferred: do not advertise a package
 installation tool without an approved source-bound acquisition phase, exact
-request/lock/vendor binding and re-prepared read-only build resources. Document
+request/lock/native-cache origin binding and re-prepared read-only build resources. Document
 the available tools, conservative limitations and explicit host provisioning.
 This human-requested intent bundle has an explicit advisory-review exception
 while receipt enforcement is unavailable; no acceptance or compliance is claimed.

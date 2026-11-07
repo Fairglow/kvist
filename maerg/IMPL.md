@@ -1,6 +1,38 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped source-only diagnostic and acquisition observation
+
+Derived by clean-slate `diagnostic-source-observer`; the comparison below came
+from separate source-blind `diagnostic-intent-comparator`. Both inspected their
+permitted inputs without running validation commands.
+
+`SandboxUnavailable` formats failures as runner preparation **or execution** failures. Path-aware helpers retain operation, path, and underlying error text. Cargo-context diagnostics identify rejected filesystem types, hard-link counts, metadata sizes, UTF-8/TOML failures, and detected changes, often suggesting corrective actions. Some installed-Rust errors remain generic.
+
+Cargo-context preparation traverses workspace members and declared local dependencies, restricts dependency roots to non-hidden in-project directories, rejects links and special entries, filters operational material, and constructs read-only grants. Bounds include 1 MiB metadata, 128 crates, 100,000 tracked entries, 32 MiB path bytes, depth 128, 256 selected mounts, and a checked 30-second budget. Metadata reads use non-following, nonblocking opens and before/after fingerprints. Acquisition staging copies manifests/locks but substitutes empty source files, generates approved registry settings, checks Git approvals, and requires a root lockfile.
+
+Installed-Rust preparation queries host rustup with a restricted environment and auto-install disabled, inventories toolchains, creates private wrappers/settings, and supplies read-only grants. Application rechecks tracked fingerprints and writable overlaps, then sets offline Cargo variables. These checks are not continuous snapshots; reviewed code depends on Unix facilities and fixed host paths.
+
+Configured acquisition resolves/probes tooling, creates transaction-local scratch, invokes acquisition, compares staged/project lock digests, then requests host-side offline repacking. Scratch cleanup is attempted after success or failure; combined failures retain both causes. There is no configured-acquisition host fallback. Failure diagnostics aggregate cancellation/time/output-limit flags; exit status appears when those flags are absent. Captured stderr takes precedence over stdout; text undergoes redaction/sanitization and UTF-8-safe truncation to 4,096 bytes, excluding surrounding error text.
+
+Reviewed assertions cover diagnostic details, retained special entries, redaction/truncation, and a local-only native workspace expecting unchanged lock bytes, no project target, empty vendor output, and cleaned scratch. This fixture does not exercise downloading external dependencies.
+
+Supplied execution evidence—not executions performed during this observation—reports four diagnostic tests failing previously; current sandbox tests 27 passed, acquisition-diagnostic tests 2 passed, shared-vendoring tests 5 passed, and formatting/strict Clippy passed. Native acquisition currently fails with status 3: payload succeeded but promotion lacked a provider-owned generation-parent capability. Unchanged archived HEAD also fails, previously hiding the cause; 16 other baseline vendor tests passed. Real-project integration remains blocked by a stale receipt; root Cargo.lock is unchanged. These observations establish neither acceptance nor compliance.
+
+**High-confidence scoped defects:** None established. The supplied native-promotion failure remains unresolved; its provider implementation was outside this inspection.
+
+### Source-blind comparison
+
+The supplied observation broadly supports the scoped diagnostic intent: neutral preparation/execution wording, operation/path/cause retention, explicit invalid filesystem conditions, bounded metadata checks, preserved isolation, and configured-acquisition no-host-fallback behavior. Observed acquisition diagnostics support flag aggregation, stderr preference, redaction/sanitization, UTF-8-safe bounding, and retention of combined cleanup failures.
+
+No high-confidence contradiction is established. Some installed-Rust errors reportedly remain generic; this potentially conflicts with the shared-resource diagnostic obligation, but the supplement does not identify sufficiently specific cases to establish a violation. Any covered filesystem/metadata failure lacking its available path or underlying cause would require human arbitration, not automatic intent revision.
+
+Evidence does not explicitly establish every promised detail, including configured-runner naming, redaction ordering, visible truncation markers, empty-output wording, or complete focused-test coverage. Passing scoped tests and formatting/Clippy results are supporting evidence, not compliance proof; execution results were supplied rather than independently reproduced.
+
+The native acquisition/promotion failure remains unresolved and recorded. Baseline reproduction explains its prior existence but does not waive it. Provider implementation was outside observation; real-project integration remains receipt-blocked, and the local-only fixture does not establish external dependency acquisition.
+
+The broader informative-errors policy remains unverified; exhaustive repository-wide coverage and acceptance are not certified.
+
 ## Final configured Rust acquisition repairs - 2026-11-06
 
 Clean-slate `final-rust-impl-observer` inspected current source/test assertions,
@@ -2350,3 +2382,43 @@ Final implementer-run production nextest
 frontends reported the same ready project tree; Kvist reused it with offline
 host policy and no acquisition. Review completion neither accepts stale revisions
 nor certifies all requirements.
+
+## Native offline preparation observation (2026-11-07 UTC)
+
+Independent source-only observer `d38462f8-d2f9-4d78-a5bb-c512f6458890`
+derived the Maerg section of
+[`native-cache-observation.md`](../docs/reviews/native-cache-observation.md).
+Its input exclusions and exact source/test references are retained there.
+It executed no checks.
+
+Observed default Rust preparation uses native data and separate explicit
+directory exports. Configured metadata stages manifests/locks/empty targets,
+uses private administration and bounds execution to 30 seconds/remaining
+budget; original and staged lock digests are checked afterwards. Unbound
+protected dependency requests are refused. Go reuses native module data, pnpm
+does not copy the global store, and host manager failures retain bounded
+diagnostics without automatic retries. Offline language verification disables
+automatic acquisition. Non-Rust presence checks do not prove exact completeness;
+vcpkg's generated configuration still uses its existing direct-write path.
+No acceptance or certification is inferred.
+
+### Independent security finding and closure
+
+Security reviewer `bf1b95b7-8a98-4777-b332-d8740de4e31f` identified a
+high-severity cold non-Rust verification path into host installers
+(confidence 9/10, original `language_verification.rs:60` dispatch).
+Introduction timing was not established. The implementer's sentinel regression
+reproduced a host npm launch before the fix. Verification now requests existing
+material with `auto_vendor=false`; six non-Rust preparation tests pass, including
+the no-installer regression. The reviewer independently re-observed that this
+closes the reported path, without executing tests. Explicit operator host
+installation remains authorized. This record is not a receipt or compliance
+certification.
+
+Source-blind comparer `a6add327-2a55-4006-b3f6-b2750041ff26` recorded scoped
+correspondence and three obsolete-documentation conflicts in
+[`native-cache-comparison.md`](../docs/reviews/native-cache-comparison.md).
+Their corrections implement the human-approved native design; the same
+source-blind comparer re-observed all three conflicts closed. No production
+behavior was re-evaluated; broader test failures remain visible and acceptance
+metadata remains unchanged.

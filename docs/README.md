@@ -20,6 +20,7 @@ posture, and the agent runtime analysis.
 | [Why Kvist](why-kvist.md) | A grounded comparison of Kvist with coding agents, specification kits, agent frameworks, sandboxes, and governance tools. |
 | [Logging and Observability Guide](logging.md) | How Kvist logs and why: the two audiences (human operators and the runtime), levels, and what is recorded. |
 | [Sandbox Toolchains and Vendoring](sandbox-toolchains-and-vendoring.md) | How toolchains and their dependencies are mounted into the sandbox, how they are discovered and used, and how to add or change vendored dependencies per toolchain. |
+| [Offline dependencies](offline-dependencies.md) | Native caches, necessary installation artifacts, incremental preparation and offline limitations for every supported package manager. |
 
 ## Agent runtime
 
@@ -55,6 +56,7 @@ reversibility consequences.
 | [0012](decisions/0012-pinned-rust-toolchains.md) | Pinned Rust toolchains provisioned on the host |
 | [0013](decisions/0013-per-language-offline-verification.md) | Per-language offline verification topology |
 | [0014](decisions/0014-readonly-rust-authoring-build-context.md) | Read-only Rust authoring build context |
+| [0020](decisions/0020-native-offline-dependency-caches.md) | Native offline dependency caches instead of routine dependency-source copies |
 
 ## Proposals (`proposals/`)
 

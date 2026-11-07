@@ -10,6 +10,50 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:cd06c5851d83e39b324a929430af4d57a7549670f1ca827eb389c8dd2827e5df", "observed_revision": "sha256:750c2db2e20befb9a1c83d5ce99589e936d109e9ba214362db4b469f4b0e3691"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:390728e5867a1a299a56bec93b20373262c46d91339a42eb7f8981570e05c259", "observed_revision": "sha256:eb53c51c0021c3e295ea3764cab6a3c9f25338a4bcac7368c16f1e13b79b0e9b"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:7417b300a66353d6feef525d90339a0701247dffc56b790d9115ca8cc9fc74b2", "observed_revision": "sha256:49177cdcef45bf6d9a8fe1cd49cdad14d5a6e1d663695112ed649686e61ecfd0"}]
 tasks:
+  - id: native-cache-write-tests
+    title: "write_tests: native offline Cargo scripts"
+    description: "Pin native wrapper defaults, explicit export configuration and private administration links."
+    context: "Human approved; explicit scoped advisory exception, no receipts. Native-default/private-administration regression failed before the shared script implementation."
+    purpose: "Fail old forced vendor source behavior."
+    expected_outcome: "Focused new script regressions fail before implementation."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#SAV-REQ-NATIVE-CARGO-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:43:00Z", updated_at: "2026-11-07T21:48:00Z", completed_at: "2026-11-07T21:48:00Z"}
+  - id: native-cache-implement-code
+    title: "implement_code: native cache scripts"
+    description: "Render offline native wrappers and private Cargo administrative home initialization. Normalize all affected current intent/README default-source claims under ADR 0020; portable exports remain explicitly staged, prior IMPL remains historical."
+    context: "3 shared script regressions pass. Consumer Skott native registry and Git runtime fixtures compile/test with private writable .global-cache/.package-cache and read-only data, alongside 24 non-checkout Rust trials and 6 native CLI tests. Protected wrappers retain offline/locked; workspace wrappers remain offline/unlocked. Strict Skott/Sav all-target Clippy, scoped formatting and whitespace pass. No default source resolver, source copies or authority changes; independent source/security/comparison remains parent-arranged and pending."
+    purpose: "Allow approved native cache reuse."
+    expected_outcome: "Script tests and attributed consumer runtime fixture pass."
+    kind: implementation
+    status: completed
+    depends_on: [native-cache-write-tests]
+    requirements: ["REQUIREMENTS.md#SAV-REQ-NATIVE-CARGO-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:43:00Z", updated_at: "2026-11-07T21:48:00Z", completed_at: "2026-11-07T21:48:00Z"}
+  - id: native-cache-security-audit
+    title: "security_audit: independently inspect native scripts"
+    description: "Parent-arranged independent source/security observation."
+    context: "No implementer self-certification or IMPL updates."
+    purpose: "Retain authority and privacy evidence."
+    expected_outcome: "Independent scoped observations."
+    kind: security-audit
+    status: completed
+    depends_on: [native-cache-implement-code]
+    requirements: ["REQUIREMENTS.md#SAV-REQ-NATIVE-CARGO-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:43:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
+  - id: native-cache-compliance-review
+    title: "compliance_review: compare native script evidence"
+    description: "Parent-arranged separate source-blind intent/evidence comparison."
+    context: "Independent source-only and separate source-blind records are linked from IMPL.md; no acceptance or fabricated receipt."
+    purpose: "Record discrepancies for arbitration."
+    expected_outcome: "Independent comparison with limits."
+    kind: compliance-review
+    status: completed
+    depends_on: [native-cache-security-audit]
+    requirements: ["REQUIREMENTS.md#SAV-REQ-NATIVE-CARGO-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:43:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
   - id: workspace-offline-write-tests
     title: "write_tests: workspace offline resolution"
     description: "Execute rendered wrappers and assert workspace Cargo/Clippy omit forced locked flags while protected consumers retain them."

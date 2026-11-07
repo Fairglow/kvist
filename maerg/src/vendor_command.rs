@@ -1,36 +1,29 @@
-//! `kvist vendor`: provision and enforce offline vendored dependencies
-//! (ADR-0011, ADR-0013).
+//! `kvist vendor`: prepare native offline dependencies (ADR-0020).
 //!
 //! This is the operator-facing entry point that makes builds and tests run with
 //! the sandbox network denied. It detects the project's language strategy and
 //! dispatches the host-authorized provisioning pass for it:
 //!
-//! - **Rust** — populates or reconciles a vendored registry with the host cargo,
-//!   records a versioned manifest under the project, and writes the sandbox
-//!   cargo configuration. The recorded manifest is re-enforced by verification
-//!   before an offline build is allowed.
-//! - **Go** — `go mod vendor` commits the exact module material into the
-//!   project's `vendor/` directory.
-//! - **JavaScript** — `npm ci` (or `yarn install --frozen-lockfile`) builds
-//!   `node_modules` from the exact locked versions into a vendored package
-//!   cache.
+//! - **Rust** — reuses selected native registry/Git data, acquiring only missing
+//!   material. Configured fetch/admission uses the closed sandbox topology;
+//!   explicit portable exports remain separate.
+//! - **Go** — `go mod download` populates the selected native module cache.
+//! - **JavaScript** — frozen native installs populate `node_modules` and a
+//!   persistent project package store.
 //! - **Python** — downloads the locked wheels and builds a provisioned
 //!   virtualenv that makes them importable offline.
 //! - **C/C++ (Conan)** — fills a project-local Conan home with the exact locked
 //!   binaries and generates the build files the project build system consumes.
 //!
-//! Kvist controls vendoring: the vendored material is produced from the exact
-//! locked versions, and every subsequent verification re-checks that the lockfile
-//! still matches and that the material is present before it allows an offline
-//! build. Provisioning is the only step that may contact the network; it runs on
-//! the host, outside the effect sandbox.
+//! Native catalogues are presence checks, not source-integrity attestations.
+//! Verification exposes data read-only with private administrative/build state
+//! and denied networking. Acquisition requires explicit operator authority.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::error::{KvistError, Result};
 use crate::sandbox::SandboxAllowedSource;
-use crate::vendoring::{VendorManifest, find_stale_vendored_packages};
+use crate::vendoring::VendorManifest;
 
 #[cfg(test)]
 #[path = "vendor_command/protected_tests.rs"]
@@ -74,29 +67,22 @@ impl std::fmt::Display for VendorReport {
     }
 }
 
-/// Maximum bytes of a failed `cargo vendor` stderr message retained in an error.
+/// Maximum bytes of a captured package-manager diagnostic retained in an error.
 const MAX_VENDOR_ERROR_BYTES: usize = 4096;
 
 /// Options controlling a vendoring pass.
 #[derive(Debug, Clone, Default)]
 pub struct VendorOptions {
-    /// Explicitly rebuild otherwise reusable Rust material.
+    /// Refresh the native receipt, or rebuild an explicitly selected export.
+    /// This does not guarantee repair of undetected native cache corruption.
     pub force: bool,
-    /// An explicit vendored-registry directory. Defaults to
-    /// `<project>/.kvist/vendored` when `None`.
+    /// Explicit portable Cargo directory export. `None` selects native cache reuse.
     pub vendored_dir: Option<PathBuf>,
-    /// Whether to populate or reconcile a vendored registry with the host
-    /// cargo. `cargo vendor` reconciles an existing registry, so cargo is
-    /// invoked only when a locked dependency is absent and the registry does not
-    /// yet satisfy the lock; a complete registry is reused and cargo is never
-    /// invoked.
+    /// Authorize Rust acquisition of missing native material or an explicit export.
+    /// Canonical complete native cache reuse does not invoke Cargo.
     pub populate: bool,
-    /// The project's sandbox configuration. When present, a stale registry is
-    /// re-provisioned by a network-allow dependency-acquisition sandbox
-    /// (`cargo fetch`) run before the effect sandbox executes; the host
-    /// `cargo vendor` is then used only to repack the fetched material into the
-    /// vendored registry offline (never contacting the network). When absent
-    /// (no sandbox configured), the classic host `cargo vendor` pass is used.
+    /// Optional sandbox for bounded native fetch/admission, never a host fallback.
+    /// Only explicit portable exports repack acquired material with offline Cargo.
     pub sandbox: Option<crate::config::SandboxConfig>,
 }
 
@@ -157,8 +143,7 @@ pub fn vendor_project_protected(
 ///
 /// A successful report only describes the existing lockfile and registry. It
 /// does not bind, fetch, or establish the presence of any requested dependency.
-/// The acquisition runner permits `cargo fetch`, but not the `cargo vendor`
-/// repack needed to provision registry material. Other languages and Rust
+/// Other languages and Rust
 /// state needing changes are refused without provisioning writes or package
 /// manager execution.
 pub fn check_protected_vendor_readiness(
@@ -205,45 +190,25 @@ pub fn check_protected_vendor_readiness(
             strategy.id()
         )));
     }
-    let manifest = VendorManifest::load(&project_dir)?.ok_or_else(|| {
-        refused(
-            "Rust has no existing vendoring manifest and the sandbox cannot perform the \
-             required vendor repack"
-                .into(),
-        )
-    })?;
-    if manifest.schema_version != crate::vendoring::VENDOR_SCHEMA_VERSION {
-        return Err(refused(
-            "the existing Rust vendoring receipt has an unsupported version".into(),
-        ));
-    }
-    let current = VendorManifest::current_digest(&project_dir)?;
-    if current != manifest.lockfile_digest {
-        return Err(KvistError::VendoringStale {
-            path: project_dir.to_string_lossy().into_owned(),
-            current,
-            expected: manifest.lockfile_digest,
-        });
-    }
-    let report = kvist_dependencies::rust::check(&project_dir, options.cancellation)?;
-    let vendored_dir = manifest.vendored_registry(&project_dir);
-    if !vendored_dir.is_dir()
-        || !find_stale_vendored_packages(&project_dir, &vendored_dir)?.is_empty()
-    {
-        return Err(refused(
-            "the Rust registry requires a vendor repack that the sandbox cannot perform".into(),
-        ));
-    }
+    let home = kvist_dependencies::rust::cache::home()?;
+    let view = native_cargo_admission_controlled(
+        &project_dir,
+        &home,
+        options.sandbox,
+        options.cancellation,
+        Some(options.remaining_budget.saturating_sub(started.elapsed())),
+    )?;
+    view.report.enforce()?;
     check_control()?;
-    Ok(VendorReport::Rust(report))
+    Ok(VendorReport::Rust(view.report))
 }
 
 /// Ensure a locked project can build offline and record what was produced.
 ///
 /// Detects the project's language strategy, performs the host-authorized
 /// provisioning pass for it, and returns the readiness report the strategy
-/// enforces. Rust additionally writes the sandbox cargo configuration and the
-/// versioned manifest; the other languages are enforced statelessly from their
+/// enforces. Native Rust writes a small lock-bound cache receipt, not a
+/// generated source-replacement configuration; other languages are enforced from their
 /// lock file plus the provisioned material on disk.
 pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<VendorReport> {
     let project_dir = canonical_or(project_dir)?;
@@ -331,14 +296,76 @@ fn enforce_language_report(
     Ok(report)
 }
 
-/// The Rust provisioning pass: populate or reconcile the vendored registry,
-/// write the sandbox cargo configuration, and persist the versioned manifest.
+/// Prepare native Cargo data, or deliberately export a portable directory source.
 fn vendor_rust_project(
     project_dir: &Path,
     options: VendorOptions,
 ) -> Result<crate::vendoring::VendoringReport> {
     let cancellation = sav::CancellationToken::new();
     let limits = kvist_dependencies::VendorLimits::load(project_dir)?;
+    if options.vendored_dir.is_none() {
+        let home = kvist_dependencies::rust::cache::home()?;
+        tracing::info!(project = %project_dir.display(), cache = %home.display(), "checking native locked Cargo cache");
+        let acquire = |home: &Path| {
+            if !options.populate {
+                return Err(kvist_dependencies::Error::VendoringUnavailable {
+                    path: project_dir.to_string_lossy().into_owned(),
+                    reason: "locked native dependencies are missing; acquisition was not authorized; run explicit `kvist vendor`".into(),
+                });
+            }
+            tracing::info!(project = %project_dir.display(), "acquiring missing locked Cargo dependencies; completed downloads will be retained");
+            if let Some(sandbox) = &options.sandbox {
+                provision_rust_via_acquisition_sandbox(project_dir, sandbox, home).map_err(
+                    |error| kvist_dependencies::Error::VendoringUnavailable {
+                        path: project_dir.to_string_lossy().into_owned(),
+                        reason: format!("{error}; configured acquisition stopped; cached downloads retained; no host fallback"),
+                    },
+                )
+            } else {
+                let cargo = crate::toolchain::resolve_pinned_toolchain(
+                    project_dir,
+                    "explicit native Cargo acquisition",
+                )
+                .map_err(|error| kvist_dependencies::Error::VendoringUnavailable {
+                    path: project_dir.to_string_lossy().into_owned(),
+                    reason: error.to_string(),
+                })?
+                .cargo;
+                kvist_dependencies::rust::cache::populate(
+                    project_dir,
+                    home,
+                    &kvist_dependencies::rust::ProvisionOptions {
+                        cargo,
+                        offline: false,
+                        vendored_dir: None,
+                        timeout: std::time::Duration::from_secs(limits.timeout_secs),
+                        force: options.force,
+                    },
+                    &cancellation,
+                )
+            }
+        };
+        let view = if let Some(sandbox) = &options.sandbox {
+            kvist_dependencies::rust::cache::provision_with_validation(
+                project_dir,
+                &home,
+                &cancellation,
+                options.force,
+                acquire,
+                |home| native_metadata(project_dir, home, sandbox, &cancellation, None),
+            )?
+        } else {
+            kvist_dependencies::rust::cache::provision_with(
+                project_dir,
+                &home,
+                &cancellation,
+                options.force,
+                acquire,
+            )?
+        };
+        tracing::info!(project = %project_dir.display(), "native locked Cargo cache ready; no source copying or per-file inventory");
+        return Ok(view.report);
+    }
     if !options.populate {
         return kvist_dependencies::rust::provision_with(
             project_dir,
@@ -358,13 +385,45 @@ fn vendor_rust_project(
             &cancellation,
             options.force,
             |staged| {
-                provision_rust_via_acquisition_sandbox(project_dir, sandbox, staged).map_err(
-                    |error| kvist_dependencies::Error::VendoringUnavailable {
-                        path: project_dir.to_string_lossy().into_owned(),
-                        reason: format!(
-                            "{error}; configured acquisition stopped; no host fallback"
-                        ),
+                let home = kvist_dependencies::rust::cache::home()?;
+                kvist_dependencies::rust::cache::provision_with_validation(
+                    project_dir,
+                    &home,
+                    &cancellation,
+                    false,
+                    |home| {
+                        provision_rust_via_acquisition_sandbox(project_dir, sandbox, home).map_err(
+                            |error| kvist_dependencies::Error::VendoringUnavailable {
+                                path: project_dir.to_string_lossy().into_owned(),
+                                reason: format!(
+                                    "{error}; configured acquisition stopped; no host fallback"
+                                ),
+                            },
+                        )
                     },
+                    |home| native_metadata(project_dir, home, sandbox, &cancellation, None),
+                )?;
+                let cargo = crate::toolchain::resolve_pinned_toolchain(
+                    project_dir,
+                    "explicit portable Cargo export",
+                )
+                .map_err(|error| kvist_dependencies::Error::VendoringUnavailable {
+                    path: project_dir.to_string_lossy().into_owned(),
+                    reason: error.to_string(),
+                })?
+                .cargo;
+                kvist_dependencies::rust::populate(
+                    project_dir,
+                    staged,
+                    &kvist_dependencies::rust::ProvisionOptions {
+                        cargo,
+                        offline: true,
+                        vendored_dir: None,
+                        timeout: std::time::Duration::from_secs(limits.timeout_secs),
+                        force: false,
+                    },
+                    Some(&home),
+                    &cancellation,
                 )
             },
         )
@@ -388,22 +447,169 @@ fn vendor_rust_project(
 
 /// Re-provision a Rust vendored registry *inside the sandbox*: run a
 /// network-allow dependency-acquisition sandbox (`cargo fetch`) with allowlisted
-/// package sources before the effect sandbox executes, then repack the fetched
-/// material into the project's vendored registry offline.
-///
-/// This is the in-sandbox provisioning step ADR-0011 describes as running the
-/// acquisition outside the effect sandbox. The one step that may contact the
-/// network is the allowlisted `cargo fetch` inside the acquisition sandbox; the
-/// repack (`cargo vendor --offline --locked`) uses only the fetched cache.
-/// This is Cargo-level offline mode, not OS confinement of the host process.
-/// Configured acquisition failure stops explicitly without host fallback.
+/// package sources into persistent native data without repacking or host fallback.
 fn provision_rust_via_acquisition_sandbox(
     project_dir: &Path,
     sandbox_config: &crate::config::SandboxConfig,
-    vendored_dir: &Path,
-) -> Result<String> {
+    cargo_home: &Path,
+) -> Result<()> {
+    let result = run_native_cargo_preparation(
+        project_dir,
+        sandbox_config,
+        cargo_home,
+        NativePreparation::Fetch,
+        &sav::CancellationToken::new(),
+        None,
+    )?;
+    let limits = kvist_dependencies::VendorLimits::load(project_dir)?;
+    check_acquisition_result(
+        project_dir,
+        &result,
+        &limits,
+        &sandbox_redactions(sandbox_config),
+    )
+}
+
+#[derive(Clone, Copy)]
+enum NativePreparation {
+    Fetch,
+    Metadata,
+}
+
+pub(crate) fn native_cargo_admission(
+    project: &Path,
+    home: &Path,
+    sandbox: Option<&crate::config::SandboxConfig>,
+    cancellation: &sav::CancellationToken,
+) -> Result<kvist_dependencies::rust::cache::CacheView> {
+    if let Some(sandbox) = sandbox {
+        native_cargo_admission_controlled(project, home, sandbox, cancellation, None)
+    } else {
+        let limits = kvist_dependencies::VendorLimits::load(project)?;
+        let toolchain = crate::toolchain::resolve_pinned_toolchain(
+            project,
+            "explicit host native Cargo admission",
+        )?;
+        kvist_dependencies::rust::cache::admit(
+            project,
+            home,
+            &kvist_dependencies::rust::ProvisionOptions {
+                cargo: toolchain.cargo,
+                offline: true,
+                vendored_dir: None,
+                timeout: std::time::Duration::from_secs(limits.timeout_secs.min(30)),
+                force: false,
+            },
+            cancellation,
+        )
+        .map_err(Into::into)
+    }
+}
+
+fn native_cargo_admission_controlled(
+    project: &Path,
+    home: &Path,
+    sandbox: &crate::config::SandboxConfig,
+    cancellation: &sav::CancellationToken,
+    remaining: Option<std::time::Duration>,
+) -> Result<kvist_dependencies::rust::cache::CacheView> {
+    kvist_dependencies::rust::cache::admit_with(project, home, cancellation, |home| {
+        native_metadata(project, home, sandbox, cancellation, remaining)
+    })
+    .map_err(Into::into)
+}
+
+fn native_metadata(
+    project: &Path,
+    home: &Path,
+    sandbox: &crate::config::SandboxConfig,
+    cancellation: &sav::CancellationToken,
+    remaining: Option<std::time::Duration>,
+) -> kvist_dependencies::Result<Vec<u8>> {
+    let result = run_native_cargo_preparation(
+        project,
+        sandbox,
+        home,
+        NativePreparation::Metadata,
+        cancellation,
+        remaining,
+    )
+    .map_err(|error| kvist_dependencies::Error::VendoringUnavailable {
+        path: project.to_string_lossy().into_owned(),
+        reason: format!("{error}; configured native admission stopped; no host fallback"),
+    })?;
+    if result.cancelled || cancellation.is_cancelled() {
+        return Err(kvist_dependencies::Error::Cancelled);
+    }
+    let failure = if result.timed_out {
+        Some(kvist_dependencies::ProcessFailure::Timeout)
+    } else if result.output_limit_exceeded {
+        Some(kvist_dependencies::ProcessFailure::OutputLimit)
+    } else if !result.output.status.success() {
+        Some(kvist_dependencies::ProcessFailure::Exit)
+    } else {
+        None
+    };
+    if let Some(failure) = failure {
+        let error = kvist_dependencies::rust::cache::classify_metadata_failure(
+            project,
+            failure,
+            result.output.status.code(),
+            &result.output.stderr,
+            cancellation,
+        );
+        if matches!(
+            error,
+            kvist_dependencies::Error::VendoringIncomplete { .. }
+                | kvist_dependencies::Error::Cancelled
+        ) {
+            return Err(error);
+        }
+        return Err(kvist_dependencies::Error::VendoringUnavailable {
+            path: project.to_string_lossy().into_owned(),
+            reason: format!(
+                "{error}; configured native Cargo metadata failed ({}); no host fallback\n{}",
+                result.output.status,
+                vendor_diagnostic(
+                    &result.output.stderr,
+                    &result.output.stdout,
+                    &sandbox_redactions(sandbox)
+                ),
+            ),
+        });
+    }
+    kvist_dependencies::rust::cache::normalize_metadata_paths(
+        project,
+        Path::new(crate::sandbox::NATIVE_CARGO_HOME),
+        &result.output.stdout,
+        cancellation,
+    )
+}
+
+fn sandbox_redactions(config: &crate::config::SandboxConfig) -> Vec<String> {
+    config
+        .environment_allowlist
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(|value| value.to_string_lossy().into_owned())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn run_native_cargo_preparation(
+    project_dir: &Path,
+    sandbox_config: &crate::config::SandboxConfig,
+    cargo_home: &Path,
+    operation: NativePreparation,
+    cancellation: &sav::CancellationToken,
+    remaining: Option<std::time::Duration>,
+) -> Result<crate::sandbox::ExecutionResult> {
     use crate::config::{PackageSource, VcsSelection};
     use crate::sandbox::{SandboxProbe, backend_identity, ensure_available, runner_identity};
+    let started = std::time::Instant::now();
+    if cancellation.is_cancelled() {
+        return Err(KvistError::Sav(sav::Error::Cancelled));
+    }
     let limits = kvist_dependencies::VendorLimits::load(project_dir)?;
 
     // Explicit standalone paths may not have project configuration.
@@ -429,22 +635,9 @@ fn provision_rust_via_acquisition_sandbox(
     let runtime_bin = crate::sandbox::provision_toolchain_bin(project_dir, &sandbox_config.runner)?;
     // Inputs live inside this transaction's private staging, never a reusable
     // writable workspace alias that could redirect host writes through links.
-    with_acquisition_scratch(project_dir, vendored_dir, |acquisition| {
-        let cargo_home = acquisition.join("cargo-home");
+    with_acquisition_scratch(project_dir, |acquisition| {
         let scratch = acquisition.join("scratch");
         let lockfile_workspace = acquisition.join("lockfile-workspace");
-        std::fs::create_dir_all(&cargo_home).map_err(|source| KvistError::Io {
-            operation: "create writable acquisition cargo home",
-            path: cargo_home.clone(),
-            source,
-        })?;
-        for child in ["registry/cache", "git/db"] {
-            std::fs::create_dir_all(cargo_home.join(child)).map_err(|source| KvistError::Io {
-                operation: "create acquisition cargo home layout",
-                path: cargo_home.clone(),
-                source,
-            })?;
-        }
         std::fs::create_dir_all(&scratch).map_err(|source| KvistError::Io {
             operation: "create acquisition scratch",
             path: scratch.clone(),
@@ -455,11 +648,18 @@ fn provision_rust_via_acquisition_sandbox(
             path: lockfile_workspace.clone(),
             source,
         })?;
-        let lockfile_before_identity = crate::sandbox::stage_acquisition_workspace(
-            sandbox_config,
-            project_dir,
-            &lockfile_workspace,
-        )?;
+        let lockfile_before_identity = match operation {
+            NativePreparation::Fetch => crate::sandbox::stage_acquisition_workspace(
+                sandbox_config,
+                project_dir,
+                &lockfile_workspace,
+            )?,
+            NativePreparation::Metadata => crate::sandbox::stage_native_admission_workspace(
+                sandbox_config,
+                project_dir,
+                &lockfile_workspace,
+            )?,
+        };
 
         // The allowlisted package sources the sandbox may contact: canonical
         // crates.io plus any project-approved additional sources.
@@ -505,87 +705,152 @@ fn provision_rust_via_acquisition_sandbox(
         // runner digest it ran under.
         let policy_identity = crate::vendoring::lockfile_digest(expected_runner.digest.as_bytes());
 
-        // Run the network-allow acquisition sandbox: `cargo fetch` with the
-        // allowlisted package sources.
-        let result = crate::sandbox::execute_dependency_acquisition(
-            sandbox_config,
-            &crate::sandbox::DependencyAcquisition {
-                project_root: project_dir,
-                vcs_selection: vcs,
-                toolchain_root: &toolchain.root,
-                cargo_path: &toolchain.cargo,
-                cargo_home: &cargo_home,
-                runtime_bin: runtime_bin.path(),
-                scratch_host_dir: &scratch,
-                lockfile_workspace: &lockfile_workspace,
-                lockfile_before_identity: &lockfile_before_identity,
-                sources: &sources,
-                policy_identity: &policy_identity,
-                backend: &probe.backend,
-                config: sandbox_config,
-                expected_runner: &expected_runner,
-            },
-            crate::sandbox::ExecutionOptions {
-                // A fetch may download a large dependency set; give it ample time.
-                timeout: Some(std::time::Duration::from_secs(limits.timeout_secs)),
-                output_limit: Some(limits.max_output_bytes),
-                live_stdout: None,
-            },
-        )?;
-        if result.timed_out || result.output_limit_exceeded || result.cancelled {
+        let timeout = std::time::Duration::from_secs(limits.timeout_secs);
+        let timeout = match operation {
+            NativePreparation::Fetch => timeout,
+            NativePreparation::Metadata => timeout
+                .min(std::time::Duration::from_secs(30))
+                .min(remaining.unwrap_or(std::time::Duration::from_secs(30)))
+                .saturating_sub(started.elapsed()),
+        };
+        if timeout.is_zero() {
             return Err(KvistError::VendoringUnavailable {
-            path: project_dir.to_string_lossy().into_owned(),
-            reason: "configured dependency acquisition exceeded its output/time allowance or was cancelled; inspect before a new explicit attempt; no host fallback".into(),
-        });
+                path: project_dir.to_string_lossy().into_owned(),
+                reason: "native Cargo preparation exhausted the remaining time budget before execution; no admission or receipt publication occurred".into(),
+            });
         }
-        if !result.output.status.success() {
-            return Err(KvistError::VendoringUnavailable {
-            path: project_dir.to_string_lossy().into_owned(),
-            reason: "configured sandbox Cargo fetch failed; inspect acquisition policy and locked inputs; no host fallback (package-manager output withheld)".into(),
-        });
-        }
+        let options = crate::sandbox::ExecutionOptions {
+            timeout: Some(timeout),
+            output_limit: Some(limits.max_output_bytes),
+            live_stdout: None,
+        };
+        let result = match operation {
+            NativePreparation::Fetch => crate::sandbox::execute_dependency_acquisition(
+                sandbox_config,
+                &crate::sandbox::DependencyAcquisition {
+                    project_root: project_dir,
+                    vcs_selection: vcs,
+                    toolchain_root: &toolchain.root,
+                    cargo_path: &toolchain.cargo,
+                    cargo_home,
+                    runtime_bin: runtime_bin.path(),
+                    scratch_host_dir: &scratch,
+                    lockfile_workspace: &lockfile_workspace,
+                    lockfile_before_identity: &lockfile_before_identity,
+                    sources: &sources,
+                    policy_identity: &policy_identity,
+                    backend: &probe.backend,
+                    config: sandbox_config,
+                    expected_runner: &expected_runner,
+                },
+                options,
+            )?,
+            NativePreparation::Metadata => {
+                let (registry, git) =
+                    crate::sandbox::native_cargo_data(sandbox_config, cargo_home)?;
+                crate::sandbox::execute_native_cargo_metadata(
+                    sandbox_config,
+                    &crate::sandbox::OfflineCargoVerification {
+                        project_root: project_dir,
+                        vcs_selection: vcs,
+                        toolchain_root: &toolchain.root,
+                        cargo_path: &toolchain.cargo,
+                        sources: crate::sandbox::CargoSources::Native {
+                            registry: registry.as_deref(),
+                            git: git.as_deref(),
+                        },
+                        runtime_bin: runtime_bin.path(),
+                        scratch_host_dir: &scratch,
+                        component_dir: &lockfile_workspace,
+                        lockfile_digest: lockfile_before_identity.clone(),
+                        policy_identity: &policy_identity,
+                        backend: &probe.backend,
+                        config: sandbox_config,
+                        expected_runner: &expected_runner,
+                    },
+                    options,
+                    cancellation,
+                )?
+            }
+        };
         if VendorManifest::current_digest(&lockfile_workspace)? != lockfile_before_identity
             || VendorManifest::current_digest(project_dir)? != lockfile_before_identity
         {
             return Err(KvistError::VendoringUnavailable {
                 path: project_dir.to_string_lossy().into_owned(),
-                reason: "configured Cargo fetch changed the locked catalogue; no repack or publication occurred; reconcile Cargo.lock before a new explicit attempt; no host fallback".into(),
+                reason: "locked catalogue changed during configured native Cargo preparation; no receipt publication occurred; reconcile Cargo.lock before a new explicit attempt; no host fallback".into(),
             });
         }
 
-        // The fetched material lives in the writable acquisition cargo home (the
-        // runner also promotes it into a sibling `project-cache`); repack it into
-        // the project's vendored registry offline. This is the only host step and
-        // enforces Cargo-level offline mode, not host OS network confinement.
-        let options = kvist_dependencies::rust::ProvisionOptions {
-            cargo: toolchain.cargo,
-            offline: true,
-            vendored_dir: None,
-            timeout: std::time::Duration::from_secs(limits.timeout_secs),
-            force: false,
-        };
-        kvist_dependencies::rust::populate(
-            project_dir,
-            vendored_dir,
-            &options,
-            Some(&cargo_home),
-            &sav::CancellationToken::new(),
-        )
-        .map_err(Into::into)
+        Ok(result)
     })
 }
 
-fn with_acquisition_scratch(
+fn check_acquisition_result(
     project: &Path,
-    vendored: &Path,
-    operation: impl FnOnce(&Path) -> Result<String>,
-) -> Result<String> {
-    let parent = vendored
-        .parent()
-        .ok_or_else(|| KvistError::VendoringUnavailable {
-            path: project.to_string_lossy().into_owned(),
-            reason: "acquisition staging has no private parent".into(),
-        })?;
+    result: &crate::sandbox::ExecutionResult,
+    limits: &kvist_dependencies::VendorLimits,
+    redactions: &[String],
+) -> Result<()> {
+    let mut causes = Vec::new();
+    if result.cancelled {
+        causes.push("cancelled".into());
+    }
+    if result.timed_out {
+        causes.push(format!("timed out (limit {} seconds)", limits.timeout_secs));
+    }
+    if result.output_limit_exceeded {
+        causes.push(format!(
+            "capture exceeded its limit of {} bytes",
+            limits.max_output_bytes
+        ));
+    }
+    if causes.is_empty() {
+        if result.output.status.success() {
+            return Ok(());
+        }
+        causes.push(format!("unsuccessful {}", result.output.status));
+    }
+    let detail = vendor_diagnostic(&result.output.stderr, &result.output.stdout, redactions);
+    Err(KvistError::VendoringUnavailable {
+        path: project.to_string_lossy().into_owned(),
+        reason: format!(
+            "configured sandbox Cargo fetch failed: {}; inspect acquisition policy and locked inputs before a new explicit attempt; completed downloads retained; no host fallback\n{detail}",
+            causes.join("; ")
+        ),
+    })
+}
+
+fn vendor_diagnostic(stderr: &[u8], stdout: &[u8], redactions: &[String]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    let stdout = String::from_utf8_lossy(stdout);
+    let detail = if stderr.trim().is_empty() {
+        stdout.trim()
+    } else {
+        stderr.trim()
+    };
+    let mut detail = if detail.is_empty() {
+        "no stdout/stderr was captured".into()
+    } else {
+        crate::presentation::sanitize(&crate::presentation::redact(detail, redactions))
+    };
+    if detail.len() > MAX_VENDOR_ERROR_BYTES {
+        let marker = "\n[truncated]";
+        let mut end = MAX_VENDOR_ERROR_BYTES - marker.len();
+        while !detail.is_char_boundary(end) {
+            end -= 1;
+        }
+        detail.truncate(end);
+        detail.push_str(marker);
+    }
+    detail
+}
+
+fn with_acquisition_scratch<T>(
+    project: &Path,
+    operation: impl FnOnce(&Path) -> Result<T>,
+) -> Result<T> {
+    let parent = Path::new("/tmp");
     let acquisition = tempfile::Builder::new()
         .prefix(".acquisition-")
         .tempdir_in(parent)
@@ -597,7 +862,7 @@ fn with_acquisition_scratch(
     let result = operation(acquisition.path());
     let path = acquisition.path().to_path_buf();
     let cleanup = acquisition.close().map_err(|source| KvistError::Io {
-        operation: "remove owned acquisition staging before publication",
+        operation: "remove owned administrative acquisition staging",
         path,
         source,
     });
@@ -622,64 +887,76 @@ fn run_host_tool(
     context: &str,
     env: &[(&str, &str)],
 ) -> Result<()> {
-    let mut command = Command::new(program);
-    command
-        .args(args)
-        .current_dir(project_dir)
-        .envs(env.iter().copied());
-    let output = command.output().map_err(|source| {
-        if source.kind() == std::io::ErrorKind::NotFound {
-            KvistError::VendoringUnavailable {
-                path: project_dir.to_string_lossy().into_owned(),
-                reason: format!(
-                    "the `{program}` executable was not found on PATH; install the \
-                     toolchain before vendoring dependencies"
-                ),
-            }
-        } else {
-            KvistError::VendoringUnavailable {
-                path: project_dir.to_string_lossy().into_owned(),
-                reason: format!("cannot invoke {program} to {context}: {source}"),
-            }
-        }
-    })?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let detail = if stderr.trim().is_empty() {
-        stdout
+    run_host_tool_capture(program, args, project_dir, context, env).map(|_| ())
+}
+
+fn run_host_tool_capture(
+    program: &str,
+    args: &[&str],
+    project_dir: &Path,
+    context: &str,
+    env: &[(&str, &str)],
+) -> Result<Vec<u8>> {
+    let limits = kvist_dependencies::VendorLimits::load(project_dir)?;
+    let command = if env.is_empty() {
+        sav::CommandSpec::new(program, args.iter().copied())
     } else {
-        stderr
+        let mut arguments: Vec<String> = env
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect();
+        arguments.push(program.into());
+        arguments.extend(args.iter().map(|arg| (*arg).to_owned()));
+        sav::CommandSpec::new("/usr/bin/env", arguments)
+    }
+    .in_directory(project_dir);
+    let policy = sav::SupervisionPolicy {
+        idle_timeout: std::time::Duration::from_secs(limits.timeout_secs.min(3600)),
+        attempt_timeout: Some(std::time::Duration::from_secs(limits.timeout_secs)),
+        detect_loops: false,
+        max_retries: 0,
+        max_output_bytes: limits.max_output_bytes,
     };
-    let truncated: String = detail.chars().take(MAX_VENDOR_ERROR_BYTES).collect();
-    Err(KvistError::VendoringUnavailable {
+    let redactions: Vec<String> = env
+        .iter()
+        .map(|(_, value)| (*value).to_owned())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    tracing::info!(project = %project_dir.display(), program, phase = context, "preparing native dependency artifacts");
+    sav::run_supervised_observed(
+        &policy,
+        &command,
+        &sav::CancellationToken::new(),
+        &mut |stream, bytes| {
+            match stream {
+                sav::OutputStream::Stdout => stdout.extend_from_slice(bytes),
+                sav::OutputStream::Stderr => stderr.extend_from_slice(bytes),
+            }
+            Ok(())
+        },
+    ).map(|output| output.stdout).map_err(|error| KvistError::VendoringUnavailable {
         path: project_dir.to_string_lossy().into_owned(),
         reason: format!(
-            "`{program} {}` did not complete:\n{truncated}",
-            args.join(" ")
+            "`{program}` could not {context}: {error}; acquisition limits: {} seconds, {} output bytes; completed native downloads/artifacts retained; inspect the source/tool installation before another explicit attempt\n{}",
+            limits.timeout_secs, limits.max_output_bytes,
+            vendor_diagnostic(&stderr, &stdout, &redactions),
         ),
     })
 }
 
-/// Go provisioning: `go mod vendor` commits the exact locked module material
-/// into the project's `vendor/` directory (the only step that may fetch).
+/// Go provisioning: acquire missing native module-cache material without a
+/// source vendor copy, preserving the locked manifest/checksum inputs.
 fn populate_go_vendor(project_dir: &Path) -> Result<()> {
-    run_host_tool(
-        "go",
-        &["mod", "vendor"],
-        project_dir,
-        "vendor Go modules",
-        &[],
-    )
+    crate::language_vendoring::go_cache::populate(project_dir)
 }
 
 /// JavaScript provisioning: build `node_modules` from the exact locked
 /// versions and vend the resolved material under `.kvist/`. `npm ci`
 /// reconciles from `package-lock.json` into a tarball cache; yarn projects
-/// reconcile from `yarn.lock`; pnpm projects are vendored as the resolved
-/// `node_modules` tree (see `populate_pnpm`). Only the install steps may touch
+/// reconcile from `yarn.lock`; pnpm uses a persistent project-native store.
+/// Required `node_modules` installation is separate useful work. Only install steps may touch
 /// the network; they run on the host during provisioning.
 fn populate_javascript(project_dir: &Path) -> Result<()> {
     let vendored = project_dir
@@ -767,9 +1044,9 @@ fn populate_python(project_dir: &Path) -> Result<()> {
     // Build the virtualenv (uv preferred for speed, stdlib venv fallback).
     let venv = project_dir.join(".kvist").join("venv");
     let venv_python = venv.join("bin").join("python");
+    let uv_available = optional_host_tool("uv", &["--version"], project_dir)?;
     if !venv_python.exists() {
-        let uv = run_host_tool_quiet("uv", &["--version"], project_dir);
-        if uv {
+        if uv_available {
             run_host_tool(
                 "uv",
                 &["venv", venv.to_str().ok_or_else(invalid_utf8_path_error)?],
@@ -795,22 +1072,25 @@ fn populate_python(project_dir: &Path) -> Result<()> {
     // Install the locked material into the venv fully offline.
     let find_links = wheels.to_str().ok_or_else(invalid_utf8_path_error)?;
     let venv_python_str = venv_python.to_str().ok_or_else(invalid_utf8_path_error)?;
-    let installed = run_host_tool_quiet(
-        "uv",
-        &[
-            "pip",
-            "install",
-            "--python",
-            venv_python_str,
-            "--no-index",
-            "--find-links",
-            find_links,
-            "-r",
-            requirements_str,
-        ],
-        project_dir,
-    );
-    if !installed {
+    if uv_available {
+        run_host_tool(
+            "uv",
+            &[
+                "pip",
+                "install",
+                "--python",
+                venv_python_str,
+                "--no-index",
+                "--find-links",
+                find_links,
+                "-r",
+                requirements_str,
+            ],
+            project_dir,
+            "install the locked Python wheels into the virtualenv",
+            &[],
+        )?;
+    } else {
         run_host_tool(
             venv_python_str,
             &[
@@ -836,41 +1116,43 @@ fn populate_python(project_dir: &Path) -> Result<()> {
 /// and installed offline into the venv, exactly like a `requirements.lock.txt`.
 ///
 /// `uv export --locked` prints the pip-format catalogue to stdout; progress
-/// messages go to stderr and are discarded. Fails closed with an actionable
-/// message when uv is absent or the export does not complete.
+/// messages go to stderr. Failures retain bounded native diagnostics.
 fn export_uv_lock(project_dir: &Path, exported: &Path) -> Result<()> {
-    let output = Command::new("uv")
-        .args(["export", "--locked"])
-        .current_dir(project_dir)
-        .output()
-        .map_err(|source| {
-            if source.kind() == std::io::ErrorKind::NotFound {
-                KvistError::VendoringUnavailable {
-                    path: project_dir.to_string_lossy().into_owned(),
-                    reason: "uv executable was not found on PATH; install uv so `uv.lock`
-                             projects can be vendored"
-                        .to_owned(),
-                }
-            } else {
-                KvistError::VendoringUnavailable {
-                    path: project_dir.to_string_lossy().into_owned(),
-                    reason: "cannot invoke uv to export the locked Python graph".to_owned(),
-                }
-            }
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let truncated: String = stderr.chars().take(MAX_VENDOR_ERROR_BYTES).collect();
-        return Err(KvistError::VendoringUnavailable {
-            path: project_dir.to_string_lossy().into_owned(),
-            reason: format!("`uv export --locked` did not complete:\n{truncated}"),
-        });
-    }
-    std::fs::write(exported, &output.stdout).map_err(|source| KvistError::Io {
-        operation: "write uv-exported requirements",
-        path: exported.to_path_buf(),
+    let output = run_host_tool_capture(
+        "uv",
+        &["export", "--locked"],
+        project_dir,
+        "export the locked Python graph (install uv for uv.lock projects)",
+        &[],
+    )?;
+    use std::io::Write as _;
+    let parent = exported.parent().ok_or_else(invalid_utf8_path_error)?;
+    let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|source| KvistError::Io {
+        operation: "stage uv-exported requirements",
+        path: parent.to_path_buf(),
         source,
-    })
+    })?;
+    staged
+        .write_all(&output)
+        .and_then(|_| staged.as_file().sync_all())
+        .map_err(|source| KvistError::Io {
+            operation: "write uv-exported requirements",
+            path: exported.to_path_buf(),
+            source,
+        })?;
+    staged.persist(exported).map_err(|error| KvistError::Io {
+        operation: "publish uv-exported requirements",
+        path: exported.to_path_buf(),
+        source: error.error,
+    })?;
+    std::fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|source| KvistError::Io {
+            operation: "sync uv-exported requirements publication",
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    Ok(())
 }
 
 /// C/C++ (Conan) provisioning: fill a project-local Conan home with the exact
@@ -991,152 +1273,61 @@ fn vcpkg_triple(project_dir: &Path) -> Result<String> {
     Ok(triple)
 }
 
-/// Probe a host tool without treating a failure as an error (for optional
-/// accelerators such as `uv`).
-fn run_host_tool_quiet(program: &str, args: &[&str], project_dir: &Path) -> bool {
-    Command::new(program)
-        .args(args)
-        .current_dir(project_dir)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+fn optional_host_tool(program: &str, args: &[&str], project_dir: &Path) -> Result<bool> {
+    let path = std::env::var_os("PATH").ok_or_else(|| KvistError::VendoringUnavailable {
+        path: project_dir.to_string_lossy().into_owned(),
+        reason: format!(
+            "PATH is not set; configure host tool discovery before probing `{program}`"
+        ),
+    })?;
+    for directory in std::env::split_paths(&path) {
+        let candidate = directory.join(program);
+        match std::fs::metadata(&candidate) {
+            Ok(metadata) if metadata.is_file() => {
+                run_host_tool(
+                    program,
+                    args,
+                    project_dir,
+                    "probe the optional accelerator",
+                    &[],
+                )?;
+                return Ok(true);
+            }
+            Ok(_) => {}
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(KvistError::Io {
+                    operation: "inspect optional host accelerator",
+                    path: candidate,
+                    source,
+                });
+            }
+        }
+    }
+    tracing::info!(
+        program,
+        "optional accelerator absent; using the standard installer"
+    );
+    Ok(false)
 }
 
-/// pnpm provisioning: build `node_modules` from the locked graph and vend its
-/// resolved material. pnpm resolves dependencies into a content-addressable
-/// store (its canonical offline catalogue), so that store is copied into
-/// `.kvist/`, bound to the lock-file digest, and mounted read-only in the
-/// sandbox. Only `pnpm install` touches the network, and only on the host.
+/// Reuse pnpm's project-native store without copying the global cache.
 fn populate_pnpm(project_dir: &Path) -> Result<()> {
-    run_host_tool(
-        "pnpm",
-        &["install"],
-        project_dir,
-        "install JavaScript packages with pnpm",
-        &[],
-    )?;
     let vendored = project_dir
         .join(".kvist")
         .join(crate::language_vendoring::JS_PACKAGE_CACHE_DIRNAME);
-    let store = pnpm_store_path(project_dir)?;
-    copy_tree(&store, &vendored)
-}
-
-/// Resolve pnpm's content-addressable store path via `pnpm store path` and
-/// confirm it exists and is therefore populated by the install above.
-fn pnpm_store_path(project_dir: &Path) -> Result<PathBuf> {
-    let output = run_capture_host_tool(
+    run_host_tool(
         "pnpm",
-        &["store", "path"],
+        &[
+            "install",
+            "--frozen-lockfile",
+            "--store-dir",
+            vendored.to_str().ok_or_else(invalid_utf8_path_error)?,
+        ],
         project_dir,
-        "locate the pnpm store",
-    )?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let store = text
-        .lines()
-        .map(str::trim)
-        .rfind(|line| !line.is_empty())
-        .ok_or_else(|| KvistError::VendoringUnavailable {
-            path: project_dir.to_string_lossy().into_owned(),
-            reason: "pnpm did not report a store path; check the pnpm installation".to_owned(),
-        })?;
-    let store_path = PathBuf::from(store);
-    if !store_path.is_dir() {
-        return Err(KvistError::VendoringUnavailable {
-            path: project_dir.to_string_lossy().into_owned(),
-            reason: format!(
-                "the pnpm store at `{store}` is not present after install; run \
-                 `pnpm install` on the host"
-            ),
-        });
-    }
-    Ok(store_path)
-}
-
-/// Recursively copy `src` into `dst`. The pnpm store is a content-addressable
-/// tree of regular files, so no symlink handling is needed; `is_dir()` and
-/// `copy` follow symlinks defensively if the layout ever changes. Host-side
-/// provisioning only; the copy becomes the lock-file-digest-identified vendored
-/// catalogue.
-fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
-    std::fs::create_dir_all(dst).map_err(|source| KvistError::Io {
-        operation: "create vendored pnpm store",
-        path: dst.to_path_buf(),
-        source,
-    })?;
-    for entry in std::fs::read_dir(src).map_err(|source| KvistError::Io {
-        operation: "read vendored pnpm store",
-        path: src.to_path_buf(),
-        source,
-    })? {
-        let entry = entry.map_err(|source| KvistError::Io {
-            operation: "list vendored pnpm store entry",
-            path: src.to_path_buf(),
-            source,
-        })?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        if src_path.is_dir() {
-            copy_tree(&src_path, &dst_path)?;
-        } else {
-            std::fs::copy(&src_path, &dst_path).map_err(|source| KvistError::Io {
-                operation: "copy vendored pnpm store entry",
-                path: src_path.clone(),
-                source,
-            })?;
-        }
-    }
-    Ok(())
-}
-
-/// Run a host tool and capture its output for downstream parsing (e.g.
-/// `pnpm store path`). Fails closed with an actionable message when the tool is
-/// absent or does not complete.
-fn run_capture_host_tool(
-    program: &str,
-    args: &[&str],
-    project_dir: &Path,
-    context: &str,
-) -> Result<std::process::Output> {
-    let output = Command::new(program)
-        .args(args)
-        .current_dir(project_dir)
-        .output()
-        .map_err(|source| {
-            if source.kind() == std::io::ErrorKind::NotFound {
-                KvistError::VendoringUnavailable {
-                    path: project_dir.to_string_lossy().into_owned(),
-                    reason: format!(
-                        "the `{program}` executable was not found on PATH; install
-                         {program} so it can {context}"
-                    ),
-                }
-            } else {
-                KvistError::VendoringUnavailable {
-                    path: project_dir.to_string_lossy().into_owned(),
-                    reason: format!("cannot invoke {program} to {context}: {source}"),
-                }
-            }
-        })?;
-    if output.status.success() {
-        return Ok(output);
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let detail = if stderr.trim().is_empty() {
-        stdout
-    } else {
-        stderr
-    };
-    let truncated: String = detail.chars().take(MAX_VENDOR_ERROR_BYTES).collect();
-    Err(KvistError::VendoringUnavailable {
-        path: project_dir.to_string_lossy().into_owned(),
-        reason: format!(
-            "`{program} {}` did not complete:\n{truncated}",
-            args.join(" ")
-        ),
-    })
+        "install JavaScript packages into the native pnpm store",
+        &[],
+    )
 }
 
 /// A non-UTF-8 path cannot cross into a tool argv or the sandbox wire format.
@@ -1179,7 +1370,7 @@ mod tests {
         )).unwrap();
             let report = kvist_dependencies::rust::provision_with(
             project.path(), destination.as_deref(), &sav::CancellationToken::new(), false,
-            |vendor| with_acquisition_scratch(project.path(), vendor, |scratch| {
+            |vendor| with_acquisition_scratch(project.path(), |scratch| {
                 std::fs::write(scratch.join("observed-fetch"), b"owned cache").unwrap();
                 let package = vendor.join("offline-fixture");
                 std::fs::create_dir_all(&package).unwrap();

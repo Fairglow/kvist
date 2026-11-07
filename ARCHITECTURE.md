@@ -42,12 +42,12 @@ trusted core.
 - Network authority MUST be capability-specific. Dependency acquisition MAY
   reach explicitly approved sources through a bounded acquisition phase;
   authoring and verification remain network-denied. Dependency acquisition MAY
-  provision a versioned, enforced vendored registry on the host so sandbox
-  builds and tests resolve everything offline ([ADR 0011](docs/decisions/0011-vendored-offline-builds.md)).
-  Vendoring is language-aware (Rust, Python/`uv`, Node/`npm`, `Conan`) and
-  consolidated through a shared dependency library, Rust first (ADR 0017);
-  other maerg language backends await extraction. A directory vendored mount
-  is identified by its lock-file digest rather than by hashing every file.
+  incrementally fill approved native dependency stores so sandbox builds and
+  tests resolve offline ([ADR 0020](docs/decisions/0020-native-offline-dependency-caches.md)).
+  Preparation is language-aware (Rust, Python/`uv`, Node/`npm`/yarn/pnpm,
+  Go, Conan/vcpkg), consolidated through a shared dependency library, Rust
+  first. Cache availability is not application per-file integrity attestation;
+  portable directory vendoring is an explicit export, not routine preparation.
 - Linux is the only executable target until other backends have independent
   native tests.
 
@@ -66,13 +66,13 @@ The repository layout places the root Rust workspace manifest at the project
 root (`/Cargo.toml`), with `maerg/`, `sav/`, `dependencies/`, `galla/`, `skott/`, and `blad/`
 as top-level peer components. Maerg and Skott depend on `dependencies` for
 shared Rust provisioning; that library depends on Sav, never a frontend.
-Both use one project `.kvist/vendored` tree with shared read/exclusive publication
-locks for explicit provisioning/protected readiness, a minimal lock receipt and
-optional common vendor-limit policy. Skott workspace execution does not require
-that receipt or a frozen lock/resource view (ADR 0019). Skott
-mounts it read-only without copying packages; the runner masks its writable
-workspace alias. Cargo owns native file-checksum validation, not an additional
-application inventory (ADR 0018).
+Both reuse native Cargo registry/Git data without copying packages, with small
+lock-bound preparation metadata and optional common acquisition limits.
+Package-manager administrative state is private and writable; approved cache
+data is read-only in effects. Skott does not require a frozen lock/resource view
+(ADR 0019). Cargo owns native archive verification, not an additional
+application inventory. Existing portable vendor/export helpers remain explicit
+and separate (ADR 0020).
 `kvist.maerg` depends on `sav` as a
 Rust library and on `blad` for Markdown rendering in its interactive TUI, while
 `galla` is an independent execution boundary.
@@ -190,9 +190,10 @@ approved resource and credential references, execution-tier selection,
 artifact promotion, and canonical evidence. The installed sandbox runner is
 the only layer allowed to cause approved filesystem and process effects.
 Dependency acquisition is a separate bounded capability that can reach only
-configured package sources and writes only attempt-local caches and workspace
-dependency state. It MAY provision a versioned, enforced vendored registry on
-the host that sandbox builds and tests resolve offline (ADR 0011), keeping every
+configured package sources and writes only explicitly granted persistent native
+dependency data and isolated workspace state. Completed downloads survive
+failure; no unapproved promotion destination is inferred. Sandbox builds and
+tests resolve from read-only native caches offline (ADR 0020), keeping every
 network toolchain operation outside the effect sandbox. Remote model credentials
 and transport remain outside the effect sandbox.
 
@@ -260,14 +261,14 @@ model is recorded in
 [`0001-separate-component-intent.md`](docs/decisions/0001-separate-component-intent.md).
 The nonbinding review gate and its separation from compliance are recorded in
 [`0002-advisory-document-review.md`](docs/decisions/0002-advisory-document-review.md).
-Offline vendored builds are recorded in
-[`0011-vendored-offline-builds.md`](docs/decisions/0011-vendored-offline-builds.md):
-the host provisions a versioned vendored registry and manifest for each supported
-language (Rust enforced exactly through `Cargo.lock`; Python, Node, and
-`Conan` enforced through their respective lock files), and the maerg re-enforces
-that manifest via `enforce_vendoring` before an offline build is allowed. Routing
-Rust verification through the Cargo topology and mounting the read-only vendored
-registry and cargo configuration is the planned, security-sensitive integration.
+Native cache-backed offline builds are recorded in
+[`0020-native-offline-dependency-caches.md`](docs/decisions/0020-native-offline-dependency-caches.md),
+superseding the directory-vendor default in ADR 0011. Rust uses its locked
+native cache, private Cargo administrative state and read-only source grants;
+other backends retain their native stores and necessary installation artifacts.
+Readiness and exact package integrity are distinct. Portable exports remain
+explicit. Acquisition transport, persistent source authority, lock coordination
+and network-denied consumers are security-sensitive integration boundaries.
 The Markdown-first output and the Blad-rendered interactive TUI are recorded in
 [`0016-markdown-first-tui-and-blad-integration.md`](docs/decisions/0016-markdown-first-tui-and-blad-integration.md):
 every command reports a well-formed Markdown document, the interactive shell

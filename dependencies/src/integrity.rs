@@ -51,6 +51,8 @@ pub(crate) struct Package {
     pub(crate) name: String,
     pub(crate) version: String,
     pub(crate) origin: Origin,
+    pub(crate) source: Option<String>,
+    pub(crate) checksum: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -77,6 +79,12 @@ pub(crate) struct LockedGraph {
 
 impl LockedGraph {
     pub(crate) fn read(project: &Dir, token: &CancellationToken) -> Result<Self> {
+        Self::read_mode(project, token, false)
+    }
+    pub(crate) fn read_native(project: &Dir, token: &CancellationToken) -> Result<Self> {
+        Self::read_mode(project, token, true)
+    }
+    fn read_mode(project: &Dir, token: &CancellationToken, native: bool) -> Result<Self> {
         control(token)?;
         let limits = VendorLimits::load(&project.display)?;
         let (bytes, identity) = project.read("Cargo.lock", limits.max_lockfile_bytes)?;
@@ -109,17 +117,17 @@ impl LockedGraph {
                     "duplicate locked package identity",
                 ));
             }
-            let origin = match raw.source {
+            let origin = match raw.source.clone() {
                 None if raw.checksum.is_none() => Origin::Local,
                 Some(source)
                     if source.starts_with("registry+") || source.starts_with("sparse+") =>
                 {
                     let url = source.strip_prefix("registry+").unwrap_or(&source);
-                    let Some(checksum) = raw.checksum else {
+                    let Some(checksum) = raw.checksum.as_deref() else {
                         return Err(unavailable(&project.display, "registry checksum absent"));
                     };
                     if !crate::resolver::safe_url(url)
-                        || !digest_shape(&checksum)
+                        || !digest_shape(checksum)
                         || url::Url::parse(url.strip_prefix("sparse+").unwrap_or(url))
                             .is_ok_and(|u| u.query().is_some())
                     {
@@ -177,19 +185,23 @@ impl LockedGraph {
                 name: raw.name,
                 version: raw.version,
                 origin,
+                source: raw.source,
+                checksum: raw.checksum,
             });
         }
         packages.sort_by(|a, b| (&a.name, &a.version).cmp(&(&b.name, &b.version)));
         // Cargo vendor cannot disambiguate identical name/version from distinct sources.
-        let mut external = BTreeSet::new();
-        for package in &packages {
-            if !matches!(package.origin, Origin::Local)
-                && !external.insert((&package.name, &package.version))
-            {
-                return Err(unavailable(
-                    &project.display,
-                    "ambiguous external name/version sources are unsupported",
-                ));
+        if !native {
+            let mut external = BTreeSet::new();
+            for package in &packages {
+                if !matches!(package.origin, Origin::Local)
+                    && !external.insert((&package.name, &package.version))
+                {
+                    return Err(unavailable(
+                        &project.display,
+                        "ambiguous external name/version sources are unsupported",
+                    ));
+                }
             }
         }
         Ok(Self {

@@ -2,6 +2,33 @@
 
 # Skott — Design
 
+## Native Cargo cache realization
+
+The native-cache design follows ADR 0020.
+Resolve the operator cache with shared `rust::cache::home`, observe it with
+`view`, and take only approved present registry/Git directory origins. Reject
+writable-scope overlap before granting origins. Missing/incomplete project locks
+or source catalogue observations become operation-local diagnostics; native root
+selection remains usable for installed/local tools.
+Observe cache selector/root metadata in the existing cheap topology cache,
+including absent roots, so later provisioning or replacement rebuilds grants.
+Never scan package contents, use portable-export state as a native runtime gate
+or hold vendor leases.
+
+Initialize a private writable Cargo administrative home in sandbox scratch,
+creating sandbox-only `registry`/`git` links to present fixed `/rust/cargo-*`
+mounts. Workspace wrappers select native offline mode, without source
+replacement or copied operator configuration.
+The staged resources contain no host-targeting links. Native Cargo performs
+source validation and reports missing sources. Wrappers use Sav's native workspace
+mode and retain explicit installed tool selection.
+The explicit dependency adapter calls `cache::sources` for canonical check
+selection, `cache::admit` for required native Git/alternate admission, and
+`cache::provision` for acquisition; shared backend owns cache mechanics.
+Runtime performs no operator `.kvist` staging, locking, cleanup or configuration
+rewriting. Explicit provisioning retains the provider's small native
+operation/lock-bound receipt metadata; it does not create portable exports.
+
 ## Live workspace realization (ADR 0019)
 
 This section replaces the older file-size/frozen-resource algorithms below.
@@ -13,19 +40,17 @@ integrity. Preserve exact matching and detect lost-update conflicts as local
 operation errors, never a global breach.
 
 Installed resource content is live. Cache prepared mount topology, rebuilding
-selection/registrations/source configuration only when their host metadata
-changes; no recursive file inventory or content-drift gate. Vendor presence and
-native resolver configuration are used without receipt/coherence/lease gates.
+selection/registrations/cache roots only when their host metadata
+changes; no recursive file inventory or content-drift gate. Present native
+data roots are used without receipt/coherence/lease gates.
 Missing package diagnostics come from the affected Cargo operation. Generate
 Sav's workspace offline/unlocked wrapper, retaining the protected locked wrapper.
 Skip recursive host writable-scope inspection: the child resolves links within
 its enforced namespace. Retain non-writable helper/runner/backend origins.
-Preserve native Cargo TOML tables, retargeting directory sources only. Stage
-malformed original configuration for Cargo to diagnose; stage an explicit
-invalid-configuration marker when bounded reading is unavailable, with an
-actionable diagnostic. Never synthesize a valid success-shaped configuration.
-Unusable vendor nodes omit that extra host grant and use the declared empty
-offline view, with explicit diagnostics; compiler/local operations remain usable.
+Leave project Cargo configuration to Cargo within the writable namespace.
+Do not import operator configuration, retarget directory sources or synthesize
+a success-shaped/empty fallback resolver. Unusable native roots omit that extra
+host grant, with explicit diagnostics; compiler/local operations remain usable.
 Resolve bounded non-path registration names through trusted host registration
 entries, canonicalizing linked roots and rejecting writable-scope overlap.
 Cache failed Rust preparations with cheap topology observations too; retry
@@ -35,21 +60,25 @@ after relevant host changes rather than repeatedly blocking independent tools.
 
 Dispatch standalone vendor operations before config discovery. Resolve the
 explicit operation directory rather than loading another config's workspace.
-Checks call the shared filesystem-only validator. Provisioning resolves an
+Checks inspect `SourceAdmission`: return/enforce `Catalogue` without a process;
+reject `NoLock` for this explicitly locked command; for `CargoOfflineRequired`,
+disclose host metadata authority, resolve selected host Cargo and call shared
+`admit` with offline/locked options and policy budgets. Do not trust
+`recorded_lock_admission` as presence or mint a receipt during admission.
+Provisioning resolves an
 installed host Cargo outside the workspace, prints concise authority/scope
 diagnostics and invokes the shared supervised backend once. No sandbox/model
 loop opt-out or new writable agent tool is introduced.
 
-Explicit provisioning/checks retain shared metadata and publication validation.
-Workspace runtime uses the live read-only vendor view without receipt,
-publication-fence or lock-binding readiness gates. Retarget native source tables
-to `/rust/vendor` and stage configuration read-only while retaining other native
-tables; malformed configuration is left to Cargo-local failure. Sav's Cargo/Clippy
-wrappers select this fixed config in addition to the existing crates.io override.
-Keep dependency-free and unmanaged crates.io trees working without arbitrary
-receipt-derived paths. Missing packages remain actionable
-affected-build diagnostics, with no automatic acquisition. Do not rehash the complete
-host vendor tree on every tool call.
+Explicit provisioning/checks retain shared native-cache validation. Workspace
+runtime uses live read-only registry/Git roots without receipt,
+publication-fence or lock-binding readiness gates. Sav's Cargo/Clippy wrappers
+use native offline sources and private administrative state, without default
+crates.io overrides or generated source replacements. Leave malformed project
+configuration to Cargo-local failure. Keep dependency-free/local builds usable
+without receipt-derived paths. Missing packages remain actionable affected-build
+diagnostics, with no automatic acquisition. Never rehash or copy a native source
+tree. Portable directory exports remain separate explicit provider operations.
 
 ## Standalone bootstrap and root mapping
 
@@ -103,7 +132,7 @@ Keep pending prompts outside discovery results and preserve manual selections.
 Bootstrap budget queries share their owner's cancellation token. Discarded jobs
 are cancelled and joined; terminal restoration precedes shutdown joins. Shutdown
 sets the worker stop flag before cancellation and prevents queued prompt dispatch.
-Toolchain summaries list enabled profiles and a short Rust selection/vendor state;
+Toolchain summaries list enabled profiles and a short Rust selection/native-cache state;
 full identity notes are journal-only. Provider endpoint probes are deduplicated
 even on failure and limited to the default provider.
 Advisory language detection checks a shared fixed manifest table, not a complete
@@ -704,8 +733,8 @@ the sandbox, never against the host `PATH`.
 
 The System gate lives in `ToolRegistry::resolve`. Sandboxed terminal/headless
 startup uses `resolve_for_workspace`, adding validated installed Rust resources
-and the shared project vendor view without changing the maerg Cargo topology.
-The workspace Cargo shim prepends `--offline` and source overrides to normal
+and native cache data roots without changing the maerg Cargo topology.
+The workspace Cargo shim prepends `--offline`, without source overrides, to normal
 PATH Cargo invocations. Cargo may create/update the writable lock; an explicit
 caller `--locked` still rejects missing/stale locks. Protected verification uses
 the separate locked wrapper. Flags also apply to metadata and checks;
@@ -714,26 +743,24 @@ paths are not rewritten. Concrete compiler,
 rustdoc and native libraries for the initial selection remain under
 `/rust/toolchain`; the trusted wrappers
 is under `/rust/runtime`. `HOME=/tmp` and `CARGO_HOME=/tmp/cargo-home` are
-private invocation scratch, not host caches. `CARGO_TARGET_DIR=/workspace/target`
+private invocation administration, not a whole host cache. `CARGO_TARGET_DIR=/workspace/target`
 keeps build output in the writable workspace across invocations. Mount the
-shared `.kvist/vendored` tree read-only at `/rust/vendor` and point the shared
-Cargo wrapper there. Only that exact read-only vendor resource may have a source
-inside the writable workspace; other Rust/context source overlaps remain refused.
-The runner overlays existing ordinary workspace vendor nodes read-only using
-descriptors pinned relative to the workspace. Both views are readable/live;
-there is no generalized overlapping grant exception. Selection uses trusted
-system or host-home Rustup and canonical host-linked registrations outside
+selected native registry/Git roots read-only at `/rust/cargo-registry` and
+`/rust/cargo-git`. Initialize private Cargo-home links to those data mounts.
+Rust/context source overlaps with the writable workspace remain refused.
+Data views are readable/live; no whole Cargo home or source copies are exposed.
+Selection uses trusted system or host-home Rustup and canonical host-linked registrations outside
 write/credential scopes, ignoring ambient Rust overrides;
 maerg `.kvist/rust-toolchain.json` is not authorization.
 Installed-resource preparation retains its 180-second cooperative budget.
-Vendor-specific quotas come from the shared library/project configuration.
-Do not enumerate/copy/hash vendor source files at startup or per tool call.
-Stage only the small retargeted native Cargo resolver configuration, preserving
-other TOML tables and retaining malformed bytes for Cargo's own failure. Runtime
-initialization copies the staged native configuration into private
-`/tmp/cargo-home/config.toml` before Cargo starts, so early-loaded aliases and
-other native tables work; CLI source overrides retain sandbox paths/offline mode.
-Runtime consumption takes no reader lease and checks no receipt/lock/content inventory.
+Bounded cache/metadata policy comes from the shared library/project configuration.
+Do not enumerate/copy/hash dependency source files at startup or per tool call.
+Stage only private selection templates and trusted wrappers; no host Cargo
+configuration, generated default resolver or empty vendor view is staged.
+Project `.cargo/config.toml` remains ordinary workspace input to Cargo and
+cannot authorize new host grants.
+Runtime consumption takes no reader lease and imposes no receipt/lock/content-inventory
+readiness gate.
 Stage ownership is shared with the registry/executor and removed when the final
 owner drops. Per-call no-follow origin binding protects against added host
 mounts, not legitimate host content or node replacement.
@@ -760,7 +787,7 @@ resolution. Missing companions affect only their own operations.
 Fixed runtime wrappers consume an optional leading `+<name>` and
 otherwise resolve rustup's active selection (environment/pin/default), then invoke
 trusted system rustup's `run`
-without installation. Workspace Cargo retains offline vendor flags with
+without installation. Workspace Cargo retains native offline flags with
 caller-selected locking; protected verification retains the locked wrapper.
 Formatter/Clippy/analyzer wrappers use the same selection. `rustup default`
 uses the real system rustup and private settings, never an emulated response.
@@ -770,7 +797,7 @@ Optional user Cargo
 bin remains a validated non-link directory outside the workspace; it is not a
 credential/configuration mount.
 
-Debug events mark selection queries, executable/layout validation, shared vendor
+Debug events mark selection queries, executable/layout validation, native-cache
 view preparation, resource preparation, preflight and runner completion,
 including elapsed times and bounded counts/identities. Trace emits individual
 grant metadata and environment names only. Neither level emits argv payloads,
@@ -843,14 +870,15 @@ changes, exports and an actual unchanged warmed Cargo build.
 Native runner discovery honors `KVIST_GALLA`, then the current test build's
 sibling runner before older installed binaries, so a workspace test exercises
 the matching enforcement implementation.
-CI provisions the vendor registry, Cargo extensions and the full/minimal Rust
+CI provisions native registry/Git material, Cargo extensions and the full/minimal Rust
 installations on the host before native tests; test bodies never install them.
 
-Runtime selects available ordinary vendor material or an explicitly empty
-view, diagnoses unusable optional nodes, and stages only native resolver
-configuration. Existing vendor aliases are overlaid readable read-only.
-Cargo owns source/checksum checks. Explicit provisioning publication retains
-its own transactional checks; runtime takes no cooperative reader lease.
+Runtime selects available ordinary native registry/Git roots, diagnoses
+unusable optional nodes, and creates sandbox-only data links in private Cargo
+administration. No default source replacement or empty directory-source view
+is emitted. Cargo owns source/checksum checks. Explicit native provisioning
+retains its own checks and native writer coordination; runtime takes no
+cooperative reader lease or frozen-receipt gate.
 Host content remains live, and topology/configuration is re-observed at later
 tool boundaries without restart. Preparation labels are not full-content
 attestations, acceptance or compliance evidence.

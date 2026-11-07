@@ -251,7 +251,7 @@ timeout/signal behavior. No control implies rollback or automatic replay.
 Model deltas are journaled live when `task run --stream` is enabled; otherwise
 request, completed-turn, broker and effect progress remain inspectable live.
 Automatic model-requested dependency fulfillment currently fails closed: exact
-request-to-lock binding and mediated vendor repacking are not implemented.
+request-to-lock binding is not implemented.
 There is no host package-manager fallback; explicit human `kvist vendor`
 remains available separately. Independent review records this unmet target.
 
@@ -657,11 +657,11 @@ validated installed toolchains read-only, not the user's home/settings.
 
 | Language                  | Authoring (agent)                                                                | Verification (`kvist task verify`)                                                                                                                                                                  | Vendoring                                                                                                                                                                                                      |
 | ------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Rust**                  | Installed toolchains/targets read-only; private offline Cargo and rustup selection in Skott and maerg | **First-class**: closed offline Cargo topology, `cargo test --locked`, enforced, validated end-to-end in CI (stable + MSRV) | Exact and automated: `kvist vendor` + per-dependency fail-closed manifest |
+| **Rust**                  | Installed toolchains and native Cargo data read-only; private administrative/selection state | Closed native offline Cargo topology, `cargo test --offline --locked`; explicit portable exports remain separate | Incremental native cache reuse, small lock-bound receipt, no source copies or per-file inventory |
 | **C/C++**                 | System `gcc`/`cc` available                                                      | **First-class** for vendored projects: shared offline language topology, `make` network-denied against the mounted Conan home or vendored vcpkg root, validated end-to-end (`language_offline_e2e`) | Automated: `kvist vendor` runs `conan install` (Conan) or `vcpkg install` (vcpkg) into the project-local package-manager root                                                                                  |
-| **Go**                    | System `go` available                                                            | **First-class** for vendored projects: shared offline language topology, `go test -mod=vendor ./...` network-denied, validated end-to-end (`language_offline_e2e`)                                  | Automated: `kvist vendor` runs `go mod vendor`; the committed `vendor/` travels inside the component mount                                                                                                     |
+| **Go**                    | System `go` available                                                            | Native read-only module cache, `go test -mod=readonly ./...`, private build cache, network/proxy/sumdb off, local toolchain | Reuse selected native `GOMODCACHE`; acquire only missing modules without a routine `vendor/` copy |
 | **Python**                | System `python3` available                                                       | **First-class** for vendored projects: shared offline language topology, `python3 -m unittest` network-denied against the mounted provisioned venv, validated end-to-end (`language_offline_e2e`)   | Automated: `kvist vendor` downloads the locked wheels and provisions an offline virtualenv                                                                                                                     |
-| **JavaScript/TypeScript** | System `node` available                                                          | **First-class** for vendored projects: shared offline language topology, `node --test` network-denied, validated end-to-end (`language_offline_e2e`)                                                | Automated: `kvist vendor` reconciles the locked graph for npm (`npm ci`), yarn (`yarn install --frozen-lockfile`), or pnpm (`pnpm install`, vendoring the content-addressable store) into `.kvist/vendored-js` |
+| **JavaScript/TypeScript** | System `node` available                                                          | Read-only project modules/cache, `node --test` network-denied | Reuse project-native npm/yarn cache; pnpm uses a frozen lock and direct `.kvist/vendored-js` store, never a whole global-store copy; `node_modules` installation remains useful work |
 | **JVM / Ruby**            | System `java`/`ruby` available                                                   | Zero-dependency projects only; `~/.m2`/Gradle home/Gem state are not visible                                                                                                                        | Not supported                                                                                                                                                                                                  |
 | **Shell / scripts**       | Available                                                                        | Available                                                                                                                                                                                           | n/a                                                                                                                                                                                                            |
 
@@ -680,7 +680,7 @@ npm/yarn/pnpm, Python, C/Conan and vcpkg); per-language end-to-end evidence is t
 1. **Rust** (installed-only offline authoring and pinned verification).
 2. **Go and JavaScript** (complete with end-to-end evidence; the easy
    languages): their offline stories fit the shared language topology with
-   little new machinery (Go `vendor/`; Node with a vendored package cache).
+   little new machinery (Go native module cache; Node project-native cache/modules).
 3. **C/C++** (the important language): provisioning, profile, and
    end-to-end evidence are complete; it is claimed as vendored-supported.
    **Python** is also complete with end-to-end evidence.
@@ -694,16 +694,18 @@ follow the same shape and self-skip on hosts without the live sandbox.
 
 Declared limitations for currently supported languages:
 
-- **Rust**: verification builds from the vendored registry with the pinned
-  host toolchain; dependency build scripts never run in the sandbox. The
+- **Rust**: verification builds from read-only native data with the pinned
+  host toolchain; dependency build scripts/procedural macros run within the
+  isolated build, never during fetch acquisition. The
   authoring sandbox uses the validated host inventory, private selection state,
-  and offline/locked Cargo. Dependencies must already be vendored. Protected
+  and offline Cargo (protected wrappers additionally locked). Dependencies must
+  already be available offline. Protected
   maerg authoring automatically exposes declared workspace/path-dependency
   build resources read-only (ADR-0014), excluding provider intent/state.
   It never grants peer writes or adds peer implementations to the prompt.
-- **Go**: requires the `vendor/` directory to be present in the component
-  (`go mod vendor` on the host); `GOCACHE` must point at the writable `/tmp`
-  via the test-policy environment allowlist.
+- **Go**: requires selected native module-cache material for the unchanged
+  `go.mod`/`go.sum`; verification mounts it read-only at `/workspace/go-modules`
+  and uses private writable administrative/build state.
 - **C/C++**: requires the Conan home (`.kvist/vendored-conan`) or vendored vcpkg
   root (`.kvist/vendored-vcpkg`) to be provisioned by `kvist vendor`, depending
   on the detected package manager; the project build system consumes the

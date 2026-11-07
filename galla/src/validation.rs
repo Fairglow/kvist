@@ -7,8 +7,8 @@
 //! non-overlapping destinations, and a structural correspondence between each
 //! declared cache/scratch/lockfile endpoint and exactly one matching grant.
 //!
-//! The exact mediated-Cargo constraints (an offline `<cargo> test --locked`
-//! verification, or a network-enabled `<cargo> fetch` acquisition with its
+//! The exact mediated-Cargo constraints (offline locked test verification,
+//! native source-only metadata admission, or `<cargo> fetch --locked` acquisition with its
 //! writable Cargo home, lockfile workspace, and promotion intent) are layered
 //! on **only** when a Cargo toolchain or a Cargo cache is selected. A generic
 //! system-toolchain authoring or verification request keeps its established
@@ -19,6 +19,8 @@ use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 use sha2::{Digest, Sha256};
+
+mod native_cache;
 
 use crate::origin::{
     self, CANONICAL_CRATES_IO_DOWNLOAD_ORIGIN, CANONICAL_CRATES_IO_INDEX_ORIGIN,
@@ -430,7 +432,10 @@ fn validate_grant_purpose_access(
     // verification.
     let acquisition = phase == Phase::DependencyAcquisition;
     let allows_write = matches!(purpose, Purpose::Authoring | Purpose::Scratch)
-        || (matches!(purpose, Purpose::DependencyCache | Purpose::Lockfile) && acquisition);
+        || (matches!(
+            purpose,
+            Purpose::DependencyCache | Purpose::Lockfile | Purpose::Registry
+        ) && acquisition);
     if write && !allows_write {
         return Err(invalid(format!(
             "{label} grants read-write access to a read-only purpose in this phase"
@@ -472,6 +477,7 @@ fn validate_phase_purpose(
                 | Purpose::Runtime
                 | Purpose::Scratch
                 | Purpose::DependencyCache
+                | Purpose::Registry
                 | Purpose::Lockfile
         ),
     };
@@ -639,6 +645,9 @@ fn canonical_production_origin(value: &str, label: &str) -> Result<origin::Origi
 fn validate_optional_roots(request: &SandboxRequest) -> Result<(), ProtocolError> {
     let grants = grants_by_destination(request);
     if let Some(cache) = &request.cache {
+        if cache.native.is_some() {
+            native_cache::validate_structure(request, cache, &grants)?;
+        }
         validate_cache_structural(cache, &grants)?;
     }
     if let Some(scratch) = &request.scratch {
@@ -862,9 +871,9 @@ fn validate_acquisition(request: &SandboxRequest) -> Result<(), ProtocolError> {
             "dependency acquisition requires package-sources network mode",
         ));
     }
-    if request.argv.len() != 2 || request.argv[1] != "fetch" {
+    if request.argv.len() != 3 || request.argv[1] != "fetch" || request.argv[2] != "--locked" {
         return Err(invalid(
-            "dependency-acquisition argv must be exactly `<cargo> fetch` and must not execute build scripts",
+            "dependency-acquisition argv must be exactly `<cargo> fetch --locked` and must not execute build scripts",
         ));
     }
     let (cargo_identity, cargo_path) = cargo_toolchain(request)?;
@@ -880,6 +889,9 @@ fn validate_acquisition(request: &SandboxRequest) -> Result<(), ProtocolError> {
         .scratch
         .as_ref()
         .ok_or_else(|| invalid("dependency acquisition requires writable scratch"))?;
+    if cache.native.is_some() {
+        return native_cache::validate_phase(request, cache, scratch);
+    }
     let writable = cache
         .writable
         .as_ref()
@@ -943,10 +955,32 @@ fn validate_acquisition(request: &SandboxRequest) -> Result<(), ProtocolError> {
 }
 
 fn validate_cargo_verification(request: &SandboxRequest) -> Result<(), ProtocolError> {
-    if request.argv.len() != 3 || request.argv[1] != "test" || request.argv[2] != "--locked" {
-        return Err(invalid(
-            "Cargo verification argv must be exactly `<cargo> test --locked`",
-        ));
+    let native = request
+        .cache
+        .as_ref()
+        .is_some_and(|cache| cache.native.is_some());
+    let test =
+        request
+            .argv
+            .iter()
+            .skip(1)
+            .map(String::as_str)
+            .eq(["test", "--offline", "--locked"]);
+    let metadata = native
+        && request.argv.iter().skip(1).map(String::as_str).eq([
+            "metadata",
+            "--offline",
+            "--locked",
+            "--format-version",
+            "1",
+            "--all-features",
+        ]);
+    if !test && !metadata {
+        return Err(invalid(if native {
+            "native Cargo verification argv must be exactly `<cargo> test --offline --locked` or `<cargo> metadata --offline --locked --format-version 1 --all-features`"
+        } else {
+            "Cargo verification argv must be exactly `<cargo> test --offline --locked`"
+        }));
     }
     let (cargo_identity, cargo_path) = cargo_toolchain(request)?;
     require_cargo_toolchain_root_grant(request, cargo_identity)?;
@@ -961,6 +995,9 @@ fn validate_cargo_verification(request: &SandboxRequest) -> Result<(), ProtocolE
         .scratch
         .as_ref()
         .ok_or_else(|| invalid("Cargo verification requires writable target scratch"))?;
+    if cache.native.is_some() {
+        return native_cache::validate_phase(request, cache, scratch);
+    }
     let approved = cache.approved.as_ref().ok_or_else(|| {
         invalid("Cargo verification requires a read-only approved Cargo-home endpoint")
     })?;
@@ -1093,6 +1130,9 @@ fn validate_cache_paths(cache: &Cache) -> Result<(), ProtocolError> {
     validate_absolute(&cache.cargo_home, "cache cargo_home")?;
     validate_absolute(&cache.registry, "cache registry")?;
     validate_absolute(&cache.git, "cache git")?;
+    if cache.native.is_some() {
+        return Ok(());
+    }
     if cache.registry != child_path(&cache.cargo_home, "registry")?
         || cache.git != child_path(&cache.cargo_home, "git")?
     {
@@ -1302,7 +1342,7 @@ mod identity_binding_tests {
         serde_json::to_vec(value).expect("encode request")
     }
 
-    /// Builds a valid `<cargo> fetch` acquisition request whose single allowed
+    /// Builds a `<cargo> fetch --locked` acquisition request whose single allowed
     /// source is `source`. The source is supplied as a full JSON object so a
     /// test can substitute the identity, name, or origins to probe the binding.
     fn acquisition_request_with_source(source: &serde_json::Value) -> SandboxRequest {
@@ -1407,7 +1447,7 @@ mod identity_binding_tests {
             "protocol": "kvist-sandbox-request-v1",
             "protocol_version": 1,
             "phase": "dependency-acquisition",
-            "argv": ["/workspace/toolchain/cargo", "fetch"],
+            "argv": ["/workspace/toolchain/cargo", "fetch", "--locked"],
             "working_directory": "/workspace/lockfile",
             "environment": environment,
             "network": network,

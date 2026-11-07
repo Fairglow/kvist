@@ -2,21 +2,32 @@
 
 # Sav Design
 
+## Native Cargo cache scripts
+
+Remove unconditional source replacement from both wrapper variants. Retain only
+offline/locked selection plus fixed optional deliberately staged export config.
+Initialization creates private Cargo administration under caller-selected
+`CARGO_HOME` (default sandbox scratch `/tmp/cargo-home`), then creates links to
+present fixed registry/Git data mounts. The fragment is caller-trusted sandbox
+initialization, not acquisition or host path selection. No source data is copied.
+
 ## Workspace offline wrapper
 
 Render both public wrapper variants through the same private generator with a
 locked-resolution boolean. Only workspace Cargo/Clippy omit forced `--locked`;
-all fixed paths, selection, source configuration and protected behavior remain.
+selection, literal arguments and deliberately staged export configuration remain.
+Protected wrappers retain forced `--locked`, with native sources by default.
 The workspace launcher path is `/rust/rustup`, supplied as a live read-only
 file grant by the host; the protected launcher path remains `/usr/bin/rustup`.
 
 ## Fixed offline source configuration
 
 Only the Cargo and Clippy wrappers conditionally add the fixed
-`/rust/runtime/vendor-config.toml` argument when the host stages it. Use a shell
+`/rust/runtime/vendor-config.toml` argument when the host deliberately stages
+portable-export configuration. Use a shell
 array for the literal optional argument; no environment/model path or shell
-interpolation constructs executable fragments. Preserve the always-enforced
-offline/locked/crates.io arguments and selection behavior.
+interpolation constructs executable fragments. Preserve the offline/locked arguments and selection behavior without a default
+crates.io replacement.
 
 ## Resilience realization
 
@@ -246,8 +257,11 @@ External agents use process supervision, not the native model/tool loop.
 generation shared by Skott and maerg. Initialization copies generated settings
 into tmpfs and links the read-only registration directory. Wrappers resolve
 the active toolchain through system rustup or consume an explicit `+name`;
-Cargo invokes `rustup run` with offline/locked vendor flags targeting the
-caller-provided read-only `/rust/vendor` mount. No host paths or
+Cargo invokes `rustup run` with native offline source resolution, adding
+`--locked` only in the protected wrapper. Private Cargo administration links
+to caller-provided read-only native registry/Git mounts. Directory-source
+configuration is consumed only when deliberately staged for a portable export.
+No host paths or
 untrusted script fragments are interpolated.
 
 The crate separates command rendering, prompt acquisition, profile storage and

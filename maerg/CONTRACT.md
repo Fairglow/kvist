@@ -2,37 +2,165 @@
 
 # Kvist Maerg Contract
 
+## Native Cargo admission
+
+Named registry aliases are explicit request metadata, never host configuration
+or network grants. Their Git/sparse protocol is derived from exact locked source
+prefixes matching the approved index origin; mixed protocols are rejected.
+Unused aliases choose sparse for a slash-terminated origin, Git otherwise.
+Galla materializes only these registry tables in the private administrative home.
+
+Noncanonical native sources may require real offline/locked metadata admission.
+Configured admission uses the exact `cargo metadata --offline --locked
+--format-version 1 --all-features` command with read-only native endpoints,
+private scratch and network denial. It returns actual bounded metadata stdout
+for locked-source validation, not a receipt-derived success. Ordinary authoring
+can select safe source-only roots without certifying their present contents;
+native offline Cargo establishes actual resolution.
+
+## Native package-manager acquisition
+
+The common host-tool adapter uses optional `.kvist/vendor.toml` time/output
+budgets and Sav's bounded no-retry supervisor. Native Go graph/cache routines
+retain their separately documented fixed budgets. Failures retain
+native status or underlying I/O/timeout cause and the last bounded redacted
+diagnostic. `KVIST_LOG=info` exposes non-secret acquisition phase messages.
+pnpm installs with a frozen lock directly into `.kvist/vendored-js`; existing
+project store material is reused by pnpm without a recursive global-store copy.
+`node_modules` installation remains separate useful materialization. Missing
+optional uv permits the standard Python installer; a present broken uv command
+fails explicitly rather than silently selecting another installer.
+
+## Native Go module cache
+
+Go uses explicit absolute `GOMODCACHE`, otherwise bounded `go env GOMODCACHE`.
+Parent traversal is refused; missing cache paths resolve their existing ancestor
+before authority checks, including aliases through an ancestor symbolic link.
+Filesystem root, the host home and ancestors of the project are refused as
+cache roots, rather than turning a cache selection into a broad host mount.
+Explicit provisioning runs `go mod download` against that native cache and
+refuses changes to `go.mod` or `go.sum`, retaining acquired material on failure.
+It does not create or refresh project `vendor/`, copy module sources or generate
+extra checksum manifests.
+
+The aggregate report identifies the native cache and a combined digest of
+`go.mod` plus `go.sum`. Present declared modules require native expanded
+metadata and matching package `ziphash`, without a partial extraction marker.
+This is not a complete transitive graph or source-content attestation.
+Local replacements are not supported by this topology; remote replacements
+select their declared native module identity.
+Go workspace discovery is disabled (`GOWORK=off`); this backend binds the
+selected local `go.mod`/`go.sum`, not undeclared workspace peers.
+Offline mounts expose only the native module cache, when present, at
+`/workspace/go-modules`. The verification command is
+`go test -mod=readonly ./...` with proxy/checksum-service networking disabled,
+local toolchain selection and private writable compiler scratch.
+The native Go profile sets `GOMAXPROCS=2` and `GOFLAGS=-mod=readonly -p=1` so
+cold compiler work fits the existing process ceiling without broadening grants.
+The isolated Go helper currently uses fixed 30-second inspection and 900-second
+acquisition limits with a 1 MiB capture limit, not the common vendor budget file.
+These approved local Go and package/configuration repairs are exceptions to the
+shared Rust extraction's unchanged non-Rust baseline; they do not introduce a
+shared non-Rust provider API.
+
+## Native Rust language strategy
+
+Default language enforcement selects the operator's native Cargo home and
+obtains the common provider's source-only view. Canonical catalogues supply
+reports; noncanonical source mapping requires actual offline native admission
+through the frontend helper, using the supplied sandbox configuration.
+`LanguageStrategy::enforce_with_sandbox` carries that context and defaults to
+ordinary enforcement for non-Rust strategies. Direct context-free Rust
+inspection refuses noncanonical admission instead of silently running host
+Cargo. Recorded lock admission is a hint, not readiness. It does not gate on
+directory-export state. The aggregate enforcement's `vendored_dir` names that
+native home, not `.kvist/vendored`. Its read-only mounts contain only available
+native `registry` and `git` subdirectories at `/workspace/cargo-registry` and
+`/workspace/cargo-git`; a path-only graph may need neither. No generated
+source-replacement configuration or full-home/credential mount is returned.
+Mount identities use the checked lock digest. Catalogue presence is not
+immutable readiness or integrity attestation; protected callers retain their
+separate native readiness obligations.
+
+The strategy's infallible `vendored_dir` location helper remains the explicit
+directory-export location; runtime consumers use the enforcement report's
+native location and mount plan instead.
+
+## Non-Rust offline cache preparation
+
+JavaScript provisioning precedence is also the lock/mount identity precedence:
+`pnpm-lock.yaml`, then `yarn.lock`, then `package-lock.json`. Python, JavaScript
+and Conan preparation does not rewrite identical generated offline
+configuration. Changed regular configuration is atomically replaced;
+configuration links and special files are refused without following them.
+Package-manager-native integrity metadata is retained; no additional file
+checksum inventory is generated.
+
+Non-Rust readiness currently checks coarse material presence and computes the
+current lock digest for mounts. It does not compare that digest with a
+previously provisioned receipt or prove package-by-package completeness.
+[`../docs/offline-dependencies.md`](../docs/offline-dependencies.md) explains the language-specific stores,
+materialization requirements and deferred acquisition work.
+
+## Failure diagnostics
+
+Sandbox failures name the configured runner without implying that every
+preparation failure means the executable is missing. Cargo context and shared
+Rust resource errors identify the affected path, observed invalid condition
+and underlying OS/parser cause where available. Invalid source entries remain
+rejected; a socket/FIFO diagnostic recommends moving runtime data outside the
+selected source tree after stopping its owner, not automatic deletion or host
+fallback. Metadata size/link/stability checks and all existing bounds remain
+effective. Configured vendoring retains these causes in its outer error.
+Configured fetch errors also name cancellation, elapsed-time/capture limits or
+exit status, with at most 4096 UTF-8-safe bytes of captured stderr (stdout when
+stderr is empty). Allowed environment values are redacted and terminal controls
+made inert before that excerpt is bounded; truncation is explicitly marked.
+
 ## Shared Rust dependency mechanics
 
 The common provider is `dependencies/CONTRACT.md` (ADR 0017). The public maerg
 catalogue module adapts/reexports its existing types and error domains; Rust
-operator provisioning uses the same transactional backend as Skott.
+operator provisioning uses the same native cache backend as Skott (ADR 0020).
 Configured acquisition failure is explicit and does not fall back to host
 Cargo. Explicit human provisioning with no acquisition configuration remains
 host-authorized. Protected fulfillment refusal and non-Rust behavior are
-unchanged. Source-replacement resolver tables come from validated Cargo output;
-project `.cargo/config.toml` remains untouched.
+unchanged. Default preparation does not run `cargo vendor` or emit a directory
+source replacement; project `.cargo/config.toml` remains untouched. Explicit
+custom directory destinations retain the separate portable export transaction.
 The closed configured-fetch workspace contains the exact bounded manifests and
 lock plus empty regular target placeholders for the workspace and declared
 in-project path dependencies. Source contents, component intent and host Cargo
 configuration/credentials are not exposed. Existing declared-resource bounds
 apply; unsupported layouts fail explicitly. Approved alternate registry
-definitions are generated from acquisition policy. Fetch uses the runner's
-unchanged closed argv; changed lock bytes are rejected before offline repack.
+definitions are generated from acquisition policy. Fetch uses exactly
+`cargo fetch --locked`; changed lock bytes are rejected before readiness.
 The standalone explicit host operator command remains separate authority, not
-fallback or protected model fulfillment. Coherent managed readiness gates protected
-inspection and prepared Rust resources, including publication/operation fences.
+fallback or protected model fulfillment. Native cache availability and active
+native operations gate protected inspection and prepared Rust resources.
 Configured Git fetch requires an exact approved HTTPS repository and full
 immutable revision in both manifests and the lock; unsupported transports,
 branch/tag-only declarations and unapproved bindings fail before fetch.
 Authoring a standalone child with no root lock or managed Rust state retains
-the empty offline registry rather than requiring nonexistent root metadata.
-`kvist vendor [PROJECT_DIR] --force` explicitly rebuilds reusable Rust material.
-Both applications use the same `.kvist/vendored`, `.kvist/vendor.json` minimal
-receipt, source resolver and optional `.kvist/vendor.toml` policy. Kvist retains
-vendor read ownership through Rust authoring/verification. Readiness checks
-metadata/presence rather than independently hashing package files; Cargo owns
-its required checksum inventory. No automatic repair/fallback is introduced.
+an empty native offline source view rather than requiring nonexistent root metadata.
+`kvist vendor [PROJECT_DIR] --force` refreshes native readiness without erasing
+operator caches. `CARGO_HOME`, or `HOME/.cargo` when absent, selects operator
+native storage; recorded receipt paths never grant source authority.
+Both applications reuse native registry/Git data, small lock-bound metadata
+and optional `.kvist/vendor.toml` policy. Protected Cargo verification is exactly
+`cargo test --offline --locked`, with denied network and read-only data mounts
+at `/workspace/cargo-registry` and `/workspace/cargo-git` when available.
+Administrative `CARGO_HOME` is writable at `/workspace/scratch/cargo-home`;
+only sandbox-native links connect it to data mounts. No whole home,
+credentials or host Cargo configuration are exposed. Acquisition grants those
+same data roots writable explicitly, preserving incremental downloads; it
+does not request an unsupported immutable-generation promotion.
+Readiness inspects bounded metadata/presence, not source file contents or
+origin attestation. Cargo owns native source resolution and archive verification.
+Old directory-export interruption fences remain untouched and are not authority
+for the independent native path. Missing data fails clearly without task fetch
+or host fallback. This exact human-approved bundle has an advisory exception
+while review receipts are unavailable; acceptance is not recorded.
 
 ## Shared registry configuration (ADR 0015)
 
@@ -706,19 +834,20 @@ non-traversing project-relative path, defaults to `.`, and cannot select VCS,
 build, attempt or recovery storage.
 External backup storage must be outside every object being quarantined.
 
-`vendor` is a host-authorized provisioning step (ADR-0011, ADR-0013): it
+`vendor` is an explicit operator-authorized provisioning step (ADR-0020, ADR-0013): it
 detects the project's language strategy and performs that language's
 host-authorized provisioning pass from the exact locked versions, then enforces
 readiness, failing closed when the lockfile drifted or locked material is
-missing. For a Rust project it provisions the exact `cargo vendor` registry and
-writes the versioned vendoring manifest under `.kvist/`. For the other
-supported languages it provisions their vendored material under `.kvist/`
-(Go's committed `vendor/` directory via `go mod vendor`; the JavaScript package
+missing. Rust defaults to selected native Cargo data and a small lock-bound
+`.kvist/cargo-cache.json` receipt. Configured fetch/admission runs only in the
+closed Galla sandbox; portable directory export is explicit and separate.
+Other supported languages provision their native offline resources
+(Go's native module cache via `go mod download`; the JavaScript package
 cache via `npm ci`/`yarn install --frozen-lockfile`; the Python locked wheels
 and provisioned virtualenv; the C/C++ project-local Conan home and generated
 build files via `conan install --build=missing`).
 
-`toolchain ensure` is a host-authorized provisioning step (ADR-0012): it
+`toolchain` is a host-authorized provisioning step (ADR-0012): it
 resolves the project's pinned Rust toolchain (`rust-toolchain.toml` or
 `rust-toolchain` at the project root, else the rustup default), installs the
 pinned channel via `rustup` when absent (the supported upgrade/downgrade
@@ -1057,7 +1186,7 @@ All current formats are version 1 and independently versioned:
   every non-current project state;
 - attempt logs: bounded JSON Lines evidence;
 - sandbox request: `protocol_version: 1`;
-- Rust vendor receipt (`.kvist/vendor.json`): only `schema_version: 1` and
+- Rust native cache receipt (`.kvist/cargo-cache.json`): only `schema_version: 1` and
   `lockfile_digest`; host paths, timestamps and file inventories are absent;
 - optional shared vendor policy (`.kvist/vendor.toml`): native TOML 1.1,
   `[limits]` fields/defaults defined by `kvist_dependencies::VendorLimits`;
@@ -1135,32 +1264,30 @@ identified, or when no writable path remains, `task run` fails closed rather tha
 granting the component root. It emits none of the
 retired `program`, `arguments`, `mounts`, or `context_files` fields. The
 independently installed runner strictly parses and validates this request and
-rejects the retired shape, but Bubblewrap enforcement is not yet integrated, so
-a valid request fails closed and `task run` still cannot execute Kvist's own
-root workspace safely. There is no fallback to the legacy request or host
-execution. The maerg builds fallible typed mediated-acquisition and offline-verification
+rejects the retired shape. Bubblewrap enforcement remains fail-closed;
+there is no fallback to a legacy request or host execution.
+The maerg builds fallible typed mediated-acquisition and offline-verification
 plans with distinct canonical UTF-8 host sources and fixed sandbox
-destinations. Acquisition is exactly `cargo fetch` using a real writable
-attempt-local `CARGO_HOME`, an isolated writable lockfile workspace, and
-separate scratch; it records lockfile before/after content identities for an
-immutable-generation promotion result. Verification is exactly
-`cargo test --locked` with denied network, `CARGO_NET_OFFLINE=true`, an
-approved generation mounted read-only at `CARGO_HOME`, and separate target
-scratch. Strict `[sandbox.acquisition]` configuration is approval-bound. The
-runner validates these values but live `task run` acquisition wiring, OS mount,
-process, DNS/address-pinning, redirect, and network enforcement, and final
-project-cache generation selection remain later work.
+destinations. Native acquisition is exactly `cargo fetch --locked`, with
+incremental writable selected registry/Git data, private administrative home,
+isolated manifest/lock snapshot and separate scratch. Lock identities are
+rechecked before the small receipt is published; no default generation copy
+or promotion occurs. Native verification is exactly
+`cargo test --offline --locked` with denied network, read-only selected data and
+separate private administrative/target scratch. Native admission uses the exact
+offline/locked metadata operation. Strict acquisition configuration controls
+package-source authority; protected model-requested acquisition remains refused.
 
 Language support is declared per language with executable evidence. Rust is
 first-class for verification: `kvist task verify` routes Rust projects
 (`Cargo.lock` present) to the closed offline Cargo topology and runs exactly
-`cargo test --locked` network-denied against the vendored registry. Every
+`cargo test --offline --locked` network-denied against native cache data. Every
 other **vendored** project is routed to the shared offline language topology
 (ADR-0013): vendoring is enforced, the language's vendored material is mounted
 read-only with the lock-file digest identity, one disjoint writable scratch is
 granted at the fixed Cargo scratch destination, the network is denied, and the
 language's canonical offline test command runs against the host system
-toolchain — Go: `go test -mod=vendor ./...`; JavaScript: `node --test`;
+toolchain — Go: `go test -mod=readonly ./...`; JavaScript: `node --test`;
 Python: `python3 -m unittest -v` against the mounted provisioned venv;
 C/C++: the approved `[test_policy]` command (the build system is
 project-defined), with the Conan home mounted read-only at its canonical host
@@ -1176,6 +1303,8 @@ mode, toolchains requiring ambient home/global mutable state, and GPU/
 accelerator toolchains are explicitly unsupported. Each supported language is
 backed by an end-to-end integration test that provisions a small real project
 on the host and runs its real build/test offline inside the sandbox.
+Offline verification never installs missing dependencies on the host; it fails
+with guidance to run the explicit operator `kvist vendor` command first.
 
 The Rust toolchain used by offline verification is pinned by the project's
 `rust-toolchain.toml` or `rust-toolchain` when present (else the rustup
@@ -1202,12 +1331,13 @@ reverse acceptance; it returns the acceptance ID and leaves a retryable
 versioned journal for `vcs commit-accepted`.
 
 Dependency acquisition permits Cargo network access only in its distinct phase
-and only to exact configured supported sources. It uses a real attempt-local
-writable `CARGO_HOME`, an isolated writable lockfile workspace, and separate
-target scratch, and never mounts the user's Cargo home. `cargo fetch` may
-update that workspace's lockfile. Authoring and verification remain
-network-denied; verification uses a selected approved immutable Cargo-home
-generation read-only with `cargo test --locked` and offline true.
+and only to configured supported source authorities. Native
+`cargo fetch --locked` uses private writable administration, selected writable
+registry/Git data and an isolated lockfile workspace; lock drift fails without
+receipt publication. It never mounts the user's whole Cargo home. Authoring and
+verification remain network-denied; native verification uses read-only live
+data and private administration with `cargo test --offline --locked`.
+Explicit directory exports retain their separate publication/recovery protocol.
 
 `agent setup` is the explicit acknowledgement for its single generated
 qualification command. Kvist adds no filesystem, credential, executable, or

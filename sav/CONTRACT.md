@@ -2,10 +2,23 @@
 
 # Sav Contract
 
+## Native Cargo source mode
+
+Native Cargo cache source mode follows ADR 0020.
+`offline_rust::{wrapper,workspace_wrapper}` force offline native Cargo resolution
+without default `source.*` overrides; protected `wrapper` retains `--locked`.
+Only deliberately staged `/rust/runtime/vendor-config.toml` adds explicit export
+configuration. `INITIALIZE` initializes private rustup state as before and private
+Cargo administration at `${CARGO_HOME:-/tmp/cargo-home}`, linking present
+`/rust/cargo-registry` and `/rust/cargo-git` data mounts at `registry` and `git`.
+The caller supplies a trusted private writable sandbox-native CARGO_HOME (default
+scratch path) and read-only data mounts. Host configuration/credentials are not
+read or copied. Existing operator/model paths cannot select data grants.
+
 ## Workspace Rust wrappers (ADR 0019)
 
-`offline_rust::workspace_wrapper(RustTool)` supplies the existing fixed runtime
-selection/source configuration with Cargo/Clippy `--offline` but no injected
+`offline_rust::workspace_wrapper(RustTool)` supplies fixed runtime
+selection and native Cargo/Clippy `--offline` resolution with no injected
 `--locked`. Caller arguments remain literal and may explicitly request locked
 resolution. `offline_rust::wrapper` retains locked semantics for protected
 consumers. Neither wrapper grants installation, networking or host write access.
@@ -367,18 +380,17 @@ at most 256 bytes. Ollama continues to use `/api/ps`.
 `/tmp/rustup-home` settings and read-only `/rust/rustup-home/toolchains`
 registrations), the closed `RustTool` enum and `TOOLS`, plus `wrapper(tool)`.
 Callers stage returned scripts read-only at `/rust/runtime`, initialize before
-effects and mount validated installations and vendor at `/rust/*`. Unknown
+effects and mount validated installations and native Cargo data at `/rust/*`. Unknown
 names are not exposed by `TOOLS`; the caller is responsible for using that
 closed set. No host discovery, installation, shell execution or grant decision
 is performed by this module. The typed executable set prevents interpolation
 of untrusted script fragments.
 
-The Cargo wrapper's vendored-source path is `/rust/vendor`; callers must expose
-their validated read-only registry there, outside writable workspace mounts.
-Cargo/Clippy additionally use `/rust/runtime/vendor-config.toml` when the caller
-stages that fixed file. The caller must validate it as source-replacement-only
-configuration, retarget its directories to `/rust/vendor`, and mount it
-read-only. Absence preserves the existing crates.io-only resolver.
+Cargo/Clippy use `/rust/runtime/vendor-config.toml` only when the caller
+deliberately stages explicit export configuration. The caller must validate it
+as source-replacement-only configuration, retarget its directories to approved
+read-only sandbox export views and mount it read-only. Absence uses native Cargo
+registry/Git sources; Sav never emits a default vendor replacement.
 
 Optional host-owned `KVIST_CARGO_WORKDIR` selects the Cargo build-view directory;
 `KVIST_COMPONENT_BUILD_DIR` maps source argument paths in that view back to

@@ -124,7 +124,7 @@
       "max_files": { "type": "integer", "minimum": 1, "maximum": 1048576 },
       "max_file_bytes": { "type": ["integer", "null"], "minimum": 1, "maximum": 8589934592 },
       "max_scratch_bytes": { "type": "integer", "minimum": 1, "maximum": 68719476736 },
-      "max_cache_bytes": { "type": "integer", "minimum": 1, "maximum": 68719476736 }
+      "max_cache_bytes": { "type": ["integer", "null"], "minimum": 1, "maximum": 68719476736 }
     }
   },
   "backendIdentity": {
@@ -166,7 +166,10 @@
           "toolchain",
           "scratch",
           "dependency-cache",
-          "lockfile"
+          "lockfile",
+          "registry",
+          "cargo-config",
+          "runtime"
         ]
       },
       "identity": { "$ref": "#/$defs/digest" }
@@ -224,10 +227,36 @@
       "cargo_home": { "$ref": "#/$defs/absolutePath" },
       "registry": { "$ref": "#/$defs/absolutePath" },
       "git": { "$ref": "#/$defs/absolutePath" },
-      "writable": { "$ref": "#/$defs/cacheEndpoint" },
-      "approved": { "$ref": "#/$defs/cacheEndpoint" },
-      "lockfile": { "$ref": "#/$defs/lockfileWorkspace" },
-      "promotion": { "$ref": "#/$defs/cachePromotion" }
+      "native": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/nativeCache" }] },
+      "writable": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/cacheEndpoint" }] },
+      "approved": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/cacheEndpoint" }] },
+      "lockfile": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/lockfileWorkspace" }] },
+      "promotion": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/cachePromotion" }] }
+    }
+  },
+  "nativeCache": {
+    "type": "object",
+    "additionalProperties": false,
+    "description": "Optional native data roots, excluding whole Cargo-home config/admin. Native verification admits exact offline locked test or format-version-one all-features metadata operations. Phase access, argv, fixed destinations and exact grants are validated by Rust.",
+    "properties": {
+      "registry": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/cacheEndpoint" }] },
+      "git": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/cacheEndpoint" }] },
+      "registries": {
+        "oneOf": [
+          { "type": "null" },
+          { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/nativeRegistryAlias" } }
+        ]
+      }
+    }
+  },
+  "nativeRegistryAlias": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["name", "index_origin"],
+    "properties": {
+      "name": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9_-]+$", "not": { "const": "crates-io" } },
+      "index_origin": { "type": "string", "maxLength": 4096 },
+      "protocol": { "type": "string", "enum": ["git", "sparse"], "default": "sparse" }
     }
   },
   "lockfileWorkspace": {

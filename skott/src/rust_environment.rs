@@ -3,12 +3,11 @@
 //! This is not the maerg provisioning or Cargo verification authority. It
 //! never installs anything, reads Cargo credentials, or trusts manifest paths.
 //! The existing System/Authoring protocol grants the compiler, fixed Cargo shim
-//! and shared vendor area as read-only Toolchain build resources at disjoint
+//! and native Cargo data as read-only Toolchain build resources at disjoint
 //! `/rust/*` destinations. No Cargo-phase topology or cache authority is added.
-//! The runner masks the writable workspace vendor alias. Per-tool directory
-//! live views reflect host publication without copying or reader leases.
+//! Per-tool live data views reflect host publication without copies or leases.
 //!
-//! Selection ignores ambient Rust/Cargo overrides and uses the standard
+//! Toolchain selection ignores ambient Rust overrides and uses the standard
 //! `$HOME/.rustup/toolchains` installation layout. Channels, requested
 //! components/targets and executable/layout identities are checked without
 //! installing anything. Missing material must be provisioned separately on the
@@ -49,7 +48,7 @@ const PREPARATION_BUDGET: Duration = Duration::from_secs(180);
 /// A complete installed inventory, initial selection and private sandbox resources.
 ///
 /// Clones share the staging owner; the final registry/executor drop removes
-/// staged wrappers and an optional empty vendor view. No packages are copied.
+/// staged wrappers and private runtime metadata. No packages are copied.
 #[derive(Debug, Clone)]
 pub struct RustEnvironment {
     resources: Arc<Resources>,
@@ -63,8 +62,8 @@ struct Resources {
     channel: String,
     identity: String,
     staging: tempfile::TempDir,
-    vendor_identity: String,
-    has_vendor: bool,
+    registry: Option<PathBuf>,
+    git: Option<PathBuf>,
     pin_identity: String,
     pinned: bool,
     user_cargo_bin: Option<PathBuf>,
@@ -451,74 +450,11 @@ pub(crate) fn host_cargo(workspace: &Path, cancellation: &CancellationToken) -> 
     Ok(host::resolve(&workspace, pin.as_ref(), &preparation)?.cargo)
 }
 
-fn source_configuration(workspace: &Path, issues: &mut Vec<String>) -> Result<Option<Vec<u8>>> {
-    let parent = workspace.join(".kvist/sandbox-cargo");
-    let path = parent.join("config.toml");
-    let input = match fs::symlink_metadata(&parent) {
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) =>
-        {
-            return Ok(None);
-        }
-        Err(error) => Err(io_error(
-            "inspect native Cargo configuration parent",
-            None,
-            error,
-        )),
-        Ok(_) => match inspect_path(&parent) {
-            Ok(metadata) if !metadata.is_dir() => return Ok(None),
-            Ok(_) => match fs::symlink_metadata(&path) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                Err(error) => Err(io_error("inspect native Cargo configuration", None, error)),
-                Ok(_) => bounded_bytes(&path, 1 << 20),
-            },
-            Err(error) => Err(error),
-        },
-    };
-    let bytes = match input {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            issues.push(format!("native Cargo configuration `{}` could not be prepared: {error}; Cargo receives an explicit configuration error, while the compiler remains available. Repair the local file/permissions or use direct Cargo with an explicit sandbox configuration; the next invocation refreshes without restart", path.display()));
-            return Ok(Some(b"[SKOTT_SOURCE_CONFIGURATION_UNAVAILABLE\n".to_vec()));
-        }
-    };
-    let mut table = match std::str::from_utf8(&bytes)
-        .ok()
-        .and_then(|text| toml::from_str::<toml::Table>(text).ok())
-    {
-        Some(table) => table,
-        None => {
-            issues.push(format!("native Cargo configuration `{}` is malformed/non-UTF-8; its original bytes are preserved for Cargo's own diagnostic, not used to disable rustc. Correct that file and retry the affected Cargo operation without restart", path.display()));
-            return Ok(Some(bytes));
-        }
-    };
-    if let Some(sources) = table.get_mut("source").and_then(toml::Value::as_table_mut) {
-        for source in sources
-            .iter_mut()
-            .filter_map(|(_, value)| value.as_table_mut())
-        {
-            if source.get("directory").is_some_and(toml::Value::is_str) {
-                source.insert(
-                    "directory".into(),
-                    toml::Value::String("/rust/vendor".into()),
-                );
-            }
-        }
-    }
-    toml::to_string(&table)
-        .map(|text| Some(text.into_bytes()))
-        .map_err(|error| {
-            failure(format!(
-                "cannot serialize native Cargo configuration: {error}"
-            ))
-        })
-}
+#[path = "rust_environment/native.rs"]
+mod native;
 
 impl RustEnvironment {
-    /// Resolves installed registration topology and a live read-only vendor view.
+    /// Resolves installed registration topology and live read-only native Cargo data.
     /// Ambient Cargo/Rust configuration and rustup overrides are not
     /// forwarded. Absence is an error for callers that explicitly enable Rust.
     pub fn resolve(workspace: &Path) -> Result<Self> {
@@ -633,77 +569,19 @@ impl RustEnvironment {
             .map_err(|e| io_error("create private Rust resources outside workspace", None, e))?;
         fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))
             .map_err(|e| io_error("protect Rust resource staging", None, e))?;
-        let vendor = workspace.join(".kvist/vendored");
-        let state_usable = match fs::symlink_metadata(workspace.join(".kvist")) {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => true,
-            Ok(_) => {
-                issues.push("workspace .kvist is not an ordinary directory; no host origin is followed through that pointer. Installed compiler/local operations remain available; provide ordinary local vendor/configuration nodes for dependency-using operations".into());
-                false
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-            Err(error) => {
-                issues.push(format!("workspace vendor/configuration state could not be inspected: {error}; compiler operations remain available; repair local state permissions and retry affected builds"));
-                false
-            }
-        };
-        let vendor_metadata = if state_usable {
-            match fs::symlink_metadata(&vendor) {
-                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-                    Some(metadata)
-                }
-                Ok(_) => {
-                    issues.push("workspace vendor is not an ordinary directory; no extra origin is mounted. Compiler/local operations remain available; provide an ordinary vendor directory for dependency-using builds".into());
-                    None
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(error) => {
-                    issues.push(format!("workspace vendor could not be inspected: {error}; compiler/local operations remain available; repair the vendor path before dependency-using builds"));
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        let has_vendor = vendor_metadata.is_some();
-        let vendor_identity = if has_vendor {
-            let metadata = vendor_metadata
-                .as_ref()
-                .ok_or_else(|| failure("vendor metadata is unavailable"))?;
-            label(format!("{}:{}", metadata.dev(), metadata.ino()).as_bytes())
-        } else {
-            fs::create_dir(staging.path().join("vendor"))
-                .map_err(|e| io_error("create empty offline vendor resource", None, e))?;
-            label(b"empty offline authoring vendor")
-        };
+        let (registry, git) = native::roots(&workspace, cancellation, &mut issues)?;
         tracing::debug!(
-            has_vendor,
-            vendor_identity = %vendor_identity,
+            registry = registry.is_some(),
+            git = git.is_some(),
             elapsed_ms = preparation.started.elapsed().as_millis() as u64,
-            "offline shared vendor view prepared"
+            "offline native Cargo cache view prepared"
         );
         fs::create_dir(staging.path().join("runtime"))
             .map_err(|e| io_error("create private Rust runtime", None, e))?;
         fs::create_dir(staging.path().join("runtime/bin"))
             .map_err(|e| io_error("create private Rust wrappers", None, e))?;
-        if let Some(contents) = if state_usable {
-            source_configuration(&workspace, &mut issues)?
-        } else {
-            None
-        } {
-            let staged = staging.path().join("runtime/vendor-config.toml");
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o400)
-                .open(&staged)
-                .map_err(|error| io_error("create private offline source config", None, error))?;
-            file.write_all(&contents)
-                .and_then(|_| file.sync_all())
-                .map_err(|error| io_error("write private offline source config", None, error))?;
-            executables.push(hash_file(&staged, &preparation)?.0);
-        }
         let initialization = staging.path().join("runtime/initialize");
-        fs::write(&initialization, format!("{}mkdir -p /tmp/cargo-home\nif test -f /rust/runtime/vendor-config.toml; then cp /rust/runtime/vendor-config.toml /tmp/cargo-home/config.toml; fi\n", sav::offline_rust::INITIALIZE))
+        fs::write(&initialization, sav::offline_rust::INITIALIZE)
             .map_err(|e| io_error("write sandbox-only Rust initialization", None, e))?;
         executables.push(hash_file(&initialization, &preparation)?.0);
         for executable in sav::offline_rust::TOOLS {
@@ -771,8 +649,8 @@ impl RustEnvironment {
                 channel: installed_name,
                 identity,
                 staging,
-                vendor_identity,
-                has_vendor,
+                registry,
+                git,
                 pin_identity,
                 pinned,
                 user_cargo_bin,
@@ -791,20 +669,20 @@ impl RustEnvironment {
             format!(
                 "Rust: {} (project pin; {})",
                 self.resources.channel,
-                if self.resources.has_vendor {
-                    "live vendor available"
+                if self.resources.registry.is_some() || self.resources.git.is_some() {
+                    "live native cache available"
                 } else {
-                    "no vendor; local dependencies remain usable"
+                    "no cache data; local dependencies remain usable"
                 }
             )
-        } else if self.resources.has_vendor {
+        } else if self.resources.registry.is_some() || self.resources.git.is_some() {
             format!(
-                "Rust: {} (offline; live vendor available)",
+                "Rust: {} (offline; live native cache available)",
                 self.resources.channel
             )
         } else {
             format!(
-                "Rust: {} (offline; no vendor; local dependencies remain usable)",
+                "Rust: {} (offline; no cache data; local dependencies remain usable)",
                 self.resources.channel
             )
         }
@@ -813,7 +691,7 @@ impl RustEnvironment {
     /// An inspectable exact selection, identity and offline-material diagnostic.
     pub fn diagnostic(&self) -> String {
         let mut diagnostic = format!(
-            "Rust authoring: {} selects installed `{}` at `{}`; preparation identity {}; pin digest {}; network denied, workspace Cargo offline without forced locked resolution, private HOME/cache/target; {}; vendor view {}. Rustup exposes {} installed registrations through live read-only mounts; choose with cargo +<name>, rustup run or invocation-local rustup default (a project pin takes precedence). Host changes are legitimate inputs; topology/configuration refresh on subsequent tools without restart, receipt or reader lease. Missing packages/components affect only the commands needing them. No host home/Cargo credentials mounted; ambient Cargo/Rust overrides ignored.",
+            "Rust authoring: {} selects installed `{}` at `{}`; preparation identity {}; pin digest {}; network denied, workspace Cargo offline without forced locked resolution, private HOME/Cargo administration and workspace target; registry data {}, Git data {}. Rustup exposes {} installed registrations through live read-only mounts; choose with cargo +<name>, rustup run or invocation-local rustup default (a project pin takes precedence). Host changes are legitimate inputs; topology refresh on subsequent tools without restart, receipt or reader lease. Missing packages/components affect only commands needing them. No host home/Cargo credentials/config mounted; only explicit CARGO_HOME or HOME/.cargo selects native data.",
             if self.resources.pinned {
                 "project pin"
             } else {
@@ -823,12 +701,14 @@ impl RustEnvironment {
             self.resources.root.display(),
             self.resources.identity,
             self.resources.pin_identity,
-            if self.resources.has_vendor {
-                "shared read-only workspace .kvist/vendored"
-            } else {
-                "no vendored registry: only dependency-free/local-path builds can resolve; provision dependencies on the host"
-            },
-            self.resources.vendor_identity,
+            self.resources
+                .registry
+                .as_ref()
+                .map_or("absent".into(), |path| path.display().to_string()),
+            self.resources
+                .git
+                .as_ref()
+                .map_or("absent".into(), |path| path.display().to_string()),
             self.resources.inventory.installations.len()
         );
         for issue in &self.resources.issues {
@@ -881,14 +761,21 @@ impl RustEnvironment {
                 purpose: Purpose::Toolchain,
                 identity: self.resources.identity.clone(),
             },
-            Grant {
-                source: self.vendor_path().to_string_lossy().into_owned(),
-                destination: "/rust/vendor".into(),
-                access: Access::ReadOnly,
-                purpose: Purpose::Toolchain,
-                identity: self.resources.vendor_identity.clone(),
-            },
         ];
+        for (source, destination) in [
+            (&self.resources.registry, native::REGISTRY_DEST),
+            (&self.resources.git, native::GIT_DEST),
+        ] {
+            if let Some(source) = source {
+                grants.push(Grant {
+                    source: source.to_string_lossy().into_owned(),
+                    destination: destination.into(),
+                    access: Access::ReadOnly,
+                    purpose: Purpose::Toolchain,
+                    identity: self.resources.identity.clone(),
+                });
+            }
+        }
         if let Some(user_cargo_bin) = &self.resources.user_cargo_bin {
             grants.push(Grant {
                 source: user_cargo_bin.to_string_lossy().into_owned(),
@@ -917,14 +804,6 @@ impl RustEnvironment {
             }
         }
         grants
-    }
-
-    fn vendor_path(&self) -> PathBuf {
-        if self.resources.has_vendor {
-            self.resources.workspace.join(".kvist/vendored")
-        } else {
-            self.resources.staging.path().join("vendor")
-        }
     }
 
     pub(crate) fn identity(&self) -> &str {
@@ -1070,8 +949,8 @@ mod tests {
                 channel: "stable".into(),
                 identity: label(b"synthetic"),
                 staging,
-                vendor_identity: label(b"empty"),
-                has_vendor: false,
+                registry: None,
+                git: None,
                 pinned: false,
                 user_cargo_bin: None,
                 rustup_home,
@@ -1090,30 +969,67 @@ mod tests {
     }
 
     #[test]
-    fn shared_vendor_grant_uses_the_project_tree_not_a_package_copy() {
+    fn native_data_grants_use_the_host_roots_without_package_copies() {
         let directory = fixture();
         let mut environment = synthetic_environment(directory.path());
-        let vendor = environment.resources.workspace.join(".kvist/vendored");
-        fs::create_dir_all(&vendor).unwrap();
-        Arc::get_mut(&mut environment.resources).unwrap().has_vendor = true;
-        let resource = environment
-            .grants()
-            .into_iter()
-            .find(|resource| resource.destination == "/rust/vendor")
-            .unwrap();
-        assert_eq!(Path::new(&resource.source), vendor);
-        assert_eq!(resource.access, Access::ReadOnly);
-        assert!(!environment.resources.staging.path().join("vendor").exists());
+        for (name, destination) in [
+            ("registry", native::REGISTRY_DEST),
+            ("git", native::GIT_DEST),
+        ] {
+            let source = directory.path().canonicalize().unwrap().join(name);
+            fs::create_dir(&source).unwrap();
+            let resources = Arc::get_mut(&mut environment.resources).unwrap();
+            if name == "registry" {
+                resources.registry = Some(source.clone());
+            } else {
+                resources.git = Some(source.clone());
+            }
+            let resource = environment
+                .grants()
+                .into_iter()
+                .find(|resource| resource.destination == destination)
+                .unwrap();
+            assert_eq!(Path::new(&resource.source), source);
+            assert_eq!(resource.access, Access::ReadOnly);
+            assert!(!environment.resources.staging.path().join(name).exists());
+        }
     }
 
     #[test]
-    fn shared_vendor_changes_do_not_require_read_ownership_or_restart() {
+    fn native_cache_absence_does_not_mount_a_synthetic_vendor_or_host_home() {
+        let directory = fixture();
+        let environment = synthetic_environment(directory.path());
+        let grants = environment.grants();
+        assert!(
+            !grants
+                .iter()
+                .any(|grant| grant.destination == "/rust/vendor")
+        );
+        for grant in grants {
+            assert!(!matches!(
+                grant.destination.as_str(),
+                "/rust/cargo-home" | "/home" | "/root"
+            ));
+        }
+    }
+
+    #[test]
+    fn native_workspace_wrapper_uses_offline_without_source_replacement_or_forced_lock() {
+        let wrapper = sav::offline_rust::workspace_wrapper(sav::offline_rust::RustTool::Cargo);
+        assert!(wrapper.contains("--offline"));
+        assert!(!wrapper.contains("--locked"));
+        assert!(!wrapper.contains("replace-with"));
+        assert!(!wrapper.contains("/rust/vendor"));
+    }
+
+    #[test]
+    fn native_cache_changes_do_not_require_read_ownership_or_restart() {
         let directory = fixture();
         let mut environment = synthetic_environment(directory.path());
-        let vendor = environment.resources.workspace.join(".kvist/vendored");
-        fs::create_dir_all(&vendor).unwrap();
+        let vendor = directory.path().canonicalize().unwrap().join("registry");
+        fs::create_dir(&vendor).unwrap();
         let resources = Arc::get_mut(&mut environment.resources).unwrap();
-        resources.has_vendor = true;
+        resources.registry = Some(vendor.clone());
         let writer = File::open(&vendor).unwrap();
         writer.try_lock().unwrap();
         drop(writer);
@@ -1219,11 +1135,12 @@ mod tests {
             assert!(!Path::new(&grant.source).starts_with(&environment.resources.workspace));
             assert!(!grant.destination.starts_with("/workspace"));
         }
-        assert!(environment.grants().iter().any(|grant| {
-            grant.destination == "/rust/vendor"
-                && grant.source == staging.join("vendor").to_string_lossy()
-                && grant.access == Access::ReadOnly
-        }));
+        assert!(
+            !environment
+                .grants()
+                .iter()
+                .any(|grant| grant.destination == "/rust/vendor")
+        );
         drop(environment);
         assert!(staging.exists());
         drop(clone);

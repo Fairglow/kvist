@@ -9,6 +9,135 @@ as a model tool.
 
 ## Rust API
 
+### Native offline cache (default preparation)
+
+`rust::cache::home() -> Result<PathBuf>` selects explicit absolute `CARGO_HOME`,
+otherwise absolute `HOME/.cargo`. Invalid explicit selection fails rather than
+falling back. These paths are operator authority, never receipt-derived grants.
+
+`rust::cache::view(project, home, cancellation) -> Result<CacheView>` performs
+bounded, process/write/network-free native catalogue inspection.
+`CacheView` exposes `cargo_home: PathBuf`, `registry: Option<PathBuf>`,
+`git: Option<PathBuf>` and `report: VendoringReport`. Registry/Git paths are only
+the selected home's native subdirectories, not a whole-home mount instruction.
+Absent data roots, or an absent home below a safe existing parent, are valid
+catalogue observations: external entries are missing and local-only graphs need
+no external cache. Inspection does not create those paths.
+Catalogue presence is not content integrity, immutable readiness or source
+provenance attestation. Cargo's sparse crates.io metadata, locked checksums and
+extraction completion markers permit a cheap canonical catalogue. Sources whose
+native identity cannot be established cheaply return `UnsupportedCacheSource`;
+alternate registry/Git name/version matches never imply readiness.
+
+`rust::cache::admit(project, home, &ProvisionOptions, cancellation)
+-> Result<CacheView>` is an explicitly process-authorized current readiness check:
+canonical catalogues remain process-free, while otherwise unsupported source
+mapping uses bounded native `metadata --offline --locked --format-version 1
+--all-features`. Exact locked source identities and manifest locations in the
+selected native roots are validated. It does not acquire missing sources or
+mint a receipt; a returned missing report is not readiness.
+
+`rust::cache::sources(project, home, cancellation) -> Result<SourceView>` returns
+only safe runtime data selection without processes or writes, even with no lock.
+`SourceView` has `cargo_home`, optional `registry`/`git`, optional
+`lockfile_digest`, and `admission: SourceAdmission`:
+`Catalogue(VendoringReport)` carries a current canonical catalogue observation;
+`CargoOfflineRequired { recorded_lock_admission: bool }` requires actual offline
+Cargo resolution and never claims current presence; `NoLock` similarly delegates
+the writable runtime lock to Cargo. `recorded_lock_admission` observes only a
+matching minimal prior native receipt, not cache origin, paths or current readiness.
+Malformed/unsafe existing locks and any consulted receipt remain explicit errors;
+canonical catalogue selection does not consult irrelevant receipts.
+
+`rust::cache::admit_with(project, home, cancellation, validate)
+-> Result<CacheView>` provides configured admission without host fallback.
+For unsupported cheap mappings the once-only callback receives the selected home
+and returns actual bounded native Cargo metadata stdout from an independently
+authorized private-admin invocation. Metadata paths must use fixed
+`/workspace/cargo-registry/src` or `/workspace/cargo-git/checkouts`; these are
+mapped only to the selected home's corresponding native data roots. No arbitrary
+path or source mapping is accepted from metadata. The callback must run literal
+offline/locked metadata argv with the project's policy budgets and redacted-safe
+failure handling. This API grants no subprocess/sandbox authority itself.
+
+`rust::cache::provision_with_validation(project, home, cancellation, force,
+acquire, validate) -> Result<CacheView>` supplies the same configured validator
+to preparation. Both callback roots exist before validation/acquisition.
+`validate: FnMut(&Path) -> Result<Vec<u8>>` returns native sandbox metadata as
+above; an explicitly classified `VendoringIncomplete` offline lookup failure
+permits the once-only acquire callback, then metadata is checked again. Other
+validator errors propagate without acquisition. Canonical warm reuse invokes
+neither callback. This is the configured replacement for `provision_with`'s
+fixed-host validation fallback, not a portable-export fallback.
+Absent required native directories (`registry/index`, `registry/cache`,
+`registry/src`, `git/db`, `git/checkouts`) establish missing external sources
+without a speculative failed metadata call. Safe directory presence alone never
+establishes source readiness.
+
+`rust::cache::classify_metadata_failure(project, failure: ProcessFailure,
+exit_code: Option<i32>, stderr: &[u8], cancellation) -> Error` is the precise
+configured callback failure adapter. It applies only to an independently observed
+native `metadata --offline --locked --format-version 1 --all-features` invocation.
+Only `ProcessFailure::Exit`, Cargo exit 101, and an anchored offline missing
+registry package/archive or exact locked Git URL/revision chain yield
+`VendoringIncomplete`; warning text, unrelated packages/sources, unknown exits,
+time/output/I/O/enforcement failures remain `NativeCargo`. Diagnostic inspection
+is bounded to 64 KiB; larger/invalid UTF-8 diagnostics cannot classify missing.
+Native errors retain the reported `exit_code`, failure class and safe guidance,
+not subprocess text. Cancellation remains `Error::Cancelled`.
+
+`rust::cache::normalize_metadata_paths(project, cargo_home, stdout, cancellation)
+-> Result<Vec<u8>>` normalizes only the exact private administrative Cargo home
+from the approved request, mapping its `registry/src` and `git/checkouts` manifest
+prefixes to the fixed native sandbox endpoints. The home argument is caller
+authority, never extracted from JSON or a receipt. Unrelated aliases, traversal,
+malformed/over-budget output and unsupported sources fail. Output remains native
+package metadata for `admit_with`/`provision_with_validation` validation, not a
+persisted inventory or standalone readiness claim.
+
+`rust::cache::provision_with(project, home, cancellation, force, acquire)
+-> Result<CacheView>` passes the live selected Cargo home to a once-only
+`FnOnce(&Path) -> Result<()>` callback only when material is missing/incomplete.
+Complete warm material bypasses it, including with stale legacy vendor state.
+`force` refreshes the native receipt, not otherwise complete cached packages.
+Native offline Cargo metadata validation establishes exact locked source and
+manifest-path mapping when the cheap catalogue is unsupported; this bounded
+fallback uses fixed host `/usr/bin/cargo`, with project policy budgets. A failed
+offline source lookup may request acquisition once; unsafe/unmapped native
+sources fail explicitly. The callback must coordinate Cargo's native writer/GC
+locks (use Cargo itself), honor locked acquisition, and never erase useful
+material on failure.
+
+`rust::cache::populate(project, home, &ProvisionOptions, cancellation)
+-> Result<()>` runs bounded literal native `cargo fetch --locked`, adding
+`--offline` when selected and setting only operator-owned `CARGO_HOME`.
+`rust::cache::provision(project, ProvisionOptions, cancellation)
+-> Result<CacheView>` is the host-authorized native entry point for
+`vendored_dir: None`; an explicit destination uses the directory export API below.
+Its native-validation fallback uses the selected host Cargo executable.
+Native process errors retain safe exit status and I/O cause where available,
+alongside failure class and payload-free repair guidance; raw streams are excluded.
+
+`rust::cache::acquisition_lease(home, cancellation) -> Result<AcquisitionLease>`
+is an optional Linux host guard for acquisition using an isolated administrative
+Cargo home with shared data roots. It acquires Cargo's retained native
+`.package-cache-mutate` then `.package-cache` locks exclusively, in native order,
+and fails explicitly if busy or locking is unsupported. Retain it only around
+the isolated subprocess; do not call host Cargo with the same home while holding
+it (that Cargo would wait for these locks). It coordinates cooperating native
+writers/GC during that interval, not arbitrary host deletion or older readers.
+`AcquisitionLease::check(cancellation)` rechecks the anchored home/lock identities.
+
+Native provision holds `.kvist/cargo-cache-operation.lock` by process advisory
+ownership, not file existence, and never deletes the retained lock file.
+`.kvist/cargo-cache.json` contains only `schema_version` and `lockfile_digest`;
+its presence alone is not cache readiness. Stale native receipts can be refreshed
+after current native validation; malformed receipts fail explicitly.
+Legacy export locks, stages and receipts are untouched. Host cache GC/mutation
+is legitimate; private project locks do not freeze or pin it.
+
+### Explicit directory export
+
 `rust::check(project, cancellation)` returns a lightweight coherent Rust
 readiness report or a typed failure, reading no application configuration and
 starting no subprocess. `rust::check_catalogue(project, vendor, cancellation)`
@@ -30,7 +159,7 @@ explicitly; no operation lock is stolen. Shared-library publication takes an
 exclusive lock on the current directory before replacement and retirement.
 Callers retain the read owner through mount preparation and subprocess completion.
 
-`rust::provision(project, options, cancellation)` performs explicitly selected
+`rust::provision(project, options, cancellation)` performs explicit directory
 host Cargo vendoring. `ProvisionOptions` contains an absolute host Cargo
 executable, `offline`, optional vendored destination, timeout and explicit `force` rebuild.
 `rust::provision_with(project, destination, cancellation, force, populate)` provides
@@ -107,4 +236,6 @@ scripts, system libraries, tools, local path dependencies outside the workspace
 or a different language can execute offline.
 Checks establish lock/metadata coherence and package presence, not content
 integrity or origin attestation. Cargo reports source/checksum failures when
-consumed. `force` explicitly rebuilds otherwise reusable material after damage.
+consumed. Directory-export `force` explicitly rebuilds otherwise reusable
+material. Native `force` refreshes the small receipt; it does not guarantee
+reacquisition or repair of apparently complete damaged native material.

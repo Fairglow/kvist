@@ -12,8 +12,9 @@ all capitals.
 `galla` is the independently installed Linux enforcement component
 for approved Kvist task grants. This component strictly parses and validates
 the redefined version-one probe and request contracts, rejects every
-superseded ("legacy") shape, implements the mediated Cargo validation and
-immutable-generation primitives (exact Cargo phase argv, environment,
+superseded ("legacy") shape, implements native Cargo data-cache validation and
+separate explicit export-generation primitives (exact Cargo phase argv,
+environment,
 toolchain/grant binding, independently derived source identities,
 transport-policy value types, and bounded descriptor-relative cache
 generation construction), and enforces approved requests through
@@ -37,11 +38,120 @@ request MUST fail closed.
 
 ## Functional requirements
 
+### SR-REQ-NATIVE-CARGO-CACHE
+
+Protected Cargo verification MUST resolve native registry index, archives,
+expanded sources and Git data from caller-approved persistent read-only roots,
+with denied networking and private writable Cargo administrative state.
+Acquisition MUST use the same approved data roots read-write, persist acquired
+data directly, and let Cargo acquire only missing locked dependencies. Neither
+phase MUST mount a whole operator home, credentials or ambient Cargo/Git config,
+copy native data, construct per-file manifests, fsync a data inventory, or invent
+a publication destination. Native endpoints MAY be absent for a local graph or
+an unavailable cache; this MUST NOT silently select export/vendor mode.
+Verification MUST reject writable native endpoints; acquisition MUST reject
+read-only native endpoints. Closed phase environments, argv, exact endpoint
+identities, disjoint grant destinations, no-follow source pinning and fixed
+purpose counts remain REQUIRED. Native Cargo MUST NOT be an authoring mode.
+Present native data origins MUST be ordinary directories.
+Private administrative directories and sandbox-only links MUST be created only
+inside approved scratch after data binds, without replacing caller-owned
+conflicting nodes. Conflicts MUST fail clearly before payload execution.
+Tests MUST cover accepted native phases, absent endpoints, mutations of
+authority/environment/argv, mutually exclusive source modes, no promotion,
+and real offline Cargo resolution without data-cache writes.
+
+This human-approved native-cache increment has an explicit local advisory
+exception while receipt enforcement is unavailable. It records no acceptance,
+receipt, implementer-derived IMPL, security certification or compliance result.
+Independent security and compliance tasks remain pending.
+
+### SR-REQ-NATIVE-CARGO-ADMISSION
+
+Native source-only admission MUST be available as one exact verification
+operation: `<cargo> metadata --offline --locked --format-version 1 --all-features`.
+It MUST reuse native verification's read-only workspace/data grants, exact
+toolchain and endpoint identities, private writable scratch administration,
+closed environment and denied network. It MUST NOT execute build scripts,
+mount operator home/config/credentials, create a source inventory, or acquire
+dependencies. Omitted endpoints remain valid for local graphs, not a fallback.
+This operation MUST NOT be accepted for portable exports, authoring or
+acquisition, and MUST NOT authorize arbitrary Cargo verbs or additional flags.
+Existing test and fetch behavior MUST remain unchanged.
+Tests MUST reject command/flag/topology mutations and exercise actual offline
+Cargo metadata with read-only cached data and a build script that cannot run.
+
+This human-approved admission increment has an explicit local advisory
+exception while receipt enforcement is unavailable. Independent security,
+source observation and source-blind comparison remain parent-arranged; the
+implementer records no IMPL, acceptance or compliance certification.
+
+### SR-REQ-NATIVE-REGISTRY-ALIASES
+
+Native Cargo MUST support explicitly approved named Git-index and sparse registry aliases
+without exposing operator configuration. Optional aliases MUST be bounded to
+64 entries, have unique names of 1–64 ASCII letters/digits/`-`/`_` bytes
+(Cargo rejects dotted registry names), and canonical
+production HTTPS index origins, without credentials, queries,
+fragments, percent aliases or private/loopback origins. The built-in
+`crates-io` name MUST NOT be rewritten.
+Each alias MUST declare `git` or `sparse` index protocol, defaulting to sparse
+when omitted. Sparse origins MUST end in `/`; Git origins need not. Generated
+Git index settings MUST retain the exact HTTPS origin, while sparse settings
+add only Cargo's `sparse+` prefix. Protocol MUST NOT grant network authority or
+change the exact name/origin acquisition comparison. Caller inference from
+locked source prefixes MUST fail explicitly on ambiguity, never silently
+reinterpret a Git source as sparse.
+Native acquisition aliases MUST exactly match every additional approved
+CargoRegistry source's name and index origin, with no extra or missing aliases.
+Native verification remains network-denied and MUST NOT infer networking
+authority from an alias. The backend MUST generate only deterministic bounded
+`[registries.<name>].index` settings in private Cargo administration, with no
+source replacement, credential, download, loader or ambient config settings.
+Configuration MUST be namespace-local read-only input; no host config/data
+copy or grant is added. Existing argv/environment/data topology stays fixed.
+Tests MUST cover malformed/forged/credential-bearing and unbound acquisition
+aliases, unchanged alias-free requests, and real offline named-registry
+metadata that fails without the declared alias, and Git index
+validation/materialization that preserves the original source URI. A focused
+real metadata trial MUST resolve a named Git-index alternate registry using
+Cargo-populated native index/archive/expanded data, generated private config,
+read-only native mounts and denied network, without a fabricated checksum or
+source inventory.
+
+This human-approved increment has an explicit scoped advisory exception while
+receipts are unavailable. Independent security/observation/comparison remain
+parent-arranged; no implementer IMPL, acceptance or certification is recorded.
+
+### SR-REQ-BOUNDED-TRANSPORT
+
+The package-source proxy MUST relay authorized CONNECT streams concurrently in
+both directions, including client-first TLS bytes and bytes coalesced with the
+CONNECT header. An idle or stalled connection MUST NOT serialize other clients.
+Connection admission, headers, buffering, upstream establishment, and transport
+inactivity MUST be bounded. Slow partial headers MUST have an absolute deadline.
+Half-close MUST preserve the opposite direction until its EOF or deadline.
+Cancellation MUST stop admission, close owned sockets, and finish transport
+workers within their establishment deadline rather than leave detached relays.
+Malformed, unauthorized, oversized, timed-out, overloaded, and failed-upstream
+requests MUST have explicit failure handling without terminating the listener.
+Tests MUST exercise real loopback sockets without external service dependencies.
+
+This human-approved repair has an explicit advisory exception for the scoped
+local intent/task additions while review-receipt enforcement is unavailable.
+It records neither component acceptance nor a fabricated receipt. Independent
+security and compliance review remain required; the implementer does not certify
+either. Cache-backed offline provisioning and missing-only acquisition are
+approved separately; their request topology and publication authority are not
+part of this transport increment.
+
 ### SR-REQ-ONE-WAY-ISOLATION
 
-Promotion MUST NOT infer a host destination from a mutable source pathname.
-Without a provider-owned publication capability, report incomplete promotion
-and retain actual fetched output; never follow a sibling link or replay fetch.
+Portable-export promotion MUST NOT infer a host destination from a mutable
+source pathname. Without a provider-owned publication capability, report
+incomplete export promotion and retain actual fetched output; never follow a
+sibling link or replay fetch. Native acquisition has no promotion stage and
+writes directly to its approved persistent data roots.
 
 ADR 0019 replaces categorical administrative-directory exclusion and mandatory
 per-file caps for workspace execution. Standard system trees, including sbin,
@@ -124,8 +234,9 @@ protocol identifier and version, typed phase (`authoring`, `verification`, or
 directory, typed environment, network capability (`deny`, or `package-sources`
 with typed `cargo-registry`/`cargo-git` sources during mediated acquisition),
 resource limits (including an optional `max_cache_bytes`), approval-bound
-identities, typed path grants, a `system` or `cargo` toolchain, the mediated
-dependency-cache object with a distinct `lockfile` purpose, and scratch. Every
+identities, typed path grants, a `system` or `cargo` toolchain, the explicit
+native-data or portable-export dependency-cache object with a distinct
+`lockfile` purpose, and scratch. Every
 submitted path field and `argv[0]`
 MUST be canonical (no duplicate `/` separators, no trailing `/` except root,
 and no `.`/`..` components), and environment names MUST be portable and
@@ -156,26 +267,36 @@ explicit test-policy matcher and is never accepted in a production request.
 It MUST reject duplicate source identities, registry names, and origin
 overlap.
 
-Acquisition MUST be exactly `<cargo> fetch`, without `--locked`, using a real
-writable attempt-local `CARGO_HOME`, a distinct writable lockfile workspace,
+In both Cargo source modes, acquisition MUST be exactly
+`<cargo> fetch --locked` and test verification MUST be exactly
+`<cargo> test --offline --locked`. Native source-only verification MAY instead
+use the exact metadata operation in SR-REQ-NATIVE-CARGO-ADMISSION. Native mode follows
+SR-REQ-NATIVE-CARGO-CACHE: data roots are read-only during verification,
+while Cargo administration remains private and writable under scratch.
+
+In the deliberately selected portable-export/whole-home mode, acquisition
+MUST use a real writable attempt-local `CARGO_HOME`, a distinct writable
+lockfile workspace,
 separate target scratch, `HOME` beneath that scratch, an explicit single
 canonical `PATH`, and `CARGO_NET_GIT_FETCH_WITH_CLI=false`. Its promotion data
 MUST bind `Cargo.lock` before/after identities, the real Cargo-home source, and
-the exact derived supported-source identities. Verification MUST be exactly
-`<cargo> test --locked`, with denied network, `CARGO_NET_OFFLINE=true`, an
-approved Cargo-home generation mounted read-only at `CARGO_HOME`, and separate
-writable target scratch. Exact allowlists reject loader variables, proxies,
+the exact derived supported-source identities. Only export verification MUST
+mount the approved export Cargo-home generation read-only at `CARGO_HOME`,
+alongside its read-only vendor registry and resolver configuration, denied
+network, `CARGO_NET_OFFLINE=true`, and separate writable target scratch.
+Exact phase allowlists in both modes reject loader variables, proxies,
 Cargo/Git configuration, credentials, and source rewrites.
 
-The cache primitive MUST require opened trusted-generation-parent and isolated
-attempt-root capabilities, reject symlink roots and equal/containing roots,
+The separate explicit export-generation cache primitive MUST require opened
+trusted-generation-parent and isolated attempt-root capabilities, reject
+symlink roots and equal/containing roots,
 validate nonzero bounded limits, traverse and copy descriptor-relatively with
 no-follow, reject links and special entries, stream/hash/recheck staged bytes,
 normalize modes, fsync, and atomically publish one complete immutable
 generation with no replacement. It MUST not claim generic mutable-destination
-promotion. The cache primitive performs no transport, resolution, or
-promotion; network, namespace, mount, and process enforcement belong to the
-production-runner requirement below.
+promotion. The export primitive performs no transport or resolution and does
+not authorize a caller's project-cache selection; network, namespace, mount,
+and process enforcement belong to the production-runner requirement below.
 
 ### SR-REQ-PRODUCTION-RUNNER
 
@@ -186,8 +307,9 @@ probing, phase-specific mount construction, explicit resource enforcement,
 process-tree cleanup, and fail-closed backend verification, built on the
 version-one parsing, validation, and acquisition semantics established by the
 protocol and acquisition boundaries. It wires the source origin matcher and
-cache promotion primitives to real network namespaces and resolved mounts
-rather than reinventing them.
+native data/private-admin topology to resolved mounts. Portable export
+generation remains a separate provider-capability primitive, not native
+acquisition publication.
 
 ### SR-REQ-TOOLCHAIN-E2E
 

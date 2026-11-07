@@ -237,8 +237,8 @@ fn write_file(path: PathBuf, contents: &str) {
     std::fs::write(path, contents).expect("write fixture file");
 }
 
-/// End-to-end: a small Go module is vendored on the host (`go mod vendor` via
-/// `kvist vendor`) and `go test -mod=vendor ./...` builds and runs offline
+/// End-to-end: a small Go module uses a native host module cache via
+/// `kvist vendor` and `go test -mod=readonly ./...` builds and runs offline
 /// inside the bubblewrap sandbox with the network denied.
 #[test]
 fn go_offline_verification_builds_and_tests_denied_network() {
@@ -254,9 +254,39 @@ fn go_offline_verification_builds_and_tests_denied_network() {
         eprintln!("skip: go not on PATH");
         return;
     }
+    if std::env::var_os("KVIST_GO_OFFLINE_CHILD").is_none() {
+        let worktree = git_worktree_root().expect("worktree checked by live_sandbox_ready");
+        let cache = tempfile::Builder::new()
+            .prefix(".go-offline-native-")
+            .tempdir_in(worktree)
+            .expect("owned native Go cache fixture");
+        let output = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "go_offline_verification_builds_and_tests_denied_network",
+                "--nocapture",
+            ])
+            .env("KVIST_GO_OFFLINE_CHILD", "1")
+            .env("GOMODCACHE", cache.path().join("modules"))
+            .env("GOPATH", cache.path().join("gopath"))
+            .env("GOCACHE", cache.path().join("compiler-cache"))
+            .env("GOENV", "off")
+            .env("GOTOOLCHAIN", "local")
+            .output()
+            .expect("isolated Go verification child");
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+        return;
+    }
 
     // A throwaway Go module depending on one small, dependency-free registry
-    // module, vendored inside the worktree so the runner stays outside it.
+    // module, with native cache selection isolated from operator caches.
     let worktree = git_worktree_root().expect("worktree checked by live_sandbox_ready");
     let project = tempfile::tempdir_in(&worktree).expect("temp project directory");
     let root = project.path();
@@ -283,10 +313,10 @@ fn go_offline_verification_builds_and_tests_denied_network() {
     if !provision(root) {
         return;
     }
-    if !root.join("vendor").join("modules.txt").is_file() {
-        eprintln!("skip: go mod vendor did not produce vendor/modules.txt");
-        return;
-    }
+    assert!(
+        !root.join("vendor").exists(),
+        "native preparation must not copy module sources"
+    );
 
     let config = sandbox_config(&runner, &bwrap);
     let approved_runner =

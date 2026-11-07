@@ -2114,3 +2114,28 @@ Galla package-network/resource/schema limitations are not newly introduced
 network-denied workspace failures, but prevent blanket cross-component
 certification. Passing attributed executions do not settle arbitration,
 accept intent or change recorded accepted revisions/revalidation metadata.
+
+## Native workspace observation (2026-11-07 UTC)
+
+Independent source-only observer `d38462f8-d2f9-4d78-a5bb-c512f6458890`
+derived the Skott section of
+[`native-cache-observation.md`](../docs/reviews/native-cache-observation.md).
+It excluded intent, queues, prior records/reviews and history and executed no
+checks. Observed explicit provisioning uses operator host authority; canonical
+checks are process-free and other source checks disclose offline host metadata.
+Workspace tooling exposes live native data read-only with private
+administration, without forced locking. Topology refresh does not recursively
+attest cached-package contents or acquire unavailable sources. Existing broader
+arbitration remains unaffected; no acceptance is inferred.
+
+Separate source-blind comparer `a6add327-2a55-4006-b3f6-b2750041ff26` recorded
+scoped native correspondence and explicit execution limits in
+[`native-cache-comparison.md`](../docs/reviews/native-cache-comparison.md).
+The nested repository-trial failure remains separate from that comparison.
+
+The nested trial was subsequently reproduced as Galla's ambient-DNS fixture
+dependence. A hermetic lookup seam fixes that test without changing Skott grants
+or production limits. Fresh source-only and separate source-blind resolver
+supplements are retained in the linked reports; final implementer-attributed
+execution passes all 25 Rust-environment cases. Historical arbitration and the
+broader dogfood failures remain unaffected.

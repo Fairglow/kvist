@@ -198,12 +198,7 @@ fn symlink_pin_and_vendor_roots_cannot_acquire_host_authority() {
     .unwrap();
     let registry = resolve(directory.path())
         .expect("unsupported vendor pointer must not disable independent compiler tools");
-    assert!(
-        registry
-            .diagnostics()
-            .join("\n")
-            .contains("no extra origin")
-    );
+    assert!(registry.profiles().contains(&"rust"));
 }
 
 #[test]
@@ -235,7 +230,7 @@ fn unusable_vendor_nodes_do_not_hide_the_compiler() {
 
 #[test]
 #[serial]
-fn native_cargo_configuration_is_preserved_without_a_shared_manifest() {
+fn retired_vendor_configuration_is_not_loaded_into_native_cargo_home() {
     let directory = fixture();
     fs::create_dir_all(directory.path().join(".kvist/sandbox-cargo")).unwrap();
     fs::write(directory.path().join(".kvist/sandbox-cargo/config.toml"), "[alias]\nhello=\"version\"\n[source.crates-io]\nreplace-with=\"local-vendor\"\n[source.local-vendor]\ndirectory=\"/host/not-granted\"\n").unwrap();
@@ -249,23 +244,18 @@ fn native_cargo_configuration_is_preserved_without_a_shared_manifest() {
         },
         directory.path().to_owned(),
     );
-    assert!(
-        checked_shell(&executor, "cargo hello")
-            .output_text(8192)
-            .contains("cargo ")
+    checked_shell(
+        &executor,
+        "cargo --version && test ! -e \"$CARGO_HOME/config.toml\" && test ! -e /rust/runtime/vendor-config.toml",
     );
 }
 
 #[test]
 #[serial]
-fn malformed_cargo_configuration_blocks_cargo_not_the_compiler() {
+fn project_cargo_configuration_blocks_cargo_not_the_compiler() {
     let directory = fixture();
-    fs::create_dir_all(directory.path().join(".kvist/sandbox-cargo")).unwrap();
-    fs::write(
-        directory.path().join(".kvist/sandbox-cargo/config.toml"),
-        "[malformed\n",
-    )
-    .unwrap();
+    fs::create_dir_all(directory.path().join(".cargo")).unwrap();
+    fs::write(directory.path().join(".cargo/config.toml"), "[malformed\n").unwrap();
     fs::write(
         directory.path().join("Cargo.toml"),
         "[package]\nname=\"local-config-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
@@ -275,7 +265,6 @@ fn malformed_cargo_configuration_blocks_cargo_not_the_compiler() {
     fs::write(directory.path().join("src/lib.rs"), "pub fn local() {}\n").unwrap();
     let registry = resolve(directory.path())
         .expect("malformed Cargo configuration is not compiler unavailability");
-    assert!(registry.diagnostics().join("\n").contains("configuration"));
     let executor = SandboxExecutor::new(
         registry,
         SandboxPaths {
@@ -579,7 +568,7 @@ fn diagnostics_cover_the_chain_without_command_or_output_payloads() {
         "querying installed Rust selection",
         "installed Rust selection query completed",
         "resolved concrete installed Rust toolchain",
-        "offline shared vendor view prepared",
+        "offline native Cargo cache view prepared",
         "offline Rust resources prepared",
         "offline Rust resources prepared",
         "sandbox preflight stage started",
@@ -616,8 +605,11 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
     let _guard = tracing::subscriber::set_default(subscriber);
     let workdir = manifest_dir().parent().unwrap().canonicalize().unwrap();
     assert!(
-        workdir.join(".kvist/vendored").is_dir(),
-        "provision repository dependencies on the host"
+        kvist_dependencies::rust::cache::home()
+            .unwrap()
+            .join("registry")
+            .is_dir(),
+        "provision native repository dependencies on the host"
     );
     let executor = SandboxExecutor::new(
         resolve(&workdir)
@@ -706,62 +698,20 @@ fn repository_nextest_recipe_uses_default_discovery() {
 
 #[test]
 #[serial]
-fn native_shared_vendor_overrides_host_paths_with_native_checks_and_masking() {
+fn native_cache_keeps_missing_sources_offline_and_host_configuration_unexposed() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
     fs::create_dir_all(workdir.join("src")).unwrap();
     fs::create_dir_all(workdir.join(".cargo")).unwrap();
     fs::create_dir_all(workdir.join(".kvist/vendored")).unwrap();
-    let dependency = workdir.join(".kvist/vendored/kvist-sandbox-dependency");
-    fs::create_dir(&dependency).unwrap();
-    let files = [
-        (
-            "Cargo.toml",
-            "[package]\nname=\"kvist-sandbox-dependency\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[lib]\npath=\"lib.rs\"\n",
-        ),
-        ("lib.rs", "pub fn answer() -> u8 { 42 }\n"),
-    ];
-    let checksums: BTreeMap<_, _> = files
-        .iter()
-        .map(|(name, text)| {
-            use sha2::{Digest, Sha256};
-            fs::write(dependency.join(name), text).unwrap();
-            (*name, hex::encode(Sha256::digest(text.as_bytes())))
-        })
-        .collect();
-    fs::write(
-        dependency.join(".cargo-checksum.json"),
-        json!({"files": checksums, "package": "0".repeat(64)}).to_string(),
-    )
-    .unwrap();
-    fs::write(workdir.join("Cargo.toml"), "[package]\nname=\"vendor-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[dependencies]\nkvist-sandbox-dependency=\"=0.1.0\"\n").unwrap();
-    fs::write(
-        workdir.join("src/lib.rs"),
-        "#[test] fn dependency() { assert_eq!(kvist_sandbox_dependency::answer(), 42); }\n",
-    )
-    .unwrap();
-    let lock = format!(
-        "version=4\n[[package]]\nname=\"vendor-trial\"\nversion=\"0.1.0\"\ndependencies=[\"kvist-sandbox-dependency\"]\n[[package]]\nname=\"kvist-sandbox-dependency\"\nversion=\"0.1.0\"\nsource=\"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum=\"{}\"\n",
-        "0".repeat(64)
-    );
-    fs::write(workdir.join("Cargo.lock"), &lock).unwrap();
-    // Neither this repository path nor a forged maerg manifest authorizes a
-    // host bind. The shim replaces the source with its private sandbox path.
-    fs::write(workdir.join(".cargo/config.toml"), "[source.crates-io]\nreplace-with=\"vendored-sources\"\n[source.vendored-sources]\ndirectory=\"/home/stefan/.cargo/credentials.toml\"\n").unwrap();
+    fs::write(workdir.join("Cargo.toml"), "[package]\nname=\"missing-cache-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[dependencies]\nkvist-sandbox-absent-native-cache=\"=99.99.99\"\n").unwrap();
+    fs::write(workdir.join("src/lib.rs"), "pub fn local() {}\n").unwrap();
     fs::write(
         workdir.join(".kvist/rust-toolchain.json"),
         "{\"root\":\"/home/stefan\",\"cargo\":\"/home/stefan/.cargo/bin/cargo\"}",
     )
     .unwrap();
     let registry = resolve(&workdir).unwrap();
-    let diagnostics = registry.diagnostics().join("\n");
-    assert!(diagnostics.contains("shared read-only"));
-    assert!(diagnostics.contains("vendor view sha256:"));
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    let host_vendor_mode = fs::metadata(workdir.join(".kvist/vendored"))
-        .unwrap()
-        .permissions()
-        .mode();
     let executor = SandboxExecutor::new(
         registry,
         SandboxPaths {
@@ -770,40 +720,6 @@ fn native_shared_vendor_overrides_host_paths_with_native_checks_and_masking() {
         },
         workdir.clone(),
     );
-    let vendor_metadata = fs::metadata(workdir.join(".kvist/vendored")).unwrap();
-    checked_shell(
-        &executor,
-        &format!(
-            "stage shared-inode test \"$(stat -c '%d:%i' /rust/vendor)\" = '{}:{}'",
-            vendor_metadata.dev(),
-            vendor_metadata.ino(),
-        ),
-    );
-    let writer = fs::File::open(workdir.join(".kvist/vendored")).unwrap();
-    writer.try_lock().unwrap();
-    drop(writer);
-    std::thread::scope(|scope| {
-        let running = scope.spawn(|| checked_shell(&executor, "touch lease-started; sleep 1"));
-        let started = std::time::Instant::now();
-        while !workdir.join("lease-started").exists() {
-            assert!(
-                started.elapsed() < std::time::Duration::from_secs(10),
-                "native tool did not start"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(
-            fs::File::open(workdir.join(".kvist/vendored"))
-                .unwrap()
-                .try_lock()
-                .is_ok()
-        );
-        running.join().unwrap();
-    });
-    fs::File::open(workdir.join(".kvist/vendored"))
-        .unwrap()
-        .try_lock()
-        .unwrap();
     let host_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let network_trial = shell(
         &executor,
@@ -816,69 +732,78 @@ fn native_shared_vendor_overrides_host_paths_with_native_checks_and_masking() {
         !network_trial.failed(),
         "host networking must remain unreachable"
     );
-    checked_shell(
-        &executor,
-        "stage alias-readable test -r .kvist/vendored\nstage alias-unwritable test ! -w .kvist/vendored\nstage alias-traversable test -x .kvist/vendored\nstage sibling-state test -r .kvist/rust-toolchain.json\nstage alias-listing ls .kvist/vendored\nstage alias-reading cat .kvist/vendored/kvist-sandbox-dependency/Cargo.toml\nif touch .kvist/vendored/forbidden; then printf 'vendor alias write unexpectedly succeeded\\n' >&2; exit 1; fi\nif chmod 755 .kvist/vendored; then printf 'vendor overlay permissions unexpectedly changed\\n' >&2; exit 1; fi",
-    );
     let result = checked_shell(
         &executor,
-        "stage offline test \"$CARGO_NET_OFFLINE\" = true\nstage cargo-home test \"$CARGO_HOME\" = /tmp/cargo-home\nstage target test \"$CARGO_TARGET_DIR\" = /workspace/target\nstage home test \"$HOME\" = /tmp\nstage home-write touch \"$HOME/scratch-proof\"\nstage credentials test ! -e /home/stefan/.cargo/credentials.toml\nstage host-settings test ! -e /home/stefan/.rustup/settings.toml\nstage root-home test ! -e /root/.cargo\nstage dns test ! -e /etc/resolv.conf\nstage token test -z \"$CARGO_REGISTRY_TOKEN\"\nstage rustup-home test \"$RUSTUP_HOME\" = /tmp/rustup-home\nstage shim-readonly test ! -w /rust/runtime/bin/cargo\nstage compiler-readonly test ! -w /rust/toolchain/bin/rustc\nstage vendor-readonly test ! -w /rust/vendor/kvist-sandbox-dependency/Cargo.toml\nstage metadata cargo metadata --format-version=1\nstage tests cargo test\nstage clippy cargo clippy --all-targets\nstage docs cargo doc --no-deps",
+        "stage offline test \"$CARGO_NET_OFFLINE\" = true\nstage cargo-home test \"$CARGO_HOME\" = /tmp/cargo-home\nstage target test \"$CARGO_TARGET_DIR\" = /workspace/target\nstage home test \"$HOME\" = /tmp\nstage home-write touch \"$HOME/scratch-proof\"\nstage admin-write touch \"$CARGO_HOME/admin-proof\"\nstage credentials test ! -e /home/stefan/.cargo/credentials.toml\nstage host-settings test ! -e /home/stefan/.rustup/settings.toml\nstage root-home test ! -e /root/.cargo\nstage dns test ! -e /etc/resolv.conf\nstage token test -z \"$CARGO_REGISTRY_TOKEN\"\nstage rustup-home test \"$RUSTUP_HOME\" = /tmp/rustup-home\nstage shim-readonly test ! -w /rust/runtime/bin/cargo\nstage compiler-readonly test ! -w /rust/toolchain/bin/rustc\nstage native-no-vendor test ! -e /rust/vendor\nstage no-export-config test ! -e /rust/runtime/vendor-config.toml\nstage compiler rustc --version",
     );
     assert!(!result.failed(), "{}", result.error_text(8192));
-    assert!(result.output_text(8192).contains("test result: ok"));
-    // The clippy stage must have run and resolved the vendored dependency.
-    assert!(result.output_text(8192).contains("stage: clippy"));
-    let published: toml::Table =
-        toml::from_str(&fs::read_to_string(workdir.join("Cargo.lock")).unwrap()).unwrap();
-    let dependency_lock = published["package"]
+    let missing = shell(&executor, "cargo check");
+    assert!(
+        missing.failed(),
+        "missing native source must not be fetched"
+    );
+    assert!(
+        missing.error_text(8192).contains("offline"),
+        "{}",
+        missing.error_text(8192)
+    );
+    assert!(!workdir.join("Cargo.lock").exists());
+}
+
+#[test]
+#[serial]
+fn native_registry_compiles_without_copying_sources_or_writing_host_administration() {
+    let directory = fixture();
+    let workdir = directory.path().canonicalize().unwrap();
+    let lock: toml::Value =
+        toml::from_str(&fs::read_to_string(manifest_dir().join("../Cargo.lock")).unwrap()).unwrap();
+    let package = lock["package"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|package| package["name"].as_str() == Some("kvist-sandbox-dependency"))
+        .find(|package| package["name"].as_str() == Some("itoa"))
         .unwrap();
-    assert_eq!(
-        dependency_lock["checksum"].as_str(),
-        Some("0000000000000000000000000000000000000000000000000000000000000000")
-    );
-    assert!(workdir.join("target/doc/vendor_trial/index.html").is_file());
-    assert_eq!(
-        fs::read_to_string(dependency.join("Cargo.toml")).unwrap(),
-        files[0].1
-    );
-    assert_eq!(
-        fs::metadata(workdir.join(".kvist/vendored"))
-            .unwrap()
-            .permissions()
-            .mode(),
-        host_vendor_mode
-    );
-    assert!(!workdir.join(".kvist/vendored/forbidden").exists());
-    fs::write(dependency.join("lib.rs"), "pub fn answer() -> u8 { 43 }\n").unwrap();
-    let damaged = shell(&executor, "cargo clean && cargo test");
+    let version = package["version"].as_str().unwrap();
+    let checksum = package["checksum"].as_str().unwrap();
+    fs::create_dir(workdir.join("src")).unwrap();
+    fs::write(workdir.join("Cargo.toml"), format!(
+        "[package]\nname=\"native-registry-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[workspace]\n[dependencies]\nitoa=\"={version}\"\n")).unwrap();
+    fs::write(workdir.join("Cargo.lock"), format!(
+        "version=4\n[[package]]\nname=\"native-registry-trial\"\nversion=\"0.1.0\"\ndependencies=[\"itoa\"]\n[[package]]\nname=\"itoa\"\nversion=\"{version}\"\nsource=\"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum=\"{checksum}\"\n")).unwrap();
+    fs::write(
+        workdir.join("src/lib.rs"),
+        "#[test] fn native_source() { assert_eq!(itoa::Buffer::new().format(42), \"42\"); }\n",
+    )
+    .unwrap();
+    let home = kvist_dependencies::rust::cache::home().unwrap();
+    let view =
+        kvist_dependencies::rust::cache::view(&workdir, &home, &CancellationToken::new()).unwrap();
     assert!(
-        damaged.failed(),
-        "Cargo must detect changed package content"
+        view.report.ready(),
+        "native registry fixture prerequisite: {}",
+        view.report.missing_human_readable()
     );
-    assert!(
-        damaged.error_text(8192).contains("checksum"),
-        "{}",
-        damaged.error_text(8192)
-    );
-    fs::write(dependency.join("lib.rs"), files[1].1).unwrap();
-
-    let without_vendor = SandboxExecutor::new(
-        ToolRegistry::new(ToolPolicy::default()),
+    let registry = view.registry.unwrap();
+    use std::os::unix::fs::MetadataExt;
+    let metadata = fs::metadata(&registry).unwrap();
+    let executor = SandboxExecutor::new(
+        resolve(&workdir).unwrap(),
         SandboxPaths {
             runner: runner(),
             backend: "/usr/bin/bwrap".into(),
         },
-        workdir,
+        workdir.clone(),
     );
-    let result = shell(
-        &without_vendor,
-        "test ! -e /rust/vendor && test -r .kvist/vendored && test ! -w .kvist/vendored",
+    let result = checked_shell(
+        &executor,
+        &format!(
+            "test \"$(stat -c '%d:%i' /rust/cargo-registry)\" = '{}:{}' && test ! -w /rust/cargo-registry && test -w \"$CARGO_HOME\" && test \"$(readlink \"$CARGO_HOME/registry\")\" = /rust/cargo-registry && cargo test && test -f \"$CARGO_HOME/.global-cache\" && test -f \"$CARGO_HOME/.package-cache\" && test ! -e \"$CARGO_HOME/credentials.toml\" && test ! -e \"$CARGO_HOME/config.toml\"",
+            metadata.dev(),
+            metadata.ino()
+        ),
     );
-    assert!(!result.failed(), "{}", result.error_text(8192));
+    assert!(result.output_text(8192).contains("1 passed; 0 failed"));
+    assert!(!workdir.join(".kvist").exists());
 }
 
 #[test]

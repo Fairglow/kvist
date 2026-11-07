@@ -3,7 +3,8 @@
 `galla` is the independently installed Linux enforcement component for approved
 Kvist task grants. It strictly parses and validates the version-one probe and
 request contracts, rejects every superseded ("legacy") shape, implements the
-mediated Cargo validation and immutable-generation primitives, and enforces
+native Cargo data-cache validation and separate portable-export generation
+primitives, and enforces
 approved requests through Bubblewrap-backed Linux isolation: user, IPC, PID,
 UTS, cgroup, and network namespace boundaries, `prlimit` resource caps,
 source-aware network egress mediation, and process supervision.
@@ -20,6 +21,68 @@ enforcement boundary, and it can be probed and exercised on its own. Nothing
 imports its types as a Rust library; the maerg mirrors the protocol
 independently rather than depending on the runner, and the two communicate only
 through the versioned wire contract.
+
+## Cargo source modes
+
+Native cached data is the normal protected Cargo mode. A present `cache.native`
+selects it explicitly, even when its registry/Git endpoints are absent:
+
+- Registry index, archives and expanded sources bind at
+  `/workspace/cargo-registry`; Git data binds at `/workspace/cargo-git`.
+  Verification reads these approved persistent roots read-only. Acquisition
+  writes directly to the approved roots; it does not publish another copy.
+- `CARGO_HOME` is exactly `scratch.destination + "/cargo-home"`, with private
+  writable namespace-local administration and sandbox-only links to declared
+  data mounts. An absent endpoint has an empty read-only data directory, not a
+  writable fallback cache.
+- Test verification is exactly `<cargo> test --offline --locked`, with denied
+  network. Acquisition is exactly `<cargo> fetch --locked`, with approved
+  package sources and an exact lockfile-before precondition. Bare `fetch` and
+  `test --locked` are retired request spellings.
+- No operator Cargo home, credentials, ambient configuration, native source
+  inventory, cache copying or inferred promotion is used. Native writer/GC
+  coordination is the shared provider's responsibility.
+
+Portable vendor/export mode remains deliberately supported when `cache.native`
+is absent/null and the caller supplies its explicit whole-home endpoints.
+Export verification uses an approved read-only Cargo home plus the fixed
+Registry `/workspace/vendored` and CargoConfig `/workspace/.cargo` grants;
+only this mode describes `CARGO_HOME` itself as read-only. Export acquisition
+uses its separate writable attempt Cargo home and export promotion intent.
+Both modes use the exact locked commands above. Export is not a silent native
+fallback, a migration path, or authority to invent a publication destination.
+See [the contract](CONTRACT.md#native-cargo-source-mode) for the closed fields,
+environments and grant counts.
+
+Native source-only admission additionally permits exactly
+`<cargo> metadata --offline --locked --format-version 1 --all-features` in the
+verification phase with the same native read-only grants/private admin and
+denied network. It resolves metadata without executing build scripts; stdout
+is actual bounded Cargo JSON for the caller to validate, not a readiness
+receipt. Portable exports and acquisition do not admit this operation.
+
+Named registries use optional native `registries` descriptors
+`[{ "name": "alt", "index_origin": "https://registry.example/index/", "protocol": "sparse" }]`.
+Protocol is `"git"` or `"sparse"` (omission defaults to sparse). Git preserves
+the exact HTTPS index URL without requiring a trailing slash; sparse requires
+a trailing slash and adds Cargo's `sparse+` prefix. The caller must disambiguate
+protocol from exact locked source identities, not silently convert Git indexes.
+The caller supplies approved additional registry sources; acquisition requires
+an exact name/index match. Galla generates only bounded named registry index
+entries in private read-only Cargo config, never loads operator config or
+replaces sources. Verification stays offline/network-denied.
+
+The real Git-index regression publishes an owned Cargo package to a local Git
+registry fixture and lets Cargo populate native data. Preparation uses only an
+owned file repository and loopback archive server; the protected metadata run
+has read-only native data, generated private config and denied network:
+
+```bash
+cargo test --offline --locked -p galla --test native_cache native_git_registry_metadata -- --ignored --test-threads=1 --nocapture
+```
+
+It requires Rust, Git and Bubblewrap, not a preexisting operator cache. This
+proves cached Git-index resolution, not production HTTPS acquisition.
 
 ## Building
 

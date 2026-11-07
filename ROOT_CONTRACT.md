@@ -29,19 +29,20 @@ constraint set injected into component work.
 - Keep authoring, dependency acquisition, verification, and promotion as
   distinct authority phases. Authoring receives only approved writable paths.
   Dependency acquisition may reach exact configured package sources and may
-  write only attempt-local dependency and workspace state, and MAY provision
-  versioned, enforced vendored registries on the host through shared
-  dependency mechanics (ADR 0017, Rust first; application authority remains
-  separate; ADR 0018 makes Rust share one tree, a minimal lock receipt and
-  configurable common vendor limits, leaving file checksums to Cargo), a language-aware model:
-  Rust enforced exactly through Cargo.lock; Python/uv, Node/npm, and Conan
-  enforced through their respective lock files. Verification runs without
-  network access and builds offline from that vendored registry. Agents must not
+  write only explicitly granted dependency data and isolated workspace state.
+  Shared dependency mechanics reuse native caches and acquire missing locked
+  material incrementally (ADR 0020, Rust first; application authority remains
+  separate). Rust uses Cargo.lock; Python/uv, Node/npm/yarn/pnpm, Go and
+  Conan/vcpkg retain their native locked artifact/environment semantics.
+  Verification denies networking and uses read-only approved dependency data
+  with private writable package-manager administrative/build state, never a
+  mounted user home or credentials. No routine source copy or application
+  per-file checksum inventory is required. Agents must not
   write queues, intent, implementation records, approval state, or canonical
   evidence.
 - Protected maerg verification uses its approved `--offline --locked` policy.
   Skott workspace Cargo remains offline but may resolve the writable project
-  lock. Live installed tools and available vendored sources do not require a
+  lock. Live installed tools and available native cached sources do not require a
   frozen lock digest, application receipt or session restart (ADR 0019).
   Acquisition remains separate from network-denied workspace execution.
 - Workspace isolation protects the host from unapproved sandbox effects, not

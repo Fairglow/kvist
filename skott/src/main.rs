@@ -30,7 +30,7 @@ fn run() -> skott::Result<ExitCode> {
         let cancellation = sav::CancellationToken::new();
         if !cli.check {
             eprintln!(
-                "Explicit host Rust vendoring for `{}`. {} Cargo may read host configuration; no model, toolchain installation, or automatic replay.",
+                "Explicit host Rust native-cache provisioning for `{}`. {} Cargo may read host configuration; no model, toolchain installation, or automatic replay.",
                 skott::error::terminal_text(&project.to_string_lossy()),
                 if cli.offline {
                     "Using Cargo's existing cache only (--offline --locked)."

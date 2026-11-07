@@ -144,11 +144,11 @@ review retains its separate configured turn cap. Opaque external agents retain
 their own internal policies and Sav's bounded process supervision; these native
 runtime changes cannot remove a provider CLI's internal limits.
 
-Normal sandbox PATH Cargo forces `--offline --locked` against the private,
-read-only vendor snapshot. Provision a matching `Cargo.lock` separately;
-missing or stale locks fail rather than being created or updated by the build.
-Explicit alternate Cargo paths are not rewritten, and standalone authoring
-still permits workspace edits. Bounded compaction summaries may lose older
+Normal authoring PATH Cargo uses `--offline` with live read-only native dependency
+data and private writable administrative state; workspace lock edits remain
+possible. Protected verification additionally forces `--locked`: provision its
+matching `Cargo.lock` separately. Neither mode downloads dependencies.
+Explicit alternate Cargo paths are not rewritten. Bounded compaction summaries may lose older
 references; this is not a guarantee of complete retained history.
 Protected runs also retain structured generation/effect evidence in memory;
 context compaction and journal rotation do not impose a total process-memory

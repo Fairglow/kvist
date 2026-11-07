@@ -3,6 +3,8 @@
 //! No application configuration is read. Host Cargo inherits operator policy;
 //! `--offline` constrains Cargo, not the operating system.
 
+pub mod cache;
+
 use crate::{
     Error, ProcessFailure, Result,
     fs::{Dir, Identity, absolute, io_error},
@@ -32,7 +34,8 @@ pub struct ProvisionOptions {
     pub cargo: PathBuf,
     /// Ask Cargo for offline acquisition, not OS network confinement.
     pub offline: bool,
-    /// Operator-owned destination; None uses `.kvist/vendored`.
+    /// Explicit export destination; native [`cache::provision`] requires None.
+    /// The directory export [`provision`] uses `.kvist/vendored` for None.
     pub vendored_dir: Option<PathBuf>,
     /// Positive wall-clock and idle bound, capped by shared project policy.
     pub timeout: Duration,

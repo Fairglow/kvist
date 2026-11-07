@@ -95,22 +95,26 @@ impl Topology {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .ok_or_else(|| failure("HOME is required to discover live Rust resources"))?;
-        let paths = [
+        let cargo_home = kvist_dependencies::rust::cache::home().ok();
+        let mut paths = vec![
             PathBuf::from("/usr/bin/rustup"),
             PathBuf::from("/usr/bin/cargo"),
             PathBuf::from("/usr/bin/rustc"),
             workspace.join("rust-toolchain"),
             workspace.join("rust-toolchain.toml"),
-            workspace.join(".kvist"),
-            workspace.join(".kvist/vendored"),
-            workspace.join(".kvist/sandbox-cargo"),
-            workspace.join(".kvist/sandbox-cargo/config.toml"),
             home.join(".rustup"),
             home.join(".rustup/settings.toml"),
             home.join(".rustup/toolchains"),
             home.join(".cargo/bin"),
             home.join(".cargo/bin/rustup"),
         ];
+        if let Some(cargo_home) = cargo_home {
+            paths.extend([
+                cargo_home.clone(),
+                cargo_home.join("registry"),
+                cargo_home.join("git"),
+            ]);
+        }
         let mut observations = Vec::with_capacity(paths.len());
         let mut blocked = Vec::<PathBuf>::new();
         for path in paths {

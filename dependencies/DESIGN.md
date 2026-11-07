@@ -2,6 +2,81 @@
 
 # Shared Dependencies Design
 
+## Native cache preparation
+
+The default backend is `rust::cache`, separate from directory export transactions
+below. Reuse native registry index/cache/src and Git db/checkouts in the operator's
+explicit Cargo home. Do not compute Cargo namespace hashes: recognize the native
+canonical crates.io sparse namespace, inspect its bounded cached index records,
+match locked checksums, and check the archive, expanded Cargo.toml and `.cargo-ok`
+metadata only. Never walk package files. Missing catalogue material is distinct
+from malformed metadata, unsafe paths and sources lacking a trustworthy cheap
+mapping. The locked parser retains full source/checksum identity and moves the
+directory-export-only name/version collision restriction out of native parsing.
+
+When cheap mapping is unavailable, bounded native `cargo metadata --offline
+--locked --format-version 1` establishes exact locked source identities and native
+manifest locations. Validate each external metadata identity against the lock and
+each path under the selected native registry/src or Git/checkouts tree; external
+directory replacements never look like native readiness. Only recognized offline
+missing-source diagnostics trigger the once-only acquisition callback. Revalidate
+afterwards. Do not publish a catalogue-only success for unsupported sources.
+Expose that process-backed path as explicit `admit` for CLI readiness. Keep
+`view` strictly cheap and separate source-only runtime selection into a typed
+`SourceView`: canonical catalogue, actual offline Cargo resolution still
+required (with optional prior lock admission), or no current lock. A receipt
+never fills in missing source identity; live runtime consumption still checks
+the actual native sources. Local-only graphs require no registry metadata scan.
+
+Configured admission/provisioning accepts actual bounded metadata stdout from a
+caller-authorized private-admin callback, never starts host Cargo implicitly.
+Factor metadata validation from process execution. Compare every returned full
+name/version/source identity against the exact lock, require every external lock
+identity observed, and map only the fixed native sandbox endpoint prefixes back
+to the selected host roots for bounded nonfollowing manifest checks. Reject
+source replacements outside those roots, malformed output, duplicates, lock
+drift and over-budget metadata. Only an explicit missing-source failure permits
+one acquisition; revalidate afterwards. Sandbox command authority remains the
+caller/Galla responsibility; the callback surface does not authorize a new phase.
+Before opaque-source resolution, inspect only required native directory roots.
+Their absence proves incomplete data and can trigger one acquisition directly;
+otherwise use metadata. Public failure adaptation requires observed Cargo exit
+101 and anchored native offline error chains tied to locked package identities
+or exact Git source URL/revision. Bound complete UTF-8 diagnostics to 64 KiB;
+unknown/error-budget/I/O failures never become missing-source evidence. Reuse this
+classification for host and configured metadata without reading arbitrary
+subprocess text into errors. Preserve reported exit codes and I/O causes.
+
+Cargo may emit manifest paths through its private administrative symlinks. A
+separate bounded normalizer receives the exact approved request Cargo home and
+maps only that prefix to fixed native endpoints, rejecting all unrelated paths.
+The subsequent existing validator still checks full source identities, exact
+lock stability and nonfollowing actual host manifest paths. Never infer an
+administrative path from metadata, scan sources, or rewrite native JSON in Galla.
+
+Anchor project/home and metadata with existing nonfollowing descriptor operations.
+Open a retained bounded regular native operation lock file with no truncation or
+links, and use process-held advisory locking. Recheck its path and the exact lock
+identity across callback/validation and before a small atomic native receipt write.
+Matching warm receipts need no writes; missing/stale receipts can be refreshed
+without acquisition. Export interruption state is not native state and is untouched.
+`force` refreshes receipt metadata only; it never authorizes redundant downloads.
+
+Acquisition calls Cargo fetch with literal locked/offline argv and bounded Sav
+supervision; Cargo owns native cache writer/GC coordination. The project lock
+serializes only cooperating project operations, not the global cache. Host GC and
+live mutation remain possible; no reader lease, immutable or pinning promise is
+made. Callback implementers must use Cargo or equivalent native coordination and
+retain live fetched material on errors. Failures expose safe diagnostic categories
+and actionable repair guidance, not raw subprocess streams or credentials.
+For isolated administrative homes, expose an explicit host acquisition lease
+holding Cargo's `.package-cache-mutate` and `.package-cache` exclusive `flock`
+locks, in that order (Cargo `MutateExclusive` convention). It is never implicitly
+held across ordinary host Cargo calls, which acquire their own locks. All locking
+failures remain explicit; no best-effort pinning claim.
+
+## Explicit directory export
+
 Separate cheap catalogue observations from coherent managed Rust readiness.
 Keep shared errors frontend-independent. Parse TOML structurally; do not infer
 package versions from arbitrary text lines for full validation.

@@ -35,9 +35,10 @@ Successful use produces:
   acceptance, with visible acknowledgement or deliberate exception;
 - task queues traceable to stable requirement and contract identifiers;
 - bounded agent execution with explicit authority;
-- builds and tests that run offline and deterministically from a vendored,
-  version-controlled dependency registry (vendor dependencies on the host, build
-  the sandbox with the network denied);
+- builds and tests that resolve locked dependencies offline from approved native
+  caches mounted read-only, with explicit missing-only acquisition and no routine
+  source duplication or file-checksum inventory; portable, version-controlled
+  vendor exports remain a deliberate separate capability (ADR 0020);
 - implementation records derived independently from source;
 - uncertain no-clobber intent proposals and comparisons derived from observed
   records without claiming to recover stakeholder intent;

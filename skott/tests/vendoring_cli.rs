@@ -1,4 +1,4 @@
-//! Explicit operator provisioning and real offline workspace consumption.
+//! Explicit native cache provisioning and actual offline sandbox consumption.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,48 +9,36 @@ use serde_json::json;
 use skott::session::ToolExecutor;
 use skott::{ProfileSetting, SandboxExecutor, SandboxPaths, ToolPolicy, ToolProfile, ToolRegistry};
 
+fn fixture() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(".native-cache-cli-")
+        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+        .unwrap()
+}
+
 fn project() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = fixture();
     fs::create_dir(dir.path().join("src")).unwrap();
     fs::write(
         dir.path().join("Cargo.toml"),
-        "[package]\nname=\"vendor-cli-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[workspace]\n",
+        "[package]\nname=\"cache-cli-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[workspace]\n",
     )
     .unwrap();
     fs::write(
         dir.path().join("Cargo.lock"),
-        "version=4\n[[package]]\nname=\"vendor-cli-trial\"\nversion=\"0.1.0\"\n",
+        "version=4\n[[package]]\nname=\"cache-cli-trial\"\nversion=\"0.1.0\"\n",
     )
     .unwrap();
-    fs::write(
-        dir.path().join("src/lib.rs"),
-        "#[test] fn works() { assert_eq!(2+2,4); }\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("src/lib.rs"), "#[test] fn works() {}\n").unwrap();
     dir
 }
 
-#[test]
-fn shared_vendor_policy_is_used_without_model_configuration() {
-    let dir = project();
-    fs::create_dir(dir.path().join(".kvist")).unwrap();
-    fs::write(
-        dir.path().join(".kvist/vendor.toml"),
-        "[limits]\nmax_entries=0\n",
-    )
-    .unwrap();
-    for args in [&["--vendor", "--check"][..], &["--vendor", "--offline"][..]] {
-        let out = cli(dir.path(), args);
-        assert!(!out.status.success(), "{out:?}");
-        assert!(!dir.path().join(".kvist/vendor.json").exists());
-        assert!(!dir.path().join(".kvist/vendored").exists());
-    }
-}
-fn cli(dir: &Path, args: &[&str]) -> Output {
+fn cli(dir: &Path, cache: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_skott"))
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::null())
+        .env("CARGO_HOME", cache)
         .env("XDG_CONFIG_HOME", dir.join("config"))
         .env("XDG_CONFIG_DIRS", dir.join("system-config"))
         .output()
@@ -61,7 +49,18 @@ fn success(out: &Output) {
     assert!(out.status.success(), "{out:?}");
 }
 
-fn rust_registry(root: &Path) -> skott::Result<ToolRegistry> {
+fn no_vendor_state(root: &Path) {
+    for path in [
+        ".kvist/vendored",
+        ".kvist/vendor-operation.lock",
+        ".kvist/sandbox-cargo/config.toml",
+        ".kvist/vendor.json",
+    ] {
+        assert!(!root.join(path).exists(), "{path}");
+    }
+}
+
+fn rust_registry(root: &Path) -> ToolRegistry {
     let settings = ToolProfile::CONFIGURABLE
         .iter()
         .map(|profile| {
@@ -82,170 +81,103 @@ fn rust_registry(root: &Path) -> skott::Result<ToolRegistry> {
         None,
         root,
     )
+    .unwrap()
 }
 
 #[test]
-fn managed_publication_fences_and_missing_locks_do_not_block_workspace_tools() {
+fn native_cache_reuse_does_not_create_project_vendor_state() {
     let dir = project();
-    success(&cli(dir.path(), &["--vendor", "--offline"]));
-    let root = dir.path().canonicalize().unwrap();
-    let operation = root.join(".kvist/vendor-operation.lock");
-    fs::write(&operation, "active or interrupted operator").unwrap();
-    let registry = rust_registry(&root).unwrap();
-    assert!(registry.profiles().contains(&"rust"));
-    assert_eq!(
-        fs::read_to_string(&operation).unwrap(),
-        "active or interrupted operator"
-    );
-    let check = cli(&root, &["--vendor", "--check"]);
-    assert!(
-        !check.status.success(),
-        "explicit check retains its publication boundary: {check:?}"
-    );
-    fs::remove_file(&operation).unwrap();
-    fs::remove_file(root.join("Cargo.lock")).unwrap();
-    let registry = rust_registry(&root).unwrap();
-    assert!(registry.profiles().contains(&"rust"));
-    assert!(
-        !root.join("Cargo.lock").exists(),
-        "preparation itself must not rewrite the project"
-    );
-}
-
-#[test]
-fn recovery_only_and_empty_resolver_state_do_not_hide_independent_rust() {
-    for directory in [false, true] {
-        let dir = project();
-        fs::remove_file(dir.path().join("Cargo.lock")).unwrap();
-        fs::create_dir(dir.path().join(".kvist")).unwrap();
-        if directory {
-            fs::create_dir(dir.path().join(".kvist/sandbox-cargo")).unwrap();
-        } else {
-            fs::write(
-                dir.path().join(".kvist/vendor-publication"),
-                "recovery fence",
-            )
-            .unwrap();
-        }
-        let root = dir.path().canonicalize().unwrap();
-        let registry = rust_registry(&root).unwrap();
-        assert!(registry.profiles().contains(&"rust"));
-        assert!(!root.join("Cargo.lock").exists());
-    }
-}
-
-#[test]
-fn vendor_and_check_work_without_application_configuration_or_project_artifacts() {
-    let dir = project();
+    let cache = fixture();
     let lock = fs::read(dir.path().join("Cargo.lock")).unwrap();
-    let check = cli(dir.path(), &["--vendor", "--check"]);
-    success(&check);
-    assert!(
-        !dir.path().join(".kvist").exists(),
-        "--check must not write"
-    );
-    let out = cli(dir.path(), &["--vendor", "--offline"]);
-    success(&out);
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("host"),
-        "{out:?}"
-    );
-    let manifest = dir.path().join(".kvist/vendor.json");
-    assert!(manifest.is_file(), "{out:?}");
-    let recorded = fs::read(&manifest).unwrap();
-    success(&cli(dir.path(), &["--vendor", "--offline"]));
-    assert_eq!(
-        fs::read(&manifest).unwrap(),
-        recorded,
-        "ready reuse must not rewrite state"
-    );
-    success(&cli(dir.path(), &["--vendor", "--check"]));
-    use std::os::unix::fs::MetadataExt;
-    let previous = fs::metadata(dir.path().join(".kvist/vendored"))
-        .unwrap()
-        .ino();
-    success(&cli(dir.path(), &["--vendor", "--offline", "--force"]));
-    assert_ne!(
-        fs::metadata(dir.path().join(".kvist/vendored"))
-            .unwrap()
-            .ino(),
-        previous
-    );
-    assert_eq!(fs::read(dir.path().join("Cargo.lock")).unwrap(), lock);
-    for absent in ["skott.toml", "kvist.toml", "VISION.md", ".skott", ".cargo"] {
-        assert!(!dir.path().join(absent).exists(), "{absent}");
+    for args in [
+        &["--vendor", "--check"][..],
+        &["--vendor", "--offline"][..],
+        &["--vendor", "--offline"][..],
+        &["--vendor", "--check"][..],
+        &["--vendor", "--offline", "--force"][..],
+    ] {
+        success(&cli(dir.path(), cache.path(), args));
+        no_vendor_state(dir.path());
     }
+    assert_eq!(fs::read(dir.path().join("Cargo.lock")).unwrap(), lock);
+    assert_eq!(
+        fs::read_dir(cache.path()).unwrap().count(),
+        0,
+        "dependency-free reuse must not create administrative host state"
+    );
 }
 
 #[test]
-fn explicit_vendor_directory_does_not_use_a_foreign_configuration_workspace() {
-    let launch = tempfile::tempdir().unwrap();
+fn explicit_cache_directory_ignores_a_foreign_configuration_workspace() {
+    let launch = fixture();
     let dir = project();
-    let out = cli(
+    let cache = fixture();
+    success(&cli(
         launch.path(),
+        cache.path(),
         &[
             "--vendor",
             "--offline",
             "--cwd",
             dir.path().to_str().unwrap(),
         ],
-    );
-    success(&out);
-    assert!(dir.path().join(".kvist/vendor.json").is_file());
+    ));
     assert_eq!(fs::read_dir(launch.path()).unwrap().count(), 0);
-    let invalid = cli(
-        launch.path(),
-        &["--vendor", "--config", "/absent/foreign.toml"],
+    no_vendor_state(dir.path());
+    assert!(
+        !cli(
+            launch.path(),
+            cache.path(),
+            &["--vendor", "--config", "/absent/foreign.toml"]
+        )
+        .status
+        .success()
     );
-    assert!(!invalid.status.success());
-    assert!(!dir.path().join("skott.toml").exists());
 }
 
 #[test]
-fn missing_malformed_stale_and_nonrust_vendor_states_are_actionable_and_read_only() {
+fn missing_malformed_and_nonrust_locks_are_actionable_without_state_writes() {
     let dir = project();
-    fs::remove_file(dir.path().join("Cargo.lock")).unwrap();
-    for args in [&["--vendor", "--check"][..], &["--vendor", "--offline"][..]] {
-        let out = cli(dir.path(), args);
-        assert!(!out.status.success());
-        assert!(
-            String::from_utf8_lossy(&out.stderr).contains("Cargo.lock"),
-            "{out:?}"
-        );
-        assert!(
-            String::from_utf8_lossy(&out.stderr).contains("Resolve Cargo.lock"),
-            "{out:?}"
-        );
-        assert!(!dir.path().join(".kvist").exists());
+    let cache = fixture();
+    for contents in [None, Some("not TOML")] {
+        if let Some(contents) = contents {
+            fs::write(dir.path().join("Cargo.lock"), contents).unwrap();
+        } else {
+            fs::remove_file(dir.path().join("Cargo.lock")).unwrap();
+        }
+        for args in [&["--vendor", "--check"][..], &["--vendor", "--offline"][..]] {
+            let out = cli(dir.path(), cache.path(), args);
+            assert!(!out.status.success());
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains("Cargo.lock"),
+                "{out:?}"
+            );
+            assert!(!dir.path().join(".kvist").exists());
+        }
     }
-    fs::write(dir.path().join("Cargo.lock"), "not TOML").unwrap();
-    let out = cli(dir.path(), &["--vendor", "--check"]);
-    assert!(!out.status.success());
-    assert!(!dir.path().join(".kvist").exists());
-    fs::write(dir.path().join("Cargo.lock"), "version=4\n").unwrap();
-    success(&cli(dir.path(), &["--vendor", "--offline"]));
-    let manifest = fs::read(dir.path().join(".kvist/vendor.json")).unwrap();
-    fs::write(dir.path().join("Cargo.lock"), "version=4\n# changed\n").unwrap();
-    let out = cli(dir.path(), &["--vendor", "--check"]);
+    assert_eq!(fs::read_dir(cache.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn native_cache_check_fails_for_missing_sources_without_acquisition() {
+    let dir = project();
+    let cache = fixture();
+    fs::write(dir.path().join("Cargo.lock"),
+        "version=4\n[[package]]\nname=\"cache-cli-trial\"\nversion=\"0.1.0\"\ndependencies=[\"absent-native-source\"]\n[[package]]\nname=\"absent-native-source\"\nversion=\"99.99.99\"\nsource=\"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum=\"0000000000000000000000000000000000000000000000000000000000000000\"\n").unwrap();
+    let out = cli(dir.path(), cache.path(), &["--vendor", "--check"]);
     assert!(!out.status.success(), "{out:?}");
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("stale"),
+        String::from_utf8_lossy(&out.stderr).contains("absent-native-source"),
         "{out:?}"
     );
-    assert_eq!(
-        fs::read(dir.path().join(".kvist/vendor.json")).unwrap(),
-        manifest
-    );
-    let nonrust = tempfile::tempdir().unwrap();
-    fs::write(nonrust.path().join("package-lock.json"), "{}").unwrap();
-    let out = cli(nonrust.path(), &["--vendor"]);
-    assert!(!out.status.success());
-    assert!(!nonrust.path().join(".kvist").exists());
+    assert!(!dir.path().join(".kvist").exists());
+    assert_eq!(fs::read_dir(cache.path()).unwrap().count(), 0);
 }
 
 #[test]
-fn provisioning_flags_cannot_be_used_as_agent_execution_flags() {
+fn provisioning_flags_are_not_agent_execution_flags() {
     let dir = project();
+    let cache = fixture();
     for args in [
         vec!["--check"],
         vec!["--offline"],
@@ -259,8 +191,10 @@ fn provisioning_flags_cannot_be_used_as_agent_execution_flags() {
         vec!["--vendor", "--attach", "journal"],
         vec!["--vendor", "task"],
     ] {
-        let out = cli(dir.path(), &args);
-        assert!(!out.status.success(), "{args:?}: {out:?}");
+        assert!(
+            !cli(dir.path(), cache.path(), &args).status.success(),
+            "{args:?}"
+        );
     }
     assert!(!dir.path().join(".kvist").exists());
 }
@@ -279,9 +213,66 @@ fn checked(command: &mut Command) {
     success(&command.output().unwrap());
 }
 
+fn shell(executor: &SandboxExecutor, command: &str) -> skott::ToolOutcome {
+    executor
+        .execute(
+            &ToolIntent {
+                id: "native-cache-runtime".into(),
+                provider_id: None,
+                name: "shell".into(),
+                arguments: json!({"command": command}),
+            },
+            &CancellationToken::new(),
+        )
+        .unwrap()
+}
+
 #[test]
-fn local_git_dependency_is_provisioned_once_and_builds_in_the_real_offline_sandbox() {
-    let infrastructure = tempfile::tempdir().unwrap();
+fn local_git_cache_builds_offline_with_private_admin_and_live_roots() {
+    const PROJECT: &str = "SKOTT_NATIVE_CACHE_FIXTURE_PROJECT";
+    if let Some(root) = std::env::var_os(PROJECT) {
+        let root = PathBuf::from(root);
+        let cache = PathBuf::from(std::env::var_os("CARGO_HOME").unwrap());
+        let executor = SandboxExecutor::new(
+            rust_registry(&root),
+            SandboxPaths {
+                runner: std::env::var_os("KVIST_GALLA")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(SandboxPaths::default_runner),
+                backend: SandboxPaths::default_backend(),
+            },
+            root.clone(),
+        );
+        let host_admin = fs::read(cache.join(".package-cache")).unwrap();
+        let out = shell(
+            &executor,
+            "cargo test && cargo clippy --all-targets && cargo doc --no-deps && test -L \"$CARGO_HOME/git\" && test \"$(readlink \"$CARGO_HOME/git\")\" = /rust/cargo-git && test -w \"$CARGO_HOME\" && test ! -w /rust/cargo-git && touch \"$CARGO_HOME/admin-proof\" && test ! -e /rust/runtime/vendor-config.toml && test ! -e /rust/vendor && test ! -e \"$CARGO_HOME/credentials.toml\" && test ! -e \"$CARGO_HOME/config.toml\"",
+        );
+        assert!(!out.failed(), "{}", out.error_text(16384));
+        assert!(root.join("target/debug/deps").is_dir());
+        assert_eq!(fs::read(cache.join(".package-cache")).unwrap(), host_admin);
+        assert!(!cache.join("admin-proof").exists());
+        no_vendor_state(&root);
+        let git = cache.join("git");
+        let retired = cache.join("retired-git");
+        fs::rename(&git, &retired).unwrap();
+        fs::create_dir(&git).unwrap();
+        let missing = shell(&executor, "cargo clean && cargo test");
+        assert!(missing.failed(), "missing Git data must fail offline");
+        assert!(
+            missing.error_text(16384).contains("offline"),
+            "{}",
+            missing.error_text(16384)
+        );
+        assert!(!shell(&executor, "rustc --version").failed());
+        fs::remove_dir(&git).unwrap();
+        fs::rename(retired, git).unwrap();
+        let restored = shell(&executor, "cargo test");
+        assert!(!restored.failed(), "{}", restored.error_text(16384));
+        return;
+    }
+
+    let infrastructure = fixture();
     let dep = infrastructure.path().join("dependency");
     fs::create_dir(&dep).unwrap();
     fs::write(dep.join("Cargo.toml"), "[package]\nname=\"offline-local-git\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[lib]\npath=\"lib.rs\"\n").unwrap();
@@ -312,13 +303,12 @@ fn local_git_dependency_is_provisioned_once_and_builds_in_the_real_offline_sandb
         .output()
         .unwrap();
     success(&rev);
-    let rev = String::from_utf8(rev.stdout).unwrap();
     let dir = project();
-    let uri = format!("file://{}", dep.display());
     let mut manifest = fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
     manifest.push_str(&format!(
-        "\n[dependencies]\noffline-local-git={{git=\"{uri}\",rev=\"{}\"}}\n",
-        rev.trim()
+        "\n[dependencies]\noffline-local-git={{git=\"file://{}\",rev=\"{}\"}}\n",
+        dep.display(),
+        String::from_utf8(rev.stdout).unwrap().trim()
     ));
     fs::write(dir.path().join("Cargo.toml"), manifest).unwrap();
     fs::write(
@@ -327,7 +317,7 @@ fn local_git_dependency_is_provisioned_once_and_builds_in_the_real_offline_sandb
     )
     .unwrap();
     let cache = infrastructure.path().join("cargo-home");
-    // The only dependency acquisition is from this owned local Git fixture.
+    // Acquisition is explicitly confined to this owned local Git fixture.
     checked(
         Command::new(host_cargo())
             .args(["generate-lockfile"])
@@ -335,71 +325,46 @@ fn local_git_dependency_is_provisioned_once_and_builds_in_the_real_offline_sandb
             .env("CARGO_NET_OFFLINE", "false")
             .current_dir(dir.path()),
     );
+    fs::write(cache.join("credentials.toml"), "private sentinel").unwrap();
+    fs::write(cache.join("config.toml"), "[alias]\nprivate=\"version\"\n").unwrap();
     let lock = fs::read(dir.path().join("Cargo.lock")).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_skott"))
-        .args(["--vendor", "--offline"])
+    success(&cli(dir.path(), &cache, &["--vendor", "--offline"]));
+    let receipt = fs::read(dir.path().join(".kvist/cargo-cache.json")).unwrap();
+    let admitted = cli(dir.path(), &cache, &["--vendor", "--check"]);
+    success(&admitted);
+    assert!(
+        String::from_utf8_lossy(&admitted.stderr).contains("metadata --offline --locked"),
+        "{admitted:?}"
+    );
+    assert_eq!(
+        fs::read(dir.path().join(".kvist/cargo-cache.json")).unwrap(),
+        receipt
+    );
+    let out = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "local_git_cache_builds_offline_with_private_admin_and_live_roots",
+            "--nocapture",
+        ])
+        .env(PROJECT, dir.path().canonicalize().unwrap())
         .env("CARGO_HOME", &cache)
-        .current_dir(dir.path())
-        .stdin(Stdio::null())
         .output()
         .unwrap();
     success(&out);
-    success(&cli(dir.path(), &["--vendor", "--check"]));
-    fs::create_dir(dir.path().join(".cargo")).unwrap();
-    fs::write(dir.path().join(".cargo/config.toml"), "[source.crates-io]\nreplace-with=\"vendored-sources\"\n[source.vendored-sources]\ndirectory=\"/not/the/vendor\"\n").unwrap();
-    let root = dir.path().canonicalize().unwrap();
-    let registry = rust_registry(&root).unwrap();
-    let executor = SandboxExecutor::new(
-        registry,
-        SandboxPaths {
-            runner: std::env::var_os("KVIST_GALLA")
-                .map(PathBuf::from)
-                .unwrap_or_else(SandboxPaths::default_runner),
-            backend: SandboxPaths::default_backend(),
-        },
-        root,
-    );
-    let out = executor.execute(&ToolIntent {
-        id: "offline-build".into(), provider_id: None, name: "shell".into(),
-        arguments: json!({"command":"cargo test && cargo clippy --all-targets && cargo doc --no-deps && test ! -w /rust/vendor && test -r .kvist/vendored && test ! -w .kvist/vendored"}),
-    }, &CancellationToken::new()).unwrap();
-    assert!(!out.failed(), "{}", out.error_text(8192));
     assert_eq!(fs::read(dir.path().join("Cargo.lock")).unwrap(), lock);
-    assert!(dir.path().join("target/debug/deps").is_dir());
-    assert!(!dir.path().join("skott.toml").exists());
-    fs::write(
-        dir.path().join(".kvist/vendored/offline-local-git/lib.rs"),
-        "tampered",
-    )
-    .unwrap();
-    success(&cli(dir.path(), &["--vendor", "--check"]));
-    let damaged = executor
-        .execute(
-            &ToolIntent {
-                id: "native-checksum-failure".into(),
-                provider_id: None,
-                name: "shell".into(),
-                arguments: json!({"command":"cargo clean && cargo test"}),
-            },
-            &CancellationToken::new(),
-        )
-        .unwrap();
-    assert!(damaged.failed());
-    assert!(
-        damaged.error_text(8192).contains("checksum"),
-        "{}",
-        damaged.error_text(8192)
-    );
-    let repaired = Command::new(env!("CARGO_BIN_EXE_skott"))
-        .args(["--vendor", "--offline", "--force"])
-        .env("CARGO_HOME", &cache)
-        .current_dir(dir.path())
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
-    success(&repaired);
     assert_eq!(
-        fs::read_to_string(dir.path().join(".kvist/vendored/offline-local-git/lib.rs")).unwrap(),
-        "pub fn answer()->u8 {42}\n"
+        fs::read_to_string(cache.join("credentials.toml")).unwrap(),
+        "private sentinel"
     );
+    fs::remove_dir_all(cache.join("git")).unwrap();
+    let missing = cli(dir.path(), &cache, &["--vendor", "--check"]);
+    assert!(
+        !missing.status.success(),
+        "a matching receipt cannot admit missing Git data"
+    );
+    assert_eq!(
+        fs::read(dir.path().join(".kvist/cargo-cache.json")).unwrap(),
+        receipt
+    );
+    assert_eq!(fs::read(dir.path().join("Cargo.lock")).unwrap(), lock);
 }

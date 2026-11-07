@@ -36,6 +36,12 @@ boundary when isolation is required.
   bounded steering and cancellation that preserve task accounting.
 - **Independent observation** through private versioned live journals and
   separately authorized local control capabilities.
+- **Offline Rust scripts** for host-approved native registry/Git data mounts and
+  private writable Cargo administration, without copying sources or mounting
+  operator configuration/credentials. Protected wrappers require `--locked`;
+  workspace wrappers may resolve their writable lock. Portable directory exports
+  use only deliberately staged caller-approved source configuration, never a
+  default resolver.
 
 ## Building
 

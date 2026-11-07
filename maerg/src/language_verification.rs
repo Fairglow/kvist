@@ -4,7 +4,7 @@
 //! Rust builds use the closed Cargo topology (`run_offline_cargo_verification`).
 //! Every other supported language uses the generic system-toolchain
 //! verification path extended with the language's vendored read-only mounts and
-//! one writable scratch: the vendored material (Go's committed `vendor/`, the
+//! one writable scratch: dependency material (Go's native module cache, the
 //! npm/yarn cache, the provisioned Python venv, the Conan home) is mounted
 //! read-only, a disjoint scratch absorbs caches and build output, the network
 //! is denied, and the language's canonical offline test command runs against
@@ -57,7 +57,7 @@ pub fn run_offline_language_verification(
     options: ExecutionOptions,
 ) -> Result<ExecutionResult> {
     let enforcement =
-        crate::language_vendoring::enforce_vendoring(project_root, true, Some(config))?;
+        crate::language_vendoring::enforce_vendoring(project_root, false, Some(config))?;
     if enforcement.language == "rust" {
         return Err(KvistError::SandboxUnavailable {
             runner: config.runner.clone(),
@@ -160,10 +160,8 @@ fn offline_profile(
             })
         }
         "go" => {
-            // `go test -mod=vendor` builds entirely from the committed vendor/
-            // directory; `GOPROXY=off` plus `GOTOOLCHAIN=local` make any
-            // accidental fetch or toolchain download fail immediately instead
-            // of reaching for the network.
+            // Native module data is read-only. Disable both proxy and checksum
+            // service lookups; compilation writes only to private scratch.
             //
             // The profile runs against the host toolchain, so the binary and
             // its standard library must both be reachable inside the sandbox,
@@ -198,20 +196,23 @@ fn offline_profile(
             }
             environment.insert("GOROOT".to_owned(), goroot.to_string_lossy().into_owned());
             environment.insert("GOPROXY".to_owned(), "off".to_owned());
+            environment.insert("GOSUMDB".to_owned(), "off".to_owned());
             environment.insert("GOTOOLCHAIN".to_owned(), "local".to_owned());
-            environment.insert("GOFLAGS".to_owned(), "-mod=vendor".to_owned());
+            environment.insert("GOWORK".to_owned(), "off".to_owned());
+            environment.insert("GOFLAGS".to_owned(), "-mod=readonly -p=1".to_owned());
+            environment.insert("GOMAXPROCS".to_owned(), "2".to_owned());
             environment.insert("GOCACHE".to_owned(), format!("{SCRATCH_DEST}/gocache"));
             environment.insert("GOTMPDIR".to_owned(), format!("{SCRATCH_DEST}/tmp"));
             environment.insert("GOPATH".to_owned(), format!("{SCRATCH_DEST}/gopath"));
             environment.insert(
                 "GOMODCACHE".to_owned(),
-                format!("{SCRATCH_DEST}/gopath/pkg/mod"),
+                crate::language_vendoring::go_cache::MOUNT.to_owned(),
             );
             Ok(LanguageProfile {
                 program,
                 arguments: vec![
                     "test".to_owned(),
-                    "-mod=vendor".to_owned(),
+                    "-mod=readonly".to_owned(),
                     "./...".to_owned(),
                 ],
                 environment,
@@ -504,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn go_profile_uses_vendor_mod_and_offline_proxy() {
+    fn go_profile_uses_readonly_native_modules_and_denies_network() {
         let root = tempfile::tempdir().expect("temp root");
         let project = project(root.path(), "go");
         let profile = offline_profile("go", &project, None).expect("go profile");
@@ -516,7 +517,7 @@ mod tests {
             profile.arguments,
             vec![
                 "test".to_owned(),
-                "-mod=vendor".to_owned(),
+                "-mod=readonly".to_owned(),
                 "./...".to_owned()
             ]
         );
@@ -527,6 +528,26 @@ mod tests {
         assert_eq!(
             profile.environment.get("GOTOOLCHAIN").map(String::as_str),
             Some("local")
+        );
+        assert_eq!(
+            profile.environment.get("GOSUMDB").map(String::as_str),
+            Some("off")
+        );
+        assert_eq!(
+            profile.environment.get("GOFLAGS").map(String::as_str),
+            Some("-mod=readonly -p=1")
+        );
+        assert_eq!(
+            profile.environment.get("GOMAXPROCS").map(String::as_str),
+            Some("2")
+        );
+        assert_eq!(
+            profile.environment.get("GOWORK").map(String::as_str),
+            Some("off")
+        );
+        assert_eq!(
+            profile.environment.get("GOMODCACHE").map(String::as_str),
+            Some("/workspace/go-modules")
         );
         assert!(profile.environment.contains_key("GOCACHE"));
         assert!(profile.environment.contains_key("GOTMPDIR"));

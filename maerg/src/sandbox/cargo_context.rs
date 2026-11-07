@@ -1,9 +1,21 @@
 //! Explicitly approved, read-only Cargo workspace/path-dependency build context.
 
-use super::rust_environment::{Fingerprint, check_budget, fingerprint, inspect};
+use super::rust_environment::{Fingerprint, check_budget, fingerprint, inspect, resource_kind};
 use super::*;
 use std::collections::BTreeSet;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+#[cfg(test)]
+#[path = "cargo_context/diagnostic_tests.rs"]
+mod diagnostic_tests;
+
+#[cfg(test)]
+#[path = "cargo_context/native_snapshot_tests.rs"]
+mod native_snapshot_tests;
+
+#[cfg(test)]
+#[path = "cargo_context/tests.rs"]
+mod tests;
 
 pub(super) struct CargoContext {
     pub grants: Vec<SandboxGrant>,
@@ -19,18 +31,29 @@ fn failure(config: &SandboxConfig, reason: impl Into<String>) -> KvistError {
     }
 }
 
+fn path_failure(config: &SandboxConfig, path: &Path, reason: impl std::fmt::Display) -> KvistError {
+    failure(
+        config,
+        format!("Cargo context `{}`: {reason}", path.display()),
+    )
+}
+
 fn manifest(config: &SandboxConfig, root: &Path) -> Result<toml::Value> {
     let path = root.join("Cargo.toml");
     let metadata = inspect(config, &path)?;
-    if !metadata.is_file() || metadata.len() > 1 << 20 {
-        return Err(failure(
+    if !metadata.is_file() {
+        return Err(path_failure(
             config,
-            "Cargo build context requires regular manifests no larger than 1 MiB",
+            &path,
+            format!(
+                "manifest is a {}; replace it with a regular non-link file",
+                resource_kind(&metadata)
+            ),
         ));
     }
     let bytes = read_metadata(config, &path, fingerprint(&metadata))?;
     let text = std::str::from_utf8(&bytes)
-        .map_err(|_| failure(config, "Cargo build manifests must be UTF-8"))?;
+        .map_err(|e| path_failure(config, &path, format!("manifest must be UTF-8: {e}")))?;
     toml::from_str(text).map_err(|e| {
         failure(
             config,
@@ -40,34 +63,84 @@ fn manifest(config: &SandboxConfig, root: &Path) -> Result<toml::Value> {
 }
 
 fn read_metadata(config: &SandboxConfig, path: &Path, expected: Fingerprint) -> Result<Vec<u8>> {
+    read_metadata_bounded(config, path, expected, 1 << 20)
+}
+
+fn read_metadata_bounded(
+    config: &SandboxConfig,
+    path: &Path,
+    expected: Fingerprint,
+    limit: u64,
+) -> Result<Vec<u8>> {
     let mut file = fs::OpenOptions::new()
         .read(true)
         .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
         .open(path)
-        .map_err(|e| sandbox_error(config, "open Cargo metadata", e))?;
+        .map_err(|e| sandbox_path_error(config, "open Cargo metadata", path, e))?;
     let before = file
         .metadata()
-        .map_err(|e| sandbox_error(config, "inspect Cargo metadata", e))?;
-    if !before.is_file()
-        || before.nlink() != 1
-        || before.len() > 1 << 20
-        || fingerprint(&before) != expected
-    {
-        return Err(failure(
+        .map_err(|e| sandbox_path_error(config, "inspect Cargo metadata", path, e))?;
+    if !before.is_file() {
+        return Err(path_failure(
             config,
-            "Cargo metadata must be stable regular single-link files no larger than 1 MiB",
+            path,
+            format!(
+                "opened metadata is a {}; use a regular file",
+                resource_kind(&before)
+            ),
+        ));
+    }
+    if before.nlink() != 1 {
+        return Err(path_failure(
+            config,
+            path,
+            format!(
+                "metadata has {} hard links; replace it with a single-link regular file",
+                before.nlink()
+            ),
+        ));
+    }
+    if before.len() > limit {
+        return Err(path_failure(
+            config,
+            path,
+            format!(
+                "metadata is {} bytes (limit {limit} bytes); reduce its size",
+                before.len()
+            ),
+        ));
+    }
+    if fingerprint(&before) != expected {
+        return Err(path_failure(
+            config,
+            path,
+            "metadata changed while opening; retry after concurrent edits have stopped",
         ));
     }
     let mut bytes = Vec::new();
     (&mut file)
-        .take((1 << 20) + 1)
+        .take(limit.saturating_add(1))
         .read_to_end(&mut bytes)
-        .map_err(|e| sandbox_error(config, "read bounded Cargo metadata", e))?;
+        .map_err(|e| sandbox_path_error(config, "read bounded Cargo metadata", path, e))?;
     let after = file
         .metadata()
-        .map_err(|e| sandbox_error(config, "reinspect Cargo metadata", e))?;
-    if bytes.len() > 1 << 20 || fingerprint(&after) != expected {
-        return Err(failure(config, "Cargo metadata changed while reading"));
+        .map_err(|e| sandbox_path_error(config, "reinspect Cargo metadata", path, e))?;
+    if bytes.len() as u64 > limit {
+        return Err(path_failure(
+            config,
+            path,
+            format!(
+                "metadata read exceeded {limit} bytes (read {} bytes); reduce its size",
+                bytes.len()
+            ),
+        ));
+    }
+    if fingerprint(&after) != expected {
+        return Err(path_failure(
+            config,
+            path,
+            "metadata changed while reading; retry after concurrent edits have stopped",
+        ));
     }
     Ok(bytes)
 }
@@ -115,11 +188,21 @@ fn approved_git(config: &SandboxConfig, repository: &str, revision: &str) -> Res
     }
 }
 
-fn acquisition_lock_sources(config: &SandboxConfig, bytes: &[u8]) -> Result<()> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| failure(config, "acquisition Cargo.lock must be UTF-8"))?;
-    let lock: toml::Value =
-        toml::from_str(text).map_err(|_| failure(config, "cannot parse acquisition Cargo.lock"))?;
+fn acquisition_lock_sources(config: &SandboxConfig, path: &Path, bytes: &[u8]) -> Result<()> {
+    let text = std::str::from_utf8(bytes).map_err(|e| {
+        path_failure(
+            config,
+            path,
+            format!("acquisition Cargo.lock must be UTF-8: {e}"),
+        )
+    })?;
+    let lock: toml::Value = toml::from_str(text).map_err(|e| {
+        path_failure(
+            config,
+            path,
+            format!("cannot parse acquisition Cargo.lock: {e}"),
+        )
+    })?;
     if let Some(packages) = lock.get("package").and_then(toml::Value::as_array) {
         for package in packages {
             if let Some(source) = package
@@ -152,7 +235,7 @@ fn local_root(
     let path = base.join(relative);
     let root = path
         .canonicalize()
-        .map_err(|e| sandbox_error(config, "resolve declared Cargo dependency", e))?;
+        .map_err(|e| sandbox_path_error(config, "resolve declared Cargo dependency", &path, e))?;
     // Inspect the original path as well, so canonicalization cannot authorize links.
     let mut original = PathBuf::new();
     for part in path.components() {
@@ -171,9 +254,14 @@ fn local_root(
         || relative.contains('\0')
         || !inspect(config, &original)?.is_dir()
     {
-        return Err(failure(
+        return Err(path_failure(
             config,
-            "Cargo dependency roots must be non-link directories inside the approved project",
+            &path,
+            format!(
+                "dependency root resolves to `{}`; it must be a non-link directory inside approved project `{}`",
+                root.display(),
+                project.display()
+            ),
         ));
     }
     if root
@@ -182,9 +270,10 @@ fn local_root(
         .components()
         .any(|part| part.as_os_str().to_string_lossy().starts_with('.'))
     {
-        return Err(failure(
+        return Err(path_failure(
             config,
-            "Cargo dependencies cannot expose hidden operational roots",
+            &root,
+            "Cargo dependencies cannot expose hidden operational roots; select a non-hidden in-project dependency directory",
         ));
     }
     Ok(root)
@@ -203,9 +292,12 @@ fn members(
             segment.is_empty() || (*segment != "*" && segment.contains(['*', '?', '[', ']']))
         })
     {
-        return Err(failure(
+        return Err(path_failure(
             config,
-            "Cargo workspace members support literal paths or whole-directory * segments only",
+            &base.join("Cargo.toml"),
+            format!(
+                "workspace pattern `{pattern}` is unsupported; use literal paths or whole-directory * segments only"
+            ),
         ));
     }
     let mut roots = vec![base.to_owned()];
@@ -215,11 +307,11 @@ fn members(
         let mut next = Vec::new();
         for root in roots {
             if segment == "*" {
-                for entry in fs::read_dir(&root)
-                    .map_err(|e| sandbox_error(config, "expand Cargo workspace member", e))?
-                {
+                for entry in fs::read_dir(&root).map_err(|e| {
+                    sandbox_path_error(config, "expand Cargo workspace member", &root, e)
+                })? {
                     let entry = entry.map_err(|e| {
-                        sandbox_error(config, "read Cargo workspace member entry", e)
+                        sandbox_path_error(config, "read Cargo workspace member entry", &root, e)
                     })?;
                     check_budget(config, started)?;
                     entries += 1;
@@ -233,13 +325,14 @@ fn members(
                     let name = name
                         .to_str()
                         .ok_or_else(|| failure(config, "Cargo member names must be UTF-8"))?;
-                    let kind = entry
-                        .file_type()
-                        .map_err(|e| sandbox_error(config, "inspect Cargo member entry", e))?;
+                    let kind = entry.file_type().map_err(|e| {
+                        sandbox_path_error(config, "inspect Cargo member entry", &entry.path(), e)
+                    })?;
                     if !name.starts_with('.') && kind.is_symlink() {
-                        return Err(failure(
+                        return Err(path_failure(
                             config,
-                            "Cargo workspace members must not use links",
+                            &entry.path(),
+                            "workspace member is a symbolic link; replace it with a regular directory",
                         ));
                     }
                     if kind.is_dir() && !name.starts_with('.') {
@@ -294,16 +387,26 @@ fn track(
     check_budget(config, bounds.started)?;
     bounds.path_bytes += path.as_os_str().len();
     if depth > 128 || tracked.len() >= 100_000 || bounds.path_bytes > 32 << 20 {
-        return Err(failure(
+        return Err(path_failure(
             config,
-            "Cargo source context exceeds its entry/path/depth bounds",
+            path,
+            format!(
+                "source context exceeds its bounds: entries={} (limit 100000), path bytes={} (limit 33554432), depth={} (limit 128); narrow selected source material",
+                tracked.len(),
+                bounds.path_bytes,
+                depth
+            ),
         ));
     }
     let metadata = inspect(config, path)?;
     if !metadata.is_file() && !metadata.is_dir() {
-        return Err(failure(
+        return Err(path_failure(
             config,
-            "Cargo build source must contain only regular non-link files/directories",
+            path,
+            format!(
+                "source entry is a {}; only regular non-link files/directories are allowed; stop the owning process and move runtime data outside the selected source tree before retrying",
+                resource_kind(&metadata)
+            ),
         ));
     }
     tracked.push((path.into(), fingerprint(&metadata)));
@@ -311,10 +414,11 @@ fn track(
         let mut complete = true;
         let mut selected = Vec::new();
         for entry in fs::read_dir(path)
-            .map_err(|e| sandbox_error(config, "inspect Cargo build source", e))?
+            .map_err(|e| sandbox_path_error(config, "inspect Cargo build source", path, e))?
         {
-            let entry =
-                entry.map_err(|e| sandbox_error(config, "read Cargo build source entry", e))?;
+            let entry = entry.map_err(|e| {
+                sandbox_path_error(config, "read Cargo build source entry", path, e)
+            })?;
             let name = entry.file_name();
             let name = name
                 .to_str()
@@ -330,7 +434,14 @@ fn track(
         }
         if !complete {
             if selected.len() > 256 {
-                return Err(failure(config, "filtered Cargo context exceeds 256 mounts"));
+                return Err(path_failure(
+                    config,
+                    path,
+                    format!(
+                        "filtered Cargo context requires {} mounts (limit 256); narrow selected source material",
+                        selected.len()
+                    ),
+                ));
             }
             return Ok(selected);
         }
@@ -344,7 +455,20 @@ pub(super) fn prepare(
     component: &Path,
     started: Instant,
 ) -> Result<CargoContext> {
-    prepare_with_policy(config, project, component, started, true)
+    prepare_with_policy(
+        config,
+        project,
+        component,
+        started,
+        SnapshotPurpose::Authoring,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SnapshotPurpose {
+    Authoring,
+    Acquisition,
+    Admission,
 }
 
 fn prepare_with_policy(
@@ -352,14 +476,14 @@ fn prepare_with_policy(
     project: &Path,
     component: &Path,
     started: Instant,
-    authoring: bool,
+    purpose: SnapshotPurpose,
 ) -> Result<CargoContext> {
     let project = project
         .canonicalize()
-        .map_err(|e| sandbox_error(config, "resolve Cargo build project", e))?;
+        .map_err(|e| sandbox_path_error(config, "resolve Cargo build project", project, e))?;
     let component = component
         .canonicalize()
-        .map_err(|e| sandbox_error(config, "resolve Cargo build component", e))?;
+        .map_err(|e| sandbox_path_error(config, "resolve Cargo build component", component, e))?;
     inspect(config, &project)?;
     inspect(config, &component)?;
     if !component.starts_with(&project) {
@@ -374,9 +498,17 @@ fn prepare_with_policy(
             pending.insert(project.clone());
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(sandbox_error(config, "inspect workspace Cargo manifest", e)),
+        Err(e) => {
+            return Err(sandbox_path_error(
+                config,
+                "inspect workspace Cargo manifest",
+                &project.join("Cargo.toml"),
+                e,
+            ));
+        }
     }
     let mut roots = BTreeMap::new();
+    let mut manifest_inputs = BTreeMap::new();
     while let Some(root) = pending.pop_first() {
         check_budget(config, started)?;
         if roots.contains_key(&root) {
@@ -385,8 +517,11 @@ fn prepare_with_policy(
         if roots.len() >= 128 {
             return Err(failure(config, "Cargo build context exceeds 128 crates"));
         }
+        let manifest_path = root.join("Cargo.toml");
+        let expected = fingerprint(&inspect(config, &manifest_path)?);
         let value = manifest(config, &root)?;
-        if authoring
+        manifest_inputs.insert(manifest_path, expected);
+        if purpose == SnapshotPurpose::Authoring
             && root != component
             && AUTHORING_WRITABLE_ROOTS
                 .iter()
@@ -405,26 +540,46 @@ fn prepare_with_policy(
             "replace",
         ] {
             if let Some(table) = value.get(key) {
-                dependency_paths(config, table, &mut paths, !authoring)?;
+                dependency_paths(
+                    config,
+                    table,
+                    &mut paths,
+                    purpose == SnapshotPurpose::Acquisition,
+                )?;
             }
         }
         if let Some(targets) = value.get("target").and_then(toml::Value::as_table) {
             for target in targets.values() {
                 for key in ["dependencies", "dev-dependencies", "build-dependencies"] {
                     if let Some(table) = target.get(key) {
-                        dependency_paths(config, table, &mut paths, !authoring)?;
+                        dependency_paths(
+                            config,
+                            table,
+                            &mut paths,
+                            purpose == SnapshotPurpose::Acquisition,
+                        )?;
                     }
                 }
             }
         }
         if let Some(patches) = value.get("patch").and_then(toml::Value::as_table) {
             for table in patches.values() {
-                dependency_paths(config, table, &mut paths, !authoring)?;
+                dependency_paths(
+                    config,
+                    table,
+                    &mut paths,
+                    purpose == SnapshotPurpose::Acquisition,
+                )?;
             }
         }
         if let Some(workspace) = value.get("workspace") {
             if let Some(table) = workspace.get("dependencies") {
-                dependency_paths(config, table, &mut paths, !authoring)?;
+                dependency_paths(
+                    config,
+                    table,
+                    &mut paths,
+                    purpose == SnapshotPurpose::Acquisition,
+                )?;
             }
             let mut exclusions = BTreeSet::new();
             if let Some(exclude) = workspace.get("exclude").and_then(toml::Value::as_array) {
@@ -468,6 +623,22 @@ fn prepare_with_policy(
         }
         roots.insert(root, value);
     }
+    if purpose != SnapshotPurpose::Authoring {
+        let context = select_native_metadata(config, &project, &roots, started)?;
+        for (path, expected) in &context.tracked {
+            if manifest_inputs
+                .get(path)
+                .is_some_and(|original| original != expected)
+            {
+                return Err(path_failure(
+                    config,
+                    path,
+                    "manifest changed during Cargo graph discovery; retry after concurrent edits have stopped",
+                ));
+            }
+        }
+        return Ok(context);
+    }
     let mut candidates = BTreeSet::new();
     let mut metadata = BTreeSet::new();
     for (root, value) in &roots {
@@ -481,10 +652,11 @@ fn prepare_with_policy(
             continue;
         }
         for entry in fs::read_dir(root)
-            .map_err(|e| sandbox_error(config, "select Cargo build resources", e))?
+            .map_err(|e| sandbox_path_error(config, "select Cargo build resources", root, e))?
         {
-            let entry =
-                entry.map_err(|e| sandbox_error(config, "read Cargo build resource entry", e))?;
+            let entry = entry.map_err(|e| {
+                sandbox_path_error(config, "read Cargo build resource entry", root, e)
+            })?;
             let name = entry.file_name();
             let name = name
                 .to_str()
@@ -526,7 +698,14 @@ fn prepare_with_policy(
             !local_writable_root,
         )?);
         if selected.len() > 256 {
-            return Err(failure(config, "filtered Cargo context exceeds 256 mounts"));
+            return Err(path_failure(
+                config,
+                &path,
+                format!(
+                    "filtered Cargo context requires {} mounts (limit 256); narrow selected source material",
+                    selected.len()
+                ),
+            ));
         }
     }
     let mut grants = Vec::new();
@@ -558,27 +737,370 @@ fn prepare_with_policy(
     })
 }
 
+struct NativeSelection<'a> {
+    config: &'a SandboxConfig,
+    project: &'a Path,
+    tracked: BTreeMap<PathBuf, Fingerprint>,
+    bounds: SourceBounds,
+    entries: usize,
+}
+
+impl NativeSelection<'_> {
+    fn observe(&mut self, path: &Path, required: bool, directory: bool) -> Result<bool> {
+        check_budget(self.config, self.bounds.started)?;
+        match fs::symlink_metadata(path) {
+            Err(e) if !required && e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => {
+                return Err(sandbox_path_error(
+                    self.config,
+                    "inspect Cargo snapshot input",
+                    path,
+                    e,
+                ));
+            }
+            Ok(_) => {}
+        }
+        let metadata = inspect(self.config, path)?;
+        if if directory {
+            !metadata.is_dir()
+        } else {
+            !metadata.is_file()
+        } {
+            return Err(path_failure(
+                self.config,
+                path,
+                format!(
+                    "selected Cargo {} is a {}; use a regular non-link {}",
+                    if directory {
+                        "target directory"
+                    } else {
+                        "metadata/target"
+                    },
+                    resource_kind(&metadata),
+                    if directory { "directory" } else { "file" },
+                ),
+            ));
+        }
+        if !directory && metadata.nlink() != 1 {
+            return Err(path_failure(
+                self.config,
+                path,
+                format!(
+                    "selected Cargo metadata/target has {} hard links; use a single-link regular file",
+                    metadata.nlink(),
+                ),
+            ));
+        }
+        if let Some(expected) = self.tracked.get(path) {
+            if fingerprint(&metadata) != *expected {
+                return Err(path_failure(
+                    self.config,
+                    path,
+                    "input changed during Cargo target discovery; retry after concurrent edits have stopped",
+                ));
+            }
+            return Ok(true);
+        }
+        let relative = path.strip_prefix(self.project).map_err(|_| {
+            path_failure(
+                self.config,
+                path,
+                "Cargo snapshot input escapes the approved project",
+            )
+        })?;
+        self.bounds.path_bytes += path.as_os_str().len();
+        let depth = relative.components().count();
+        if depth > 128 || self.tracked.len() >= 100_000 || self.bounds.path_bytes > 32 << 20 {
+            return Err(path_failure(
+                self.config,
+                path,
+                format!(
+                    "Cargo snapshot exceeds bounds: entries={} (limit 100000), path bytes={} (limit 33554432), depth={depth} (limit 128)",
+                    self.tracked.len(),
+                    self.bounds.path_bytes,
+                ),
+            ));
+        }
+        self.tracked.insert(path.into(), fingerprint(&metadata));
+        Ok(true)
+    }
+
+    fn optional_target(&mut self, root: &Path, relative: &str) -> Result<()> {
+        let path = root.join(relative);
+        let parent = path
+            .parent()
+            .ok_or_else(|| path_failure(self.config, &path, "Cargo target has no parent"))?;
+        if self.observe(parent, false, true)? {
+            self.observe(&path, false, false)?;
+        }
+        Ok(())
+    }
+
+    fn explicit_target(&mut self, root: &Path, relative: &str) -> Result<()> {
+        if relative.is_empty() || relative.contains('\0') || Path::new(relative).is_absolute() {
+            return Err(path_failure(
+                self.config,
+                &root.join("Cargo.toml"),
+                format!(
+                    "Cargo target path `{relative}` must be a nonempty relative path inside the approved project",
+                ),
+            ));
+        }
+        let mut path = root.to_owned();
+        for part in Path::new(relative).components() {
+            match part {
+                std::path::Component::Normal(name) => {
+                    path.push(name);
+                    if name == ".cargo" {
+                        return Err(path_failure(
+                            self.config,
+                            &root.join(relative),
+                            "Cargo target enters .cargo configuration; native snapshots exclude Cargo configuration",
+                        ));
+                    }
+                }
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    self.observe(&path, true, true)?;
+                    path.pop();
+                }
+                _ => {
+                    return Err(path_failure(
+                        self.config,
+                        &root.join(relative),
+                        "invalid Cargo target path",
+                    ));
+                }
+            }
+            if !path.starts_with(self.project) {
+                return Err(path_failure(
+                    self.config,
+                    &root.join(relative),
+                    "Cargo target escapes the approved project",
+                ));
+            }
+        }
+        // Preserve safe in-project ../ targets, while rejecting links in every selected ancestor.
+        let mut parent = path.parent();
+        while let Some(directory) = parent.filter(|directory| directory.starts_with(self.project)) {
+            self.observe(directory, true, true)?;
+            parent = directory.parent();
+        }
+        self.observe(&path, true, false)?;
+        Ok(())
+    }
+
+    fn auto_targets(&mut self, root: &Path, relative: &str) -> Result<()> {
+        let directory = root.join(relative);
+        if !self.observe(&directory, false, true)? {
+            return Ok(());
+        }
+        for entry in fs::read_dir(&directory).map_err(|e| {
+            sandbox_path_error(self.config, "discover Cargo auto targets", &directory, e)
+        })? {
+            check_budget(self.config, self.bounds.started)?;
+            let entry = entry.map_err(|e| {
+                sandbox_path_error(self.config, "read Cargo auto target entry", &directory, e)
+            })?;
+            self.entries += 1;
+            if self.entries > 100_000 {
+                return Err(path_failure(
+                    self.config,
+                    &directory,
+                    "Cargo auto target discovery exceeds 100000 entries",
+                ));
+            }
+            let path = entry.path();
+            if path.extension().is_some_and(|extension| extension == "rs") {
+                self.observe(&path, true, false)?;
+            } else {
+                let kind = entry.file_type().map_err(|e| {
+                    sandbox_path_error(self.config, "inspect Cargo auto target entry", &path, e)
+                })?;
+                if kind.is_dir() || kind.is_symlink() {
+                    self.observe(&path, true, true)?;
+                    self.observe(&path.join("main.rs"), false, false)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn package_targets(&mut self, root: &Path, value: &toml::Value) -> Result<()> {
+        let Some(package) = value.get("package") else {
+            return Ok(());
+        };
+        if let Some(library) = value.get("lib") {
+            let path = library
+                .get("path")
+                .map(|path| {
+                    path.as_str().ok_or_else(|| {
+                        path_failure(
+                            self.config,
+                            &root.join("Cargo.toml"),
+                            "Cargo lib.path must be a string",
+                        )
+                    })
+                })
+                .transpose()?
+                .unwrap_or("src/lib.rs");
+            self.explicit_target(root, path)?;
+        } else if package.get("autolib").and_then(toml::Value::as_bool) != Some(false) {
+            self.optional_target(root, "src/lib.rs")?;
+        }
+        for (key, automatic, directory) in [
+            ("bin", "autobins", "src/bin"),
+            ("test", "autotests", "tests"),
+            ("bench", "autobenches", "benches"),
+            ("example", "autoexamples", "examples"),
+        ] {
+            if let Some(targets) = value.get(key).and_then(toml::Value::as_array) {
+                for target in targets {
+                    if let Some(path) = target.get("path") {
+                        let path = path.as_str().ok_or_else(|| {
+                            path_failure(
+                                self.config,
+                                &root.join("Cargo.toml"),
+                                format!("Cargo {key}.path must be a string"),
+                            )
+                        })?;
+                        self.explicit_target(root, path)?;
+                    } else if let Some(name) = target.get("name").and_then(toml::Value::as_str) {
+                        if name.is_empty()
+                            || name.contains(['/', '\\', '\0'])
+                            || matches!(name, "." | "..")
+                        {
+                            return Err(path_failure(
+                                self.config,
+                                &root.join("Cargo.toml"),
+                                format!(
+                                    "Cargo {key} target name `{name}` must be a single path segment"
+                                ),
+                            ));
+                        }
+                        let parent = root.join(directory);
+                        if self.observe(&parent, false, true)? {
+                            self.observe(&parent.join(format!("{name}.rs")), false, false)?;
+                            let nested = parent.join(name);
+                            if self.observe(&nested, false, true)? {
+                                self.observe(&nested.join("main.rs"), false, false)?;
+                            }
+                        }
+                        if key == "bin"
+                            && package.get("name").and_then(toml::Value::as_str) == Some(name)
+                        {
+                            self.optional_target(root, "src/main.rs")?;
+                        }
+                    }
+                }
+            }
+            if package.get(automatic).and_then(toml::Value::as_bool) != Some(false) {
+                if key == "bin" {
+                    self.optional_target(root, "src/main.rs")?;
+                }
+                self.auto_targets(root, directory)?;
+            }
+        }
+        match package.get("build") {
+            Some(toml::Value::Boolean(false)) => {}
+            Some(toml::Value::String(path)) => self.explicit_target(root, path)?,
+            None | Some(toml::Value::Boolean(true)) => {
+                self.optional_target(root, "build.rs")?;
+            }
+            Some(_) => {
+                return Err(path_failure(
+                    self.config,
+                    &root.join("Cargo.toml"),
+                    "Cargo package.build must be a path string or boolean",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn select_native_metadata(
+    config: &SandboxConfig,
+    project: &Path,
+    roots: &BTreeMap<PathBuf, toml::Value>,
+    started: Instant,
+) -> Result<CargoContext> {
+    let mut selection = NativeSelection {
+        config,
+        project,
+        tracked: BTreeMap::new(),
+        bounds: SourceBounds {
+            path_bytes: 0,
+            started,
+        },
+        entries: 0,
+    };
+    let mut metadata = BTreeSet::new();
+    for (root, value) in roots {
+        selection.observe(root, true, true)?;
+        let manifest = root.join("Cargo.toml");
+        selection.observe(&manifest, true, false)?;
+        metadata.insert(manifest);
+        let lock = root.join("Cargo.lock");
+        if selection.observe(&lock, false, false)? {
+            metadata.insert(lock);
+        }
+        selection.package_targets(root, value)?;
+    }
+    Ok(CargoContext {
+        grants: Vec::new(),
+        tracked: selection.tracked.into_iter().collect(),
+        directory: "/rust/project".into(),
+        metadata,
+    })
+}
+
 /// Stage bounded manifests/lock bytes and empty target files, never source contents.
 pub(crate) fn stage_acquisition_workspace(
     config: &SandboxConfig,
     project: &Path,
     destination: &Path,
 ) -> Result<String> {
-    let started = Instant::now();
     crate::acquisition::validate_acquisition_config(&config.acquisition)
         .map_err(|e| failure(config, format!("invalid acquisition source policy: {e}")))?;
+    stage_native_workspace(config, project, destination, SnapshotPurpose::Acquisition)
+}
+
+/// Stage read-only offline resolver inputs without granting acquisition authority.
+pub(crate) fn stage_native_admission_workspace(
+    config: &SandboxConfig,
+    project: &Path,
+    destination: &Path,
+) -> Result<String> {
+    stage_native_workspace(config, project, destination, SnapshotPurpose::Admission)
+}
+
+fn stage_native_workspace(
+    config: &SandboxConfig,
+    project: &Path,
+    destination: &Path,
+    purpose: SnapshotPurpose,
+) -> Result<String> {
+    let started = Instant::now();
     let project = project
         .canonicalize()
-        .map_err(|e| sandbox_error(config, "resolve acquisition project", e))?;
-    let context = prepare_with_policy(config, &project, &project, started, false)?;
+        .map_err(|e| sandbox_path_error(config, "resolve acquisition project", project, e))?;
+    let limits = kvist_dependencies::VendorLimits::load(&project).map_err(|e| {
+        failure(
+            config,
+            format!("cannot load native Cargo snapshot limits: {e}"),
+        )
+    })?;
+    let context = prepare_with_policy(config, &project, &project, started, purpose)?;
     let mut lock_identity = None;
     for (source, expected) in &context.tracked {
         check_budget(config, started)?;
         let metadata = inspect(config, source)?;
         if fingerprint(&metadata) != *expected {
-            return Err(failure(
+            return Err(path_failure(
                 config,
-                "Cargo inputs changed before acquisition staging",
+                source,
+                "inputs changed before acquisition staging; retry after concurrent edits have stopped",
             ));
         }
         let relative = source
@@ -586,8 +1108,9 @@ pub(crate) fn stage_acquisition_workspace(
             .map_err(|_| failure(config, "Cargo acquisition inputs escape the project"))?;
         let target = destination.join(relative);
         if metadata.is_dir() {
-            fs::create_dir_all(&target)
-                .map_err(|e| sandbox_error(config, "stage Cargo target directory", e))?;
+            fs::create_dir_all(&target).map_err(|e| {
+                sandbox_path_error(config, "stage Cargo target directory", &target, e)
+            })?;
             continue;
         }
         fs::create_dir_all(
@@ -595,277 +1118,45 @@ pub(crate) fn stage_acquisition_workspace(
                 .parent()
                 .ok_or_else(|| failure(config, "Cargo target has no parent"))?,
         )
-        .map_err(|e| sandbox_error(config, "stage Cargo metadata parent", e))?;
+        .map_err(|e| sandbox_path_error(config, "stage Cargo metadata parent", &target, e))?;
         let bytes = if context.metadata.contains(source) {
-            read_metadata(config, source, *expected)?
+            let limit = if relative == Path::new("Cargo.lock") {
+                limits.max_lockfile_bytes
+            } else {
+                1 << 20
+            };
+            read_metadata_bounded(config, source, *expected, limit)?
         } else {
             Vec::new()
         };
         if relative == Path::new("Cargo.lock") {
-            acquisition_lock_sources(config, &bytes)?;
+            if purpose == SnapshotPurpose::Acquisition {
+                acquisition_lock_sources(config, source, &bytes)?;
+            }
             lock_identity = Some(crate::vendoring::lockfile_digest(&bytes));
         }
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&target)
-            .map_err(|e| sandbox_error(config, "create private Cargo metadata/target", e))?;
-        file.write_all(&bytes)
-            .map_err(|e| sandbox_error(config, "write private Cargo metadata/target", e))?;
+            .map_err(|e| {
+                sandbox_path_error(config, "create private Cargo metadata/target", &target, e)
+            })?;
+        file.write_all(&bytes).map_err(|e| {
+            sandbox_path_error(config, "write private Cargo metadata/target", &target, e)
+        })?;
     }
     for (path, expected) in &context.tracked {
         check_budget(config, started)?;
         if fingerprint(&inspect(config, path)?) != *expected {
-            return Err(failure(
+            return Err(path_failure(
                 config,
-                "Cargo inputs changed during acquisition staging",
+                path,
+                "inputs changed during acquisition staging; retry after concurrent edits have stopped",
             ));
         }
     }
     let identity = lock_identity
-        .ok_or_else(|| failure(config, "Cargo acquisition requires a regular Cargo.lock"))?;
-    let mut registries = toml::Table::new();
-    for source in &config.acquisition.additional_sources {
-        if let crate::config::PackageSource::CargoRegistry {
-            name, index_origin, ..
-        } = source
-        {
-            let registry = toml::Table::from_iter([(
-                "index".into(),
-                toml::Value::String(index_origin.clone()),
-            )]);
-            if registries
-                .insert(name.clone(), toml::Value::Table(registry))
-                .is_some()
-            {
-                return Err(failure(config, "duplicate approved Cargo registry name"));
-            }
-        }
-    }
-    if !registries.is_empty() {
-        let cargo = destination.join(".cargo");
-        fs::create_dir(&cargo)
-            .map_err(|e| sandbox_error(config, "stage approved registry settings", e))?;
-        let contents = toml::to_string(&toml::Table::from_iter([(
-            "registries".into(),
-            toml::Value::Table(registries),
-        )]))
-        .map_err(|e| failure(config, format!("serialize approved registry settings: {e}")))?;
-        fs::write(cargo.join("config.toml"), contents)
-            .map_err(|e| sandbox_error(config, "write approved registry settings", e))?;
-    }
+        .ok_or_else(|| path_failure(config, &project.join("Cargo.lock"), "native Cargo snapshot requires a regular Cargo.lock; generate the project lockfile before offline admission or acquisition"))?;
     Ok(identity)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn config() -> SandboxConfig {
-        SandboxConfig {
-            runner: "/not-invoked".into(),
-            backend: "/not-invoked".into(),
-            environment_allowlist: Vec::new(),
-            acquisition: crate::config::AcquisitionConfig::default(),
-        }
-    }
-
-    #[test]
-    fn acquisition_snapshot_preserves_metadata_but_not_source_or_host_configuration() {
-        let project = tempfile::tempdir().unwrap();
-        let destination = tempfile::tempdir().unwrap();
-        fs::create_dir(project.path().join("src")).unwrap();
-        fs::create_dir(project.path().join(".cargo")).unwrap();
-        let manifest = "[package]\nname='fixture'\nversion='0.1.0'\nedition='2024'\n";
-        fs::write(project.path().join("Cargo.toml"), manifest).unwrap();
-        fs::write(project.path().join("Cargo.lock"), "version=4\n").unwrap();
-        fs::write(project.path().join("src/lib.rs"), "PRIVATE_SOURCE_CONTENT").unwrap();
-        fs::write(
-            project.path().join(".cargo/config.toml"),
-            "[alias]\nbuild='dangerous'\n",
-        )
-        .unwrap();
-        fs::write(project.path().join("REQUIREMENTS.md"), "PRIVATE_INTENT").unwrap();
-        let mut config = config();
-        config
-            .acquisition
-            .additional_sources
-            .push(crate::config::PackageSource::CargoRegistry {
-                name: "approved".into(),
-                index_origin: "https://registry.example.invalid/index/".into(),
-                download_origin: "https://registry.example.invalid/crates/".into(),
-            });
-        let identity =
-            stage_acquisition_workspace(&config, project.path(), destination.path()).unwrap();
-        assert_eq!(identity, crate::vendoring::lockfile_digest(b"version=4\n"));
-        assert_eq!(
-            fs::read_to_string(destination.path().join("Cargo.toml")).unwrap(),
-            manifest
-        );
-        assert!(
-            fs::read(destination.path().join("src/lib.rs"))
-                .unwrap()
-                .is_empty()
-        );
-        assert!(!destination.path().join("REQUIREMENTS.md").exists());
-        let settings: toml::Value = toml::from_str(
-            &fs::read_to_string(destination.path().join(".cargo/config.toml")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            settings["registries"]["approved"]["index"].as_str(),
-            Some("https://registry.example.invalid/index/")
-        );
-        assert!(settings.get("alias").is_none());
-        assert_eq!(
-            fs::read_to_string(project.path().join("src/lib.rs")).unwrap(),
-            "PRIVATE_SOURCE_CONTENT"
-        );
-    }
-
-    #[test]
-    fn acquisition_snapshot_rejects_links_and_missing_lockfiles() {
-        for linked in [false, true] {
-            let project = tempfile::tempdir().unwrap();
-            let destination = tempfile::tempdir().unwrap();
-            fs::create_dir(project.path().join("src")).unwrap();
-            fs::write(
-                project.path().join("Cargo.toml"),
-                "[package]\nname='fixture'\nversion='0.1.0'\n",
-            )
-            .unwrap();
-            if linked {
-                fs::write(project.path().join("Cargo.lock"), "version=4\n").unwrap();
-                std::os::unix::fs::symlink("/etc/passwd", project.path().join("src/lib.rs"))
-                    .unwrap();
-            } else {
-                fs::write(project.path().join("src/lib.rs"), "").unwrap();
-            }
-            assert!(
-                stage_acquisition_workspace(&config(), project.path(), destination.path()).is_err()
-            );
-        }
-    }
-
-    #[test]
-    fn acquisition_rejects_unapproved_git_and_native_transports_before_fetch() {
-        let revision = "a".repeat(40);
-        for (repository, approved) in [
-            ("git://internal.example.invalid/private", false),
-            ("ssh://internal.example.invalid/private", false),
-            ("https://unapproved.example.invalid/private", false),
-            ("https://git.example.invalid/dependency.git", true),
-        ] {
-            let project = tempfile::tempdir().unwrap();
-            let destination = tempfile::tempdir().unwrap();
-            fs::create_dir(project.path().join("src")).unwrap();
-            fs::write(project.path().join("src/lib.rs"), "").unwrap();
-            fs::write(project.path().join("Cargo.toml"), format!(
-                "[package]\nname='fixture'\nversion='0.1.0'\n[dependencies]\nexternal={{git='{repository}',rev='{revision}'}}\n"
-            )).unwrap();
-            fs::write(project.path().join("Cargo.lock"), format!(
-                "version=4\n[[package]]\nname='external'\nversion='0.1.0'\nsource='git+{repository}?rev={revision}#{revision}'\n"
-            )).unwrap();
-            let mut config = config();
-            config
-                .acquisition
-                .additional_sources
-                .push(crate::config::PackageSource::CargoGit {
-                    repository: "https://git.example.invalid/dependency.git".into(),
-                    revision: revision.clone(),
-                });
-            let result = stage_acquisition_workspace(&config, project.path(), destination.path());
-            assert_eq!(result.is_ok(), approved, "{repository}: {result:?}");
-        }
-    }
-
-    #[test]
-    fn acquisition_rejects_native_git_hidden_in_lock_or_target_patch_tables() {
-        let revision = "a".repeat(40);
-        for section in [
-            "",
-            "[target.'cfg(unix)'.build-dependencies]",
-            "[workspace.dependencies]",
-            "[patch.crates-io]",
-            "[replace]",
-        ] {
-            let project = tempfile::tempdir().unwrap();
-            let destination = tempfile::tempdir().unwrap();
-            fs::create_dir(project.path().join("src")).unwrap();
-            fs::write(project.path().join("src/lib.rs"), "").unwrap();
-            let dependency = if section.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "{section}\nexternal={{git='git://internal.example.invalid/private',rev='{revision}'}}\n"
-                )
-            };
-            fs::write(
-                project.path().join("Cargo.toml"),
-                format!("[package]\nname='fixture'\nversion='0.1.0'\n{dependency}"),
-            )
-            .unwrap();
-            fs::write(project.path().join("Cargo.lock"), if section.is_empty() {
-                format!("version=4\n[[package]]\nname='external'\nversion='0.1.0'\nsource='git+git://internal.example.invalid/private#{revision}'\n")
-            } else { "version=4\n".into() }).unwrap();
-            assert!(
-                stage_acquisition_workspace(&config(), project.path(), destination.path()).is_err(),
-                "{section}"
-            );
-        }
-    }
-
-    #[test]
-    fn clean_subtrees_collapse_before_mount_bounds_and_provider_aliases_fail() {
-        let project = tempfile::tempdir().unwrap();
-        fs::create_dir(project.path().join("src")).unwrap();
-        fs::write(
-            project.path().join("Cargo.toml"),
-            "[package]\nname='fixture'\nversion='0.1.0'\n",
-        )
-        .unwrap();
-        for index in 0..257 {
-            fs::write(project.path().join(format!("src/file{index}.rs")), "").unwrap();
-        }
-        let context = prepare(&config(), project.path(), project.path(), Instant::now()).unwrap();
-        assert_eq!(context.grants.len(), 2);
-        fs::create_dir(project.path().join("src/provider")).unwrap();
-        fs::write(
-            project.path().join("src/provider/Cargo.toml"),
-            "[package]\nname='provider'\nversion='0.1.0'\n",
-        )
-        .unwrap();
-        fs::write(project.path().join("Cargo.toml"), "[package]\nname='fixture'\nversion='0.1.0'\n[dependencies]\nprovider={path='src/provider'}\n").unwrap();
-        assert!(
-            prepare(&config(), project.path(), project.path(), Instant::now())
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("overlap writable")
-        );
-    }
-
-    #[test]
-    fn declared_sources_cannot_escape_use_links_or_hidden_roots() {
-        let config = SandboxConfig {
-            runner: "/not-invoked".into(),
-            backend: "/not-invoked".into(),
-            environment_allowlist: Vec::new(),
-            acquisition: crate::config::AcquisitionConfig::default(),
-        };
-        let parent = tempfile::tempdir().unwrap();
-        let project = parent.path().join("project");
-        fs::create_dir(&project).unwrap();
-        fs::create_dir(project.join("regular")).unwrap();
-        fs::create_dir(project.join(".private")).unwrap();
-        symlink(project.join("regular"), project.join("linked")).unwrap();
-        let outside = parent.path().join("outside");
-        fs::create_dir(&outside).unwrap();
-        assert!(local_root(&config, &project, &project, "../outside").is_err());
-        assert!(local_root(&config, &project, &project, "linked").is_err());
-        assert!(local_root(&config, &project, &project, ".private").is_err());
-        assert!(members(&config, &project, &project, "**", Instant::now()).is_err());
-        assert!(members(&config, &project, &project, "regular?", Instant::now()).is_err());
-        assert!(members(&config, &project, &project, "*", Instant::now()).is_err());
-    }
 }

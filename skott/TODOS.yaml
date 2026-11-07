@@ -10,6 +10,94 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:3086d1bd8a18b675b1468721f662518abda2fa56473e02eaa032b4cc61d3fda4", "observed_revision": "sha256:02b7979e6f81e2815f5503538266d13034718471afe061ee55f71a37a7075ed5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03", "observed_revision": "sha256:4bec0afba47fcba5472c45f6a3b225cf7920bad53eacf3926f90205b36676f62"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:0c1cfae82b7f2f6819b5a1898fc15a1608e08b91c738fb405507e0b2b458f9fb", "observed_revision": "sha256:a21376824ea18202c8dbe373530fc9f92b44cc2e01a562ba610a8ac8b55bb93c"}]
 tasks:
+  - id: native-admission-write-tests
+    title: "write_tests: exact native Git check admission"
+    description: "Cover actual offline Git admission and missing-source failure despite a matching lock-only receipt."
+    context: "Human-requested safe admission; explicit scoped advisory exception. Actual local Git --check regression failed before adapter changes with UnsupportedCacheSource."
+    purpose: "Expose unsupported cheap-source checks before adapting the explicit command."
+    expected_outcome: "Git check regression fails before production changes."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"]
+    timestamps: {created_at: "2026-11-07T22:04:00Z", updated_at: "2026-11-07T22:05:53Z", completed_at: "2026-11-07T22:05:53Z"}
+  - id: native-admission-implement-code
+    title: "implement_code: explicit bounded native source admission"
+    description: "Use sources canonical fast path and shared admit for actual Git/alternate checks, with truthful host authority diagnostics and no acquisition or receipt minting."
+    context: "All 6 affected vendoring_cli tests pass, including actual Git admission and missing Git data despite a matching native receipt; lock/receipt unchanged. Strict Skott all-target Clippy, scoped rustfmt and whitespace pass using .skott-admission-target with integrated /opt/target/debug/galla-runner. Canonical checks remain process-free; only explicitly disclosed Git/alternate metadata admission resolves host Cargo. Provisioning already uses shared native admission and remains missing-only. Live runtime unchanged; no source-content attestation or global Git blocker. Independent source/security/comparison remains pending."
+    purpose: "Safely check exact sources through native Cargo when cheap mapping cannot suffice."
+    expected_outcome: "Affected CLI regressions and scoped lint pass."
+    kind: implementation
+    status: completed
+    depends_on: [native-admission-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"]
+    timestamps: {created_at: "2026-11-07T22:04:00Z", updated_at: "2026-11-07T22:05:53Z", completed_at: "2026-11-07T22:05:53Z"}
+  - id: native-admission-security-audit
+    title: "security_audit: independently observe native admission"
+    description: "Parent-arranged source/security observation of explicit host metadata authority, safe mapping and acquisition-free failure."
+    context: "No implementer certification or IMPL updates."
+    purpose: "Record independent evidence and limits."
+    expected_outcome: "Independent scoped observations for arbitration."
+    kind: security-audit
+    status: completed
+    depends_on: [native-admission-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"]
+    timestamps: {created_at: "2026-11-07T22:04:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
+  - id: native-admission-compliance-review
+    title: "compliance_review: compare source admission evidence"
+    description: "Parent-arranged separate source-blind comparison of admission intent, independent observations and attributed tests."
+    context: "Independent records are linked from IMPL.md; evidence limits and historical arbitration remain, with no acceptance or fabricated receipt."
+    purpose: "Retain discrepancies and human arbitration."
+    expected_outcome: "Independent comparison and concrete evidence limits."
+    kind: compliance-review
+    status: completed
+    depends_on: [native-admission-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"]
+    timestamps: {created_at: "2026-11-07T22:04:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
+  - id: native-cache-write-tests
+    title: "write_tests: native Cargo cache workspace resources"
+    description: "Cover read-only data mounts, credentials/admin privacy, reuse, live roots, missing sources and real offline compilation."
+    context: "Approved native-cache reuse; explicit local advisory exception, no acceptance/receipts. Two native resource/wrapper assertions failed before production changes. The CLI fixture was added before adapter edits; its later assertions were corrected to permit the shared provider's minimal native receipt/lock, not legacy vendor state."
+    purpose: "Expose vendored replacement behavior before implementing native resources."
+    expected_outcome: "Focused native-cache regressions fail before production changes."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T21:48:00Z", completed_at: "2026-11-07T21:48:00Z"}
+  - id: native-cache-implement-code
+    title: "implement_code: shared native Cargo cache resources"
+    description: "Use shared cache view/provision, private administration, native source mode and refreshed read-only registry/Git roots. Normalize all directly affected current intent/README default-source claims under ADR 0020, leaving prior IMPL historical; remove only owned validation targets after integrated-runner availability."
+    context: "18 Rust resource unit, 13 sandbox-selected unit, 24 non-checkout Rust runtime and 6 native cache CLI tests pass; shared Sav 3 script tests pass. Actual registry/Git compilation, private admin writes, source-root replacement/failure/restoration and denied-network/privacy covered. Strict Skott/Sav all-target Clippy, scoped rustfmt and diff whitespace pass. All Cargo checks offline/locked using .skott-native-target; parent-arranged independent reviews remain pending. No runtime operator writes, package copies/inventories or automatic acquisition; explicit native provisioning retains the provider's minimal receipt/operation lock in owned test projects."
+    purpose: "Reuse native material while preserving denied network and host boundaries."
+    expected_outcome: "Focused regressions and feasible native runtime trial pass."
+    kind: implementation
+    status: completed
+    depends_on: [native-cache-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T21:48:00Z", completed_at: "2026-11-07T21:48:00Z"}
+  - id: native-cache-security-audit
+    title: "security_audit: independently inspect native cache resources"
+    description: "Parent-arranged independent observation/security review of mounts, private administration and refresh."
+    context: "Implementer must not certify its own work or update IMPL."
+    purpose: "Record independent evidence and limits."
+    expected_outcome: "Independent scoped observations for arbitration."
+    kind: security-audit
+    status: completed
+    depends_on: [native-cache-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
+  - id: native-cache-compliance-review
+    title: "compliance_review: compare native cache intent"
+    description: "Parent-arranged source-blind comparison with independent observations and attributed test evidence."
+    context: "Independent records are linked from IMPL.md; nested repository-trial qualification and historical arbitration remain separate from scoped correspondence."
+    purpose: "Retain discrepancies and human arbitration."
+    expected_outcome: "Independent comparison and concrete evidence limits."
+    kind: compliance-review
+    status: completed
+    depends_on: [native-cache-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"]
+    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
   - id: live-workspace-write-tests
     title: "write_tests: live resources and unrestricted file sizes"
     description: "Pin streaming large files, live read continuation, resumable searches, atomic large-file edits, host resource refresh and native outside-write denial."

@@ -406,3 +406,46 @@ The separate Skott lost-update qualification and external-linked snapshot gaps
 remain for explicit human arbitration; Galla evidence does not certify Skott.
 Attributed final executions remain distinct from independent observation.
 Accepted revision/revalidation metadata is unchanged.
+
+## Native cache and transport observation (2026-11-07 UTC)
+
+Independent source-only observer `d38462f8-d2f9-4d78-a5bb-c512f6458890`
+derived the Galla section of
+[`native-cache-observation.md`](../docs/reviews/native-cache-observation.md).
+The observer excluded intent, queues, prior records/reviews and history and
+executed no checks.
+
+Observed native requests separate read-only registry/Git endpoints from private
+administration; acquisition alone grants data writes. Commands, environments,
+aliases and grant purposes are closed. The proxy preserves client-first bytes,
+full-duplex traffic and half-closes with bounded admission and deadlines.
+HTTPS CONNECT authorizes authority, not encrypted paths or Git revisions.
+Uninterruptible DNS, unbounded lock-digest streaming inside its helper and absent
+native aggregate cache/scratch quotas remain explicit observation limits.
+These observations do not certify package-network confinement or acceptance.
+
+Source-blind comparer `a6add327-2a55-4006-b3f6-b2750041ff26` recorded scoped
+native/transport correspondence and evidence limits in
+[`native-cache-comparison.md`](../docs/reviews/native-cache-comparison.md),
+without source/test-body access. Legacy promotion/resource failures are not
+converted into passing evidence or global certification.
+
+### Hermetic resolver follow-up
+
+Fresh source-only observer `721f6eeb-1581-42b9-afd0-6eeadbe74b50` derived the
+resolver supplement in the observation document. Production selects native
+lookup; the test injects named resolution and uses shared normalization,
+bounded queue and pinned relay. The observer executed no checks.
+
+Implementer-attributed native execution now passes all 22 transport tests and
+all 25 Skott Rust-environment cases, including the previously failing nested
+repository trial. Its cause was ambient DNS fixture dependence, not native
+cache acquisition or concurrency. No workspace DNS grants, increased production
+limits or skipped assertions were introduced. The DNS diagnostic regression
+also reproduced lost native cause before the fix and passes afterwards.
+
+Security reviewer `bf1b95b7-8a98-4777-b332-d8740de4e31f` inspected the
+Git-index fixture's local bootstrap/protected-request separation and reported no
+additional security finding. Its missing fixture-subprocess deadlines remain
+unqualified; neither that inspection nor the real trial certifies general
+cleanup/deadline behavior.

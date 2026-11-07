@@ -34,6 +34,23 @@ pub enum Error {
         current: String,
         expected: String,
     },
+    /// Native source identity needs Cargo validation rather than catalogue inference.
+    #[error("native Cargo cache source mapping unsupported at `{path}`: {reason}")]
+    UnsupportedCacheSource { path: PathBuf, reason: &'static str },
+    /// Sanitized native Cargo failure with actionable, payload-free guidance.
+    #[error("native Cargo {operation} failed ({failure:?}): {diagnostic}")]
+    NativeCargo {
+        operation: &'static str,
+        failure: ProcessFailure,
+        diagnostic: &'static str,
+        /// Safe process status, including signal termination when available.
+        status: Option<std::process::ExitStatus>,
+        /// Independently reported payload exit code when raw status is unavailable.
+        exit_code: Option<i32>,
+        /// Underlying operating-system I/O cause, without captured payload.
+        #[source]
+        source: Option<io::Error>,
+    },
     /// A filesystem operation failed.
     #[error("cannot {operation} `{path}`: {source}")]
     Io {
