@@ -67,7 +67,9 @@ root (`/Cargo.toml`), with `maerg/`, `sav/`, `dependencies/`, `galla/`, `skott/`
 as top-level peer components. Maerg and Skott depend on `dependencies` for
 shared Rust provisioning; that library depends on Sav, never a frontend.
 Both use one project `.kvist/vendored` tree with shared read/exclusive publication
-locks, a minimal lock receipt and optional common vendor-limit policy. Skott
+locks for explicit provisioning/protected readiness, a minimal lock receipt and
+optional common vendor-limit policy. Skott workspace execution does not require
+that receipt or a frozen lock/resource view (ADR 0019). Skott
 mounts it read-only without copying packages; the runner masks its writable
 workspace alias. Cargo owns native file-checksum validation, not an additional
 application inventory (ADR 0018).
@@ -193,6 +195,14 @@ dependency state. It MAY provision a versioned, enforced vendored registry on
 the host that sandbox builds and tests resolve offline (ADR 0011), keeping every
 network toolchain operation outside the effect sandbox. Remote model credentials
 and transport remain outside the effect sandbox.
+
+**One-way workspace isolation:** protect the host from unapproved agent
+effects, not the payload from host edits. Read-only resources remain live and
+changed topology/configuration refreshes automatically. Bounded streaming,
+result pages and process budgets replace general workspace file-size quotas.
+Enforcement never scans/deletes operator files to enforce payload limits.
+Protected workflow provenance remains separate. See
+[ADR 0019](docs/decisions/0019-one-way-workspace-isolation.md).
 
 **Compatibility:** every machine-consumed artifact declares an independent
 format version. Unknown or invalid semantics fail explicitly. The unreleased

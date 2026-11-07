@@ -527,7 +527,10 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
             installed,
             names(&checked(&executor, "rustup toolchain list"))
         );
-        assert_eq!(lock, fs::read(workspace.join("Cargo.lock")).unwrap());
+        let before: toml::Value = toml::from_str(std::str::from_utf8(&lock).unwrap()).unwrap();
+        let after: toml::Value =
+            toml::from_str(&fs::read_to_string(workspace.join("Cargo.lock")).unwrap()).unwrap();
+        assert_eq!(before.get("package"), after.get("package"));
     }));
     let mut after = HostState::new();
     snapshot(&rustup_home, &mut after);

@@ -308,3 +308,101 @@ SR-REQ-TOOLCHAIN-E2E or the related PATH/authority obligations. The local logs
 show four passing tests each, but noisy PATH and compiler attribution are
 separately reported rather than visible in those quiet logs. This is neither
 remote CI verification nor component acceptance.
+
+## One-way/live-resource implementation observation — 2026-11-07
+
+Independent `source-only-live-records` observed current source/tests, Cargo
+manifest and native schema without intent, queues, old repository IMPL, docs,
+reviews, chat/session checkpoints or Git history/diffs. Its follow-up reread only
+`enforcement/host_code.rs` and its private tests. The following publishes scoped
+extracts of those observations, not an implementer compliance determination.
+The observer ran no tests or builds.
+
+### Observed implementation
+
+- Request/probe entry points validate bounded version-one input and report
+  validation/enforcement failures explicitly; there is no host fallback.
+  Authoring denies networking but accepts canonical payload PATH and loader
+  settings. Closed Cargo phases retain exact argv/environment/grant rules.
+- `enforcement/source.rs::{pin,walk,ordinary}` walks absolute paths with
+  `O_PATH|O_NOFOLLOW`, retaining ordinary inode descriptors. Bubblewrap consumes
+  transferred bind descriptors before payload execution. Path replacement
+  cannot redirect retained origins; mounted contents remain live, not copied,
+  leased or content-frozen.
+- System layout exposes existing usr/lib/bin/sbin trees read-only, preserves
+  links and drops capabilities. Administrative names are not categorical bans.
+  The exact Authoring workspace vendor overlay uses pinned-relative traversal,
+  is readable/nonwritable and independent of Rust readiness; it skips linked,
+  absent or nontraversable local nodes without creating material.
+- `host_code.rs::protect` retains the running image through `/proc/self/exe`,
+  separately protects installed replacements, backend/prlimit, native loader
+  dependency closure, executable mappings and loader inputs. `Guard::check`
+  checks writable containment and direct-file device/inode equality. Guard
+  descriptors remain CLOEXEC; request environment reaches isolated payloads,
+  not unconfined launcher commands.
+- `Guard::selector_slots` inspects known origin ancestors, canonical parent
+  slots and encountered link-target ancestors, including concealed writable
+  selector slots whose final library is outside the grant. Both visited sets
+  are bounded to 16,384 entries. Read-only-only checks skip the walk; missing
+  entries retain named slots, while unexpected errors/budget overflow diagnose
+  repair or scope narrowing. No arbitrary writable-tree inventory is performed.
+- ELF/trace capture bounds metadata, maps/stdout to 1 MiB, stderr to 64 KiB and
+  closure to 512 paths, with a three-second supervised trace deadline and owned
+  group cleanup. Unsupported/incomplete traces fail explicitly.
+- Per-process NOFILE and optional FSIZE are inherited before payload startup;
+  there is no host-file polling/deletion or UID-wide NPROC. Private tmpfs RAM
+  budgets and streamed output limits remain. Descendant/group thread accounting
+  is sampled, not a hard kernel admission ceiling.
+- The separate descriptor-relative cache primitive verifies/copies/hashes,
+  fsyncs and publishes with `RENAME_NOREPLACE`, reporting post-publication sync
+  uncertainty honestly. Wire-request promotion instead refuses absent trusted
+  generation-parent capability after successful execution; attempt files
+  remain and no sibling destination is inferred or written.
+
+### Evidence and limitations
+
+Source assertions cover retained source origins, live admin layout, native
+dependencies, direct hardlinks, deleted/replaced images, descriptor closure,
+bounded/stalled traces, concealed ancestor aliases, independent writes and
+operator content/selector updates. These are finite fixtures, not adversarial
+concurrent launcher transactions or exhaustive host alias inventories.
+
+Observed limits remain: selector checks use synchronous pathname operations,
+not retained selector capabilities or an atomic topology snapshot; host trace
+and later launch remain pathname-based. Reader joins ultimately use blocking
+I/O/waits. CLI validation is not repeated by public `enforcement::run`, and
+identity fields do not all attest executed inputs. No active Cargo-home cache
+quota was observed. Package-source proxying is environment-based, not mandatory
+socket mediation; setup failure, CONNECT/DNS and blocking proxy behavior remain
+limitations. The native schema purpose enum does not cover every parser variant.
+These observations do not establish closed acquisition/network conformance.
+
+Parent-attributed final execution: Galla+Sav+Skott 1046/1046 passed
+`d98adaee-bb82-463d-849b-a366a791ee8a`; explicit native isolation passed
+`42ed4b28-e551-48a6-8a73-816bab9bfe25`, and exclusive checkout passed
+`c901e06d-9fe5-4523-90da-50145bd8433b`. Strict affected Clippy, workspace
+all-target check, formatting and matching release builds passed. The independent
+security reviewer separately marked its four original findings and related
+ancestor-selector finding fixed; final selector review confidence was 9/10.
+Neither attributed execution nor review changes accepted revisions or certifies
+the whole runner.
+
+### Separate source-blind comparison
+
+`source-blind-live-comparison` read current local intent, relevant global
+intent/ADR and fresh independent records, without source/tests, old repository
+IMPL, queues, Git/history or previous reviews. It ran nothing. It found scoped
+correspondence for live read-only views, optional FSIZE, no operator-file
+polling/deletion, explicit pinned origins/closed descriptors, bounded host-code
+and selector protection, and refusal to infer cache publication authority.
+Its finding about superseded mode-000 prose was retained chronologically and
+resolved by a narrow policy-directed documentation cleanup/follow-up, not a
+new implementation or acceptance.
+
+Known-origin/direct-file protection is not an exhaustive directory-alias/IPC
+inventory or atomic launcher transaction. Existing package-network, cache-quota,
+output-join and schema limitations remain outside whole-runner certification.
+The separate Skott lost-update qualification and external-linked snapshot gaps
+remain for explicit human arbitration; Galla evidence does not certify Skott.
+Attributed final executions remain distinct from independent observation.
+Accepted revision/revalidation metadata is unchanged.

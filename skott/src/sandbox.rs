@@ -25,11 +25,6 @@ use sha2::{Digest, Sha256};
 use crate::config::SandboxPaths;
 use crate::error::{Error, Result, io_error};
 
-mod scope;
-use scope::check_writable_scope;
-#[cfg(test)]
-use scope::check_writable_scope_with;
-
 /// The CLI argument that selects the version-one request mode on the runner.
 const REQUEST_ARGUMENT: &str = "--kvist-sandbox-request-v1";
 /// The accepted request protocol identifier.
@@ -38,10 +33,6 @@ const PROTOCOL_ID: &str = "kvist-sandbox-request-v1";
 const PROTOCOL_VERSION: u32 = 1;
 /// The maximum encoded request size before parsing.
 const MAX_REQUEST_BYTES: usize = 1 << 20;
-const MAX_IDENTITY_BYTES: u64 = 256 << 20;
-const MAX_SCOPE_ENTRIES: usize = 1_000_000;
-const MAX_SCOPE_DEPTH: usize = 128;
-const MAX_SCOPE_PATH_BYTES: usize = 32 << 20;
 const MAX_PREFLIGHT_TIME: Duration = Duration::from_secs(120);
 
 /// Reasonable, well-bounded execution limits for one tool call.
@@ -51,7 +42,7 @@ pub const fn default_resources() -> Resources {
         max_output_bytes: 1 << 20,
         max_processes: 256,
         max_files: 1 << 12,
-        max_file_bytes: 64 << 20,
+        max_file_bytes: None,
         max_scratch_bytes: 1 << 30,
         max_cache_bytes: None,
     }
@@ -162,7 +153,7 @@ pub(crate) fn build_request_with_rust(
         });
     }
     let preflight = preflight.stage("workspace_scope");
-    check_writable_scope(&workdir, &preflight)?;
+    preflight.check()?;
     let authoring = grant(
         &workdir,
         &write_root,
@@ -404,7 +395,7 @@ fn backend_identity(
 
 fn read_file_identity(label: &str, path: &Path, preflight: &Preflight<'_>) -> Result<String> {
     preflight.check()?;
-    let mut file = std::fs::OpenOptions::new()
+    let file = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
         .open(path)
@@ -428,14 +419,9 @@ fn read_file_identity(label: &str, path: &Path, preflight: &Preflight<'_>) -> Re
             reason: format!("{label} must be a regular non-link file"),
         });
     }
-    if metadata.len() > MAX_IDENTITY_BYTES {
-        return Err(Error::SandboxBuild {
-            reason: format!("{label} exceeds the 256 MiB identity bound"),
-        });
-    }
+    let mut file = file.take(metadata.len());
     let mut hash = Sha256::new();
     let mut bytes = [0_u8; 65536];
-    let mut total = 0_u64;
     loop {
         preflight.check()?;
         let count = file.read(&mut bytes).map_err(|source| {
@@ -447,12 +433,6 @@ fn read_file_identity(label: &str, path: &Path, preflight: &Preflight<'_>) -> Re
         })?;
         if count == 0 {
             break;
-        }
-        total += count as u64;
-        if total > MAX_IDENTITY_BYTES {
-            return Err(Error::SandboxBuild {
-                reason: format!("{label} grew beyond the 256 MiB identity bound"),
-            });
         }
         hash.update(&bytes[..count]);
     }
@@ -470,95 +450,6 @@ fn build_context_grant(root: &Path, index: usize, preflight: &Preflight<'_>) -> 
         purpose: Purpose::Context,
         identity,
     })
-}
-
-fn admit_scope_entry(count: &std::sync::atomic::AtomicUsize) -> Result<()> {
-    if count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= MAX_SCOPE_ENTRIES {
-        return Err(Error::SandboxBuild {
-            reason: "working directory scan exceeds 1000000 entries; narrow the working directory"
-                .into(),
-        });
-    }
-    Ok(())
-}
-
-fn queue_scope_directory(
-    path: PathBuf,
-    depth: usize,
-    stack: &mut Vec<(PathBuf, usize)>,
-    visited: &mut std::collections::BTreeSet<PathBuf>,
-    path_bytes: &mut usize,
-) -> Result<()> {
-    if depth > MAX_SCOPE_DEPTH {
-        return Err(Error::SandboxBuild {
-            reason: "working directory scan exceeds depth 128; narrow the working directory".into(),
-        });
-    }
-    if visited.contains(&path) {
-        return Ok(());
-    }
-    let charge = path.as_os_str().len().saturating_mul(2);
-    let total = path_bytes.saturating_add(charge);
-    if total > MAX_SCOPE_PATH_BYTES {
-        return Err(Error::SandboxBuild { reason: "working directory scan exceeds the 32 MiB path-storage bound; narrow the working directory".into() });
-    }
-    *path_bytes = total;
-    visited.insert(path.clone());
-    stack.push((path, depth));
-    Ok(())
-}
-
-/// Join a link target onto the directory that holds it: absolute targets are
-/// returned unchanged, relative targets resolve against the link's own
-/// directory (matching how the kernel resolves the link).
-fn resolve_link_target(target: &Path, link_path: &Path) -> PathBuf {
-    if target.is_absolute() {
-        target.to_path_buf()
-    } else {
-        link_path
-            .parent()
-            .map(|parent| parent.join(target))
-            .unwrap_or_else(|| target.to_path_buf())
-    }
-}
-
-/// Whether `candidate` resolves to a location outside `scope_root`. Symlinks in
-/// the path are resolved when they exist; a dangling candidate is normalized
-/// lexically, and one that cannot be proven inside the scope is treated as an
-/// escape (fail safe).
-fn target_escapes_scope(candidate: &Path, scope_root: &Path) -> bool {
-    match std::fs::canonicalize(candidate) {
-        Ok(resolved) => !resolved.starts_with(scope_root),
-        Err(_) => lexical_escapes(candidate, scope_root),
-    }
-}
-
-fn lexical_escapes(candidate: &Path, scope_root: &Path) -> bool {
-    !lexical_normalizes_inside(candidate, scope_root)
-}
-
-/// Lexically resolve `candidate` against `scope_root` without touching the
-/// filesystem, for symlink targets that cannot be canonicalized (dangling or
-/// looping). Returns whether the result stays inside the scope.
-fn lexical_normalizes_inside(candidate: &Path, scope_root: &Path) -> bool {
-    let mut resolved: PathBuf = PathBuf::from(scope_root);
-    for component in candidate.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                if !resolved.pop() {
-                    return false;
-                }
-            }
-            std::path::Component::RootDir => {
-                resolved.clear();
-                resolved.push(std::path::Component::RootDir);
-            }
-            std::path::Component::Prefix(_) => return false,
-            std::path::Component::Normal(part) => resolved.push(part),
-        }
-    }
-    resolved.starts_with(scope_root)
 }
 
 fn filter_environment(provided: &BTreeMap<String, String>) -> BTreeMap<String, String> {
@@ -675,9 +566,6 @@ pub fn resolve_executable(program: &str) -> Result<PathBuf> {
     if let Some(env_path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&env_path) {
             let candidate = dir.join(program);
-            if galla::validation::is_administrative_path(&candidate) {
-                continue;
-            }
             if candidate.is_file() {
                 return Ok(candidate);
             }
@@ -803,7 +691,7 @@ mod preflight_tests {
     }
 
     #[test]
-    fn identity_read_rejects_more_than_256_mib_before_request_dispatch() {
+    fn identity_read_streams_more_than_256_mib_without_a_file_quota() {
         let root = tempfile::tempdir().unwrap();
         let (sandbox, work) = fixture(root.path(), (256 << 20) + 1);
         let policy = ToolPolicy::minimum();
@@ -816,8 +704,7 @@ mod preflight_tests {
             policy: &policy,
             resources: default_resources(),
         };
-        let error = build_request(&sandbox, &request).unwrap_err();
-        assert!(error.to_string().contains("256 MiB"), "{error}");
+        build_request(&sandbox, &request).unwrap();
     }
 
     #[test]
@@ -850,64 +737,27 @@ mod preflight_tests {
     }
 
     #[test]
-    fn workspace_scan_rejects_directory_depth_over_128() {
+    fn workspace_topology_does_not_require_a_recursive_frozen_scope() {
         let root = tempfile::tempdir().unwrap();
-        let mut path = root.path().to_owned();
-        for _ in 0..128 {
+        let (sandbox, work) = fixture(root.path(), 6);
+        let mut path = work.clone();
+        for _ in 0..129 {
             path.push("d");
             std::fs::create_dir(&path).unwrap();
         }
-        let token = CancellationToken::new();
-        let preflight =
-            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
-        check_writable_scope(root.path(), &preflight).unwrap();
-        path.push("d");
-        std::fs::create_dir(&path).unwrap();
-        let error = check_writable_scope(root.path(), &preflight).unwrap_err();
-        assert!(error.to_string().contains("128"), "{error}");
-    }
-
-    #[test]
-    fn scope_entry_quota_accepts_exactly_one_million() {
-        let count = std::sync::atomic::AtomicUsize::new(0);
-        for _ in 0..MAX_SCOPE_ENTRIES {
-            admit_scope_entry(&count).unwrap();
-        }
-        assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 1_000_000);
-        assert!(admit_scope_entry(&count).is_err());
-    }
-
-    #[test]
-    fn scope_path_quota_accepts_exact_bound_then_rejects_growth() {
-        let mut stack = Vec::new();
-        let mut visited = std::collections::BTreeSet::new();
-        let mut bytes = MAX_SCOPE_PATH_BYTES - 2;
-        queue_scope_directory(PathBuf::from("d"), 0, &mut stack, &mut visited, &mut bytes).unwrap();
-        assert_eq!(bytes, 32 << 20);
-        assert!(
-            queue_scope_directory(PathBuf::from("e"), 0, &mut stack, &mut visited, &mut bytes)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn expired_preflight_and_cancellation_stop_scope_inspection() {
-        let root = tempfile::tempdir().unwrap();
-        let token = CancellationToken::new();
-        let expired = Preflight {
-            started: Instant::now() - MAX_PREFLIGHT_TIME,
-            ..Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope")
-        };
-        let error = check_writable_scope(root.path(), &expired).unwrap_err();
-        assert!(
-            error.to_string().contains("stage=workspace_scope"),
-            "{error}"
-        );
-        assert!(error.to_string().contains("elapsed_ms="), "{error}");
-        let current =
-            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
-        token.cancel();
-        assert!(check_writable_scope(root.path(), &current).is_err());
+        std::os::unix::fs::symlink(root.path(), path.join("external")).unwrap();
+        let policy = ToolPolicy::minimum();
+        let argv = vec!["/bin/bash".into(), "-c".into(), "true".into()];
+        build_request(
+            &sandbox,
+            &BuildRequest {
+                argv: &argv,
+                working_directory: &work,
+                policy: &policy,
+                ..BuildRequest::default()
+            },
+        )
+        .unwrap();
     }
 
     #[test]
@@ -932,79 +782,5 @@ mod preflight_tests {
             error.to_string().contains("stage=runner_identity"),
             "{error}"
         );
-    }
-
-    #[test]
-    fn independent_scope_directories_are_inspected_concurrently() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::{Mutex, mpsc};
-
-        let root = tempfile::tempdir().unwrap();
-        for name in ["first", "second"] {
-            std::fs::create_dir(root.path().join(name)).unwrap();
-        }
-        let token = CancellationToken::new();
-        let preflight =
-            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
-        let arrivals = AtomicUsize::new(0);
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let receiver = Mutex::new(receiver);
-        let result = check_writable_scope_with(root.path(), &preflight, &|path| {
-            if path == root.path() {
-                return Ok(());
-            }
-            if arrivals.fetch_add(1, Ordering::Relaxed) == 0 {
-                receiver
-                    .lock()
-                    .unwrap()
-                    .recv_timeout(Duration::from_secs(2))
-                    .map_err(|_| Error::SandboxBuild {
-                        reason: "independent directory inspection was serialized".into(),
-                    })?;
-            } else {
-                sender.send(()).unwrap();
-            }
-            Ok(())
-        });
-        assert!(result.is_ok(), "{result:?}");
-        assert_eq!(arrivals.load(Ordering::Relaxed), 2);
-    }
-
-    #[test]
-    fn scope_inspection_deduplicates_internal_directory_aliases_and_cycles() {
-        let root = tempfile::tempdir().unwrap();
-        let root = root.path().canonicalize().unwrap();
-        std::fs::create_dir_all(root.join("real/nested")).unwrap();
-        std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
-        std::os::unix::fs::symlink(&root, root.join("real/nested/cycle")).unwrap();
-        let token = CancellationToken::new();
-        let preflight =
-            Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
-        let seen = std::sync::Mutex::new(std::collections::BTreeSet::new());
-        check_writable_scope_with(&root, &preflight, &|path| {
-            assert!(seen.lock().unwrap().insert(path.to_owned()), "{path:?}");
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(seen.lock().unwrap().len(), 3);
-    }
-
-    #[test]
-    fn scope_inspection_keeps_hidden_directory_escape_checks() {
-        for directory in [".generated/deep", ".kvist/deep"] {
-            let root = tempfile::tempdir().unwrap();
-            let work = root.path().join("work");
-            let hidden = work.join(directory);
-            std::fs::create_dir_all(&hidden).unwrap();
-            std::os::unix::fs::symlink(root.path(), hidden.join("escape")).unwrap();
-            let token = CancellationToken::new();
-            let preflight =
-                Preflight::new(&token, default_resources().wall_time_ms).stage("workspace_scope");
-            let error = check_writable_scope(&work, &preflight).unwrap_err();
-            assert!(
-                error.to_string().contains("escapes the writable scope"),
-                "{directory}: {error}"
-            );
-        }
     }
 }

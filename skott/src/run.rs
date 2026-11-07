@@ -450,19 +450,20 @@ You are an autonomous coding agent operating inside a restricted execution sandb
 
 ## Dependency Management
 - Prepared Rust dependencies are mounted **read-only** at `/rust/vendor`, outside the writable workspace. Other offline resources depend on the advertised toolchain.
-- If a build or test fails due to a missing dependency, **report the missing dependency clearly** in your output. The sandbox cannot download packages; dependency provisioning happens outside the sandbox by the user running `kvist vendor`.
-- **DO NOT** manually modify dependency manifests (e.g., `Cargo.toml`, `package.json`, lockfiles) or touch vendor directories to manage packages. Manual edits will cause desynchronization and break the workspace.
+- Missing or stale build resources block the affected build/test, not source inspection or user-requested manifest edits within the workspace. Explain which verification remains unavailable; do not claim unrun tests passed.
+- Cargo remains offline, but may create/update the writable project lock; use `--locked` when specifically requested. Missing packages require host acquisition: the operator can run `skott --vendor --cwd DIR` and optionally `skott --vendor --check --cwd DIR`. Replace DIR with the actual host project path. Available vendor material needs no application receipt or frozen lock digest. Host edits/provisioning are legitimate live inputs; mount topology and source configuration refresh at the next tool without restart. Do not write the read-only vendor tree or claim unavailable verification passed.
 
 ## Tool Protocol & File Operations
-- **Exact File Edits**: Always provide the fresh SHA-256 hash returned by the most recent `read_file` when calling `edit_file`.
-- **Incremental Mutations**: Prefer `edit_file` for one exact replacement, `apply_patch` for multiple exact unified hunks in one file, and `append_file` for verbatim appends. Patch/append require the current full-file SHA-256. Patch input has no file headers; all hunks validate before an atomic write.
+- **Exact File Edits**: Use exact replacement/context and inspect local conflicts. Revision preconditions are optional, not mandatory ceremony; only use a digest known to describe the whole current file when explicitly guarding an operation.
+- **Incremental Mutations**: Prefer `edit_file` for one exact replacement, `apply_patch` for multiple exact unified hunks in one file, and `append_file` for verbatim appends. Patch input has no file headers; all hunks validate before an atomic write. General source-file sizes are not capped; input text and output pages remain bounded to protect working memory/context.
 - **Byte Offsets**: `read_file` offsets are exact UTF-8 byte positions, NOT line numbers.
   - Omitting `offset` continues that path's last successful page within this prompt, initially byte 0. You may instead pass the returned `next_offset` explicitly.
-  - To re-read from the start, pass `offset: 0`. Continuation rejects changed files; restart explicitly.
+  - To re-read from the start, pass `offset: 0`. Continuation reads live bytes without freezing the revision. Check the returned effective offset if a file shrank or a UTF-8 boundary moved.
   - Stop at `next_offset: null`. Further implicit reads return an empty EOF page and repeated terminal calls trigger loop detection.
   - Never describe an offset in conversational text expecting the tool to use it—pass it directly in the tool arguments.
-- **Search Scope**: Restrict searches to bounded source directories or files. Do not search binary objects or executables.
+- **Search Scope**: Start with relevant source directories or files; use a literal `file_pattern` (such as `.rs`), not a glob. Native tools skip special descendants rather than opening sockets/FIFOs. Search work/results are bounded, not file sizes: use `next_scan`/`scan_offset` for a large file and `next_offset` separately for collected pages. Never imply full coverage for an incomplete scan. Follow diagnostics or use authorized workspace shell inspection for unsupported shapes/traversal budgets; no broader grants or extra approval are needed for an already-authorized alternative.
 - **Execution & Status**: Always check exit codes and error status returned by tools. Never assume an operation succeeded without inspecting the output.
+- **Helpful Recovery**: An inspection limit or unavailable toolchain is not a blanket security denial. Read the actual diagnostic, adapt the scope or choose another supported action within existing authority. Continue safe independent work. Explain a real blocker promptly with the affected operation, concrete cause, preserved progress and exact next action; do not invent additional prohibitions or require approval for an already-authorized narrower read. For failed or uncertain effectful commands, inspect state before retrying; never blindly replay or broaden grants.
 
 ## Workflow & Long-Session Discipline
 Break complex tasks down into small, verifiable subtasks:
@@ -975,6 +976,21 @@ mod tests {
         assert!(prompt.contains("HOST UNCONFINED") && prompt.contains("/tmp/project"));
         assert!(prompt.contains("NOT Kvist's protected task broker"));
         assert!(!prompt.contains("running inside a sandbox"));
+    }
+
+    #[test]
+    fn sandbox_instructions_recover_without_blanket_source_or_manifest_blockers() {
+        let prompt = system_prompt("/workspace");
+        assert!(prompt.contains("next_scan`/`scan_offset"));
+        assert!(prompt.contains("file_pattern"));
+        assert!(prompt.contains("Continue safe independent work"));
+        assert!(prompt.contains("user-requested manifest edits"));
+        assert!(prompt.contains("skott --vendor --cwd DIR"));
+        assert!(prompt.contains("may create/update the writable project lock"));
+        assert!(prompt.contains("without restart"));
+        assert!(prompt.contains("preconditions are optional"));
+        assert!(!prompt.contains("Continuation rejects changed files"));
+        assert!(!prompt.contains("DO NOT** manually modify dependency manifests"));
     }
 
     #[test]

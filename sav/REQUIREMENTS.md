@@ -2,6 +2,15 @@
 
 # Sav Requirements
 
+## SAV-REQ-WORKSPACE-OFFLINE
+
+Provide a workspace Rust wrapper with offline but not forced-locked Cargo/
+Clippy resolution. Retain the existing locked wrapper for protected consumers.
+Selection, fixed source configuration, private homes, literal arguments and
+network authority MUST remain unchanged. Test actual wrapper arguments and
+consumer native offline lock resolution. This user-directed ADR 0019 bundle
+has an explicit local advisory exception while receipts are unavailable.
+
 ## SAV-REQ-OFFLINE-SOURCE-CONFIG
 
 Cargo and Clippy wrappers MUST consume an optional caller-staged fixed

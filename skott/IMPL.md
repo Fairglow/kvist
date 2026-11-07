@@ -1,6 +1,89 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Bounded inspection recovery observations - 2026-11-07
+
+`tool-recovery-source-observer` independently inspected current
+`src/file_tools.rs`, `src/tools.rs`, `src/run.rs` and
+`tests/native_file_tools.rs`, excluding intent, queue, previous records/reviews,
+chat and Git history. It ran no tests and changed no files.
+It observed deterministic descriptor-relative traversal that counts and skips
+enumerated symlinks and special entries without opening those classified entries.
+Explicit special search scopes are rejected before opening; ordinary files are
+opened nonblocking/no-follow and descriptor-checked. Unreadable ordinary files
+and detected unsupported substitutions still fail.
+
+Search admits whole files up to the remaining 8 MiB budget, including an exact
+fit. The next otherwise eligible file that cannot fit stops recursive traversal.
+Collected matches survive with `scan_limit_reached`, actual charged bytes,
+incomplete coverage and narrowing guidance. Sorted result pagination describes
+collected matches, not unscanned files; calls rescan rather than retain snapshots.
+Binary bytes consume budget; oversized and literal-filtered files do not.
+Existing file, depth, entry, matching-line and encoded-output bounds remain.
+Hard traversal/match errors include narrowing instructions.
+
+Model instructions distinguish recoverable inspection/toolchain limits from
+security denials, continue safe independent work, and explain concrete blockers.
+User-requested manifest edits are no longer categorically prohibited; acquisition
+and lock regeneration remain explicit host operations, with vendor/check/restart
+before prepared offline/locked verification. Prompt assertions establish text,
+not actual model compliance.
+Separate `prerequisite-source-observer` inspected only `src/error.rs`, without
+intent/history and without executing tests. It observed preservation of the
+specific prerequisite cause/remedy, an affected-operation retry restriction and
+explicit permission to continue other supported work, replacing the unrelated
+installation-repair prescription. Its assertions likewise verify presentation,
+not dispatch or model behavior. Neither observer established a deterministic
+high-confidence defect or certified compliance.
+
+The main observer retained filesystem race limits: pathname classifications can
+race with opens, regular-to-regular replacement is not identity-checked, and
+same-size content changes evade size checks. A racing ordinary-to-special
+substitution may be opened before descriptor rejection. Classified-special skip
+behavior is not a race-proof guarantee; no sandbox escape was demonstrated.
+
+Implementer-attributed execution: five new/changed regressions failed before
+production repair in nextest `a4fb732b-1f07-4e66-bc72-0e93cc3a12ca`.
+The supplementary prerequisite-message regression independently failed before
+its production repair in `6100a788-4e82-48cd-b50d-b7d29928e989`.
+Final nextest `f0a3ccc3-e546-4629-97eb-ec683be1a973` passed all 67 selected
+native-file, incremental mutation, worker/registry and error tests, including
+actual SandboxExecutor special-entry/partial-search/narrowed-recovery trials.
+Strict Skott all-target Clippy, formatting, release binaries and whitespace
+checks passed. Component intent structurally validates; acceptance is unchanged.
+
+Read-only helper checks on the actual checkout reproduced the recorded discovery
+and search argument shapes: discovery skipped one special entry and returned
+without failure; broad search retained partial results after 8,265,444 charged
+bytes. Narrowing to `maerg/src/bark` with literal `.rs` filtering found
+`tui/workspace/view.rs:133` with complete coverage and 497,748 charged bytes.
+These checks used host namespace paths, not a claimed whole-checkout sandbox
+trial. The original session ended cancelled after five read-only calls, three
+unsuccessful; no shell/mutation calls or completed fix were recorded.
+Its stale vendored lock state remains a real build prerequisite: a read-only
+check still fails. No dependency provisioning, original answer-input change,
+automatic prompt replay, acceptance or blanket security certification occurred.
+
+Separate `tool-recovery-source-blind-comparator` compared scoped intent with
+these observations and attributed evidence without Rust/source access.
+It reported correspondence for classified-special handling, exact/overflow
+whole-file budgets, truthful collected-result pagination, retained bounds and
+operation-specific authoring/verification guidance. It retained the unconditional
+intent wording "without opening" versus a racing ordinary-to-special substitution
+as an explicit arbitration item; intent was not rewritten to conceal that limit.
+It also retained same-size/replacement races, cooperative execution, finite
+field-invariant evidence and the lack of real-model qualification. Its initial
+oversized IMPL read exposed older observation sections, which it excluded from
+its comparison; strict record-scope isolation was therefore not achieved.
+No acceptance or compliance certification is implied.
+
+Native `component validate skott` and `doctor` validate this component's intent
+and queue. `task next skott` remains blocked by pre-existing missing structural
+sections in the separate dependencies component, not by this recovery change.
+Release binaries were rebuilt at `/opt/target/release/skott` and
+`/opt/target/release/skott-file-tool`; the separate user-installed launchers and
+running sessions were not replaced or stopped.
+
 ## Final native Rust support observations - 2026-11-06
 
 `final-rust-impl-observer` independently read source/test assertions without
@@ -1881,3 +1964,153 @@ stopping existing sessions. Installed CLI versions were Kvist 0.3.0 and Skott
 0.3.1; both installed frontends reported the same ready vendor tree. The retired
 root receipt was removed, generated state/staging ignore rules were checked, and
 the optional root policy remains trackable. Final native queue validation passed.
+
+## Live workspace implementation observation — 2026-11-07
+
+Independent `source-only-live-records` observed scoped source/test assertions,
+Cargo manifest and directly referenced helpers without intent, queues, old
+repository IMPL, docs, reviews, chat/session checkpoints or Git history/diffs.
+A source-only follow-up read only `vendoring_cli.rs` and `rustup_inventory.rs`.
+The following publishes scoped extracts, not implementer certification.
+The observer ran no tests/builds.
+
+### Observed file tools and progress
+
+`ToolRegistry` renders stable shell/read/write/list/find/search/edit/append/patch
+definitions without effects. Default command filters are empty; operator
+substring/prefix filters remain advisory. Native arguments and result pages
+remain bounded, including 64 KiB text, 1024-byte queries and 7000 encoded bytes;
+source/result files have no general quota.
+
+`stream.rs::read_page` seeks only a bounded page and UTF-8 edge lookaround.
+Ordinary pages have `sha256:null`, actual page digest, total length and
+continuation offsets. Full raw-file hashing requires explicit full-hash/guard
+input. UTF-8 validation is page-local; adjusted/shrunken offsets are explained.
+Directory/search traversal is no-follow and deterministic, with entry/depth
+budgets; symlink/special descendants are skipped/counted, not opened.
+
+`search.rs` streams literal/multiline matching with an 8 MiB per-call work
+budget. Match pagination is distinct from `next_scan/scan_offset`; query/UTF-8
+overlap preserves boundary matches. Deep global line counts can be null, with
+local scan/preview coordinates. Resuming an interrupted directory file does
+not cover later siblings; pagination rescans live data, not a snapshot.
+
+Mutation streams revisions/replacements through adjacent exclusive temporary
+files. Exact single-occurrence matching includes overlaps; append is verbatim,
+and unified hunks require exact coordinates/context with no paths/fuzz.
+Unrelated bytes, mode, CRLF and missing final newline are preserved. Digest
+guards are optional. Preimage/revision checks, sync and descriptor-relative
+rename reject detected stale edits; they are not transactional CAS against
+arbitrary host writers. A late writer can race final recheck/rename, and a
+post-rename sync error can accompany an installed effect.
+
+Prompt cursors use actual validated page metadata, not synthesized full-file
+guards; failed reads do not advance. `NativeProgress` observes only authorized
+mutation targets, not recursive shell workspace state. Evidence pairs exact
+intent/outcome once, is bounded, and loses credit on ambiguity. Unavailable
+observations preserve actual outcomes with diagnostics and no progress claim.
+Observed changes do not establish causation against concurrent host writers.
+
+### Observed scope and live Rust behavior
+
+The executor retains canonical workspace origin when writable selector parents
+could otherwise steer outside grants; operator-controlled outside selectors
+remain live. Native helpers execute in the sandbox, not as privileged host file
+RPC. Private staging requires a writable canonical parent; a root-filesystem
+workspace or unwritable parent cannot stage.
+
+Sandbox requests are Authoring/System/network-denied with exact workspace
+authority, disjoint read-only context and an outside runner. Hashing streams
+opened initial lengths without a general size cap; directory identities are
+labels, not recursive inventories. Defaults retain wall/output/process/FD/RAM
+budgets and no FSIZE quota. A separately selected `HostExecutor` is unconstrained
+host execution, not a failed-sandbox fallback; every frontend selection was not
+audited. Process cleanup/cancellation reports bounded drain/reap uncertainty.
+
+Trusted system/host-home Rustup and operator-owned registrations select
+canonical installations outside writable/credential scopes. Writable selector
+parents cannot authorize external targets. The selected compiler plus bounded
+optional registrations/extensions are read-only; inventory is capped at 128
+names with omission guidance. Optional components are ultimately tested by
+actual command execution, not full startup capability attestation.
+
+`live.rs::Cache` observes finite topology/configuration/selected-executable
+metadata, repreparing/recovering on changes without restart. Mounted contents
+remain live; no recursive hashes, runtime receipt, frozen lock digest or reader
+lease gate workspace work. This does not prove refresh of every possible
+outside change. Missing/unsupported vendor resources and unavailable requested
+Rust (including workspace On/forced) do not block independent tools. Generic
+System On-profile availability still has explicit error semantics.
+
+Native Cargo configuration retains tables and retargets directory sources;
+malformed/unreadable config causes Cargo-local errors without hiding rustc.
+Workspace wrappers inject offline but not forced locked resolution; callers'
+explicit `--locked` still applies. Homes/cache/selection are invocation-private,
+target output persists, and wrappers do not add namespace authority. Explicit
+operator provisioning/checks remain separate, with lock/publication validation.
+
+### Source assertions and attributed execution
+
+Tests assert large streamed mutations, 128 MiB hashing under 64 MiB address
+space, sparse terabyte head/tail paging, page-local UTF-8, resumable multiline
+search, truthful coverage, exact guards/patches, helper isolation and actual
+progress pairing. Rust tests assert live recovery, independent optional-tool
+failure, private homes, read-only readable vendor aliases, Cargo-native checksum
+errors, lock creation/update versus explicit locked refusal and native build/
+fmt/test/doc/Clippy chains.
+
+The observed CLI tests distinguish workspace preparation from explicit operator
+fences: requested Rust remains advertised with missing lock, recovery markers
+or empty resolver state, without preparation rewriting the project; explicit
+vendor check retains publication refusal. A local Git fixture builds offline
+with readable/nonwritable vendor aliases, diagnoses a subsequent host checksum
+change and restores material through explicit force provisioning.
+The inventory test compares exposed host/native versions/targets/components,
+executes compilers and denies mutations. Lock comparison checks parsed package
+tables, not byte/version/format freezing. Before/after host snapshots are
+test-only evidence, not runtime leases or atomic whole-tree guarantees.
+
+Parent-attributed final execution passed 1046/1046 Galla+Sav+Skott tests
+(`d98adaee-bb82-463d-849b-a366a791ee8a`), native isolation
+(`42ed4b28-e551-48a6-8a73-816bab9bfe25`) and exclusive native checkout
+(`c901e06d-9fe5-4523-90da-50145bd8433b`). An earlier native checkout failed on
+missing offline uuid1.29.1, then passed after adding only that cached package to
+the live project vendor; no existing packages, receipt, source or lock changed.
+Earlier full-suite fixture/concurrency and stale-policy assertions were
+diagnosed, coupled assertions updated, and the complete suite passed with
+TMPDIR unset/four threads. Strict checks and matching release binaries passed.
+Existing installed launchers/sessions were not deployed or restarted.
+Live-model qualifications remain unexecuted; these records neither accept
+intent nor certify model behavior, every host race or the whole application.
+
+### Separate source-blind comparison and unresolved arbitration
+
+`source-blind-live-comparison` read current local requirements/contract/design,
+relevant global intent/ADR and the fresh independent records. It accessed no
+source/test files, cited source filenames, old repository IMPL, queues, Git,
+history or prior reviews, and ran nothing. It found substantial scoped
+correspondence for streaming/live tools, bounded truthful continuation,
+optional guards, prepared-scope progress, live resource recovery, optional
+inventory and offline caller-selected locking. Its superseded lower-policy
+prose finding was retained chronologically and reconciled with authoritative
+policy through a narrow documentation-only follow-up.
+
+Two findings remain **unresolved for explicit human arbitration**:
+
+- The top lost-concurrent-edit requirement is broader than the contract/design
+  and observed nontransactional final-preimage-check/rename guarantee.
+  Detected stale changes are protected, but arbitrary external writers can
+  race publication. Neither intent nor source was automatically changed to
+  conceal this qualification.
+- The native host snapshot hashes `.rustup` but does not descend external
+  linked installations. Read-only use and version/target execution evidence
+  do not establish before/after content coverage of every linked root.
+  Separate Galla explicit-grant evidence does not certify automatic Skott
+  preparation; this verification gap was not concealed.
+
+Finite topology refresh, non-atomic full-digest/page reads, known-origin
+protection and unexecuted live-model trials limit broader claims. Existing
+Galla package-network/resource/schema limitations are not newly introduced
+network-denied workspace failures, but prevent blanket cross-component
+certification. Passing attributed executions do not settle arbitration,
+accept intent or change recorded accepted revisions/revalidation metadata.

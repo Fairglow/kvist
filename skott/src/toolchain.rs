@@ -213,7 +213,8 @@ impl ToolchainProbe for HostProbe {
 pub const MOUNTED_SYSTEM_DIRS: &[&str] = &["/usr", "/lib", "/lib64", "/bin"];
 
 /// Fixed System search directories shared by generic and prepared environments.
-pub(crate) const SANDBOX_SYSTEM_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+pub(crate) const SANDBOX_SYSTEM_PATH: &str =
+    "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin";
 
 /// Whether `profile` has a usable interpreter under one of `search_dirs` that
 /// resolves (after symlink canonicalisation) beneath a `mounted` root.
@@ -229,15 +230,12 @@ pub fn language_available(profile: ToolProfile, search_dirs: &[PathBuf], mounted
     for base in search_dirs {
         for name in binaries {
             let path = base.join(name);
-            if galla::validation::is_administrative_path(&path) || !path.is_file() {
+            if !path.is_file() {
                 continue;
             }
             let Ok(canonical) = std::fs::canonicalize(&path) else {
                 continue;
             };
-            if galla::validation::is_administrative_path(&canonical) {
-                continue;
-            }
             if canonical.file_name().is_some_and(|file| file == "rustup") {
                 continue;
             }

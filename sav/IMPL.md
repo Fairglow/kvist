@@ -1042,3 +1042,58 @@ The implementing context's final all-feature workspace nextest run passed
 2219 tests with zero failures and 15 existing skips. Strict workspace Clippy,
 formatting and the workspace documentation test passed. These are attributed
 execution results, not acceptance, review receipts or broad certification.
+
+## Workspace offline wrapper observation — 2026-11-07
+
+Independent `source-only-live-records` read `offline_rust.rs`, its inline tests,
+export and Cargo manifest without intent, queues, prior repository IMPL,
+docs/reviews, chat/session checkpoints or Git history/diffs. It ran no
+tests/builds and characterized no other Sav subsystem. These are scoped
+extracts of its source-derived record, not implementer certification.
+
+`INITIALIZE` creates private selection settings and links mounted read-only
+registrations/default facade; it copies no compiler installation and installs
+nothing. `RustTool` limits rendering to eight fixed tools; rendering itself has
+no I/O. Quoted argv and fixed tool names are passed through native Rustup
+selection, including explicit leading `+name`, rather than command evaluation.
+
+`wrapper` uses `/usr/bin/rustup` and adds offline/locked Cargo and Clippy flags.
+`workspace_wrapper` uses mounted `/rust/rustup` and adds offline without forced
+locked resolution. Explicit caller `--locked` remains forwarded. Both use fixed
+`/rust/vendor` source resolution and optional fixed native config; neither
+requires vendor receipts, hashes Cargo.lock nor inventories packages.
+Cargo working-directory and compiler source remapping remain quoted,
+environment-controlled conveniences, not authorization. Delegated Clippy
+strips only its leading subcommand token.
+
+The generator grants no host authority and has no supervision, recovery or
+resource catalogue. Missing native resources/commands fail through shell/exec
+status. Optional tools can be rendered when absent. Isolation, no-install
+policy, read-only ownership and safe host environment are caller obligations;
+offline/locked wrapper text is not mandatory network confinement or a guard
+against direct alternate executables.
+
+Inline tests assert rendered strings, not native shell execution. Observed
+Skott consumer tests execute lock resolution, vendored Clippy and native
+compile/fmt/check/test/doc chains with independent optional-component failure.
+Parent-attributed final Galla+Sav+Skott 1046/1046 passed
+`d98adaee-bb82-463d-849b-a366a791ee8a`; explicit isolation and exclusive checkout
+passed `42ed4b28-e551-48a6-8a73-816bab9bfe25` and
+`c901e06d-9fe5-4523-90da-50145bd8433b`. Strict checks and matching consumer
+release binaries passed. These are not independent executions, protected-
+consumer certification, acceptance or review receipts.
+
+### Separate source-blind comparison
+
+`source-blind-live-comparison` compared current local intent and fresh
+independent observations with attributed execution results, without raw source,
+test source, old repository IMPL, queues, Git/history or prior reviews. It ran
+nothing. Workspace offline/no-forced-lock versus protected locked rendering,
+literal selection/argument handling and caller-owned authority correspond
+within this bounded wrapper scope. Unobserved protected consumers and scripts
+alone are not independently qualified isolation/network guarantees.
+
+The separate Skott lost-update qualification and linked-root snapshot gap
+remain for explicit human arbitration; they are not resolved by wrapper string
+tests or attributed consumer success. No acceptance, receipt, certification or
+accepted-revision/revalidation update is implied by completed review work.

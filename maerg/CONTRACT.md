@@ -1278,8 +1278,9 @@ effect grants, policy approval, or output redaction.
 ## Errors and failure semantics
 
 Rust authoring uses a bin-only PATH including `/usr/local/bin`.
-Standard administrative directories are excluded by Galla in every phase;
-language verification does not select tools through sbin aliases.
+Galla provides live read-only standard system trees, including sbin; this does
+not grant host privileges. The maerg's explicit language-tool selection still
+uses its fixed bin-only search policy.
 
 For components with a local `Cargo.toml`, authoring prepares every validated
 standard-layout host Rust installation read-only at `/rust/toolchains/N`.

@@ -1,4 +1,4 @@
-//! Bounded native file primitives. This module is not an isolation boundary:
+//! Streaming native file primitives. This module is not an isolation boundary:
 //! the sandbox executor supplies the namespace and authority of the helper.
 
 use std::fs::{File, OpenOptions};
@@ -8,8 +8,8 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use nix::fcntl::{AT_FDCWD, OFlag, openat, renameat};
-use nix::sys::stat::{Mode, fchmod};
+use nix::fcntl::{AT_FDCWD, AtFlags, OFlag, openat, renameat};
+use nix::sys::stat::{Mode, SFlag, fchmod, fstatat};
 use nix::unistd::{UnlinkatFlags, unlinkat};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -17,13 +17,17 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result, io_error};
 
+mod mutation;
 mod patch;
 mod revision;
+mod search;
+mod stream;
+use mutation::{Mutation, replace};
+use search::search;
+use stream::read_page;
 
 /// Maximum encoded helper request, checked before parsing.
 pub const MAX_REQUEST_BYTES: usize = 256 * 1024;
-/// Maximum complete file size for reads, edits and scanned files.
-pub const MAX_FILE_BYTES: usize = 1024 * 1024;
 /// Maximum success output including the helper's line terminator. Complete
 /// JSON pages fit below the loop's combined 8 KiB result preview.
 pub const MAX_OUTPUT_BYTES: usize = 7000;
@@ -51,6 +55,8 @@ struct ReadArgs {
     offset: usize,
     #[serde(default = "default_read_limit")]
     limit: usize,
+    #[serde(default)]
+    include_sha256: bool,
     #[serde(
         default,
         deserialize_with = "optional_string",
@@ -99,6 +105,18 @@ struct SearchArgs {
     offset: usize,
     #[serde(default = "default_page_limit")]
     limit: usize,
+    #[serde(
+        default,
+        deserialize_with = "optional_offset",
+        skip_serializing_if = "Option::is_none"
+    )]
+    scan_offset: Option<u64>,
+}
+
+fn optional_offset<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<u64>, D::Error> {
+    u64::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,7 +144,12 @@ struct EditArgs {
     path: String,
     old_text: String,
     new_text: String,
-    expected_sha256: String,
+    #[serde(
+        default,
+        deserialize_with = "optional_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    expected_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,7 +157,12 @@ struct EditArgs {
 struct AppendArgs {
     path: String,
     content: String,
-    expected_sha256: String,
+    #[serde(
+        default,
+        deserialize_with = "optional_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    expected_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,7 +170,12 @@ struct AppendArgs {
 struct PatchArgs {
     path: String,
     patch: String,
-    expected_sha256: String,
+    #[serde(
+        default,
+        deserialize_with = "optional_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    expected_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -307,7 +340,7 @@ impl FileRequest {
         canonical_path(self.operation.path())?;
         match &self.operation {
             Operation::ReadFile(a) => {
-                page_bounds(a.offset, a.limit, 16384, MAX_FILE_BYTES)?;
+                page_bounds(a.offset, a.limit, 16384, usize::MAX)?;
                 if let Some(expected) = &a.expected_sha256 {
                     validate_digest(expected)?;
                 }
@@ -338,17 +371,23 @@ impl FileRequest {
                 if a.old_text.is_empty() {
                     return Err(failure("old_text must be nonempty"));
                 }
-                validate_digest(&a.expected_sha256)?;
+                if let Some(expected) = &a.expected_sha256 {
+                    validate_digest(expected)?;
+                }
             }
             Operation::AppendFile(a) => {
                 self.validate_mutation(&a.path)?;
                 text_bound(&a.content)?;
-                validate_digest(&a.expected_sha256)?;
+                if let Some(expected) = &a.expected_sha256 {
+                    validate_digest(expected)?;
+                }
             }
             Operation::ApplyPatch(a) => {
                 self.validate_mutation(&a.path)?;
                 text_bound(&a.patch)?;
-                validate_digest(&a.expected_sha256)?;
+                if let Some(expected) = &a.expected_sha256 {
+                    validate_digest(expected)?;
+                }
             }
         }
         Ok(())
@@ -473,19 +512,19 @@ pub fn execute_file_request(request: &FileRequest) -> Result<Value> {
             request,
             &a.path,
             Mutation::Edit(&a.old_text, &a.new_text),
-            Some(&a.expected_sha256),
+            a.expected_sha256.as_deref(),
         )?,
         Operation::AppendFile(a) => replace(
             request,
             &a.path,
             Mutation::Append(&a.content),
-            Some(&a.expected_sha256),
+            a.expected_sha256.as_deref(),
         )?,
         Operation::ApplyPatch(a) => replace(
             request,
             &a.path,
             Mutation::Patch(&a.patch),
-            Some(&a.expected_sha256),
+            a.expected_sha256.as_deref(),
         )?,
     };
     ensure_output_bound(&output)?;
@@ -514,95 +553,12 @@ fn ensure_output_bound(output: &Value) -> Result<()> {
     }
 }
 
-fn sha256(bytes: &[u8]) -> String {
-    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
-}
-
-fn bounded_read(mut file: File) -> Result<Vec<u8>> {
-    let metadata = file
-        .metadata()
-        .map_err(|e| io_error("inspect file descriptor", None, e))?;
-    if !metadata.is_file() {
-        return Err(failure("target must be a regular file"));
-    }
-    if metadata.len() > MAX_FILE_BYTES as u64 {
-        return Err(failure("file exceeds the complete-file byte bound"));
-    }
-    let mut bytes = Vec::new();
-    (&mut file)
-        .take((MAX_FILE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| io_error("read bounded file", None, e))?;
-    if bytes.len() > MAX_FILE_BYTES {
-        return Err(failure("file exceeds the complete-file byte bound"));
-    }
-    Ok(bytes)
-}
-
 fn open_read(path: &str, nofollow: bool) -> Result<File> {
     OpenOptions::new()
         .read(true)
         .custom_flags(nix::libc::O_NONBLOCK | if nofollow { nix::libc::O_NOFOLLOW } else { 0 })
         .open(path)
         .map_err(|e| io_error("open file for bounded read", Some(path), e))
-}
-
-fn read_page(args: &ReadArgs) -> Result<Value> {
-    let bytes = bounded_read(open_read(&args.path, false)?)?;
-    let digest = sha256(&bytes);
-    if args
-        .expected_sha256
-        .as_ref()
-        .is_some_and(|expected| expected != &digest)
-    {
-        return Err(failure(
-            "read preimage changed; restart with explicit offset: 0 and no expected_sha256",
-        ));
-    }
-    let text = std::str::from_utf8(&bytes).map_err(|_| failure("read_file requires UTF-8 text"))?;
-    if args.offset > bytes.len() || !text.is_char_boundary(args.offset) {
-        return Err(failure(
-            "offset must be within the file at a UTF-8 byte boundary",
-        ));
-    }
-    let mut end = args.offset.saturating_add(args.limit).min(bytes.len());
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    if end == args.offset && end < bytes.len() {
-        return Err(failure("limit is too small for the next UTF-8 character"));
-    }
-    let outcome = |end| {
-        json!({
-            "content":&text[args.offset..end], "sha256":digest,
-            "offset":args.offset, "next_offset":(end < bytes.len()).then_some(end), "total_bytes":bytes.len()
-        })
-    };
-    let requested = outcome(end);
-    if output_fits(&requested)? {
-        return Ok(requested);
-    }
-    let boundaries: Vec<usize> = text[args.offset..end]
-        .char_indices()
-        .map(|(i, _)| args.offset + i)
-        .chain(std::iter::once(end))
-        .collect();
-    let mut lower = 1;
-    let mut upper = boundaries.len().saturating_sub(1);
-    let mut fitted = None;
-    while lower <= upper {
-        let middle = lower + (upper - lower) / 2;
-        let candidate = outcome(boundaries[middle]);
-        if output_fits(&candidate)? {
-            fitted = Some(candidate);
-            lower = middle + 1;
-        } else {
-            upper = middle - 1;
-        }
-    }
-    fitted.ok_or_else(|| {
-        failure("a single UTF-8 character cannot fit the complete encoded output bound")
-    })
 }
 
 fn directory(path: &str) -> Result<OwnedFd> {
@@ -659,7 +615,9 @@ fn entries(fd: &OwnedFd) -> Result<Vec<Entry>> {
     let mut result = Vec::new();
     for entry in iterator {
         if result.len() >= MAX_ENTRIES {
-            return Err(failure("directory entry count exceeds the traversal bound"));
+            return Err(failure(format!(
+                "directory entry count exceeds the {MAX_ENTRIES}-entry traversal bound; select a smaller directory scope"
+            )));
         }
         let entry = entry.map_err(|e| io_error("read ordinary directory entry", None, e))?;
         let name = entry
@@ -736,8 +694,9 @@ struct WalkState {
     skipped_symlinks: usize,
     skipped_binary: usize,
     skipped_generated: usize,
-    skipped_oversized: usize,
+    skipped_special: usize,
     excluded_files: usize,
+    scan_limit_reached: bool,
 }
 
 impl WalkState {
@@ -745,8 +704,9 @@ impl WalkState {
         self.skipped_symlinks == 0
             && self.skipped_binary == 0
             && self.skipped_generated == 0
-            && self.skipped_oversized == 0
+            && self.skipped_special == 0
             && self.excluded_files == 0
+            && !self.scan_limit_reached
     }
 }
 
@@ -766,12 +726,19 @@ fn walk(
     visit: &mut impl FnMut(&OwnedFd, &str, &str, &mut WalkState) -> Result<()>,
 ) -> Result<()> {
     if depth > MAX_DEPTH {
-        return Err(failure("recursive traversal exceeds the depth bound"));
+        return Err(failure(format!(
+            "recursive traversal exceeds the depth bound ({MAX_DEPTH}); select a deeper, smaller directory scope"
+        )));
     }
     for entry in entries(fd)? {
+        if state.scan_limit_reached {
+            break;
+        }
         state.visited += 1;
         if state.visited > MAX_ENTRIES {
-            return Err(failure("recursive traversal exceeds the entry count bound"));
+            return Err(failure(format!(
+                "recursive traversal exceeds the entry count bound ({MAX_ENTRIES}); narrow the directory path; a file filter does not prune directories"
+            )));
         }
         let full = if path == "/" {
             format!("/{}", entry.name)
@@ -797,9 +764,7 @@ fn walk(
         } else if entry.kind.is_file() {
             visit(fd, &entry.name, &full, state)?;
         } else {
-            return Err(failure(
-                "recursive traversal encountered an unsupported ordinary entry",
-            ));
+            state.skipped_special += 1;
         }
     }
     Ok(())
@@ -845,6 +810,7 @@ fn discover(args: &FindArgs) -> Result<Value> {
     fitted_page(&files, args.offset, args.limit, |page, next| {
         json!({"files":page,"offset":args.offset,"next_offset":next,"total":files.len(),
         "skipped_symlinks":state.skipped_symlinks,"skipped_generated":state.skipped_generated,
+        "skipped_special":state.skipped_special,
         "visited_entries":state.visited,"complete":state.complete()})
     })
 }
@@ -866,6 +832,17 @@ fn search_scope(path: &str) -> Result<SearchScope> {
     } else {
         parent_path
     })?;
+    let metadata = fstatat(&parent, name, AtFlags::AT_SYMLINK_NOFOLLOW)
+        .map_err(|e| failure(format!("cannot inspect search scope: {e}")))?;
+    let kind = SFlag::from_bits_truncate(metadata.st_mode) & SFlag::S_IFMT;
+    if kind == SFlag::S_IFLNK {
+        return Err(failure("search scope must not be a symlink"));
+    }
+    if kind != SFlag::S_IFREG && kind != SFlag::S_IFDIR {
+        return Err(failure(
+            "search scope must be a regular file or directory; choose a source file or directory, not a socket, FIFO or device",
+        ));
+    }
     let fd = openat(
         &parent,
         name,
@@ -889,402 +866,5 @@ fn search_scope(path: &str) -> Result<SearchScope> {
         Ok(SearchScope::File(file))
     } else {
         Err(failure("search scope must be a regular file or directory"))
-    }
-}
-
-fn scan_bytes(mut file: File, initial_len: u64) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    (&mut file)
-        .take((MAX_FILE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| io_error("read bounded search file", None, e))?;
-    if bytes.len() > MAX_FILE_BYTES {
-        return Err(failure(
-            "ordinary search file grew beyond the complete-file byte bound",
-        ));
-    }
-    let fresh = file
-        .metadata()
-        .map_err(|e| io_error("reinspect search file descriptor", None, e))?;
-    if bytes.len() as u64 != initial_len || fresh.len() != initial_len {
-        return Err(failure("ordinary search file changed size while reading"));
-    }
-    Ok(bytes)
-}
-
-fn search_file(
-    file: File,
-    path: &str,
-    relative: &str,
-    args: &SearchArgs,
-    state: &mut WalkState,
-    matches: &mut Vec<Value>,
-) -> Result<()> {
-    let metadata = file
-        .metadata()
-        .map_err(|e| io_error("inspect ordinary search file", None, e))?;
-    if !metadata.is_file() {
-        return Err(failure(
-            "ordinary search file changed to an unsupported entry",
-        ));
-    }
-    if args
-        .file_pattern
-        .as_ref()
-        .is_some_and(|pattern| !relative.contains(pattern))
-    {
-        state.excluded_files += 1;
-        return Ok(());
-    }
-    if metadata.len() > MAX_FILE_BYTES as u64 {
-        state.skipped_oversized += 1;
-        return Ok(());
-    }
-    if metadata.len() > (MAX_SCAN_BYTES - state.scanned_bytes) as u64 {
-        return Err(failure("search exceeds the total scanned byte bound"));
-    }
-    let bytes = scan_bytes(file, metadata.len())?;
-    state.scanned_bytes += bytes.len();
-    let Ok(text) = std::str::from_utf8(&bytes) else {
-        state.skipped_binary += 1;
-        return Ok(());
-    };
-    if text.contains('\0') {
-        state.skipped_binary += 1;
-        return Ok(());
-    }
-    let mut previous_offset = 0;
-    let mut line = 1;
-    let mut line_start = 0;
-    let mut last_result_line = 0;
-    for (offset, _) in text.match_indices(&args.query) {
-        let prefix = &text[previous_offset..offset];
-        line += prefix.bytes().filter(|byte| *byte == b'\n').count();
-        if let Some(newline) = prefix.rfind('\n') {
-            line_start = previous_offset + newline + 1;
-        }
-        previous_offset = offset;
-        if line == last_result_line {
-            continue;
-        }
-        last_result_line = line;
-        if matches.len() >= MAX_ENTRIES {
-            return Err(failure("search match count exceeds the result bound"));
-        }
-        let line_end = text[line_start..]
-            .find('\n')
-            .map_or(text.len(), |i| line_start + i);
-        let content = &text[line_start..line_end];
-        let mut end = content.len().min(MAX_LINE_BYTES);
-        while !content.is_char_boundary(end) {
-            end -= 1;
-        }
-        matches.push(json!({"path":path,"line":line,"match_byte_offset":offset,"content":&content[..end],"truncated":end < content.len()}));
-    }
-    Ok(())
-}
-
-fn search(args: &SearchArgs) -> Result<Value> {
-    let mut state = WalkState::default();
-    let mut matches = Vec::<Value>::new();
-    let scope = match search_scope(&args.path)? {
-        SearchScope::Directory(root) => {
-            walk(
-                &root,
-                &args.path,
-                0,
-                args.include_generated,
-                &mut state,
-                &mut |fd, name, path, state| {
-                    let opened = openat(
-                        fd,
-                        name,
-                        OFlag::O_RDONLY | OFlag::O_NONBLOCK | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
-                        Mode::empty(),
-                    )
-                    .map_err(|e| failure(format!("cannot read ordinary search file: {e}")))?;
-                    let relative = path
-                        .strip_prefix(&args.path)
-                        .unwrap_or(path)
-                        .trim_start_matches('/');
-                    search_file(
-                        File::from(opened),
-                        path,
-                        relative,
-                        args,
-                        state,
-                        &mut matches,
-                    )
-                },
-            )?;
-            "directory"
-        }
-        SearchScope::File(file) => {
-            state.visited = 1;
-            let name = args.path.rsplit('/').next().unwrap_or(&args.path);
-            search_file(file, &args.path, name, args, &mut state, &mut matches)?;
-            "file"
-        }
-    };
-    matches.sort_by(|a, b| {
-        a["path"]
-            .as_str()
-            .cmp(&b["path"].as_str())
-            .then_with(|| a["line"].as_u64().cmp(&b["line"].as_u64()))
-    });
-    fitted_page(&matches, args.offset, args.limit, |page, next| {
-        json!({"matches":page,"offset":args.offset,"next_offset":next,"total":matches.len(),
-        "skipped_symlinks":state.skipped_symlinks,"skipped_binary":state.skipped_binary,
-        "skipped_generated":state.skipped_generated,"skipped_oversized":state.skipped_oversized,
-        "excluded_files":state.excluded_files,"complete":state.complete(),"scope":scope,
-        "visited_entries":state.visited,"scanned_bytes":state.scanned_bytes})
-    })
-}
-
-struct Preimage {
-    bytes: Vec<u8>,
-    metadata: std::fs::Metadata,
-}
-
-fn preimage(parent: &OwnedFd, name: &str) -> Result<Option<Preimage>> {
-    match openat(
-        parent,
-        name,
-        OFlag::O_RDONLY | OFlag::O_NONBLOCK | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
-        Mode::empty(),
-    ) {
-        Ok(fd) => {
-            let file = File::from(fd);
-            let metadata = file
-                .metadata()
-                .map_err(|e| io_error("inspect mutation preimage", None, e))?;
-            let bytes = bounded_read(file)?;
-            Ok(Some(Preimage { bytes, metadata }))
-        }
-        Err(nix::errno::Errno::ENOENT) => Ok(None),
-        Err(e) => Err(failure(format!(
-            "cannot open mutation preimage (symlink targets are forbidden): {e}"
-        ))),
-    }
-}
-
-struct Replacement<'a> {
-    parent: &'a OwnedFd,
-    name: String,
-    file: File,
-}
-
-impl<'a> Replacement<'a> {
-    fn create(parent: &'a OwnedFd) -> Result<Self> {
-        for _ in 0..64 {
-            let serial = NEXT_REPLACEMENT.fetch_add(1, Ordering::Relaxed);
-            let name = format!(".agent-file-{}-{serial}", std::process::id());
-            match openat(
-                parent,
-                name.as_str(),
-                OFlag::O_WRONLY
-                    | OFlag::O_CREAT
-                    | OFlag::O_EXCL
-                    | OFlag::O_NOFOLLOW
-                    | OFlag::O_CLOEXEC,
-                Mode::from_bits_truncate(0o600),
-            ) {
-                Ok(fd) => {
-                    return Ok(Self {
-                        parent,
-                        name,
-                        file: File::from(fd),
-                    });
-                }
-                Err(nix::errno::Errno::EEXIST) => continue,
-                Err(e) => return Err(failure(format!("cannot create atomic replacement: {e}"))),
-            }
-        }
-        Err(failure(
-            "cannot allocate an exclusive atomic replacement after bounded retries",
-        ))
-    }
-}
-
-impl Drop for Replacement<'_> {
-    fn drop(&mut self) {
-        let _ = unlinkat(self.parent, self.name.as_str(), UnlinkatFlags::NoRemoveDir);
-    }
-}
-
-fn same_preimage(first: &Option<Preimage>, fresh: &Option<Preimage>) -> bool {
-    match (first, fresh) {
-        (None, None) => true,
-        (Some(a), Some(b)) => {
-            a.bytes == b.bytes
-                && a.metadata.dev() == b.metadata.dev()
-                && a.metadata.ino() == b.metadata.ino()
-                && a.metadata.mode() == b.metadata.mode()
-        }
-        _ => false,
-    }
-}
-
-enum Mutation<'a> {
-    Write(&'a str),
-    Edit(&'a str, &'a str),
-    Append(&'a str),
-    Patch(&'a str),
-}
-
-fn replace(
-    request: &FileRequest,
-    path: &str,
-    mutation: Mutation<'_>,
-    expected: Option<&str>,
-) -> Result<Value> {
-    let root = directory(&request.write_root)?;
-    let relative = path
-        .strip_prefix(&request.write_root)
-        .ok_or_else(|| failure("mutation escaped its root"))?
-        .trim_start_matches('/');
-    let components: Vec<&str> = relative.split('/').collect();
-    let (name, parents) = components
-        .split_last()
-        .ok_or_else(|| failure("mutation requires a filename"))?;
-    let mut parent = root;
-    for component in parents {
-        parent = openat(
-            &parent,
-            *component,
-            OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
-            Mode::empty(),
-        )
-        .map_err(|e| {
-            failure(format!(
-                "cannot traverse mutation parent (links are forbidden): {e}"
-            ))
-        })?;
-    }
-    let first = preimage(&parent, name)?;
-    if let Some(expected) = expected {
-        let original = first
-            .as_ref()
-            .ok_or_else(|| failure("expected preimage file does not exist"))?;
-        if sha256(&original.bytes) != expected {
-            return Err(failure(
-                "stale expected_sha256; read_file with explicit offset: 0 before editing",
-            ));
-        }
-    }
-    let new_bytes = match mutation {
-        Mutation::Write(content) => content.as_bytes().to_vec(),
-        Mutation::Append(content) => {
-            let original = first
-                .as_ref()
-                .ok_or_else(|| failure("append target does not exist"))?;
-            std::str::from_utf8(&original.bytes)
-                .map_err(|_| failure("append_file requires UTF-8 text"))?;
-            let mut bytes = original.bytes.clone();
-            bytes.extend_from_slice(content.as_bytes());
-            bytes
-        }
-        Mutation::Patch(patch) => {
-            let original = first
-                .as_ref()
-                .ok_or_else(|| failure("patch target does not exist"))?;
-            let text = std::str::from_utf8(&original.bytes)
-                .map_err(|_| failure("apply_patch requires UTF-8 text"))?;
-            patch::apply(text, patch)?.into_bytes()
-        }
-        Mutation::Edit(old, new) => {
-            let original = first
-                .as_ref()
-                .ok_or_else(|| failure("edit target does not exist"))?;
-            let text = std::str::from_utf8(&original.bytes)
-                .map_err(|_| failure("edit_file requires UTF-8 text"))?;
-            let occurrences: Vec<usize> = text
-                .char_indices()
-                .filter_map(|(i, _)| text[i..].starts_with(old).then_some(i))
-                .take(2)
-                .collect();
-            if occurrences.len() != 1 {
-                return Err(failure(
-                    "old_text must have exactly one occurrence, including overlapping matches",
-                ));
-            }
-            let start = occurrences[0];
-            let end = start + old.len();
-            let mut bytes = Vec::with_capacity(original.bytes.len().saturating_add(new.len()));
-            bytes.extend_from_slice(&original.bytes[..start]);
-            bytes.extend_from_slice(new.as_bytes());
-            bytes.extend_from_slice(&original.bytes[end..]);
-            bytes
-        }
-    };
-    if new_bytes.len() > MAX_FILE_BYTES {
-        return Err(failure("replacement exceeds the file byte bound"));
-    }
-    let outcome = json!({"path":path,"sha256":sha256(&new_bytes),"total_bytes":new_bytes.len()});
-    ensure_output_bound(&outcome)?;
-    let mode = first
-        .as_ref()
-        .map_or(0o644, |pre| pre.metadata.permissions().mode() & 0o7777);
-    let mut replacement = Replacement::create(&parent)?;
-    replacement
-        .file
-        .write_all(&new_bytes)
-        .map_err(|e| io_error("write atomic replacement", None, e))?;
-    fchmod(&replacement.file, Mode::from_bits_truncate(mode))
-        .map_err(|e| failure(format!("cannot preserve file mode: {e}")))?;
-    replacement
-        .file
-        .sync_all()
-        .map_err(|e| io_error("synchronize atomic replacement", None, e))?;
-    // Re-open no-follow at the effect boundary. This is deliberately not a
-    // transactional compare-and-swap against arbitrary external writers.
-    let fresh = preimage(&parent, name)?;
-    if !same_preimage(&first, &fresh) {
-        return Err(failure(
-            "stale mutation preimage changed before replacement",
-        ));
-    }
-    renameat(&parent, replacement.name.as_str(), &parent, *name)
-        .map_err(|e| failure(format!("cannot install atomic replacement: {e}")))?;
-    File::from(
-        parent
-            .try_clone()
-            .map_err(|e| io_error("clone mutation directory descriptor", None, e))?,
-    )
-    .sync_all()
-    .map_err(|e| io_error("synchronize mutation directory", None, e))?;
-    Ok(outcome)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn search_scan_rejects_concurrent_growth_or_shrinkage_from_the_inspected_size() {
-        let dir = tempfile::Builder::new()
-            .prefix(".native-scan-growth-")
-            .tempdir_in(".")
-            .unwrap();
-        let path = dir.path().join("source");
-        for changed in [
-            b"shorter".to_vec(),
-            b"initial content plus growth".to_vec(),
-            vec![b'x'; MAX_FILE_BYTES + 1],
-        ] {
-            std::fs::write(&path, b"initial content").unwrap();
-            let file = File::open(&path).unwrap();
-            let inspected_size = file.metadata().unwrap().len();
-            std::fs::write(&path, &changed).unwrap();
-            let error = scan_bytes(file, inspected_size).unwrap_err().to_string();
-            if changed.len() > MAX_FILE_BYTES {
-                assert!(
-                    error.contains("grew beyond") && error.contains("byte bound"),
-                    "{error}"
-                );
-            } else {
-                assert!(error.contains("changed size"), "{error}");
-            }
-        }
     }
 }

@@ -2,6 +2,14 @@
 
 # Sav Design
 
+## Workspace offline wrapper
+
+Render both public wrapper variants through the same private generator with a
+locked-resolution boolean. Only workspace Cargo/Clippy omit forced `--locked`;
+all fixed paths, selection, source configuration and protected behavior remain.
+The workspace launcher path is `/rust/rustup`, supplied as a live read-only
+file grant by the host; the protected launcher path remains `/usr/bin/rustup`.
+
 ## Fixed offline source configuration
 
 Only the Cargo and Clippy wrappers conditionally add the fixed

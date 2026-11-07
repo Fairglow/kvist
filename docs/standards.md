@@ -30,10 +30,12 @@ does not claim process conformance to either lifecycle standard because doing
 so would require a broader organizational assessment with no current product
 benefit.
 
-Rust uses one shared project vendor tree and a minimal lock-bound receipt
-(ADR 0018). Cargo's native checksum metadata remains required; Kvist/Skott do
-not maintain a second per-file inventory or claim independent source-content
-attestation. Readiness is coherent metadata/presence, not proof of build success.
+Rust uses one shared project vendor tree. Explicit protected provisioning keeps
+its minimal lock-bound receipt (ADR 0018); Skott workspace runtime does not
+require that receipt, reader leases or a frozen lock/resource view (ADR 0019).
+Cargo's native checksum metadata remains required when resolving sources.
+Neither application maintains a second source-file inventory or claims
+independent source-content attestation or build success from readiness.
 
 IEEE 1016 software design description guidance was considered. Its enduring
 view-based separation of design information is useful, but Kvist uses

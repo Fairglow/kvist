@@ -572,7 +572,11 @@ fn a_denied_shell_command_is_reported_but_not_fatal() {
         ),
         answer_turn("refused and recovered"),
     ]);
-    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let policy = ToolPolicy {
+        shell_deny_substrings: vec!["rm -rf /".into()],
+        ..ToolPolicy::minimum()
+    };
+    let executor = RecordingExecutor::new(policy, PathBuf::from("/tmp"));
     let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
     let mut recorder = FakeRecorder::default();
     let cancellation = CancellationToken::new();
@@ -1564,7 +1568,7 @@ fn empty_file_terminal_repeats_are_bounded_and_new_prompt_restarts() {
 }
 
 #[test]
-fn stale_continuations_do_not_advance_and_explicit_restart_recovers() {
+fn live_continuations_adjust_host_shrinkage_and_moved_utf8_without_implicit_guards() {
     struct ChangingReadExecutor {
         native: NativeReadExecutor,
         path: PathBuf,
@@ -1582,7 +1586,7 @@ fn stale_continuations_do_not_advance_and_explicit_restart_recovers() {
                 .push(intent.arguments.clone());
             let outcome = self.native.execute(intent, token)?;
             if self.arguments.lock().unwrap().len() == 1 {
-                std::fs::write(&self.path, "newbytes").unwrap();
+                std::fs::write(&self.path, "aéz").unwrap();
             }
             Ok(outcome)
         }
@@ -1626,18 +1630,22 @@ fn stale_continuations_do_not_advance_and_explicit_restart_recovers() {
         )
         .unwrap();
     assert!(result.success(), "{result:?}");
-    assert_eq!(result.tools_executed, 2);
+    assert_eq!(result.tools_executed, 4);
     let args = executor.arguments.lock().unwrap();
     assert_eq!(args[1]["offset"], 2);
-    assert_eq!(args[2], args[1]);
+    assert_eq!(args[2]["offset"], 4);
     assert_eq!(args[3]["offset"], 0);
     assert!(args[3].get("expected_sha256").is_none());
-    assert_eq!(executor.native.pages.lock().unwrap()[1]["content"], "new");
     assert!(
-        sink.events()
-            .iter()
-            .any(|e| matches!(e, Event::Note(text) if text.contains("offset: 0")))
+        args.iter()
+            .all(|args| args.get("expected_sha256").is_none())
     );
+    let pages = executor.native.pages.lock().unwrap();
+    assert_eq!(pages[1]["content"], "z");
+    assert_eq!(pages[1]["offset"], 3);
+    assert_eq!(pages[1]["offset_adjustment"], "utf8_boundary");
+    assert_eq!(pages[2]["content"], "");
+    assert_eq!(pages[3]["content"], "aé");
 }
 
 #[test]
@@ -1744,6 +1752,7 @@ fn reliability_native_page_metadata_survives_outer_model_json_escaping() {
     let payload = content.split_once('\n').unwrap().1;
     let retained: serde_json::Value = serde_json::from_str(payload).expect("complete native JSON");
     assert_eq!(retained["sha256"], page["sha256"]);
+    assert_eq!(retained["page_sha256"], page["page_sha256"]);
     assert_eq!(
         retained["next_offset"],
         retained["content"].as_str().unwrap().len()
@@ -2512,7 +2521,11 @@ fn a_denied_tool_still_records_a_tool_result_for_the_next_turn() {
         tool_turn("thinking", "shell", json!({ "command": "rm -rf /" })), // denied by policy
         answer_turn("refused and continued"),
     ]);
-    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let policy = ToolPolicy {
+        shell_deny_substrings: vec!["rm -rf /".into()],
+        ..ToolPolicy::minimum()
+    };
+    let executor = RecordingExecutor::new(policy, PathBuf::from("/tmp"));
     let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
     let mut recorder = FakeRecorder::default();
     let cancellation = CancellationToken::new();

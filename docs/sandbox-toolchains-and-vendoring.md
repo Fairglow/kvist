@@ -118,8 +118,8 @@ The Rust toolchain is mounted as a discrete, identity-bound resource at a
 fixed sandbox path. This allows Kvist to:
 
 - Pin the exact compiler version used for builds
-- Verify the toolchain hasn't drifted since provisioning
-- Provide an offline, locked Cargo environment
+- Provide live read-only installed compiler resources without a content freeze
+- Provide offline Cargo (workspace locks may update; protected verification retains locked evidence rules)
 
 The mount layout is:
 
@@ -127,18 +127,20 @@ The mount layout is:
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
 | `/rust/toolchain`                                      | Initially selected host toolchain directory                                          | Read-only default compiler, standard library, and targets                         |
 | `/rust/toolchains/N`                                   | Other validated installed toolchains, sorted by name                                 | Read-only access to every other installed version and its targets                 |
-| `/rust/runtime/bin/cargo`                              | Kvist-provided Cargo shim                                                            | A wrapper that forces `--offline --locked` and the vendored sources configuration |
+| `/rust/runtime/bin/cargo`                              | Kvist-provided Cargo shim                                                            | Workspace `--offline` and vendored sources; protected wrapper additionally forces `--locked` |
 | `/rust/vendor`                                         | Same host `.kvist/vendored` tree                                                     | Read-only shared dependency registry, without package copies                      |
 | `/rust/runtime/vendor-config.toml`                     | Validated generated source-replacement config, retargeted to `/rust/vendor`          | Optional read-only locked Git/alternate-registry resolver                          |
 | `/rust/runtime/bin/rustc`, `/rust/runtime/bin/rustdoc` | Fixed selection-aware wrappers                                                       | Compiler and documentation selection follows Cargo or a leading `+name`           |
-| `/rust/rustup-home`                                    | Private generated settings and sandbox-native registrations for every installed name | Read-only complete installed inventory discovery                                  |
+| `/rust/rustup-home`                                    | Private generated settings and sandbox-native selected/optional registrations | Read-only inventory discovery; omitted optional names have selection guidance |
 | `/tmp/rustup-home`                                     | Settings copied inside the sandbox; link to the read-only registration directory     | Invocation-local selection/profile state; never host settings                     |
 | `/rust/user-cargo-bin`                                 | Validated optional host `~/.cargo/bin` directory                                     | Read-only host-provisioned Cargo extensions; no host Cargo config or credentials  |
+| `/rust/rustup`                                         | Trusted Skott system or host-home Rustup executable                                  | Live read-only file, without mounting host HOME; protected wrapper keeps its system path |
 | `/tmp/cargo-home`                                      | Private tmpfs                                                                        | Private, sandbox-local Cargo home (cache, registry metadata)                      |
 | `/workspace/target`                                    | Writable Skott workspace                                                             | Persistent workspace build target directory                                      |
 
 The Cargo shim at `/rust/runtime/bin/cargo` is essential: it ensures that
-normal PATH Cargo invocations default to offline/locked vendored resolution.
+normal PATH Cargo invocations default to offline vendored resolution; Skott
+does not force `--locked`. Protected consumers retain locked wrappers.
 Explicit alternate Cargo paths are not rewritten; network isolation is enforced
 independently by Galla, not by this convenience wrapper.
 
@@ -169,15 +171,17 @@ the complete validated host inventory. Use `cargo +<name>`, `rustc +<name>`,
 invocation; `rustup default stable` succeeds offline when stable is installed.
 Each new sandbox invocation starts from the resolved host default or pin.
 Compiler and
-rustdoc wrappers follow Cargo selection; PATH Cargo retains offline/locked
+rustdoc wrappers follow Cargo selection; Skott PATH Cargo retains offline
 vendored resolution. Explicit concrete Cargo paths remain unwrapped.
 All toolchains and registration templates are read-only; private selection
 settings are writable in tmpfs. Installation is disabled.
-Inventory/target drift requires restart after host provisioning. Invalid,
-custom-linked or over-bound installations fail preparation rather than being
-silently omitted. Host Cargo/rustup overrides are still ignored at startup.
-Missing requested formatter/Clippy components fail before effects; provision
-them separately on the host.
+Skott refreshes relevant topology/configuration at subsequent tool boundaries,
+including recovery from initial unavailability. Canonical trusted custom-linked
+registrations are usable; optional failures are diagnosed without disabling the
+selected compiler. A bounded plan retains that compiler and up to 127 other
+registrations; pin an omitted name to select it. Host Cargo/rustup overrides
+are still ignored. Missing optional formatter/Clippy resources fail only their
+own commands; provision them on the host and retry without restart.
 
 Maerg uses the same Sav runtime scripts but mounts all installations under
 `/rust/toolchains/N` (without Skott's initial `/rust/toolchain` alias or optional
@@ -204,14 +208,12 @@ implicit prompt context and never grants peer writes. The closed Cargo
 verification topology is unchanged.
 
 The vendor destination remains `/rust/vendor` for both Rust authoring consumers.
-The default host source of truth is `.kvist/vendored`, mounted directly under a
-read lease without package copies. Resolving through
-`/workspace/.kvist/vendored` would use a mutable workspace alias. Only the exact
-read-only vendor source may overlap the writable workspace grant.
-When prepared Rust authoring also mounts the workspace, the runner covers its
-existing `.kvist/vendored` directory with an empty, inaccessible read-only
-mount. The directory entry may be visible, but listing, reading, writing and
-changing permissions fail. Only `/rust/vendor` is usable inside the sandbox.
+The default host source of truth is `.kvist/vendored`, mounted directly without
+package copies. Skott runtime takes no read lease or receipt/lock coherence gate;
+protected provisioning/approval checks remain separate. Existing ordinary
+workspace `.kvist/vendored` nodes are overlaid readable read-only even without
+Rust integration. Both aliases remain live, but payload writes/mode changes fail.
+No hidden mode-000 input freeze or general overlapping-grant exception is needed.
 Host registry files/permissions and other `.kvist` files are unchanged; an
 absent registry causes no host directory creation.
 
@@ -228,20 +230,18 @@ fixed mount paths.
 
 The sandbox exposes the following System resources read-only:
 
-- `/usr`, through a filtered namespace view excluding administrative directories
+- `/usr`
 - `/lib`
 - `/lib64`
 - `/bin`
+- `/sbin` (and the sbin directories under `/usr`)
 
-`/sbin`, `/usr/sbin` and `/usr/local/sbin` are inaccessible in every execution
-phase, including by absolute path. Their entries may remain visible as empty,
-mode-000 read-only namespace mounts. Galla filters `/usr` and `/usr/local`
-instead of following administrative aliases; a host `/usr/sbin -> bin` does
-not hide `/usr/bin`. Host content, links and permissions are unchanged.
-Overmount grants and administrative PATH entries are rejected; read-only
-Toolchain self-grants at `/usr` or `/usr/local` retain the filtered view.
-This excludes directory paths, not every administrative binary installed in
-ordinary bin directories or copied through explicitly approved resource aliases.
+Standard system bin/sbin trees are live read-only views; host links and
+permissions are preserved. Names do not grant privileges: namespace/capability,
+network and approved filesystem authority protect the host. Authoring PATH and
+explicit runtime/Git/language environment values may select sandbox-local code,
+including writable workspace scripts. Host enforcers run with cleared
+environments; closed Cargo-phase source/environment rules remain separate.
 
 Skott's prepared Rust profile also exposes the optional `~/.cargo/bin` directory
 at `/rust/user-cargo-bin`, after the Cargo shim and concrete compiler in PATH.
@@ -260,11 +260,11 @@ Timeout errors include `limit_ms`, `stage`, `elapsed_ms` and
 also records identity, workspace, Rust-resource, context and request-validation
 stages. Logs omit command text, environment values and captured output.
 
-The complete writable checkout is inspected on every request, including hidden,
-vendor and build directories. Up to eight joined workers overlap directory I/O
-under one shared entry/path/depth allowance and deadline; generated directories
-are not trusted, skipped or cached. Debug completion records include entry and
-directory counts, duration and failure state. External CPU/storage contention
+There is no recursive writable-checkout inventory or frozen-resource scan.
+Explicit grant origins are opened without following source/ancestor links and
+handed off as close-on-exec, descriptor-backed mounts; the backend consumes raw
+source capabilities before payload execution. Mounted bytes remain live;
+atomic node replacements are selected at the next tool boundary. External CPU/storage contention
 can still exhaust a finite deadline, and kernel calls cannot be preempted.
 Run native repository tests through the automatically discovered
 `.config/nextest.toml` policy so other tests in that invocation cannot mutate the
@@ -541,8 +541,10 @@ KVIST_GALLA=/opt/target/debug/galla-runner \
 ```
 
 Replace `/opt/target` if using a different outside-worktree target directory.
-The host must provide `/usr/bin/rustup`, an installed standard-layout toolchain,
-its requested rustfmt/Clippy components, system cc/ar/as, and working Bubblewrap.
+The host must provide a trusted system or host-home Rustup launcher and installed
+standard/custom-linked toolchain outside the work scope. Complete-chain tests
+also need rustfmt/Clippy, system cc/ar/as and working Bubblewrap; missing optional
+companions do not disable independent compiler/source operations.
 The CI quality job supplies these prerequisites and runs this chain explicitly.
 No provider, network acquisition or pre-existing vendor tree is needed for the
 self-contained fixture tests.

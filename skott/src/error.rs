@@ -251,7 +251,7 @@ impl Error {
             ),
             Error::InvalidModelTurn { reason } => format!("invalid model turn: {reason}"),
             Error::ToolPrerequisite { tool, reason } => format!(
-                "tool `{tool}` prerequisite failed before dispatch: {reason}; repair the installed resource before continuing"
+                "tool `{tool}` prerequisite failed before dispatch: {reason}; restore this prerequisite before retrying the affected operation; other supported work may continue"
             ),
             Error::EventDelivery { reason } => format!("session event delivery failed: {reason}"),
             Error::Cancelled => "prompt cancelled".into(),
@@ -414,6 +414,20 @@ impl From<galla::validation::ProtocolError> for Error {
 #[cfg(test)]
 mod terminal_tests {
     use super::*;
+
+    #[test]
+    fn prerequisite_diagnostic_blocks_only_the_affected_operation() {
+        let message = Error::ToolPrerequisite {
+            tool: "Rust offline dependencies".into(),
+            reason: "vendoring stale; run skott --vendor --cwd /project then restart".into(),
+        }
+        .describe();
+        assert!(message.contains("vendoring stale"));
+        assert!(message.contains("skott --vendor --cwd /project"));
+        assert!(message.contains("affected operation"));
+        assert!(message.contains("other supported work may continue"));
+        assert!(!message.contains("repair the installed resource"));
+    }
 
     #[test]
     fn diagnostics_escape_path_controls_and_keep_io_sources() {

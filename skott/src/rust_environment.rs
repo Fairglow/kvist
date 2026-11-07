@@ -6,7 +6,7 @@
 //! and shared vendor area as read-only Toolchain build resources at disjoint
 //! `/rust/*` destinations. No Cargo-phase topology or cache authority is added.
 //! The runner masks the writable workspace vendor alias. Per-tool directory
-//! read locks coordinate publication without copying package contents.
+//! live views reflect host publication without copying or reader leases.
 //!
 //! Selection ignores ambient Rust/Cargo overrides and uses the standard
 //! `$HOME/.rustup/toolchains` installation layout. Channels, requested
@@ -19,6 +19,7 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -36,12 +37,13 @@ use crate::error::{Error, Result, io_error};
 mod host;
 #[path = "rust_environment/inventory.rs"]
 mod inventory;
+#[path = "rust_environment/live.rs"]
+mod live;
+pub(crate) use live::Cache as RustEnvironmentCache;
 
 const TOOLCHAIN_DEST: &str = "/rust/toolchain";
 const RUNTIME_DEST: &str = "/rust/runtime";
 const RUSTUP_HOME_DEST: &str = "/rust/rustup-home";
-const MAX_FILE_BYTES: u64 = 256 << 20;
-const MAX_ENTRIES: usize = 100_000;
 const PREPARATION_BUDGET: Duration = Duration::from_secs(180);
 
 /// A complete installed inventory, initial selection and private sandbox resources.
@@ -53,43 +55,23 @@ pub struct RustEnvironment {
     resources: Arc<Resources>,
 }
 
-/// An installed executable bound at resolve time to its identity and fingerprint.
-///
-/// `identity` is the SHA-256 that rides on the sandbox grant identity. It is
-/// derived from the cheap `fingerprint` (dev/ino/size/mtime/ctime) rather than
-/// the file contents, so startup does not re-read hundreds of megabytes of
-/// installed toolchain material. The runner never re-hashes mounted files
-/// against their grant identity (only the bwrap backend is), and per-call
-/// validation compares the `fingerprint`; any modification, truncation or
-/// replacement updates at least one of those fields, so drift detection stays
-/// strict without re-hashing.
-#[derive(Debug)]
-struct TrackedExecutable {
-    path: PathBuf,
-    /// Read only through the environment identity's `Debug` projection, which
-    /// binds every executable's exact bytes into the grant identity.
-    #[allow(dead_code)]
-    identity: String,
-    fingerprint: Fingerprint,
-}
-
 #[derive(Debug)]
 struct Resources {
     workspace: PathBuf,
     root: PathBuf,
+    rustup: PathBuf,
     channel: String,
     identity: String,
-    executables: Vec<TrackedExecutable>,
-    directories: Vec<(PathBuf, (u64, u64))>,
     staging: tempfile::TempDir,
     vendor_identity: String,
     has_vendor: bool,
-    lock_fingerprint: Option<Fingerprint>,
     pin_identity: String,
     pinned: bool,
     user_cargo_bin: Option<PathBuf>,
     rustup_home: PathBuf,
     inventory: inventory::Inventory,
+    topology: live::Topology,
+    issues: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -171,23 +153,24 @@ fn inspect_path(path: &Path) -> Result<fs::Metadata> {
 }
 
 fn file(path: &Path, maximum: u64) -> Result<File> {
-    let metadata = inspect_path(path)?;
+    let origin = File::from(galla::enforcement::source::pin(path).map_err(failure)?);
+    let metadata = origin
+        .metadata()
+        .map_err(|error| io_error("inspect pinned Rust resource", None, error))?;
     if !metadata.is_file() || metadata.len() > maximum {
         return Err(failure(format!(
             "Rust resource `{}` must be a bounded regular file (maximum {maximum} bytes)",
             path.display()
         )));
     }
-    let opened = OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
-        .open(path)
+    // Reopen the pinned regular inode, never a second mutable host pathname.
+    let opened = File::open(format!("/proc/self/fd/{}", origin.as_raw_fd()))
         .map_err(|e| io_error("open Rust resource", Some(&path.to_string_lossy()), e))?;
     let actual = opened
         .metadata()
         .map_err(|e| io_error("inspect opened Rust resource", None, e))?;
-    if !actual.is_file() || (metadata.dev(), metadata.ino()) != (actual.dev(), actual.ino()) {
-        return Err(failure("Rust resource changed while opening"));
+    if !actual.is_file() {
+        return Err(failure("opened Rust resource must be a regular file"));
     }
     Ok(opened)
 }
@@ -236,13 +219,13 @@ fn fingerprint_identity(fingerprint: Fingerprint) -> String {
 }
 
 fn hash_file(path: &Path, preparation: &Preparation<'_>) -> Result<(String, Fingerprint)> {
-    let mut opened = file(path, MAX_FILE_BYTES)?;
+    let opened = file(path, u64::MAX)?;
     let before = opened
         .metadata()
         .map_err(|e| io_error("inspect Rust identity", None, e))?;
     let mut hash = Sha256::new();
     let mut buffer = [0; 65536];
-    let mut total = 0_u64;
+    let mut opened = opened.take(before.len());
     loop {
         preparation.check()?;
         let count = opened
@@ -251,17 +234,7 @@ fn hash_file(path: &Path, preparation: &Preparation<'_>) -> Result<(String, Fing
         if count == 0 {
             break;
         }
-        total += count as u64;
-        if total > MAX_FILE_BYTES {
-            return Err(failure(
-                "Rust executable grew beyond the 256 MiB identity bound",
-            ));
-        }
         hash.update(&buffer[..count]);
-    }
-    let after = inspect_path(path)?;
-    if fingerprint(&before) != fingerprint(&after) {
-        return Err(failure("Rust executable changed while hashing"));
     }
     Ok((
         format!("sha256:{}", hex::encode(hash.finalize())),
@@ -269,7 +242,7 @@ fn hash_file(path: &Path, preparation: &Preparation<'_>) -> Result<(String, Fing
     ))
 }
 
-fn track_executable(path: PathBuf, _preparation: &Preparation<'_>) -> Result<TrackedExecutable> {
+fn track_executable(path: PathBuf, _preparation: &Preparation<'_>) -> Result<String> {
     let metadata = inspect_path(&path)?;
     if !metadata.is_file() {
         return Err(failure(format!(
@@ -286,11 +259,7 @@ fn track_executable(path: PathBuf, _preparation: &Preparation<'_>) -> Result<Tra
     let fingerprint = fingerprint(&metadata);
     let identity = fingerprint_identity(fingerprint);
     tracing::trace!(path = %path.display(), %identity, "Rust executable validated");
-    Ok(TrackedExecutable {
-        path,
-        identity,
-        fingerprint,
-    })
+    Ok(identity)
 }
 
 fn token(value: &str) -> bool {
@@ -304,20 +273,58 @@ fn token(value: &str) -> bool {
 }
 
 fn channel(value: &str) -> Result<()> {
-    let base = value.split('-').next().unwrap_or_default();
-    let release = base.split('.').collect::<Vec<_>>();
-    if !token(value)
-        || !(matches!(base, "stable" | "beta" | "nightly")
-            || ((2..=3).contains(&release.len())
-                && release
-                    .iter()
-                    .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))))
+    if value.is_empty()
+        || value.len() > 255
+        || value.starts_with('-')
+        || matches!(value, "." | "..")
+        || value.chars().any(|character| {
+            character.is_control() || character.is_whitespace() || matches!(character, '/' | '\\')
+        })
     {
         return Err(failure(
-            "Rust channel must be a rustup release channel/version, never a path, option or custom linked toolchain",
+            "Rust selection must be one bounded registration name, not a path or option",
         ));
     }
     Ok(())
+}
+
+fn registered_root(home: &Path, workspace: &Path, name: &str) -> Result<PathBuf> {
+    channel(name)?;
+    if !host::operator_selector(&home.join(".rustup/toolchains"), workspace)? {
+        return Err(failure(
+            "host Rust registration selector slots must be outside the write scope before resolving their targets",
+        ));
+    }
+    let parent = home
+        .join(".rustup/toolchains")
+        .canonicalize()
+        .map_err(|error| {
+            io_error(
+                "resolve trusted host Rust registration directory",
+                None,
+                error,
+            )
+        })?;
+    if parent.starts_with(workspace) {
+        return Err(failure(
+            "host Rust registration pointers must be outside the writable workspace",
+        ));
+    }
+    let root = parent
+        .join(name)
+        .canonicalize()
+        .map_err(|error| io_error("resolve host-registered Rust root", None, error))?;
+    if root.starts_with(workspace)
+        || workspace.starts_with(&root)
+        || home.starts_with(&root)
+        || home.join(".cargo").starts_with(&root)
+        || !inspect_path(&root)?.is_dir()
+    {
+        return Err(failure(
+            "registered Rust root must be outside the writable workspace and must not expose the host home or Cargo credential store",
+        ));
+    }
+    Ok(root)
 }
 
 fn project_pin(workspace: &Path) -> Result<Option<PinToolchain>> {
@@ -388,73 +395,6 @@ fn pin_identity(workspace: &Path) -> Result<String> {
     Ok(label(&bytes))
 }
 
-fn native_library_layout(root: &Path) -> Result<Vec<PathBuf>> {
-    let manifest = root.join("lib/rustlib/components");
-    let bytes = bounded_bytes(&manifest, 65536)?;
-    let text = std::str::from_utf8(&bytes)
-        .map_err(|_| failure("installed Rust component manifest must be UTF-8"))?;
-    let native = text
-        .lines()
-        .filter_map(|s| s.strip_prefix("rustc-"))
-        .collect::<Vec<_>>();
-    if native.len() != 1 || !token(native[0]) {
-        return Err(failure(
-            "installed Rust lacks one native compiler component; repair/provision it on the host",
-        ));
-    }
-    let directory = root.join("lib/rustlib").join(native[0]).join("lib");
-    if !inspect_path(&directory)?.is_dir() {
-        return Err(failure(
-            "installed Rust lacks its native standard library; provision it on the host",
-        ));
-    }
-    let mut core = None;
-    let mut std = None;
-    let mut entries = 0;
-    for entry in
-        fs::read_dir(&directory).map_err(|e| io_error("inspect native Rust libraries", None, e))?
-    {
-        entries += 1;
-        if entries > 1024 {
-            return Err(failure(
-                "native Rust library directory exceeds 1024 entries",
-            ));
-        }
-        let entry = entry.map_err(|e| io_error("enumerate native Rust libraries", None, e))?;
-        let name = entry.file_name();
-        let name = name
-            .to_str()
-            .ok_or_else(|| failure("native Rust library names must be UTF-8"))?;
-        if name.ends_with(".rlib") && (name.starts_with("libcore-") || name.starts_with("libstd-"))
-        {
-            if !inspect_path(&entry.path())?.is_file() {
-                return Err(failure(
-                    "native Rust libraries must be regular non-link files",
-                ));
-            }
-            let slot = if name.starts_with("libcore-") {
-                &mut core
-            } else {
-                &mut std
-            };
-            if slot.replace(entry.path()).is_some() {
-                return Err(failure(
-                    "installed Rust has ambiguous native standard libraries; repair it on the host",
-                ));
-            }
-        }
-    }
-    Ok(vec![
-        manifest,
-        core.ok_or_else(|| {
-            failure("installed Rust lacks native libcore; provision rust-std on the host")
-        })?,
-        std.ok_or_else(|| {
-            failure("installed Rust lacks native libstd; provision rust-std on the host")
-        })?,
-    ])
-}
-
 fn query_rustup(
     rustup: &Path,
     home: &Path,
@@ -491,7 +431,7 @@ fn query_rustup(
     );
     if result.failed() {
         return Err(failure(
-            "installed Rust selection is unavailable; provision the project pin on the host before starting skott (no installation or fallback is performed)",
+            "installed Rust selection is unavailable; provision or correct the project pin on the host, then retry the affected Rust command without restart (no installation or automatic replay is performed)",
         ));
     }
     String::from_utf8(result.stdout).map_err(|_| failure("rustup selection output must be UTF-8"))
@@ -511,9 +451,75 @@ pub(crate) fn host_cargo(workspace: &Path, cancellation: &CancellationToken) -> 
     Ok(host::resolve(&workspace, pin.as_ref(), &preparation)?.cargo)
 }
 
+fn source_configuration(workspace: &Path, issues: &mut Vec<String>) -> Result<Option<Vec<u8>>> {
+    let parent = workspace.join(".kvist/sandbox-cargo");
+    let path = parent.join("config.toml");
+    let input = match fs::symlink_metadata(&parent) {
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => Err(io_error(
+            "inspect native Cargo configuration parent",
+            None,
+            error,
+        )),
+        Ok(_) => match inspect_path(&parent) {
+            Ok(metadata) if !metadata.is_dir() => return Ok(None),
+            Ok(_) => match fs::symlink_metadata(&path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => Err(io_error("inspect native Cargo configuration", None, error)),
+                Ok(_) => bounded_bytes(&path, 1 << 20),
+            },
+            Err(error) => Err(error),
+        },
+    };
+    let bytes = match input {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            issues.push(format!("native Cargo configuration `{}` could not be prepared: {error}; Cargo receives an explicit configuration error, while the compiler remains available. Repair the local file/permissions or use direct Cargo with an explicit sandbox configuration; the next invocation refreshes without restart", path.display()));
+            return Ok(Some(b"[SKOTT_SOURCE_CONFIGURATION_UNAVAILABLE\n".to_vec()));
+        }
+    };
+    let mut table = match std::str::from_utf8(&bytes)
+        .ok()
+        .and_then(|text| toml::from_str::<toml::Table>(text).ok())
+    {
+        Some(table) => table,
+        None => {
+            issues.push(format!("native Cargo configuration `{}` is malformed/non-UTF-8; its original bytes are preserved for Cargo's own diagnostic, not used to disable rustc. Correct that file and retry the affected Cargo operation without restart", path.display()));
+            return Ok(Some(bytes));
+        }
+    };
+    if let Some(sources) = table.get_mut("source").and_then(toml::Value::as_table_mut) {
+        for source in sources
+            .iter_mut()
+            .filter_map(|(_, value)| value.as_table_mut())
+        {
+            if source.get("directory").is_some_and(toml::Value::is_str) {
+                source.insert(
+                    "directory".into(),
+                    toml::Value::String("/rust/vendor".into()),
+                );
+            }
+        }
+    }
+    toml::to_string(&table)
+        .map(|text| Some(text.into_bytes()))
+        .map_err(|error| {
+            failure(format!(
+                "cannot serialize native Cargo configuration: {error}"
+            ))
+        })
+}
+
 impl RustEnvironment {
-    /// Resolves the installed inventory and initial selection, and snapshots vendor
-    /// material. Ambient Cargo/Rust configuration and rustup overrides are not
+    /// Resolves installed registration topology and a live read-only vendor view.
+    /// Ambient Cargo/Rust configuration and rustup overrides are not
     /// forwarded. Absence is an error for callers that explicitly enable Rust.
     pub fn resolve(workspace: &Path) -> Result<Self> {
         Self::resolve_cancellable(workspace, &CancellationToken::new())
@@ -522,6 +528,14 @@ impl RustEnvironment {
     pub(crate) fn resolve_cancellable(
         workspace: &Path,
         cancellation: &CancellationToken,
+    ) -> Result<Self> {
+        Self::resolve_observed(workspace, cancellation, |_| {})
+    }
+
+    fn resolve_observed(
+        workspace: &Path,
+        cancellation: &CancellationToken,
+        mut selected_root: impl FnMut(&Path),
     ) -> Result<Self> {
         let preparation = Preparation {
             started: Instant::now(),
@@ -534,6 +548,7 @@ impl RustEnvironment {
             return Err(failure("Rust workspace must be a regular directory"));
         }
         tracing::debug!(workspace = %workspace.display(), "preparing offline Rust resources");
+        let mut topology = live::Topology::capture(&workspace)?;
         let pin = project_pin(&workspace)?;
         let pinned = pin.is_some();
         let pin_identity = pin_identity(&workspace)?;
@@ -545,6 +560,8 @@ impl RustEnvironment {
             root,
             installed_name,
         } = host::resolve(&workspace, pin.as_ref(), &preparation)?;
+        selected_root(&root);
+        topology.observe_root(&root)?;
         tracing::debug!(
             requested_channel = %selected,
             installed_channel = %installed_name,
@@ -552,129 +569,60 @@ impl RustEnvironment {
             pinned,
             "resolved concrete installed Rust toolchain"
         );
-        let mut directories = Vec::new();
-        for path in [
-            &root,
-            &root.join("bin"),
-            &root.join("lib"),
-            &root.join("lib/rustlib"),
-        ] {
-            let metadata = inspect_path(path)?;
-            if !metadata.is_dir() {
-                return Err(failure(
-                    "installed Rust root lacks its bin/lib/rustlib layout",
-                ));
-            }
-            directories.push((path.to_owned(), (metadata.dev(), metadata.ino())));
-        }
-        if let Some(pin) = &pin {
-            for component in &pin.components {
-                let executable = match component.as_str() {
-                    "cargo" | "rustc" | "rustdoc" | "rustfmt" | "rust-analyzer" => {
-                        component.as_str()
-                    }
-                    "clippy" => "cargo-clippy",
-                    "rust-std" => continue,
-                    _ => {
-                        return Err(failure(format!(
-                            "unsupported requested Rust component `{component}`; verify/provision it on the host"
-                        )));
-                    }
-                };
-                inspect_path(&root.join("bin").join(executable))
-                    .map_err(|e| failure(format!("requested Rust component `{component}` is absent; provision it on the host: {e}")))?;
-            }
-            for target in &pin.targets {
-                if !inspect_path(&root.join("lib/rustlib").join(target).join("lib"))?.is_dir() {
-                    return Err(failure(
-                        "requested Rust target is absent; provision it on the host",
-                    ));
-                }
-            }
-        }
         let mut executables = Vec::new();
-        for name in ["cargo", "rustc", "rustdoc"] {
+        for name in ["cargo", "rustc"] {
             let path = root.join("bin").join(name);
             executables.push(track_executable(path, &preparation)?);
-        }
-        for name in ["rustfmt", "cargo-fmt", "cargo-clippy", "clippy-driver"] {
-            let path = root.join("bin").join(name);
-            let required = pin.as_ref().is_some_and(|pin| {
-                pin.components.iter().any(|component| match name {
-                    "rustfmt" | "cargo-fmt" => component == "rustfmt",
-                    _ => component == "clippy",
-                })
-            });
-            match fs::symlink_metadata(&path) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound && !required => continue,
-                Err(error) => {
-                    return Err(failure(format!(
-                        "Rust companion `{name}` is unavailable; provision it on the host: {error}"
-                    )));
-                }
-                Ok(_) => {}
-            }
-            executables.push(track_executable(path, &preparation)?);
-        }
-        for path in native_library_layout(&root)? {
-            let metadata = inspect_path(&path)?;
-            let file_fingerprint = fingerprint(&metadata);
-            executables.push(TrackedExecutable {
-                path: path.clone(),
-                identity: fingerprint_identity(file_fingerprint),
-                fingerprint: file_fingerprint,
-            });
-        }
-        for name in ["cc", "ar", "as"] {
-            let path = Path::new("/usr/bin")
-                .join(name)
-                .canonicalize()
-                .map_err(|e| io_error("resolve system Rust linker/archiver", None, e))?;
-            if !path.starts_with("/usr")
-                || path.starts_with(&workspace)
-                || inspect_path(&path)?.permissions().mode() & 0o111 == 0
-            {
-                return Err(failure(
-                    "Rust requires executable system cc/ar/as outside the writable workspace",
-                ));
-            }
-            let (file_identity, file_fingerprint) = hash_file(&path, &preparation)?;
-            executables.push(TrackedExecutable {
-                path: path.clone(),
-                identity: file_identity,
-                fingerprint: file_fingerprint,
-            });
         }
         executables.push(track_executable(rustup.clone(), &preparation)?);
-        let inventory = inventory::resolve(
-            &home,
-            &workspace,
-            &installed_name,
-            &rustup,
-            &preparation,
-            &mut executables,
-        )?;
+        let inventory =
+            inventory::resolve(&home, &workspace, &installed_name, &rustup, &preparation)?;
+        let mut issues = inventory.diagnostics.clone();
         let user_cargo_bin = home.join(".cargo").join("bin");
-        let has_user_cargo_bin = match fs::symlink_metadata(&user_cargo_bin) {
-            Ok(_) => {
-                let metadata = inspect_path(&user_cargo_bin)?;
-                if !metadata.is_dir() || user_cargo_bin.starts_with(&workspace) {
-                    return Err(failure(
-                        "user Cargo bin must be a non-link directory outside the workspace",
-                    ));
-                }
-                directories.push((user_cargo_bin.clone(), (metadata.dev(), metadata.ino())));
-                true
+        let user_cargo_bin = match host::operator_selector(&user_cargo_bin, &workspace) {
+            Err(error) => {
+                issues.push(format!("optional Cargo extension selector cannot be authorized: {error}; no outside origin is mounted, compiler tools remain usable"));
+                None
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-            Err(error) => return Err(io_error("inspect optional user Cargo bin", None, error)),
+            Ok(false) => {
+                issues.push("optional Cargo extension selector is writable in this workspace; no outside target is followed or mounted. Compiler tools remain usable; keep host installation selectors outside the work scope to expose extensions".into());
+                None
+            }
+            Ok(true) => match user_cargo_bin.canonicalize() {
+                Ok(path)
+                    if !path.starts_with(&workspace)
+                        && !workspace.starts_with(&path)
+                        && !home.starts_with(&path)
+                        && !home.join(".cargo").starts_with(&path) =>
+                {
+                    match inspect_path(&path) {
+                        Ok(metadata) if metadata.is_dir() => Some(path),
+                        Ok(_) => {
+                            issues.push("optional Cargo extension origin is no longer a directory; compiler tools remain available. Repair ~/.cargo/bin and retry the extension".into());
+                            None
+                        }
+                        Err(error) => {
+                            issues.push(format!("optional Cargo extensions cannot be inspected: {error}; compiler tools remain available. Repair ~/.cargo/bin and retry the extension"));
+                            None
+                        }
+                    }
+                }
+                Ok(_) => {
+                    issues.push("optional user Cargo extension directory is not usable outside the write scope; compiler tools remain available. Correct ~/.cargo/bin to restore extensions".into());
+                    None
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => {
+                    issues.push(format!("optional Cargo extensions unavailable: {error}; selected compiler remains usable. Repair ~/.cargo/bin to restore extensions"));
+                    None
+                }
+            },
         };
-
-        let user_cargo_bin_path = if has_user_cargo_bin {
-            user_cargo_bin.to_string_lossy().into_owned()
-        } else {
-            "none".to_owned()
-        };
+        let has_user_cargo_bin = user_cargo_bin.is_some();
+        let user_cargo_bin_path = user_cargo_bin
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "none".into());
         let staging = tempfile::Builder::new()
             .prefix(".skott-rust-")
             .tempdir_in(
@@ -686,36 +634,41 @@ impl RustEnvironment {
         fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))
             .map_err(|e| io_error("protect Rust resource staging", None, e))?;
         let vendor = workspace.join(".kvist/vendored");
-        match fs::symlink_metadata(workspace.join(".kvist")) {
+        let state_usable = match fs::symlink_metadata(workspace.join(".kvist")) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => true,
             Ok(_) => {
-                if !inspect_path(&workspace.join(".kvist"))?.is_dir() {
-                    return Err(failure(
-                        "workspace .kvist must be a regular non-link directory",
-                    ));
+                issues.push("workspace .kvist is not an ordinary directory; no host origin is followed through that pointer. Installed compiler/local operations remain available; provide ordinary local vendor/configuration nodes for dependency-using operations".into());
+                false
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                issues.push(format!("workspace vendor/configuration state could not be inspected: {error}; compiler operations remain available; repair local state permissions and retry affected builds"));
+                false
+            }
+        };
+        let vendor_metadata = if state_usable {
+            match fs::symlink_metadata(&vendor) {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                    Some(metadata)
+                }
+                Ok(_) => {
+                    issues.push("workspace vendor is not an ordinary directory; no extra origin is mounted. Compiler/local operations remain available; provide an ordinary vendor directory for dependency-using builds".into());
+                    None
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => {
+                    issues.push(format!("workspace vendor could not be inspected: {error}; compiler/local operations remain available; repair the vendor path before dependency-using builds"));
+                    None
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(io_error("inspect local vendor parent", None, e)),
-        }
-        let has_vendor = match fs::symlink_metadata(&vendor) {
-            Ok(_) => true,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-            Err(e) => return Err(io_error("inspect local vendored registry", None, e)),
-        };
-        let _vendor_read = if has_vendor {
-            Some(
-                kvist_dependencies::rust::read_lease(&vendor, cancellation)
-                    .map_err(crate::dependencies::from_error)?,
-            )
         } else {
             None
         };
-        let mut vendor_identity = if has_vendor {
-            let metadata = inspect_path(&vendor)?;
-            if !metadata.is_dir() {
-                return Err(failure("vendor resource must be a non-link directory"));
-            }
-            directories.push((vendor.clone(), (metadata.dev(), metadata.ino())));
+        let has_vendor = vendor_metadata.is_some();
+        let vendor_identity = if has_vendor {
+            let metadata = vendor_metadata
+                .as_ref()
+                .ok_or_else(|| failure("vendor metadata is unavailable"))?;
             label(format!("{}:{}", metadata.dev(), metadata.ino()).as_bytes())
         } else {
             fs::create_dir(staging.path().join("vendor"))
@@ -732,75 +685,27 @@ impl RustEnvironment {
             .map_err(|e| io_error("create private Rust runtime", None, e))?;
         fs::create_dir(staging.path().join("runtime/bin"))
             .map_err(|e| io_error("create private Rust wrappers", None, e))?;
-        let mut has_locked_state = false;
-        for marker in [
-            "Cargo.lock",
-            ".kvist/vendor.json",
-            ".kvist/vendor-operation.lock",
-            ".kvist/vendor-publication",
-            ".kvist/sandbox-cargo",
-        ] {
-            match fs::symlink_metadata(workspace.join(marker)) {
-                Ok(_) => has_locked_state = true,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(io_error("inspect Rust dependency state", None, error)),
-            }
-        }
-        if has_locked_state {
-            let limits = kvist_dependencies::VendorLimits::load(&workspace)
-                .map_err(crate::dependencies::from_error)?;
-            let view = if has_vendor {
-                vendor.clone()
-            } else {
-                staging.path().join("vendor")
-            };
-            let (report, resolver) =
-                kvist_dependencies::rust::check_view(&workspace, &view, cancellation)
-                    .map_err(crate::dependencies::from_error)?;
-            vendor_identity = report.lockfile_digest;
-            if let Some(resolver) = resolver {
-                let contents = kvist_dependencies::rust::resolver_config_with_limits(
-                    &resolver,
-                    "/rust/vendor",
-                    &limits,
-                )
-                .map_err(crate::dependencies::from_error)?;
-                let staged = staging.path().join("runtime/vendor-config.toml");
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(0o400)
-                    .open(&staged)
-                    .map_err(|error| {
-                        io_error("create private offline source config", None, error)
-                    })?;
-                file.write_all(contents.as_bytes())
-                    .and_then(|_| file.sync_all())
-                    .map_err(|error| {
-                        io_error("write private offline source config", None, error)
-                    })?;
-                let (identity, fingerprint) = hash_file(&staged, &preparation)?;
-                executables.push(TrackedExecutable {
-                    path: staged,
-                    identity,
-                    fingerprint,
-                });
-            }
-        }
-        let lock_fingerprint = if has_locked_state {
-            Some(fingerprint(&inspect_path(&workspace.join("Cargo.lock"))?))
+        if let Some(contents) = if state_usable {
+            source_configuration(&workspace, &mut issues)?
         } else {
             None
-        };
+        } {
+            let staged = staging.path().join("runtime/vendor-config.toml");
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o400)
+                .open(&staged)
+                .map_err(|error| io_error("create private offline source config", None, error))?;
+            file.write_all(&contents)
+                .and_then(|_| file.sync_all())
+                .map_err(|error| io_error("write private offline source config", None, error))?;
+            executables.push(hash_file(&staged, &preparation)?.0);
+        }
         let initialization = staging.path().join("runtime/initialize");
-        fs::write(&initialization, sav::offline_rust::INITIALIZE)
+        fs::write(&initialization, format!("{}mkdir -p /tmp/cargo-home\nif test -f /rust/runtime/vendor-config.toml; then cp /rust/runtime/vendor-config.toml /tmp/cargo-home/config.toml; fi\n", sav::offline_rust::INITIALIZE))
             .map_err(|e| io_error("write sandbox-only Rust initialization", None, e))?;
-        let (identity, fingerprint) = hash_file(&initialization, &preparation)?;
-        executables.push(TrackedExecutable {
-            path: initialization,
-            identity,
-            fingerprint,
-        });
+        executables.push(hash_file(&initialization, &preparation)?.0);
         for executable in sav::offline_rust::TOOLS {
             let wrapper = staging.path().join("runtime/bin").join(executable.name());
             let mut file = OpenOptions::new()
@@ -809,18 +714,15 @@ impl RustEnvironment {
                 .mode(0o500)
                 .open(&wrapper)
                 .map_err(|e| io_error("create trusted Rust runtime wrapper", None, e))?;
-            let script = sav::offline_rust::wrapper(*executable);
+            let script = sav::offline_rust::workspace_wrapper(*executable);
             file.write_all(script.as_bytes())
                 .map_err(|e| io_error("write fixed Rust runtime wrapper", None, e))?;
             file.sync_all()
                 .map_err(|e| io_error("synchronize Rust runtime wrapper", None, e))?;
-            let (file_identity, file_fingerprint) = hash_file(&wrapper, &preparation)?;
-            executables.push(TrackedExecutable {
-                path: wrapper.clone(),
-                identity: file_identity,
-                fingerprint: file_fingerprint,
-            });
+            executables.push(hash_file(&wrapper, &preparation)?.0);
         }
+        std::os::unix::fs::symlink("/rust/rustup", staging.path().join("runtime/bin/rustup"))
+            .map_err(|error| io_error("create private Rustup PATH facade", None, error))?;
 
         let rustup_home = staging.path().join("rustup-home");
         let toolchains = rustup_home.join("toolchains");
@@ -837,19 +739,13 @@ impl RustEnvironment {
         let settings = rustup_home.join("settings.toml");
         fs::write(
             &settings,
-            format!("version = \"12\"\ndefault_toolchain = \"{installed_name}\"\nprofile = \"minimal\"\n"),
+            format!(
+                "version = \"12\"\ndefault_toolchain = {}\nprofile = \"minimal\"\n",
+                toml::Value::String(installed_name.clone())
+            ),
         )
         .map_err(|e| io_error("write private rustup selection", None, e))?;
-        let (identity, fingerprint) = hash_file(&settings, &preparation)?;
-        executables.push(TrackedExecutable {
-            path: settings,
-            identity,
-            fingerprint,
-        });
-        for path in [&rustup_home, &toolchains] {
-            let metadata = inspect_path(path)?;
-            directories.push((path.to_owned(), (metadata.dev(), metadata.ino())));
-        }
+        executables.push(hash_file(&settings, &preparation)?.0);
         let identity = label(
             format!(
                 "kvist/authoring-rust/v1\0{installed_name}\0{}\0{}\0{executables:?}\0{inventory:?}",
@@ -871,23 +767,19 @@ impl RustEnvironment {
             resources: Arc::new(Resources {
                 workspace,
                 root,
+                rustup,
                 channel: installed_name,
                 identity,
-                executables,
-                directories,
                 staging,
                 vendor_identity,
                 has_vendor,
-                lock_fingerprint,
                 pin_identity,
                 pinned,
-                user_cargo_bin: if has_user_cargo_bin {
-                    Some(user_cargo_bin)
-                } else {
-                    None
-                },
+                user_cargo_bin,
                 rustup_home,
                 inventory,
+                topology,
+                issues,
             }),
         })
     }
@@ -900,19 +792,19 @@ impl RustEnvironment {
                 "Rust: {} (project pin; {})",
                 self.resources.channel,
                 if self.resources.has_vendor {
-                    "vendor snapshot ready"
+                    "live vendor available"
                 } else {
-                    "no vendor snapshot"
+                    "no vendor; local dependencies remain usable"
                 }
             )
         } else if self.resources.has_vendor {
             format!(
-                "Rust: {} (offline; vendor snapshot ready)",
+                "Rust: {} (offline; live vendor available)",
                 self.resources.channel
             )
         } else {
             format!(
-                "Rust: {} (offline; no vendor snapshot)",
+                "Rust: {} (offline; no vendor; local dependencies remain usable)",
                 self.resources.channel
             )
         }
@@ -920,12 +812,12 @@ impl RustEnvironment {
 
     /// An inspectable exact selection, identity and offline-material diagnostic.
     pub fn diagnostic(&self) -> String {
-        format!(
-            "Rust authoring: {} initially selects installed `{}` at `{}`; identity {}; pin digest {}; network denied, Cargo explicitly offline and locked, private HOME/cache/target; {}            ; vendor view {}. Rustup exposes {} installed toolchains and their targets through read-only sandbox-native registrations; choose with cargo +<name>, rustup run or invocation-local rustup default (a project pin takes precedence). Automatic installation disabled. Provision a matching Cargo.lock separately. No host home/Cargo credentials mounted; ambient Cargo/Rust overrides ignored.",
+        let mut diagnostic = format!(
+            "Rust authoring: {} selects installed `{}` at `{}`; preparation identity {}; pin digest {}; network denied, workspace Cargo offline without forced locked resolution, private HOME/cache/target; {}; vendor view {}. Rustup exposes {} installed registrations through live read-only mounts; choose with cargo +<name>, rustup run or invocation-local rustup default (a project pin takes precedence). Host changes are legitimate inputs; topology/configuration refresh on subsequent tools without restart, receipt or reader lease. Missing packages/components affect only the commands needing them. No host home/Cargo credentials mounted; ambient Cargo/Rust overrides ignored.",
             if self.resources.pinned {
                 "project pin"
             } else {
-                "host default (resolved once; no project pin)"
+                "live host default (no project pin)"
             },
             self.resources.channel,
             self.resources.root.display(),
@@ -938,7 +830,12 @@ impl RustEnvironment {
             },
             self.resources.vendor_identity,
             self.resources.inventory.installations.len()
-        )
+        );
+        for issue in &self.resources.issues {
+            diagnostic.push('\n');
+            diagnostic.push_str(issue);
+        }
+        diagnostic
     }
 
     pub(crate) fn validate(
@@ -946,90 +843,12 @@ impl RustEnvironment {
         workspace: &Path,
         cancellation: &CancellationToken,
     ) -> Result<()> {
-        let preparation = Preparation {
-            started: Instant::now(),
-            cancellation,
-        };
+        crate::executor::check_cancelled(cancellation)?;
         if workspace != self.resources.workspace {
             return Err(failure(
                 "resolved Rust resources belong to a different writable workspace",
             ));
         }
-        let lock = workspace.join("Cargo.lock");
-        let current = match fs::symlink_metadata(&lock) {
-            Ok(_) => Some(fingerprint(&inspect_path(&lock)?)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(io_error("inspect current Rust lock", None, error)),
-        };
-        if current != self.resources.lock_fingerprint {
-            return Err(failure(
-                "Rust lock changed since startup; restart after explicit host vendoring",
-            ));
-        }
-        for marker in [".kvist/vendor-operation.lock", ".kvist/vendor-publication"] {
-            match fs::symlink_metadata(workspace.join(marker)) {
-                Ok(_) => {
-                    return Err(failure(
-                        "vendor operation/publication is active or interrupted; inspect before restarting",
-                    ));
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(io_error("inspect vendor operation state", None, error)),
-            }
-        }
-        if pin_identity(workspace)? != self.resources.pin_identity {
-            return Err(failure(
-                "project Rust pin changed since startup; restart to explicitly resolve the new installed selection",
-            ));
-        }
-        inventory::validate(&self.resources.inventory, &preparation)?;
-        for (path, expected) in &self.resources.directories {
-            preparation.check()?;
-            let actual = inspect_path(path)?;
-            if !actual.is_dir() || (actual.dev(), actual.ino()) != *expected {
-                return Err(failure(
-                    "installed Rust root/layout changed since startup; restart after host provisioning",
-                ));
-            }
-        }
-        for tracked in &self.resources.executables {
-            preparation.check()?;
-            let metadata = inspect_path(&tracked.path)?;
-            if fingerprint(&metadata) != tracked.fingerprint {
-                return Err(failure(
-                    "installed Rust executable or trusted shim drifted since startup; restart after host provisioning",
-                ));
-            }
-        }
-        let registrations = self.resources.rustup_home.join("toolchains");
-        let count = fs::read_dir(&registrations)
-            .map_err(|e| io_error("recheck sandbox Rust inventory", None, e))?
-            .try_fold(0_usize, |count, entry| {
-                entry.map_err(|e| io_error("recheck sandbox Rust registration entry", None, e))?;
-                Ok::<_, Error>(count + 1)
-            })?;
-        if count != self.resources.inventory.installations.len() {
-            return Err(failure(
-                "sandbox Rust registration inventory drifted since startup; restart",
-            ));
-        }
-        for installation in &self.resources.inventory.installations {
-            let link = registrations.join(&installation.name);
-            let target = fs::read_link(&link)
-                .map_err(|e| io_error("recheck sandbox Rust registration", None, e))?;
-            if target != Path::new(&installation.destination) {
-                return Err(failure(
-                    "sandbox Rust registration drifted since startup; restart",
-                ));
-            }
-        }
-        tracing::debug!(
-            channel = %self.resources.channel,
-            identity = %self.resources.identity,
-            tracked_files = self.resources.executables.len(),
-            elapsed_ms = preparation.started.elapsed().as_millis() as u64,
-            "offline Rust resources validated"
-        );
         Ok(())
     }
 
@@ -1079,6 +898,13 @@ impl RustEnvironment {
                 identity: self.resources.identity.clone(),
             });
         }
+        grants.push(Grant {
+            source: self.resources.rustup.to_string_lossy().into_owned(),
+            destination: "/rust/rustup".into(),
+            access: Access::ReadOnly,
+            purpose: Purpose::Toolchain,
+            identity: self.resources.identity.clone(),
+        });
         for installation in &self.resources.inventory.installations {
             if installation.destination != TOOLCHAIN_DEST {
                 grants.push(Grant {
@@ -1099,14 +925,6 @@ impl RustEnvironment {
         } else {
             self.resources.staging.path().join("vendor")
         }
-    }
-
-    pub(crate) fn read_lease(
-        &self,
-        cancellation: &CancellationToken,
-    ) -> Result<kvist_dependencies::rust::ReadLease> {
-        kvist_dependencies::rust::read_lease(&self.vendor_path(), cancellation)
-            .map_err(crate::dependencies::from_error)
     }
 
     pub(crate) fn identity(&self) -> &str {
@@ -1161,6 +979,59 @@ mod tests {
         assert!(error.to_string().contains("180 seconds"), "{error}");
     }
 
+    #[test]
+    fn a_host_home_launcher_does_not_require_system_installation_or_home_mounts() {
+        let directory = fixture();
+        let workspace = directory.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let launcher = directory.path().join("host-rustup");
+        fs::write(&launcher, "fixture launcher").unwrap();
+        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o500)).unwrap();
+        assert_eq!(
+            host::select_rustup(std::slice::from_ref(&launcher), &workspace).unwrap(),
+            launcher.canonicalize().unwrap()
+        );
+        assert!(host::select_rustup(std::slice::from_ref(&launcher), directory.path()).is_err());
+    }
+
+    #[test]
+    fn trusted_linked_registration_is_usable_but_cannot_point_into_write_scope() {
+        let directory = fixture();
+        let home = directory.path().join("home");
+        let workspace = directory.path().join("workspace");
+        let installed = directory.path().join("installed");
+        fs::create_dir_all(home.join(".rustup/toolchains")).unwrap();
+        fs::create_dir(&workspace).unwrap();
+        fs::create_dir(&installed).unwrap();
+        let link = home.join(".rustup/toolchains/stable");
+        symlink(&installed, &link).unwrap();
+        assert_eq!(
+            registered_root(&home, &workspace, "stable").unwrap(),
+            installed.canonicalize().unwrap()
+        );
+        fs::remove_file(&link).unwrap();
+        symlink(&workspace, &link).unwrap();
+        assert!(registered_root(&home, &workspace, "stable").is_err());
+    }
+
+    #[test]
+    fn writable_host_selector_slots_cannot_authorize_outside_executables_or_roots() {
+        let directory = fixture();
+        let home = directory.path().join("home");
+        let outside = directory.path().join("outside");
+        fs::create_dir_all(home.join(".cargo")).unwrap();
+        fs::create_dir_all(home.join(".rustup")).unwrap();
+        fs::create_dir_all(outside.join("stable")).unwrap();
+        fs::write(outside.join("rustup"), "fixture").unwrap();
+        fs::set_permissions(outside.join("rustup"), fs::Permissions::from_mode(0o500)).unwrap();
+        symlink(&outside, home.join(".cargo/bin")).unwrap();
+        symlink(&outside, home.join(".rustup/toolchains")).unwrap();
+        assert!(
+            host::select_rustup(&[home.join(".cargo/bin/rustup")], &home.join(".cargo")).is_err()
+        );
+        assert!(registered_root(&home, &home.join(".rustup"), "stable").is_err());
+    }
+
     fn fixture() -> tempfile::TempDir {
         // Prefer the run-time `CARGO_MANIFEST_DIR` (set by cargo) so the
         // fixture directory stays correct when a previously built test binary
@@ -1182,12 +1053,6 @@ mod tests {
         fs::create_dir(&root).unwrap();
         let executable = root.join("cargo");
         fs::write(&executable, b"initial executable").unwrap();
-        let cancellation = CancellationToken::new();
-        let preparation = Preparation {
-            started: Instant::now(),
-            cancellation: &cancellation,
-        };
-        let metadata = inspect_path(&root).unwrap();
         let staging = tempfile::Builder::new()
             .prefix(".rust-staging-")
             .tempdir_in(&directory)
@@ -1195,37 +1060,31 @@ mod tests {
         let rustup_home = staging.path().join("rustup-home");
         fs::create_dir_all(rustup_home.join("toolchains")).unwrap();
         symlink(TOOLCHAIN_DEST, rustup_home.join("toolchains/stable")).unwrap();
+        let topology = live::Topology::capture(&workspace).unwrap();
         RustEnvironment {
             resources: Arc::new(Resources {
                 pin_identity: pin_identity(&workspace).unwrap(),
                 workspace,
                 root: root.clone(),
+                rustup: root.join("cargo"),
                 channel: "stable".into(),
                 identity: label(b"synthetic"),
-                executables: vec![{
-                    let (identity, fingerprint) = hash_file(&executable, &preparation).unwrap();
-                    TrackedExecutable {
-                        path: executable.clone(),
-                        identity,
-                        fingerprint,
-                    }
-                }],
-                directories: vec![(root, (metadata.dev(), metadata.ino()))],
                 staging,
                 vendor_identity: label(b"empty"),
                 has_vendor: false,
-                lock_fingerprint: None,
                 pinned: false,
                 user_cargo_bin: None,
                 rustup_home,
                 inventory: inventory::Inventory {
+                    diagnostics: Vec::new(),
                     installations: vec![inventory::Installation {
                         name: "stable".into(),
                         root: directory.join("toolchain"),
                         destination: TOOLCHAIN_DEST.into(),
                     }],
-                    fingerprints: Vec::new(),
                 },
+                topology,
+                issues: Vec::new(),
             }),
         }
     }
@@ -1248,24 +1107,17 @@ mod tests {
     }
 
     #[test]
-    fn shared_vendor_read_ownership_is_per_call_and_replacement_requires_restart() {
+    fn shared_vendor_changes_do_not_require_read_ownership_or_restart() {
         let directory = fixture();
         let mut environment = synthetic_environment(directory.path());
         let vendor = environment.resources.workspace.join(".kvist/vendored");
         fs::create_dir_all(&vendor).unwrap();
-        let metadata = inspect_path(&vendor).unwrap();
         let resources = Arc::get_mut(&mut environment.resources).unwrap();
         resources.has_vendor = true;
-        resources
-            .directories
-            .push((vendor.clone(), (metadata.dev(), metadata.ino())));
         let writer = File::open(&vendor).unwrap();
         writer.try_lock().unwrap();
         drop(writer);
-        let lease = environment.read_lease(&CancellationToken::new()).unwrap();
         let writer = File::open(&vendor).unwrap();
-        assert!(writer.try_lock().is_err());
-        drop(lease);
         writer.try_lock().unwrap();
         drop(writer);
         fs::rename(&vendor, vendor.with_file_name("retired-vendor")).unwrap();
@@ -1273,30 +1125,25 @@ mod tests {
         assert!(
             environment
                 .validate(&environment.resources.workspace, &CancellationToken::new())
-                .is_err()
+                .is_ok()
         );
     }
 
     #[test]
-    fn same_bytes_lock_replacement_requires_restart() {
+    fn live_lock_replacement_does_not_require_restart() {
         let directory = fixture();
-        let mut environment = synthetic_environment(directory.path());
+        let environment = synthetic_environment(directory.path());
         let lock = environment.resources.workspace.join("Cargo.lock");
         fs::write(&lock, "version=4\n").unwrap();
-        Arc::get_mut(&mut environment.resources)
-            .unwrap()
-            .lock_fingerprint = Some(fingerprint(&inspect_path(&lock).unwrap()));
         environment
             .validate(&environment.resources.workspace, &CancellationToken::new())
             .unwrap();
         let replacement = lock.with_file_name("replacement.lock");
         fs::write(&replacement, "version=4\n").unwrap();
         fs::rename(replacement, lock).unwrap();
-        assert!(
-            environment
-                .validate(&environment.resources.workspace, &CancellationToken::new())
-                .is_err()
-        );
+        environment
+            .validate(&environment.resources.workspace, &CancellationToken::new())
+            .unwrap();
     }
 
     #[test]
@@ -1311,7 +1158,13 @@ mod tests {
                     .user_cargo_bin = Some(directory.path().join("cargo-bin"));
                 expected.push("/rust/user-cargo-bin");
             }
-            expected.extend(["/usr/bin", "/bin", "/usr/local/bin"]);
+            expected.extend([
+                "/usr/bin",
+                "/bin",
+                "/usr/local/bin",
+                "/usr/local/sbin",
+                "/usr/sbin",
+            ]);
             let variables = environment.environment();
             assert_eq!(
                 variables["PATH"].split(':').collect::<Vec<_>>(),
@@ -1322,7 +1175,7 @@ mod tests {
     }
 
     #[test]
-    fn drift_and_substituted_roots_are_rejected_without_mutating_real_installs() {
+    fn host_changes_are_not_a_mounted_resource_breach() {
         let directory = fixture();
         let environment = synthetic_environment(directory.path());
         let workspace = &environment.resources.workspace;
@@ -1333,14 +1186,14 @@ mod tests {
             b"substituted executable",
         )
         .unwrap();
-        assert!(environment.validate(workspace, &cancellation).is_err());
+        environment.validate(workspace, &cancellation).unwrap();
         fs::rename(
             &environment.resources.root,
             directory.path().join("old-toolchain"),
         )
         .unwrap();
         fs::create_dir(&environment.resources.root).unwrap();
-        assert!(environment.validate(workspace, &cancellation).is_err());
+        environment.validate(workspace, &cancellation).unwrap();
         fs::remove_dir(&environment.resources.root).unwrap();
         symlink(
             directory
@@ -1351,7 +1204,7 @@ mod tests {
             &environment.resources.root,
         )
         .unwrap();
-        assert!(environment.validate(workspace, &cancellation).is_err());
+        environment.validate(workspace, &cancellation).unwrap();
     }
 
     #[test]
@@ -1378,7 +1231,7 @@ mod tests {
     }
 
     #[test]
-    fn registration_uses_exact_selection_and_private_home_and_rejects_drift() {
+    fn registration_uses_private_home_without_a_host_edit_integrity_gate() {
         let directory = fixture();
         let environment = synthetic_environment(directory.path());
         let variables = environment.environment();
@@ -1392,12 +1245,12 @@ mod tests {
         assert!(
             environment
                 .validate(&environment.resources.workspace, &CancellationToken::new())
-                .is_err()
+                .is_ok()
         );
     }
 
     #[test]
-    fn non_selected_targets_and_inventory_membership_drift_fail_closed() {
+    fn host_target_and_registration_updates_do_not_trip_integrity_checks() {
         for change in [
             "library",
             "target-added",
@@ -1424,10 +1277,6 @@ mod tests {
                 });
             let registrations = resources.rustup_home.join("toolchains");
             symlink("/rust/toolchains/1", registrations.join("nightly")).unwrap();
-            resources.inventory.fingerprints = [&parent, &alternate, &libraries, &library]
-                .into_iter()
-                .map(|path| (path.clone(), fingerprint(&inspect_path(path).unwrap())))
-                .collect();
             environment
                 .validate(&environment.resources.workspace, &CancellationToken::new())
                 .unwrap();
@@ -1446,7 +1295,7 @@ mod tests {
             assert!(
                 environment
                     .validate(&environment.resources.workspace, &CancellationToken::new())
-                    .is_err(),
+                    .is_ok(),
                 "{change}"
             );
         }
@@ -1480,7 +1329,7 @@ mod tests {
     }
 
     #[test]
-    fn same_size_executable_drift_is_rejected_by_fingerprint() {
+    fn live_executable_updates_do_not_trip_fingerprint_checks() {
         let directory = fixture();
         let environment = synthetic_environment(directory.path());
         let workspace = &environment.resources.workspace;
@@ -1493,18 +1342,25 @@ mod tests {
             b"hijacked executable!",
         )
         .unwrap();
-        assert!(environment.validate(workspace, &cancellation).is_err());
+        environment.validate(workspace, &cancellation).unwrap();
     }
 
     #[test]
-    fn preparation_is_cancelled_and_file_bound_is_checked_before_allocating() {
+    fn resource_hashes_have_no_general_file_cap_and_remain_cancellable() {
         let directory = fixture();
         let path = directory.path().join("large");
         File::create(&path)
             .unwrap()
-            .set_len(MAX_FILE_BYTES + 1)
+            .set_len((256 << 20) + 1)
             .unwrap();
-        assert!(file(&path.canonicalize().unwrap(), MAX_FILE_BYTES).is_err());
+        hash_file(
+            &path,
+            &Preparation {
+                started: Instant::now(),
+                cancellation: &CancellationToken::new(),
+            },
+        )
+        .unwrap();
         let environment = synthetic_environment(directory.path());
         let cancellation = CancellationToken::new();
         cancellation.cancel();
@@ -1516,35 +1372,7 @@ mod tests {
     }
 
     #[test]
-    fn native_standard_library_is_required_and_cannot_be_a_link() {
-        let directory = fixture();
-        let root = directory.path().canonicalize().unwrap();
-        assert!(native_library_layout(&root).is_err());
-        fs::create_dir_all(root.join("lib/rustlib/test-native/lib")).unwrap();
-        fs::write(root.join("lib/rustlib/components"), "rustc-test-native\n").unwrap();
-        assert!(native_library_layout(&root).is_err());
-        fs::write(
-            root.join("lib/rustlib/test-native/lib/libcore-test.rlib"),
-            b"core",
-        )
-        .unwrap();
-        fs::write(
-            root.join("lib/rustlib/test-native/lib/libstd-test.rlib"),
-            b"std",
-        )
-        .unwrap();
-        assert_eq!(native_library_layout(&root).unwrap().len(), 3);
-        fs::remove_file(root.join("lib/rustlib/test-native/lib/libstd-test.rlib")).unwrap();
-        symlink(
-            "/etc/passwd",
-            root.join("lib/rustlib/test-native/lib/libstd-test.rlib"),
-        )
-        .unwrap();
-        assert!(native_library_layout(&root).is_err());
-    }
-
-    #[test]
-    fn native_release_channel_tokens_accept_pins_but_not_paths_or_custom_roots() {
+    fn native_registration_tokens_accept_custom_names_but_not_paths_or_options() {
         for value in [
             "stable",
             "beta",
@@ -1552,17 +1380,18 @@ mod tests {
             "1.95",
             "1.95.0",
             "stable-x86_64-unknown-linux-gnu",
+            "custom-host",
+            "custom..host",
+            "stable;echo",
         ] {
             channel(value).unwrap();
         }
         for value in [
             "",
-            "custom",
             "--help",
             "/host/root",
             "../../toolchain",
             "stable\n",
-            "stable;echo",
             "stable\\root",
         ] {
             assert!(channel(value).is_err(), "{value}");

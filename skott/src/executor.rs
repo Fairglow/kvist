@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use sav::loop_detection::ProgressEvidence;
 use sav::{CancellationToken, ToolIntent};
@@ -31,17 +31,27 @@ pub struct SandboxExecutor {
     sandbox: SandboxPaths,
     working_directory: PathBuf,
     progress: NativeProgress,
+    rust_environment: Mutex<crate::toolchain::rust_environment::RustEnvironmentCache>,
+    workspace_selector: Mutex<Option<PathBuf>>,
 }
 
 impl SandboxExecutor {
     /// Builds an executor from a registry, sandbox paths, and the working
     /// directory the agent may write to.
     pub fn new(registry: ToolRegistry, sandbox: SandboxPaths, working_directory: PathBuf) -> Self {
+        let rust_environment = Mutex::new(
+            crate::toolchain::rust_environment::RustEnvironmentCache::new(
+                registry.rust_requested(),
+                registry.rust_environment().cloned(),
+            ),
+        );
         SandboxExecutor {
             registry,
             sandbox,
             working_directory,
             progress: NativeProgress::default(),
+            rust_environment,
+            workspace_selector: Mutex::new(None),
         }
     }
 
@@ -53,6 +63,52 @@ impl SandboxExecutor {
     /// The enabled tool profiles.
     pub fn profiles(&self) -> Vec<&'static str> {
         self.registry.profiles()
+    }
+
+    fn current_workspace(&self) -> Result<(PathBuf, Option<String>)> {
+        let mut selector = self.workspace_selector.lock().map_err(|_| Error::SandboxBuild {
+            reason: "workspace origin state is poisoned; recreate the executor to recover its internal state".into(),
+        })?;
+        let source = selector.as_ref().unwrap_or(&self.working_directory);
+        let workspace = source.canonicalize()
+            .map_err(|error| io_error("resolve current workspace origin; repair the host directory and retry without restart", None, error))?;
+        let absolute = std::path::absolute(source)
+            .map_err(|error| io_error("resolve workspace selector", None, error))?;
+        let mut prefix = PathBuf::new();
+        let mut writable_selector = false;
+        for component in absolute.components() {
+            prefix.push(component);
+            if let Some(parent) = prefix.parent() {
+                let parent = parent.canonicalize().map_err(|error| {
+                    io_error("authorize workspace selector parent", None, error)
+                })?;
+                if parent.starts_with(&workspace) {
+                    writable_selector = true;
+                    break;
+                }
+            }
+        }
+        let diagnostic = writable_selector.then(|| format!("skott: workspace selector is inside its writable scope; canonical origin `{}` is retained so payload edits cannot authorize another host root. Contents remain live. Use an operator-controlled selector outside the write scope to switch workspaces.\n", workspace.display()));
+        *selector = Some(if writable_selector {
+            workspace.clone()
+        } else {
+            absolute
+        });
+        Ok((workspace, diagnostic))
+    }
+
+    fn current_rust(
+        &self,
+        workspace: &Path,
+        cancellation: &CancellationToken,
+    ) -> Result<(
+        Option<crate::toolchain::rust_environment::RustEnvironment>,
+        Option<String>,
+    )> {
+        let mut cached = self.rust_environment.lock().map_err(|_| Error::SandboxBuild {
+            reason: "live Rust resource cache is poisoned; restart the executor to recover its internal state".into(),
+        })?;
+        cached.refresh(workspace, cancellation)
     }
 
     fn execute_prepared(
@@ -111,11 +167,12 @@ impl ToolExecutor for SandboxExecutor {
         cancellation: &CancellationToken,
     ) -> Result<ToolOutcome> {
         check_cancelled(cancellation)?;
-        let context = ExecContext::new(self.working_directory.clone(), intent.id.clone());
+        let (workspace, workspace_diagnostic) = self.current_workspace()?;
+        let context = ExecContext::new(workspace.clone(), intent.id.clone());
         let rendered = self.registry.render(intent, &context)?;
         let helper = if rendered.file_request.is_some() {
             Some(
-                resolve_file_helper(rendered.file_helper.as_deref(), &self.working_directory)
+                resolve_file_helper(rendered.file_helper.as_deref(), &workspace)
                     .map_err(|error| prerequisite_error(intent, error, cancellation))?,
             )
         } else {
@@ -127,7 +184,7 @@ impl ToolExecutor for SandboxExecutor {
         let payload = rendered
             .file_request
             .as_ref()
-            .map(|request| stage_file_request(request, &self.working_directory, cancellation))
+            .map(|request| stage_file_request(request, &workspace, cancellation))
             .transpose()?;
         // A shell command too large for one argv entry travels as the /context/0
         // read-only script file its argv references; the render contract keeps
@@ -135,7 +192,7 @@ impl ToolExecutor for SandboxExecutor {
         let script = rendered
             .shell_script
             .as_deref()
-            .map(|script| stage_bytes(script.as_bytes(), &self.working_directory, cancellation))
+            .map(|script| stage_bytes(script.as_bytes(), &workspace, cancellation))
             .transpose()?;
         let mut read_roots: Vec<PathBuf> = Vec::new();
         if let (Some(payload), Some(helper)) = (&payload, &helper) {
@@ -145,15 +202,22 @@ impl ToolExecutor for SandboxExecutor {
             read_roots.push(script.path().to_owned());
         }
         let argv = rendered.argv.clone();
-        let _vendor_read = self
-            .registry
-            .rust_environment()
-            .map(|rust| rust.read_lease(cancellation))
-            .transpose()
-            .map_err(|error| prerequisite_error(intent, error, cancellation))?;
+        let (rust, rust_diagnostic) = match self.current_rust(&workspace, cancellation) {
+            Ok(resources) => resources,
+            Err(error) => {
+                check_cancelled(cancellation)?;
+                tracing::warn!(%error, "live Rust integration unavailable; independent tools remain usable");
+                (
+                    None,
+                    Some(format!(
+                        "skott: Rust integration unavailable for this call: {error}. Continue independent source/workspace work; provision or correct the requested installed resource on the host, then retry only the affected Rust command. No restart or automatic replay.\n"
+                    )),
+                )
+            }
+        };
         let build = BuildRequest {
             argv: &argv,
-            working_directory: &self.working_directory,
+            working_directory: &workspace,
             read_roots: &read_roots,
             environment: BTreeMap::new(),
             policy: self.registry.policy(),
@@ -162,7 +226,7 @@ impl ToolExecutor for SandboxExecutor {
         let request = crate::sandbox::build_request_with_rust(
             &self.sandbox,
             &build,
-            self.registry.rust_environment(),
+            rust.as_ref(),
             cancellation,
         )
         .map_err(|error| prerequisite_error(intent, error, cancellation))?;
@@ -174,7 +238,14 @@ impl ToolExecutor for SandboxExecutor {
             cancellation,
             || {
                 check_cancelled(cancellation)?;
-                execute(&self.sandbox, &request, cancellation)
+                let mut outcome = execute(&self.sandbox, &request, cancellation)?;
+                if let Some(diagnostic) = rust_diagnostic {
+                    outcome.stderr.extend_from_slice(diagnostic.as_bytes());
+                }
+                if let Some(diagnostic) = workspace_diagnostic {
+                    outcome.stderr.extend_from_slice(diagnostic.as_bytes());
+                }
+                Ok(outcome)
             },
         )
     }
@@ -522,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_prepared_scope_link_rebind_is_rejected_before_effects() {
+    fn sandbox_prepared_scope_link_rebind_retains_outcome_without_claiming_progress() {
         let fixture = prepared_selection();
         let moved = fixture.original.with_file_name("moved");
         std::fs::rename(&fixture.original, &moved).unwrap();
@@ -538,11 +609,16 @@ mod tests {
                 Ok(successful_fixture_outcome())
             },
         );
-        assert!(result.is_err(), "prepared source alias must be refused");
-        let error = result.unwrap_err();
-        assert!(error.describe().contains("not executed"), "{error}");
-        assert!(error.describe().contains("reconcile"), "{error}");
-        assert!(!executed.get());
+        let outcome =
+            result.expect("observation uncertainty must retain the real execution outcome");
+        assert!(executed.get());
+        assert_eq!(
+            fixture
+                .executor
+                .progress(&fixture.intent, &outcome)
+                .unwrap(),
+            ProgressEvidence::None
+        );
         assert_eq!(std::fs::read(moved.join("text")).unwrap(), b"before");
         assert_eq!(
             std::fs::read(fixture.rebound.join("text")).unwrap(),

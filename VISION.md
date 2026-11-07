@@ -111,6 +111,10 @@ status, and attempt logs, is exempt.
    required.
 9. **Deterministic and safe behavior.** Validation, ordering, serialization,
    failures, and authority boundaries are explicit and reproducible.
+   Workspace isolation is one-way: protect the host from unapproved agent
+   effects, not the agent from legitimate host edits. Read-only resources remain
+   live; no general file-size quota or frozen-resource prerequisite blocks useful
+   workspace work (ADR 0019). Bounded working memory and clear recovery remain.
 10. **Markdown is the canonical output.** Every command reports a well-formed
    Markdown document, and the interactive workspace renders that document with
    full fidelity through the `blad` renderer. The on-screen transcript is a

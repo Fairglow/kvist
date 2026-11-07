@@ -2,6 +2,41 @@
 
 # Skott — Requirements
 
+## RUN-REQ-LIVE-WORKSPACE
+
+ADR 0019 deliberately replaces this component's earlier complete-file limits,
+implicit digest-bound read continuation, frozen installed-resource/lock/vendor
+checks, forced locked workspace Cargo, reader leases and categorical shell
+filters. This section governs those superseded policies below.
+
+All native file operations MUST accept arbitrarily large regular source files
+using bounded working memory, not a whole-file allocation or size rejection.
+Read pages MUST observe current data without an implicit expected revision;
+explicit requested preconditions remain optional. Search MUST support bounded
+resumption within a large file, with truthful offsets, line/coverage metadata
+and actionable continuation. Mutation MUST preserve unrelated bytes and modes,
+atomic publication, exact matching and protection against lost concurrent edits.
+Digest guards for edits/append/patch MUST be optional, not mandatory boilerplate.
+
+Host resource edits MUST be visible without fingerprint/digest violations,
+manifest readiness gates, reader leases or mandatory restart. Changed installed
+selection/inventory/vendor/configuration topology MUST refresh automatically at
+the next tool. Missing packages MUST affect only actual dependency-using tools.
+Workspace Cargo MUST remain offline without forcibly adding locked resolution.
+Read-only vendor aliases and non-writable installed enforcement resources MUST
+remain protected from sandbox writes. OS confinement replaces recursive
+host-symlink inspections and categorical command-name filters.
+
+Bounded protocol payloads/results, working memory, per-call work/cancellation,
+open descriptors and process counts remain host-protection safeguards. Explain
+limits and ordinary missing-path/stale-mutation errors precisely; continue safe
+independent work. Tests MUST cover large reads/search/mutations, host changes
+between calls, automatic resource refresh, absent/stale receipts, actual native
+execution and denied unapproved outside effects.
+
+This human-requested bundle has an explicit local advisory exception while
+receipt enforcement is unavailable; no compliance/acceptance is implied.
+
 ## RUN-REQ-OFFLINE-DEPENDENCIES
 
 `--vendor` MUST provision existing locked Rust dependencies through the common
@@ -13,13 +48,14 @@ Unsupported languages MUST fail explicitly. Future language support needs
 shared provisioning and actual tested offline environment wiring, not just
 language-tool discovery.
 
-Rust startup MUST check available package/native metadata against the locked
-catalogue in the shared `.kvist/vendored` tree and surface missing/stale metadata
-with the exact Skott provisioning command. Safe generated source configuration
-MUST support locked registry/Git replacements without trusting host paths.
-Existing dependency-free/local builds, sandbox masking, locked Cargo, no host
+Explicit provisioning/checks retain their shared metadata validation. Workspace
+runtime MUST use available vendor/source configuration without a mandatory
+receipt or locked-catalogue gate. Safe generated source configuration MUST
+support native registry/Git replacements without trusting host paths.
+Existing dependency-free/local builds, read-only vendor aliases, offline Cargo, no host
 credentials, no auto-installation and toolchain selection MUST remain intact.
-Provisioned dependency refresh requires explicit restart, without prompt replay.
+Provisioned dependency changes MUST refresh at tool boundaries without restart
+or prompt replay.
 Tests MUST cover real CLI provisioning, checks with no effects, offline native
 compilation/tests, stale/malformed inputs and failures.
 Rust preparation timeout diagnostics MUST state the actual 180-second budget,
@@ -30,10 +66,9 @@ the existing isolation assertions; availability is not a promise of arbitrary
 system libraries, credentials or out-of-workspace path dependencies.
 Skott MUST NOT copy vendor package contents or hash their file inventory.
 The shared vendor tree MUST be read-only at `/rust/vendor`, with its writable
-workspace alias inaccessible. A shared read owner MUST survive each tool call,
-but not block provisioning while the session is idle. Directory/lock replacement
-requires restart; direct host source edits are left to Cargo's native checks.
-Both applications MUST use shared vendor limits/defaults. Explicit `--force`
+workspace alias also readable read-only. Runtime MUST NOT require a shared read
+owner or reject directory/lock replacement; direct host source edits are left
+to Cargo's native checks. Explicit provisioning uses shared vendor limits/defaults. Explicit `--force`
 rebuilds damaged material without automatic downloads or fallback.
 
 This human-requested Rust consolidation has a local advisory exception while
@@ -154,8 +189,8 @@ Prepared Rust environments MUST retain every bin-only System PATH directory,
 including `/usr/local/bin`, so enabling Rust does not hide other advertised
 language tools. Rust shim and remaining bin precedence MUST remain unchanged;
 missing bin directories are appended, not inherited from host PATH. All standard
-`sbin` directories MUST be excluded from search and profile availability, in
-agreement with Galla's enforced exclusion. This MUST NOT expand resource or
+`sbin` directories MUST remain usable read-only with canonical PATH entries,
+in agreement with Galla's standard System views. This MUST NOT expand host
 write authority.
 CI jobs running these tests MUST provision the required language tools in
 sandbox-visible system locations on the host. Host toolcache availability
@@ -228,8 +263,9 @@ and source-blind comparison remain separate from acceptance.
 
 ## RUN-REQ-RUST-SANDBOX-CHAIN
 
-Rust workspace preparation MUST expose every safely validated installed
-toolchain and its installed targets to rustup through sandbox-native paths,
+Rust workspace preparation MUST expose the usable selected toolchain and a
+bounded set of other usable installed registrations with explicit omission
+guidance. Exposed targets use sandbox-native paths,
 never dangling host-path links. The project pin or host default remains the
 initial selection; the agent MAY explicitly select another installed version
 using `cargo +<name>`, `rustc +<name>`, `rustup run`, or invocation-local
@@ -242,7 +278,8 @@ offline and affect subsequent tools in that invocation without changing host
 state or installation mounts. A project pin retains precedence over the default.
 `HOME` MUST name writable private
 invocation scratch. Requested compiler, formatter and Clippy resources MUST be
-regular executable files; missing requested resources MUST fail before effects.
+regular executable files when needed; missing optional companions MUST fail only
+their own operation rather than block an available compiler or source work.
 
 Native tests MUST exercise selection, PATH discovery, rustup queries, compilation,
 linking, executable execution, unit/integration/doctests, formatting, Clippy,
@@ -255,19 +292,21 @@ claim their presence.
 Build output MUST use the writable workspace's `/workspace/target` so it
 survives shell invocations. Cargo cache and selection settings remain private
 invocation scratch. Vendored resolution MUST consume the shared read-only
-vendor tree with per-tool read ownership, not its mutable workspace alias.
-The workspace alias MUST be inaccessible during prepared sandbox execution
+vendor tree without per-tool reader leases. The existing workspace alias MUST
+also be readable read-only during sandbox execution
 without changing the host registry or concealing unrelated project state.
 
-Native inventory tests MUST compare all installed names, versions, target
-catalogues and installed targets/components against host queries, compile
-every installed target, execute each installed compiler and Cargo test runner,
+Native inventory tests MUST compare exposed installed names, versions, target
+catalogues and installed targets/components against host queries, account for
+explicitly omitted optional registrations, compile exposed installed targets,
+execute the exposed compilers and Cargo test runners,
 and verify denied mutations and unchanged host content/metadata excluding
 access times. All installations remain read-only, including non-selected
-versions. Preparation MUST fail explicitly rather than silently omit an
-invalid, unsafe or over-bound installation. Host inventory, executable,
-registration and target-layout drift MUST fail before dispatch and require
-restart after host provisioning; no install/update or ambient host home mount
+versions. Preparation MUST diagnose unavailable optional inventory/registrations while
+retaining a usable selected compiler. A bounded mount plan MAY omit optional
+registrations with explicit selection guidance. Host changes MUST be live inputs,
+not drift breaches; relevant topology/configuration updates refresh without
+restart. No install/update or ambient host home mount
 is authorized.
 
 The native inventory/default regression MUST be non-ignored and MUST fail
@@ -287,14 +326,10 @@ remain separate evidence, not acceptance or implementer certification.
 
 ## RUN-REQ-SCOPE-PREFLIGHT
 
-Sandbox request preparation MUST inspect the complete writable scope, including
-hidden and generated directories, without serializing independent directory I/O.
-Concurrency MUST remain bounded and preserve aggregate entry, depth and retained
-path quotas, link confinement, cancellation, and a bounded preflight deadline.
-Every inspection worker MUST finish before request construction returns; an I/O,
-worker or scheduling failure MUST prevent dispatch rather than omit coverage.
-Tests MUST demonstrate overlapping directory inspection, complete link checks,
-cycle deduplication, cancellation and unchanged quota boundaries.
+Sandbox request preparation MUST NOT recursively inventory the writable scope or
+reject unrelated links/special entries as mount-origin authority. Explicit source
+origins are validated and pinned at the enforcement boundary. Preparation MUST
+retain cancellation and its bounded deadline without a file-size quota.
 
 Debug diagnostics MUST distinguish identity reads, workspace inspection, Rust
 resource validation, context identities and final request validation. Timeout
@@ -309,15 +344,15 @@ external CPU/storage contention. No new intent acceptance is performed.
 The first tool request MUST NOT reject a safely progressing workspace scan
 solely because preparation exceeded an unrelated 30-second allowance.
 Preparation MUST use the requested tool wall-time budget, capped at 120 seconds,
-across all preflight stages and workers. Smaller requested budgets MUST remain
-effective. Cancellation, full hidden/generated-directory inspection, aggregate
-quotas, fail-before-dispatch behavior and owned worker cleanup MUST be preserved;
+across all preflight stages. Smaller requested budgets MUST remain
+effective. Cancellation, explicit-origin confinement and fail-before-dispatch
+behavior MUST be preserved;
 no cache-based exemption, automatic replay or host fallback is permitted.
 
 Timeout diagnostics MUST state the effective budget, active stage, total elapsed
 time and stage elapsed time. Tests MUST cover preparation beyond 30 seconds,
 the exact effective deadline, smaller tool budgets and fresh detection of an
-escaping link. The actual checkout MUST exercise the reported initial Git
+unsafe mount origin. The actual checkout MUST exercise the reported initial Git
 inspection and a subsequent native root listing in the enforced sandbox.
 Warm-cache success MUST NOT be represented as proof of cold-cache performance
 or immunity to arbitrary filesystem contention.
@@ -402,10 +437,9 @@ An installed Rust toolchain MUST be usable through validated read-only
 host-selected resources, without user-home/configuration/credential mounts,
 toolchain installation, network access, or an maerg dependency. Offline
 vendored resolution MUST use sandbox-native paths and bounded private scratch.
-The normal sandbox Cargo entry point MUST force `--offline --locked`, including
-when callers omit those flags. Builds MUST fail actionably for a missing or
-outdated `Cargo.lock`, without creating or changing it. Lockfiles and vendored
-dependencies MUST be provisioned separately before locked builds.
+The normal sandbox Cargo entry point MUST force `--offline`, but not `--locked`.
+Native Cargo MAY create/update the writable project lock. Explicitly requested
+locked builds and unavailable dependency resolution MUST fail actionably.
 Missing requested resources MUST fail clearly; auto discovery MUST NOT
 advertise unusable tooling.
 
@@ -635,12 +669,13 @@ Successful use produces:
 - A small, robust set of sandbox-executed tools: shell, bounded/paginated file
   reads, whole-file writes, exact preimage edits, listing, literal search and
   file discovery.
-- Command policy enforcement (an allow-by-default shell with a safe denylist and
+- Command policy enforcement (an allow-by-default shell with optional operator filters and
   language profiles that surface the relevant package and build tools).
 - Language tool-chain detection, configuration, and gating: advertise profiles
   only against validated read-only resources that reach the sandbox, let each
   configurable profile be `on`/`auto`/`off`, detect the project language
-  advisingly, and fail at startup when a requested or `on` profile is missing.
+  advisingly. Explicit System `on` availability errors remain; unavailable
+  workspace Rust is diagnostic/unadvertised without blocking independent tools.
 - Construction and execution of a version-one Authoring-phase sandbox request
   against the installed `galla-runner`, reusing its closed protocol and
   Bubblewrap enforcement.
@@ -719,17 +754,19 @@ Successful use produces:
 - Given a prompt, the agent performs at least one model turn, and when the model
   proposes an approved tool call, the tool runs in the sandbox and its result is
   shown and fed back. The loop ends when the model stops proposing tools.
-- Given a model-intended command that matches the denylist (for example
-  `rm -rf` on a system path), the agent runner rejects the call with a clear
+- Given a model-intended command that matches an operator-configured denylist,
+  the agent runner rejects the call with a clear
   reason and does not build a sandbox request for it.
 - Given a write whose target is outside the working directory, the agent runner
   rejects the call with a clear reason.
 - Given a missing or misconfigured sandbox runner or backend, the tool reports
   the problem and exits without executing anything on the host.
-- Given an explicit or `on` language profile whose interpreter does not reach the
+- Given an explicit or `on` System language profile whose interpreter does not reach the
   sandbox, `skott` fails startup with a `ToolchainUnavailable` diagnostic
   instead of advertising a tool the sandbox cannot run; a profile set to `auto`
   is advertised only when its interpreter is available.
+- Unavailable requested workspace Rust is diagnosed and not advertised while
+  safe independent workspace tools remain usable.
 - Given a project whose root manifest names a language, `skott` may log
   the detected language but does not advertise that profile unless its interpreter
   is available or the profile is explicitly enabled.
@@ -858,7 +895,7 @@ failed startup MUST NOT quit the app.
 
 Provide bounded/paginated text reads, directory listing,
 literal search and scoped file discovery, plus exact-single-occurrence edits
-bound to an expected SHA-256 preimage. Preserve unrelated bytes, CRLF and
+with optional expected SHA-256 guards. Preserve unrelated bytes, CRLF and
 missing final newlines. Reject stale/ambiguous matches, malformed/unknown
 arguments, traversal, and symbolic-link mutation paths. File effects run in a
 small Rust helper through the same sandbox executor. Payload staging MUST be
@@ -871,12 +908,12 @@ Within one prompt run, an omitted `read_file.offset` MUST continue that path's
 last successful page, including across interleaved files and changed limits.
 Explicit offsets MUST override the cursor; zero restarts. Cursor advancement
 MUST use the actual returned byte boundary, not the requested limit, and occur
-only after a successful validated result. Continuations MUST reject changed
-preimages with an actionable restart diagnostic. New prompts start fresh.
+only after a successful validated result. Ordinary continuations MUST NOT freeze
+the revision; explicitly supplied guards remain authoritative. New prompts start fresh.
 Advancing reads MUST NOT trigger identical-action detection; repeated terminal
 reads MUST receive the existing bounded correction/circuit-breaker behavior.
 
-Provide digest-bound atomic append and strict single-file unified-diff updates
+Provide optionally digest-guarded atomic append and strict single-file unified-diff updates
 through the existing native helper and executor. They MUST preserve unrelated
 bytes and file modes, reject stale input, malformed/ambiguous patches,
 out-of-scope paths and linked mutation paths, and leave the original unchanged
@@ -892,6 +929,33 @@ request/lock/vendor binding and re-prepared read-only build resources. Document
 the available tools, conservative limitations and explicit host provisioning.
 This human-requested intent bundle has an explicit advisory-review exception
 while receipt enforcement is unavailable; no acceptance or compliance is claimed.
+
+### RUN-REQ-TOOL-RECOVERY
+
+Native discovery/search MUST skip and count sockets, FIFOs and other nonregular
+entries without opening them; their presence alone MUST NOT abort inspection.
+Explicit special-file scopes and detected ordinary-file substitutions MUST
+still fail. Search MUST retain collected matches and a supported scan
+continuation when its bounded streamed work reaches the 8 MiB budget, with partial
+coverage with the actual charge, an explicit limit flag and actionable narrowing
+guidance. Result pagination MUST NOT imply that unscanned files were searched.
+Depth, entry, matching-line, output and authority bounds remain enforced;
+hard traversal/result-limit errors MUST identify the bound and a supported next
+action. Tests MUST cover special entries, exact/overflow byte budgets, retained
+matches and pages, narrowed recovery and actual sandbox execution.
+
+Agent instructions MUST distinguish recoverable inspection limits from security
+denials and effectful failures, continue safe independent work, and explain
+blocked operations with their cause and concrete next step. Missing build
+resources MUST NOT prohibit source inspection or user-requested manifest edits.
+Dependency acquisition remains an explicit host operation; workspace Cargo
+remains offline with optional locked resolution. Live resources refresh at tool
+boundaries without restart after host changes. No automatic replay, download,
+broadened grant, human acceptance or compliance claim is introduced.
+
+This user-requested recovery bundle has an explicit local advisory exception
+while receipt enforcement is unavailable. Independent observation and
+source-blind comparison remain separate from acceptance.
 
 ### RUN-REQ-HEADLESS
 

@@ -463,7 +463,9 @@ fn write_root_is_enforced_on_a_slash_boundary_for_custom_roots() {
 
 #[test]
 fn denylisted_shell_command_is_rejected() {
-    let reg = registry();
+    let mut policy = ToolPolicy::default();
+    policy.shell_deny_substrings.push("rm -rf /".into());
+    let reg = ToolRegistry::new(policy);
     let err = reg
         .render(
             &tool_intent("shell", json!({ "command": "rm -rf /" })),
@@ -558,7 +560,9 @@ fn full_length_shell_command_is_executable_not_rejected() {
 
 #[test]
 fn denylisted_long_command_is_still_rejected() {
-    let reg = registry();
+    let mut policy = ToolPolicy::default();
+    policy.shell_deny_substrings.push("rm -rf /".into());
+    let reg = ToolRegistry::new(policy);
     let context = ExecContext::new("/tmp/work", "c");
     let padding = "a".repeat(4097);
     let command = format!("{} && rm -rf /", padding);
@@ -698,12 +702,7 @@ fn build_request_produces_a_closed_authoring_request() {
 }
 
 #[test]
-fn build_request_rejects_symlink_that_escapes_writable_scope() {
-    // The scope is symlink-free only in the sense that no link may escape it: a
-    // link whose resolved target lies outside the working directory could write
-    // through and leave the sandbox, so the build fails closed up front and names
-    // both the offending link and the target it points at. This holds at any
-    // depth, including the depth-two links real projects ship (Node's `.bin`).
+fn build_request_does_not_inventory_unrelated_workspace_symlinks() {
     let scope = tempdir().expect("temp scope");
     let sb = fake_sandbox(&scope);
     let workdir = tempdir().expect("temp workdir");
@@ -716,13 +715,13 @@ fn build_request_rejects_symlink_that_escapes_writable_scope() {
     let read_roots: Vec<PathBuf> = Vec::new();
     let environment: BTreeMap<String, String> = BTreeMap::new();
     let policy = ToolPolicy::minimum();
-    let err = sandbox::build_request(
+    let request = sandbox::build_request(
         &sb,
         &build(&argv, workdir.path(), &read_roots, environment, &policy),
     )
-    .expect_err("a scope-escaping symlink must fail the build");
-    assert_sandbox_build_reason(&err, "escape");
-    assert_sandbox_build_reason(&err, "escapes the writable scope");
+    .expect("workspace links add no host mounts or authority");
+    assert_eq!(request.grants.len(), 1);
+    assert_eq!(request.network.mode, galla::protocol::NetworkMode::Deny);
 }
 
 #[test]

@@ -10,6 +10,94 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:3086d1bd8a18b675b1468721f662518abda2fa56473e02eaa032b4cc61d3fda4", "observed_revision": "sha256:02b7979e6f81e2815f5503538266d13034718471afe061ee55f71a37a7075ed5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03", "observed_revision": "sha256:4bec0afba47fcba5472c45f6a3b225cf7920bad53eacf3926f90205b36676f62"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:0c1cfae82b7f2f6819b5a1898fc15a1608e08b91c738fb405507e0b2b458f9fb", "observed_revision": "sha256:a21376824ea18202c8dbe373530fc9f92b44cc2e01a562ba610a8ac8b55bb93c"}]
 tasks:
+  - id: live-workspace-write-tests
+    title: "write_tests: live resources and unrestricted file sizes"
+    description: "Pin streaming large files, live read continuation, resumable searches, atomic large-file edits, host resource refresh and native outside-write denial."
+    context: "User-directed ADR 0019; explicit local advisory exception. Tests precede production changes."
+    purpose: "Expose unnecessary inside-protection gates without weakening host confinement."
+    expected_outcome: "Regressions fail against old file caps and frozen state."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:00:52Z", completed_at: "2026-11-07T13:00:52Z"}
+  - id: live-workspace-implement-code
+    title: "implement_code: one-way workspace tools"
+    description: "Stream files, remove implicit freeze and manifest/lease gates, refresh live resources, use offline/unlocked workspace Cargo and OS-enforced scope."
+    context: "Skott447/447 non-checkout regressions passed ea8825a2-646e-4645-9a93-32ff0cd2d08d; real isolation passed de3b0f3c-a2f9-4e04-a404-1bcddaa6d1ed and exclusive native checkout passed a16724be-0466-47d2-ba57-3ce6c055cdbf after adding only cached missing uuid1.29.1 to the live project vendor. Affected strict Clippy, workspace all-target check, formatting and matching release binaries passed. Retain bounded memory/results, optional guards and outside origin protection; installed launchers/existing sessions were not updated."
+    purpose: "Allow useful work and legitimate host changes."
+    expected_outcome: "Focused and native regression tests pass without broad authority."
+    kind: implementation
+    status: completed
+    depends_on: [live-workspace-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:00:52Z", completed_at: "2026-11-07T13:00:52Z"}
+  - id: live-workspace-security-audit
+    title: "security_audit: independently observe one-way tools"
+    description: "Derive scoped implementation observations from source/tests without intent, queue, old records, reviews or history."
+    context: "Independent source-only-live-records excluded intent/queues/old repository IMPL/docs/reviews/chat/Git and ran no tests. Scoped observations and source-only follow-up for vendoring/inventory assertions are published in IMPL; finite refresh, nontransactional mutation and linked-root snapshot limits remain explicit. No implementer self-certification."
+    purpose: "Retain confinement, memory, concurrency and recovery evidence."
+    expected_outcome: "Persist independent observations and concrete limitations."
+    kind: security-audit
+    status: completed
+    depends_on: [live-workspace-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:17:34Z", completed_at: "2026-11-07T13:17:34Z"}
+  - id: live-workspace-compliance-review
+    title: "compliance_review: compare one-way workspace evidence"
+    description: "Separately compare intent with independent observations and attributed execution without raw source."
+    context: "Separate source-blind-live-comparison read current intent and fresh independent records only, without source/tests/old repository IMPL/queues/Git/history/prior reviews. Scoped correspondence and policy-directed old-prose cleanup are published in IMPL. Lost-update qualification and external-linked snapshot coverage remain unresolved for explicit human arbitration; neither side was automatically changed to conceal them. Completed comparison is not acceptance; recorded revisions/revalidation remain unchanged."
+    purpose: "Avoid treating implementation success as compliance."
+    expected_outcome: "Persist source-blind comparison and evidence limits."
+    kind: compliance-review
+    status: completed
+    depends_on: [live-workspace-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:21:23Z", completed_at: "2026-11-07T13:21:23Z"}
+  - id: tool-recovery-write-tests
+    title: "write_tests: useful bounded inspection"
+    description: "Reproduce special-entry aborts and discarded scan results; cover exact bounds, partial pagination, narrowed recovery, sandbox execution and agent instructions."
+    context: "User requested investigation of session-2026-11-07T09-38-11Z-3216821-1; explicit local advisory exception. Five regressions failed before repair (a4fb732b-1f07-4e66-bc72-0e93cc3a12ca); supplementary prerequisite presentation failed before its repair (6100a788-4e82-48cd-b50d-b7d29928e989)."
+    purpose: "Make avoidable inspection blockers fail before production changes."
+    expected_outcome: "Focused regressions fail against prior behavior."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"]
+    timestamps: {created_at: "2026-11-07T09:49:56Z", updated_at: "2026-11-07T10:01:18Z", completed_at: "2026-11-07T10:01:18Z"}
+  - id: tool-recovery-implement-code
+    title: "implement_code: diagnostic-driven recovery"
+    description: "Count unopened special entries, retain bounded partial search matches and add exact narrowing guidance; replace overbroad agent restrictions with operation-specific recovery."
+    context: "Final nextest f0a3ccc3-e546-4629-97eb-ec683be1a973 passed 67 selected tests; strict all-target Clippy, formatting and release build passed. Actual checkout discovery and bounded/narrowed search succeeded. No relaxed grants, acquisition, lock regeneration or replay; stale vendor readiness remains a build prerequisite."
+    purpose: "Keep useful work moving while preserving truthful coverage and safety."
+    expected_outcome: "Focused tests and actual sandbox recovery pass."
+    kind: implementation
+    status: completed
+    depends_on: [tool-recovery-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"]
+    timestamps: {created_at: "2026-11-07T09:49:56Z", updated_at: "2026-11-07T10:01:18Z", completed_at: "2026-11-07T10:01:18Z"}
+  - id: tool-recovery-security-audit
+    title: "security_audit: independently observe recovery"
+    description: "Derive a scoped IMPL supplement from current source/tests without intent, queue, prior records, reviews, chat or history."
+    context: "tool-recovery-source-observer independently observed current scoped source/test assertions; prerequisite-source-observer separately observed only the final error presentation amendment. Neither read intent/history, ran tests or established a deterministic high-confidence defect. IMPL retains race and model-behavior limits; no self-certification."
+    purpose: "Retain bounds, no-follow behavior and evidence limitations."
+    expected_outcome: "Persist attributed independent observations and discrepancies."
+    kind: security-audit
+    status: completed
+    depends_on: [tool-recovery-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"]
+    timestamps: {created_at: "2026-11-07T09:49:56Z", updated_at: "2026-11-07T10:01:18Z", completed_at: "2026-11-07T10:01:18Z"}
+  - id: tool-recovery-compliance-review
+    title: "compliance_review: compare recovery evidence"
+    description: "Separately compare scoped intent with independently observed behavior and test evidence without raw source."
+    context: "Separate tool-recovery-source-blind-comparator reported correspondence and retained unconditional no-open wording versus concurrent substitution, cooperative/race and real-model evidence limits for arbitration. Its initial oversized IMPL read exposed older observation sections, excluded from comparison; strict record-scope isolation was not achieved. Persisted in IMPL without acceptance/certification."
+    purpose: "Separate observed implementation from intended usefulness."
+    expected_outcome: "Persist source-blind correspondence and finite evidence limits."
+    kind: compliance-review
+    status: completed
+    depends_on: [tool-recovery-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"]
+    timestamps: {created_at: "2026-11-07T09:49:56Z", updated_at: "2026-11-07T10:03:12Z", completed_at: "2026-11-07T10:03:12Z"}
   - id: shared-area-write-tests
     title: "write_tests: no vendor package copy"
     description: "Pin direct shared-directory grants, masked writable aliases, per-call ownership and lightweight checks."

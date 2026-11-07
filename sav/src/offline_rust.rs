@@ -54,6 +54,20 @@ impl RustTool {
 
 /// Render a selection-aware wrapper for a trusted tool.
 pub fn wrapper(tool: RustTool) -> String {
+    render_wrapper(tool, true)
+}
+
+/// Render an offline workspace wrapper that allows writable lock resolution.
+pub fn workspace_wrapper(tool: RustTool) -> String {
+    render_wrapper(tool, false)
+}
+
+fn render_wrapper(tool: RustTool, locked: bool) -> String {
+    let rustup = if locked {
+        "/usr/bin/rustup"
+    } else {
+        "/rust/rustup"
+    };
     let working_directory = if tool == RustTool::Cargo {
         "if [[ -n \"${KVIST_CARGO_WORKDIR-}\" ]]; then cd \"$KVIST_CARGO_WORKDIR\"; fi\n"
     } else {
@@ -67,12 +81,16 @@ pub fn wrapper(tool: RustTool) -> String {
     } else {
         ""
     };
-    // Cargo and its dependency-resolving companion (cargo-clippy) must force
-    // offline, locked, vendored resolution. cargo consumes its own flags before
+    // Cargo and its dependency-resolving companion force offline resolution.
+    // Protected consumers also lock it. Cargo consumes its own flags before
     // delegating to the external clippy subcommand, so the flags must also be
     // injected here or clippy would resolve against the empty scratch registry.
     let arguments = if matches!(tool, RustTool::Cargo | RustTool::CargoClippy) {
-        " --offline --locked --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/rust/vendor\"'"
+        if locked {
+            " --offline --locked --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/rust/vendor\"'"
+        } else {
+            " --offline --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/rust/vendor\"'"
+        }
     } else {
         ""
     };
@@ -99,13 +117,22 @@ pub fn wrapper(tool: RustTool) -> String {
     };
     let tool = tool.name();
     format!(
-        "#!/usr/bin/bash\nset -eu\n{working_directory}if [[ \"${{1-}}\" == +* ]]; then selected=\"${{1:1}}\"; shift; else active=\"$(/usr/bin/rustup show active-toolchain)\"; selected=\"${{active%% *}}\"; fi\n{subcommand}{source_paths}{source_config}exec /usr/bin/rustup run -- \"$selected\" {tool}{arguments}{source_arguments} \"$@\"\n"
+        "#!/usr/bin/bash\nset -eu\n{working_directory}if [[ \"${{1-}}\" == +* ]]; then selected=\"${{1:1}}\"; shift; else active=\"$({rustup} show active-toolchain)\"; selected=\"${{active%% *}}\"; fi\n{subcommand}{source_paths}{source_config}exec {rustup} run -- \"$selected\" {tool}{arguments}{source_arguments} \"$@\"\n"
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_resolution_is_offline_without_an_injected_lock_requirement() {
+        for tool in [RustTool::Cargo, RustTool::CargoClippy] {
+            let script = workspace_wrapper(tool);
+            assert!(script.contains("--offline"));
+            assert!(!script.contains("--locked"), "{script}");
+        }
+    }
 
     #[test]
     fn runtime_uses_private_settings_readonly_registrations_and_fixed_selection() {

@@ -161,7 +161,9 @@ pub struct Resources {
     pub max_output_bytes: u64,
     pub max_processes: u64,
     pub max_files: u64,
-    pub max_file_bytes: u64,
+    /// Optional per-process file-write cap, not a quota on existing host files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_file_bytes: Option<u64>,
     pub max_scratch_bytes: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cache_bytes: Option<u64>,

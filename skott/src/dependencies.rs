@@ -70,7 +70,7 @@ pub(crate) fn failure(error: &impl std::fmt::Display) -> Error {
     Error::ToolPrerequisite {
         tool: "Rust offline dependencies".into(),
         reason: format!(
-            "{error}. Resolve Cargo.lock explicitly on the host if absent; run `skott --vendor [--cwd DIR]` (or add --offline for an existing cache), then `skott --vendor --check`.             After dependency changes restart the session to refresh its shared vendor view; interrupted publication requires inspection, never blind replay"
+            "{error}. Resolve Cargo.lock explicitly on the host if required by this explicit provision/check; run `skott --vendor [--cwd DIR]` (or add --offline for an existing cache), then `skott --vendor --check`. Live workspace tools notice provisioned changes on subsequent invocations without restart. Interrupted publication requires inspection, never blind replay"
         ),
     }
 }

@@ -2,6 +2,35 @@
 
 # Skott — Design
 
+## Live workspace realization (ADR 0019)
+
+This section replaces the older file-size/frozen-resource algorithms below.
+Stream hashes, pages, literal matching and atomic mutations through bounded
+buffers and same-directory temporary files. Result buffers remain bounded.
+Ordinary read cursors follow current bytes; do not synthesize expected hashes.
+Explicit preconditions protect requested mutations, not read-only resource
+integrity. Preserve exact matching and detect lost-update conflicts as local
+operation errors, never a global breach.
+
+Installed resource content is live. Cache prepared mount topology, rebuilding
+selection/registrations/source configuration only when their host metadata
+changes; no recursive file inventory or content-drift gate. Vendor presence and
+native resolver configuration are used without receipt/coherence/lease gates.
+Missing package diagnostics come from the affected Cargo operation. Generate
+Sav's workspace offline/unlocked wrapper, retaining the protected locked wrapper.
+Skip recursive host writable-scope inspection: the child resolves links within
+its enforced namespace. Retain non-writable helper/runner/backend origins.
+Preserve native Cargo TOML tables, retargeting directory sources only. Stage
+malformed original configuration for Cargo to diagnose; stage an explicit
+invalid-configuration marker when bounded reading is unavailable, with an
+actionable diagnostic. Never synthesize a valid success-shaped configuration.
+Unusable vendor nodes omit that extra host grant and use the declared empty
+offline view, with explicit diagnostics; compiler/local operations remain usable.
+Resolve bounded non-path registration names through trusted host registration
+entries, canonicalizing linked roots and rejecting writable-scope overlap.
+Cache failed Rust preparations with cheap topology observations too; retry
+after relevant host changes rather than repeatedly blocking independent tools.
+
 ## Shared Rust dependencies
 
 Dispatch standalone vendor operations before config discovery. Resolve the
@@ -11,16 +40,15 @@ installed host Cargo outside the workspace, prints concise authority/scope
 diagnostics and invokes the shared supervised backend once. No sandbox/model
 loop opt-out or new writable agent tool is introduced.
 
-Validate locked package/native metadata against the shared read-only vendor
-view, not its mutable workspace alias. Retarget shared generated source tables to
-`/rust/vendor`; managed state also passes the lightweight shared coherence gate
-(manifest, publication fences and resolver/lock binding). Partial publication
-must not be bypassed merely because package content is present. Stage that
-config as a read-only runtime file. Sav's Cargo/Clippy
+Explicit provisioning/checks retain shared metadata and publication validation.
+Workspace runtime uses the live read-only vendor view without receipt,
+publication-fence or lock-binding readiness gates. Retarget native source tables
+to `/rust/vendor` and stage configuration read-only while retaining other native
+tables; malformed configuration is left to Cargo-local failure. Sav's Cargo/Clippy
 wrappers select this fixed config in addition to the existing crates.io override.
 Keep dependency-free and unmanaged crates.io trees working without arbitrary
 receipt-derived paths. Missing packages remain actionable
-startup diagnostics, with no automatic acquisition. Do not rehash the complete
+affected-build diagnostics, with no automatic acquisition. Do not rehash the complete
 host vendor tree on every tool call.
 
 ## Standalone bootstrap and root mapping
@@ -212,9 +240,24 @@ never a guess about shell scripts. Distinct successful outcomes reset only
 consecutive stalls, not the effectful action history.
 
 Native traversal applies explicit generated-directory and literal path filters,
-accounts for exclusions/oversize without loading oversized files, and keeps
-all existing recursion/entry/byte and encoded-page ceilings. File search uses
+accounts for exclusions without imposing a source-file size quota, and keeps
+recursion/entry/scan-work and encoded-page ceilings. File search uses
 secure non-following descriptor access and explicit file-vs-directory errors.
+Count nonregular descendants without opening them; retain substitution and
+explicit-scope refusals. A shared walk-state scan-limit flag stops all recursive
+frames when bounded streamed scan work consumes the remaining 8 MiB.
+Return collected sorted matches with that flag, incomplete coverage, actual
+scanned bytes and a bounded narrowing instruction. Do not discard matches,
+increase per-call work limits or present result pages as full coverage.
+Use the explicit file/scan-offset continuation, separate from result pagination.
+Hard depth/count/match-limit errors include the limit and supported narrowing.
+System instructions direct the agent to adapt inspection scope, continue safe
+independent work and report concrete blockers. Replace the blanket manifest-edit
+ban with the actual separation between authoring and host acquisition/lock
+updates; live prepared offline resources refresh at tool boundaries without restart.
+Prerequisite error presentation retains the specific cause/remedy and limits
+the block to that operation, rather than prescribing an unrelated installation
+repair or stopping supported independent work.
 Rust integration remains a separately bounded host-selection/read-only-mount
 path; it must not import maerg policy/types or relax its closed Cargo phases.
 
@@ -253,10 +296,10 @@ small helper runs inside the installed isolation boundary; it does not confer
 process isolation when manually invoked. The broker mounts the helper and a
 private payload read-only, and never stages files using provider IDs or writes
 payloads into the workspace. Exact editing preserves raw unrelated bytes and
-requires a SHA-256 preimage. Atomic replacement is per file, with stale-content
+accepts an optional SHA-256 preimage. Atomic replacement is per file, with stale-content
 revalidation immediately before replacement; unrelated external writers are
 not a transactional locking participant. Paginated reads/search/discovery are
-deterministic and bounded, including recursion, scanned bytes, file size and
+deterministic and bounded, including recursion, scanned work and
 encoded output.
 
 The headless CLI and TUI share transport/executor/session construction. NDJSON
@@ -585,30 +628,58 @@ happens on our argv.
   fit 7000 bytes, leaving room for the loop's 8-KiB process-status preview.
 - Mutation uses descriptor-relative no-follow directory traversal, rejects
   linked targets and uses atomic per-file replacement, preserving permissions.
-  Exact edits require a SHA-256 preimage and one literal occurrence, including
-  rejecting overlapping matches. CRLF and unrelated/missing-newline bytes stay
+  Explicit SHA-256 preconditions are optional. Exact edits require one literal
+  occurrence, including rejecting overlapping matches. CRLF and unrelated/missing-newline bytes stay
   unchanged. External writers do not participate in a transactional lock:
   stale checks do not promise atomic compare-and-swap against arbitrary writers.
 
 The per-run executor bridge owns a mutex-protected, bounded map of exact path
 read cursors (at most 4096 distinct paths, then explicit refusal). This is local runtime
 state, not filesystem authority or durable workflow evidence. It resolves
-omitted offsets immediately before execution, adds the prior digest on
-continuation and validates successful JSON page metadata before advancing.
+omitted offsets immediately before execution, preserves only explicit digest
+guards and validates successful JSON page metadata before advancing. Ordinary
+reads seek to the requested position with at most three lookbehind bytes and
+bounded lookahead, reading at most `limit+10` bytes, not preflighting the whole
+descriptor. They validate page-local UTF-8 and hash exactly the fitted returned
+content. Whole raw-file hashing occurs only for an explicit full-digest request
+or guard; `sha256` is otherwise null. Two bounded page attempts tolerate a
+concurrent length change; continued races fail only that read with retry guidance.
+Pages adjust moved UTF-8 offsets forward or clamp shrunken EOF positions and
+report the adjustment. Cursors verify content digests and compare equal byte
+ranges, descriptor lengths or explicitly obtained full revisions, never treating
+different page digests as whole-file revision changes.
 It never reads host files to discover cursor state. Explicit zero resets;
 explicit other offsets replace the cursor only on success. EOF keeps the
 terminal byte position. Only reads not already at a known terminal position
 are repeatable; EOF observations enter Sav's unchanged repeat detector.
 Malformed helper output fails explicitly. New prompt runs get a fresh bridge.
 
-Append and patch reuse the existing descriptor-relative replacement path and
-digest checks. A typed mutation selects whole replacement, exact edit, append
-or patch; all compute/validate the new bytes before creating a temporary file.
-The private patch parser accepts only single-file unified hunks with checked
-numeric ranges, exact old/context bytes and consistent new coordinates/counts.
-It constructs the full result in memory within the 1-MiB file bound, preserving
-line endings and explicit missing-newline markers; there is no subprocess,
-header-path interpretation or fuzzy fallback.
+Append and patch reuse descriptor-relative replacement and streamed digest
+checks. Each operation pins the preimage descriptor, streams its revision,
+creates an exclusive same-directory replacement and streams candidate bytes
+through a hashing writer. Exact edits use request-sized KMP state to count
+overlapping occurrences, then rewind and stream unchanged ranges around the
+unique match. Append copies validated UTF-8 chunks and writes the request text
+verbatim. The patch parser retains only bounded request hunks, skips unchanged
+source lines through fixed-size buffers and compares removal/context lines
+chunkwise without allocating complete source lines. Checked numeric ranges
+have no artificial line-coordinate ceiling. New coordinates/counts and
+missing-final-newline markers remain exact. Candidate content and a fresh
+no-follow revision (digest, inode, mode and change timestamps) must agree with
+the pinned preimage observations before atomic publication. Failed operations
+remove the owned candidate; arbitrary host writers are not an atomic CAS.
+Revision observation hashes fixed-size chunks with cancellation checks and
+no size quota.
+
+Literal search similarly streams fixed-size buffers with request-sized KMP
+state. A bounded recent-line deque retains only 1024-byte previews; collected
+results remain capped, including lines of arbitrary length. An 8-MiB scan window
+returns a UTF-8-aligned overlapping `next_scan` byte cursor, distinct from
+result pagination. Up to 8 MiB of separate prefix work restores absolute line
+counts/previews for resumed offsets; larger offsets return explicitly unknown
+global lines and local line/preview origins. UTF-8/NUL validation covers only
+observed bytes; special/generated skipping and incomplete coverage remain
+truthful. There is no whole-file search allocation or length skip.
 
 `bash` is resolved once to its canonical path at request construction. The
 registry renders the sandbox-relative path the agent passes (typically under the
@@ -634,12 +705,12 @@ the sandbox, never against the host `PATH`.
 The System gate lives in `ToolRegistry::resolve`. Sandboxed terminal/headless
 startup uses `resolve_for_workspace`, adding validated installed Rust resources
 and the shared project vendor view without changing the maerg Cargo topology.
-The fixed Cargo shim prepends `--offline --locked` and source overrides to every
-normal PATH Cargo invocation; Cargo handles missing/stale locks before a build
-can update them. Flags also apply to metadata and checks; version/help remain
-usable without a project lock. Explicit alternate executable paths are not
-rewritten. This is a locked-build default, not an artifact write-protection
-mechanism for the standalone writable workspace. Concrete compiler,
+The workspace Cargo shim prepends `--offline` and source overrides to normal
+PATH Cargo invocations. Cargo may create/update the writable lock; an explicit
+caller `--locked` still rejects missing/stale locks. Protected verification uses
+the separate locked wrapper. Flags also apply to metadata and checks;
+version/help remain usable without a project lock. Explicit alternate executable
+paths are not rewritten. Concrete compiler,
 rustdoc and native libraries for the initial selection remain under
 `/rust/toolchain`; the trusted wrappers
 is under `/rust/runtime`. `HOME=/tmp` and `CARGO_HOME=/tmp/cargo-home` are
@@ -648,44 +719,49 @@ keeps build output in the writable workspace across invocations. Mount the
 shared `.kvist/vendored` tree read-only at `/rust/vendor` and point the shared
 Cargo wrapper there. Only that exact read-only vendor resource may have a source
 inside the writable workspace; other Rust/context source overlaps remain refused.
-The runner's fixed prepared-Rust rule masks existing workspace vendor content
-behind mode-000 read-only tmpfs after binding grants. There is no second usable
-registry inside the sandbox and no generalized overlapping grant exception.
-Selection uses the standard host rustup layout, ignoring ambient overrides and
-custom linked roots; maerg `.kvist/rust-toolchain.json` is not authorization.
+The runner overlays existing ordinary workspace vendor nodes read-only using
+descriptors pinned relative to the workspace. Both views are readable/live;
+there is no generalized overlapping grant exception. Selection uses trusted
+system or host-home Rustup and canonical host-linked registrations outside
+write/credential scopes, ignoring ambient Rust overrides;
+maerg `.kvist/rust-toolchain.json` is not authorization.
 Installed-resource preparation retains its 180-second cooperative budget.
 Vendor-specific quotas come from the shared library/project configuration.
 Do not enumerate/copy/hash vendor source files at startup or per tool call.
-Retain only shared directory identity, lock binding and a small staged resolver.
-Obtain a shared vendor read owner before request preparation and retain it through
-execution; publication uses an exclusive directory lock. Idle registry clones
-hold no vendor read lock. Stage ownership is shared
-with the registry/executor and removed when the final owner drops. Pin/root
-substitution and tracked executable/library/shim drift fail before dispatch;
-the identity is not a complete toolchain-tree digest.
+Stage only the small retargeted native Cargo resolver configuration, preserving
+other TOML tables and retaining malformed bytes for Cargo's own failure. Runtime
+initialization copies the staged native configuration into private
+`/tmp/cargo-home/config.toml` before Cargo starts, so early-loaded aliases and
+other native tables work; CLI source overrides retain sandbox paths/offline mode.
+Runtime consumption takes no reader lease and checks no receipt/lock/content inventory.
+Stage ownership is shared with the registry/executor and removed when the final
+owner drops. Per-call no-follow origin binding protects against added host
+mounts, not legitimate host content or node replacement.
 
-Enumerate and sort every standard-layout installed name reported by the trusted
-system rustup. Require bounded, non-link roots outside the writable workspace
-and validate each compiler/Cargo/rustdoc, native layout and present companions.
-Register every name in a private staged rustup home. The initial selection links
+Enumerate and sort usable standard/custom host registrations from trusted
+operator-controlled selectors. Include the selected compiler even when optional
+inventory queries fail; diagnose skipped optional entries and mount-plan limits.
+Register the exposed names in a private staged rustup home. The initial selection links
 to `/rust/toolchain`; other names link to disjoint `/rust/toolchains/N` mounts.
 Generated `settings.toml` selects the initial name. These templates remain read-only.
 Before executing a shell command, initialize `/tmp/rustup-home` with a copy of
 the settings and a link to the read-only registration directory. Rustup may
 change invocation-local selection/profile settings, but cannot write installations
 or registrations. Setup runs inside the sandbox, not against host scratch.
-Track inventory membership and bin/lib/rustlib metadata recursively to detect
-additions, removals, target changes and non-selected installation drift before
-dispatch. Fail on invalid entries, limits or drift, never silently truncate.
+A live cache observes bounded relevant slot metadata, including failed
+preparations and selected compiler roots. Changed topology/configuration
+reprepares at a tool boundary; unchanged unavailable state avoids repeated
+expensive setup. Optional inventory failures/unusable registrations are
+diagnosed without disabling the selected compiler; no recursive drift inventory.
 Set
 `RUSTUP_TOOLCHAIN` only for a project pin, `RUSTUP_AUTO_INSTALL=0`, and retain
-`HOME=/tmp`; direct PATH Cargo still enters the offline/locked shim.
-Track all present formatter/Clippy executables and the generated settings.
-Validate every generated link and the complete registration set before each
-dispatch. Fixed runtime wrappers consume an optional leading `+<name>` and
+`HOME=/tmp`; direct PATH Cargo enters the offline shim without forced locked
+resolution. Missing companions affect only their own operations.
+Fixed runtime wrappers consume an optional leading `+<name>` and
 otherwise resolve rustup's active selection (environment/pin/default), then invoke
 trusted system rustup's `run`
-without installation. Cargo retains its fixed offline/locked vendor flags.
+without installation. Workspace Cargo retains offline vendor flags with
+caller-selected locking; protected verification retains the locked wrapper.
 Formatter/Clippy/analyzer wrappers use the same selection. `rustup default`
 uses the real system rustup and private settings, never an emulated response.
 Set `RUSTC` and `RUSTDOC` to the selection-aware runtime wrappers so an alternate
@@ -770,22 +846,14 @@ the matching enforcement implementation.
 CI provisions the vendor registry, Cargo extensions and the full/minimal Rust
 installations on the host before native tests; test bodies never install them.
 
-Vendor startup checks package/native metadata, directory identity, lock binding
-and managed controls without copying or hashing package contents. It stages only
-small runtime configuration. Each executor invocation obtains directory read
-ownership before preparing/spawning the request and retains it through completion;
-idle resources retain no lock. Shared publication exclusively owns the old and
-candidate directories. Only the exact project vendor source may overlap the
-writable `/workspace` grant, with its alias masked by the existing runner.
-Directory/lock replacement requires restart. Cargo owns its source checksums;
-direct host edits are outside cooperative publication guarantees.
-
-Per-invocation validation compares each tracked executable/library/shim against
-the dev/ino/size/mtime/ctime fingerprint captured at resolve time; any
-modification, truncation or replacement updates at least one field, so strict
-drift detection no longer re-hashes hundreds of megabytes per tool call.
-Installed-resource identities bound into the environment and grants are derived
-from these metadata fingerprints, not a full-content attestation.
+Runtime selects available ordinary vendor material or an explicitly empty
+view, diagnoses unusable optional nodes, and stages only native resolver
+configuration. Existing vendor aliases are overlaid readable read-only.
+Cargo owns source/checksum checks. Explicit provisioning publication retains
+its own transactional checks; runtime takes no cooperative reader lease.
+Host content remains live, and topology/configuration is re-observed at later
+tool boundaries without restart. Preparation labels are not full-content
+attestations, acceptance or compliance evidence.
 Explicit host execution keeps the System-only registry. The System gate
 combines three inputs:
 
@@ -818,11 +886,12 @@ missing output and mismatched versions. Both Rust CI jobs provision Python,
 Node and C/C++ through system packages before native tests; Go and Rust retain
 their existing separate host provisioning.
 
-The fixed bin-only System PATH is shared from `toolchain` by generic and prepared Rust
+The fixed bin/sbin System PATH is shared from `toolchain` by generic and prepared Rust
 environments. Rust preparation keeps its existing shim, optional Cargo-bin and
 System directory precedence, then appends missing shared System directories
-without duplicates. Profile availability rejects administrative path aliases
-before and after canonicalization; executable fallback searches only bin
+without duplicates. Profile availability uses read-only standard system
+origins without classifying executable names or administrative aliases;
+executable fallback searches the fixed bin/sbin
 directories. It does not inherit host PATH or add mounts. Synthetic
 resource tests cover both optional Cargo-bin branches; the native Node trial
 also checks that `/usr/local/bin` survives the actual request/execution chain.
@@ -840,11 +909,8 @@ An absent or successfully signalled group does not establish direct-child
 termination: an unconfined child can change its group membership. Cleanup
 never follows that child into the supervisor's own group.
 Request construction checks the same cancellation/deadline token while hashing
-identity files in 64-KiB blocks and scanning the workspace. A held non-following
-regular descriptor limits identities to 256 MiB, including concurrent growth.
-Deduplicated directory scheduling charges two retained path representations,
-caps their bytes at 32 MiB, and rejects depth above 128 or more than 1,000,000
-entries. One cooperative preflight guard bounds all stages by the requested
+identity files in 64-KiB blocks. There is no source-file size quota or recursive
+workspace inventory. One cooperative preflight guard bounds all stages by the requested
 tool wall time, capped at 120 seconds; it never resets on stage transitions.
 This replaces the unrelated fixed 30-second allowance that could reject the
 first tool on a cold or contended filesystem even with valid resources.
@@ -920,12 +986,11 @@ Missing/directory/overlapping context sources fail explicitly. No scratch
 grant is declared: the runner already mounts a private `/tmp` tmpfs in every
 sandbox, so that area serves as scratch and `HOME` points at `/tmp` (a dangling
 `HOME` would break tools that write home-relative state). Destinations are
-disjoint, so the runner's overlap check passes; the writable-scope check
-rejects only symlinks whose resolved target escapes the working directory
-(symlinks that stay inside the scope are allowed), so the build succeeds for
-real projects that ship in-project links. If the working directory contains a
-symlink that could write outside the scope the build fails closed with an
-actionable message naming the link and its target.
+disjoint, so the runner's overlap check passes. Do not recursively inspect
+workspace links before dispatch: the child resolves them inside its existing
+namespace, where ungranted host paths are absent/read-only. Galla pins explicit
+source origins without following links so source selectors cannot add outside
+authority; unrelated workspace links are not general preparation blockers.
 
 Network is `Deny` and no Cargo cache is declared, which is what the `Authoring`
 phase requires. Resources are bounded well below the runner's maxima.
@@ -1120,17 +1185,21 @@ trust. No speculative or misleading number is ever shown.
 - A tool that renders outside the write root is rejected before the sandbox; a
   sibling prefix such as `/workspace-evil` is rejected when the write root is
   `/workspace`.
-- A shell command matching the denylist is rejected before the sandbox.
-- A missing runner/backend path fails the session, not the host.
-- A request whose working directory contains a symlink that escapes the writable
-  scope fails the sandbox build (in-project links that stay inside are allowed).
+- A shell command matching an operator-configured denylist is rejected before
+  the sandbox.
+- A missing runner/backend fails closed with actionable prerequisite diagnostics,
+  never a host-execution fallback.
+- Unrelated workspace links do not trigger recursive preparation refusal;
+  native tests establish namespace confinement and explicit origin protection.
 - Cancellation during a turn reports `cancelled` and stops the loop.
 - Oversized output is truncated and reported, not buffered unbounded.
 - Config with wrong `schema_version` or unknown model selector fails to load.
-- A profile set to `on` or forced via `-p` that is not available inside the
+- A System profile set to `on` or forced via `-p` that is not available inside the
   sandbox fails startup with `ToolchainUnavailable`; `auto` advertises only the
   profiles whose interpreter reaches the read-only System/prepared resources, and `rustup`
   stubs are not treated as usable tool-chains.
+- Unavailable requested workspace Rust remains diagnostic/unadvertised while
+  independent tools continue.
 - `detect_languages` reports the project's detected language without gating
   advertisement.
 - Deterministic ordering of tool definitions, grants, and identities.

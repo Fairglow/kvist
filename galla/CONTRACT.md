@@ -41,15 +41,46 @@ fully implemented and active.
 
 ## Enforcement status
 
-All execution phases exclude `/sbin`, `/usr/sbin` and `/usr/local/sbin`.
-Their directory entries may exist as inaccessible read-only namespace mounts,
-but host contents and aliases are not exposed. PATH entries selecting these
-directories and grants covering or recreating them are rejected. The exception
-is a read-only Toolchain self-grant at `/usr` or `/usr/local`, which uses the
-already-filtered System view. Host state is unchanged; ordinary bin paths,
-including `/usr/local/bin`, remain available. This does not classify binaries
-installed in bin directories or material copied through separately approved
-resource aliases.
+ADR 0019 supersedes the previous administrative-directory exclusion policy:
+standard system trees, including sbin paths, are live read-only views. Host
+edits are legitimate inputs; executable names do not grant host privileges.
+Namespace/capability and network/grant enforcement remain unchanged.
+`Resources.max_file_bytes` is an optional positive integer; omission/null means
+no payload file-size cap. Explicit caps restrict payload writes only.
+The runner never scans/deletes operator files to enforce that cap.
+Granted ordinary source nodes are opened through no-follow descriptor traversal
+and bound from those descriptors; installed Bubblewrap must support `--bind-fd`
+and `--ro-bind-fd`, qualified by the native probe. Descriptors are consumed before
+the payload, not exposed as host directory capabilities. Mounted node contents
+remain live; replacement nodes are selected on subsequent calls without a
+content/revision check. This is origin authorization, not a frozen manifest.
+Workspace vendor aliases are readable but read-only, not mode-000 input
+exclusions. The private `/tmp` and `/run` filesystems each use `max_scratch_bytes`;
+this is a bounded RAM budget, not a quota/poll on host-mounted scratch data.
+
+System bin/sbin paths remain usable read-only. Authoring PATH may select
+canonical sandbox directories, including writable workspace executables;
+namespace enforcement, not PATH provenance, bounds their effects. Closed Cargo
+phase-specific PATH rules are retained.
+Explicit authoring environment values configure the isolated payload, including
+runtime loaders and Git/language paths; host enforcers run with cleared
+environments. Fixed Cargo-phase environment/source constraints remain separate.
+`enforcement::source::pin(&Path) -> Result<OwnedFd, String>` opens an ordinary
+absolute source through no-follow descriptor traversal. Returned descriptors
+are close-on-exec by default; callers explicitly transfer only final bind
+descriptors to a backend that consumes/closes them before payload execution.
+Writable origins containing the running runner, its installed replacement,
+host enforcers, their resolved transitive libraries/loaders, active executable
+mappings or global loader inputs are rejected with scope/installation remediation.
+Direct writable file grants are also rejected on pinned device/inode equality.
+Known code-path ancestor selector slots are protected through their canonical
+parent origins and encountered symlink targets, even when both the original
+lookup name and final resolved file lie outside a writable grant.
+Legitimate unlink/replacement of the running image does not require a restart
+or surviving old pathname; kernel image protection remains active.
+Approved directories are object grants: callers must avoid trusted-code/host
+control-channel/inode aliases inside them; no whole-host alias/IPC inventory
+or general attribution of concurrent external writes is claimed.
 
 Bubblewrap-based namespace enforcement is fully implemented and active. The
 runner constructs a complete Bubblewrap command line that establishes user,
@@ -119,6 +150,11 @@ Rust parser governs. The retired version-one request shape is not recognized.
 
 ## Behavioral guarantees
 
+`max_processes` is sampled descendant/process-group task accounting, including
+threads; it is not a kernel admission ceiling and may overshoot between samples.
+Process names containing spaces or parentheses must not corrupt accounting.
+UID-wide NPROC limits are not imposed on unrelated host users/jobs.
+
 The runner rejects unknown fields, unknown enumerants, wrong types, malformed
 `sha256:` digests, oversized input, non-canonical paths (duplicate `/`
 separators, a trailing `/` except root, or `.`/`..` components) in `argv[0]`
@@ -140,6 +176,14 @@ back to host execution.
 
 ## Errors and failure semantics
 
+The request's promotion intent does not authorize a host destination. The CLI
+must not infer a mutable sibling `project-cache`. Until its provider integration
+supplies a trusted generation-parent descriptor, a successful fetch retains its
+attempt-local files and reports promotion unavailable, without publishing or
+replaying the payload. Providers can use the existing descriptor-relative
+`cache::open_trusted_generation_parent`, `open_isolated_attempt_root` and
+immutable-generation API after authorizing the destination.
+
 Galla reserves `/.galla-sandbox` as a read-only namespace-local marker in every
 execution phase; grant destinations cannot cover it or its descendants.
 Inside a marked sandbox, both protocol modes return status 3 without reading
@@ -148,14 +192,12 @@ already inside a Galla sandbox; nesting is unnecessary; run the intended
 command directly. Clearing environment variables does not remove detection.
 The marker is a diagnostic signal, not an authority or confinement certificate.
 
-Prepared Rust workspace authoring has one resolver view: when an authoring
-request grants writable `/workspace` and read-only toolchain `/rust/vendor`,
-an existing `/workspace/.kvist/vendored` is covered by an empty, mode-000,
-read-only namespace mount. The directory entry can remain visible, but its
-contents cannot be read, traversed or changed; host content/permissions and
-sibling `.kvist` files are unchanged. An absent host registry remains absent
-without creating a host mountpoint. Other request topologies are unaffected.
-This is a fixed restrictive enforcement rule, not a new overlapping grant
+Workspace authoring overlays an existing ordinary `/workspace/.kvist/vendored`
+file/directory read-only from the pinned writable workspace origin, independently
+of Rust preparation. Its contents remain readable/live but cannot be changed
+through that alias; host permissions and sibling files are unchanged. Missing,
+linked or nontraversable nodes add no outside origin or host mountpoint. Other
+request topologies are unaffected. This is not a general overlapping grant
 capability or request field.
 
 A rejected, unenforceable, or unknown invocation writes a concise non-secret

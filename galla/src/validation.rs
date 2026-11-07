@@ -116,7 +116,7 @@ pub fn is_administrative_path(path: &Path) -> bool {
         .any(|directory| normalized.starts_with(directory))
 }
 
-pub(crate) fn is_filtered_system_grant(grant: &Grant) -> bool {
+pub(crate) fn is_system_grant(grant: &Grant) -> bool {
     matches!(grant.destination.as_str(), "/usr" | "/usr/local")
         && grant.source == grant.destination
         && grant.access == Access::ReadOnly
@@ -194,17 +194,10 @@ fn validate_environment_shape(request: &SandboxRequest) -> Result<(), ProtocolEr
                 "environment value for `{name}` contains a NUL byte"
             )));
         }
-        if is_dangerous_environment_name(name) {
+        if request.phase != Phase::Authoring && is_dangerous_environment_name(name) {
             return Err(invalid(format!(
                 "environment variable `{name}` is not permitted in a sandbox request"
             )));
-        }
-        if name == "PATH"
-            && value
-                .split(':')
-                .any(|entry| is_administrative_path(Path::new(entry)))
-        {
-            return Err(invalid("PATH must not select administrative directories"));
         }
     }
     Ok(())
@@ -221,6 +214,12 @@ fn validate_path_grants(request: &SandboxRequest) -> Result<(), ProtocolError> {
         .map(String::as_str)
         .unwrap_or_default();
     if path_value.is_empty() {
+        return Ok(());
+    }
+    if request.phase == Phase::Authoring {
+        for entry in path_value.split(':') {
+            validate_absolute(entry, "authoring PATH entry")?;
+        }
         return Ok(());
     }
     if path_value
@@ -267,7 +266,6 @@ fn validate_resources(resources: &Resources) -> Result<(), ProtocolError> {
         ),
         ("max_processes", resources.max_processes, MAX_PROCESSES),
         ("max_files", resources.max_files, MAX_FILES),
-        ("max_file_bytes", resources.max_file_bytes, MAX_FILE_BYTES),
         (
             "max_scratch_bytes",
             resources.max_scratch_bytes,
@@ -279,6 +277,13 @@ fn validate_resources(resources: &Resources) -> Result<(), ProtocolError> {
                 "resource {name} must be nonzero and no greater than the safe maximum {maximum}"
             )));
         }
+    }
+    if let Some(value) = resources.max_file_bytes
+        && (value == 0 || value > MAX_FILE_BYTES)
+    {
+        return Err(invalid(format!(
+            "resource max_file_bytes must be nonzero and no greater than the safe maximum {MAX_FILE_BYTES}"
+        )));
     }
     if let Some(value) = resources.max_cache_bytes
         && (value == 0 || value > MAX_CACHE_BYTES)
@@ -371,19 +376,6 @@ fn validate_grants(request: &SandboxRequest) -> Result<(), ProtocolError> {
                 "{label} destination covers the reserved sandbox marker"
             )));
         }
-        if !is_filtered_system_grant(grant)
-            && ["/sbin", "/usr/sbin", "/usr/local/sbin"]
-                .iter()
-                .any(|administrative| {
-                    path_contains(&grant.destination, administrative)
-                        || path_contains(administrative, &grant.destination)
-                })
-        {
-            return Err(invalid(format!(
-                "{label} destination `{}` covers an excluded administrative directory",
-                grant.destination
-            )));
-        }
         if grant.destination.contains("/../")
             || grant.destination.contains("/./")
             || grant.destination.ends_with("/..")
@@ -402,44 +394,6 @@ fn validate_grants(request: &SandboxRequest) -> Result<(), ProtocolError> {
                 "{label} source `{}` is a symbolic link",
                 grant.source
             )));
-        }
-        if grant.access == Access::ReadWrite
-            && source_path.is_dir()
-            && let Ok(entries) = std::fs::read_dir(source_path)
-        {
-            // The writable scope may legitimately contain symlinks that stay
-            // inside it (Node's `.bin` links, in-project aliases); only a link
-            // whose resolved target escapes the scope is unsafe. The client
-            // performs the thorough recursive check; the runner re-validates the
-            // immediate scope here as a cheap second line.
-            for e in entries.flatten() {
-                if let Ok(file_type) = e.file_type()
-                    && file_type.is_symlink()
-                {
-                    let link = e.path();
-                    let target = std::fs::read_link(&link).unwrap_or_default();
-                    let resolved = if target.is_absolute() {
-                        target.clone()
-                    } else {
-                        link.parent()
-                            .unwrap_or(std::path::Path::new("."))
-                            .join(&target)
-                    };
-                    if !symlink_target_inside_scope(&resolved, std::path::Path::new(&grant.source))
-                    {
-                        return Err(invalid(format!(
-                            "{label} writable scope `{}` contains a symbolic link `{}`
-                             pointing at `{}` which escapes the scope",
-                            grant.source,
-                            link.display(),
-                            target.to_string_lossy()
-                        )));
-                    }
-                }
-            }
-        }
-        if grant.destination.contains("unapproved") {
-            return Err(invalid(format!("{label} references an unapproved root")));
         }
         validate_digest(&grant.identity, &format!("{label} identity"))?;
         validate_grant_purpose_access(grant.purpose, grant.access, request.phase, &label)?;
@@ -847,15 +801,16 @@ fn grants_by_destination(request: &SandboxRequest) -> BTreeMap<&str, &Grant> {
 /// Whether `value` selects a directory inside one granted read-only
 /// destination. A PATH entry must resolve to authority the request explicitly
 /// granted read-only: it cannot point at writable scratch, an unmounted host
-/// directory, or any destination the grant set does not cover. The single
-/// read-only Toolchain self-grant at `/usr` or `/usr/local` receives the
-/// already-filtered System view, so its destination is not treated as the
-/// unfiltered host tree.
+/// directory, or any destination the grant set does not cover. Standard
+/// bin/sbin directories are part of the read-only System view.
 fn granted_read_only_contains(request: &SandboxRequest, value: &str) -> bool {
-    matches!(value, "/bin" | "/usr/bin" | "/usr/local/bin")
-        || request.grants.iter().any(|grant| {
-            grant.access == Access::ReadOnly && path_contains(&grant.destination, value)
-        })
+    matches!(
+        value,
+        "/bin" | "/usr/bin" | "/usr/local/bin" | "/sbin" | "/usr/sbin" | "/usr/local/sbin"
+    ) || request
+        .grants
+        .iter()
+        .any(|grant| grant.access == Access::ReadOnly && path_contains(&grant.destination, value))
 }
 
 /// Whether every `PATH` entry selects a directory inside one granted
@@ -1332,40 +1287,6 @@ fn path_contains(ancestor: &str, descendant: &str) -> bool {
         || descendant
             .strip_prefix(ancestor)
             .is_some_and(|suffix| suffix.starts_with('/'))
-}
-
-/// Whether a symlink target stays inside `scope_root`. Symlinks in the path are
-/// resolved when they exist; a dangling target is normalized lexically, and one
-/// that cannot be proven inside the scope is treated as an escape (fail safe).
-fn symlink_target_inside_scope(candidate: &std::path::Path, scope_root: &std::path::Path) -> bool {
-    match std::fs::canonicalize(candidate) {
-        Ok(resolved) => resolved.starts_with(scope_root),
-        Err(_) => lexical_normalizes_inside(candidate, scope_root),
-    }
-}
-
-/// Lexically resolve `candidate` against `scope_root` without touching the
-/// filesystem, for symlink targets that cannot be canonicalized (dangling or
-/// looping). Returns whether the result stays inside the scope.
-fn lexical_normalizes_inside(candidate: &std::path::Path, scope_root: &std::path::Path) -> bool {
-    let mut resolved: std::path::PathBuf = std::path::PathBuf::from(scope_root);
-    for component in candidate.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                if !resolved.pop() {
-                    return false;
-                }
-            }
-            std::path::Component::RootDir => {
-                resolved.clear();
-                resolved.push(std::path::Component::RootDir);
-            }
-            std::path::Component::Prefix(_) => return false,
-            std::path::Component::Normal(part) => resolved.push(part),
-        }
-    }
-    resolved.starts_with(scope_root)
 }
 
 #[cfg(test)]

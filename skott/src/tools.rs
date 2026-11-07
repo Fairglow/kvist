@@ -37,8 +37,7 @@ const MAX_INLINE_SHELL_COMMAND_BYTES: usize = MAX_VALUE_BYTES;
 /// inline form. A bare `$(cat /context/0)` as the `-c` script would be wrong:
 /// the exec'd bash would run `cat` and word-split its output into a command.
 const STAGED_SCRIPT_WRAPPER: &str = "exec bash -c \"$(cat /context/0)\" skott";
-const RUST_SHELL_WRAPPER: &str =
-    "source /rust/runtime/initialize; exec /usr/bin/bash -c \"$1\" skott";
+const RUST_SHELL_WRAPPER: &str = "if test -r /rust/runtime/initialize; then source /rust/runtime/initialize; fi; exec /usr/bin/bash -c \"$1\" skott";
 
 pub(crate) fn default_file_helper_path() -> crate::error::Result<PathBuf> {
     std::env::current_exe()
@@ -96,6 +95,7 @@ pub struct ToolRegistry {
     profiles: Vec<ToolProfile>,
     file_helper: Option<PathBuf>,
     rust_environment: Option<crate::toolchain::rust_environment::RustEnvironment>,
+    rust_requested: bool,
     diagnostics: Vec<String>,
 }
 
@@ -109,6 +109,7 @@ impl ToolRegistry {
             profiles: vec![ToolProfile::Generic],
             file_helper: None,
             rust_environment: None,
+            rust_requested: false,
             diagnostics: Vec::new(),
         }
     }
@@ -141,6 +142,7 @@ impl ToolRegistry {
             profiles,
             file_helper: Some(default_file_helper_path()?),
             rust_environment: None,
+            rust_requested: false,
             diagnostics: Vec::new(),
         })
     }
@@ -193,6 +195,7 @@ impl ToolRegistry {
             forced.filter(|p| *p != ToolProfile::Rust),
         )?;
         if setting != ProfileSetting::Off {
+            registry.rust_requested = true;
             match crate::toolchain::rust_environment::RustEnvironment::resolve_cancellable(
                 workdir,
                 cancellation,
@@ -202,10 +205,10 @@ impl ToolRegistry {
                     registry.profiles.push(ToolProfile::Rust);
                     registry.rust_environment = Some(environment);
                 }
-                Err(error) if setting == ProfileSetting::Auto && !cancellation.is_cancelled() => {
+                Err(error) if !cancellation.is_cancelled() => {
                     registry
                         .diagnostics
-                        .push(format!("Rust unavailable (auto; not advertised): {error}"));
+                        .push(format!("Rust requested but unavailable (not advertised): {error}. Independent workspace tools remain usable; provision or repair the installed resource on the host and retry only the affected Rust command without restart"));
                 }
                 Err(error) => return Err(error),
             }
@@ -222,6 +225,10 @@ impl ToolRegistry {
         &self,
     ) -> Option<&crate::toolchain::rust_environment::RustEnvironment> {
         self.rust_environment.as_ref()
+    }
+
+    pub(crate) fn rust_requested(&self) -> bool {
+        self.rust_requested
     }
 
     /// Overrides the resolved `bash` path (used by tests).
@@ -267,11 +274,11 @@ impl ToolRegistry {
             .collect::<Vec<_>>()
             .join(", ");
         let rust_scope = if self.rust_environment.is_some() {
-            " Rust exposes all validated installed toolchains and targets read-only. Discover \
+            " Rust exposes the usable selected toolchain and bounded optional registrations read-only. Discover \
               them with rustup toolchain list and rustup target list --installed --toolchain <name>; \
               select with cargo +<name>, rustc +<name>, rustup run <name>, or invocation-local \
               rustup default <installed-name> (a project pin takes precedence). Cargo is explicitly \
-              offline with a private read-only vendor snapshot, HOME/cache are scratch and \
+              offline with the current read-only vendor view, HOME/cache are scratch and \
               build output persists at /workspace/target. \
               Missing dependencies require host provisioning; sandbox builds never download."
         } else {
@@ -300,14 +307,14 @@ impl ToolRegistry {
         for (name, description, extra, required, read) in [
             (
                 "read_file",
-                "Read a UTF-8 byte page (default 4096, maximum 16384), with full-file sha256, total_bytes and next_offset. Within this prompt, omitting offset continues this path's last successful page (initially zero); explicit offset: 0 restarts. Offsets are bytes, NOT lines. EOF returns an empty page on continuation; repeated EOF reads are loop-detected. Continuation rejects changed files: restart explicitly. Complete files are bounded to 1 MiB. Pages dynamically shrink on UTF-8 boundaries to fit 7000 encoded bytes. Optional expected_sha256 guards explicit reads.",
+                "Read a page-local UTF-8 byte page (default 4096, maximum 16384) using bounded I/O, with page_sha256, total_bytes and next_offset. sha256 is null by default: no whole-file scan or UTF-8 preflight. Explicit include_sha256:true or expected_sha256 streams the whole raw file for a full revision and may be expensive. Never use page_sha256 as a full-file guard. Within this prompt, omitted offset continues the last actual page; explicit offset: 0 restarts. Offsets are bytes, NOT lines. Changed offsets move forward to a UTF-8 boundary or clamp to EOF, reporting requested_offset/offset_adjustment. Pages shrink to fit 7000 encoded bytes.",
                 None,
                 vec!["path"],
                 true,
             ),
             (
                 "write_file",
-                "Atomically create or replace a file strictly inside the write root. Content is bounded to 64 KiB; existing files to 1 MiB. Optional expected_sha256 rejects stale preimages.",
+                "Atomically create or replace a file strictly inside the write root. Request content is bounded to 64 KiB; existing files have no size cap. Streaming revision checks prevent detected lost updates; optional expected_sha256 rejects stale requests.",
                 Some(("content", "The complete replacement UTF-8 content.")),
                 vec!["path", "content"],
                 false,
@@ -321,7 +328,7 @@ impl ToolRegistry {
             ),
             (
                 "find_files",
-                "Find regular files under this directory using a literal substring of the scoped path. Generated directories are pruned by default; include_generated opts in. Coverage reports skipped_generated and complete. Sorted pages shrink to 7000 encoded bytes; use actual next_offset. Recursion/count/depth bounds fail explicitly; symlinks are skipped.",
+                "Find regular files under this directory using a literal substring of the scoped path. Generated directories are pruned by default; include_generated opts in. Symlinks and special entries (sockets/FIFOs) are skipped and counted, never opened. Coverage reports complete. Sorted pages shrink to 7000 encoded bytes; use actual next_offset. Recursion/count/depth bounds fail explicitly with narrowing guidance.",
                 Some((
                     "pattern",
                     "Literal substring, not a glob or regular expression; empty matches all.",
@@ -331,7 +338,7 @@ impl ToolRegistry {
             ),
             (
                 "search_files",
-                "Search a directory or one regular UTF-8 file for a nonempty literal substring. file_pattern is a literal scoped-path filter, not a glob. Generated directories are pruned by default; include_generated opts in. Oversized, binary and linked files are counted as skipped; complete reports coverage. Sorted path/line pages shrink to 7000 encoded bytes; use actual next_offset. Resource/scan bounds fail explicitly.",
+                "Stream a directory or regular UTF-8 file for a nonempty literal substring, including multiline queries. No file-size cap. file_pattern is a literal path filter. Generated, binary, linked and special entries are counted as skipped. At 8 MiB scan work, use next_scan.path with scan_offset=next_scan.offset (regular-file scope only); offset/next_offset separately paginate collected matches. Continuations overlap enough bytes to retain split queries, but do not cover omitted prefixes or later directory siblings. Global line is null beyond an 8 MiB prefix-count budget; line_in_scan/preview_offset then identify local context. Pages shrink to 7000 encoded bytes.",
                 Some((
                     "query",
                     "Nonempty literal substring, not a regular expression.",
@@ -341,29 +348,29 @@ impl ToolRegistry {
             ),
             (
                 "edit_file",
-                "Atomically replace exactly one occurrence of old_text, including overlapping matches, only when expected_sha256 matches. Preserves unrelated bytes, CRLF, missing final newline and mode.",
+                "Stream and atomically replace exactly one occurrence of old_text, including overlapping matches. No source/result size cap. Optional expected_sha256 guards a requested revision; detected concurrent changes reject only this mutation. Preserves unrelated bytes, CRLF, missing final newline and mode.",
                 None,
-                vec!["path", "old_text", "new_text", "expected_sha256"],
+                vec!["path", "old_text", "new_text"],
                 false,
             ),
             (
                 "append_file",
-                "Atomically append content verbatim to an existing UTF-8 file inside the write root, only when expected_sha256 matches. No newline is inserted. Preserves prior bytes and mode. Content maximum 64 KiB, resulting file maximum 1 MiB.",
+                "Stream and atomically append content verbatim to an existing UTF-8 file inside the write root. Optional expected_sha256 guards a revision. No newline is inserted. Preserves prior bytes and mode. Request content maximum 64 KiB; no source/result size cap.",
                 Some((
                     "content",
                     "The UTF-8 content to append, without an implicit newline.",
                 )),
-                vec!["path", "content", "expected_sha256"],
+                vec!["path", "content"],
                 false,
             ),
             (
                 "apply_patch",
-                "Atomically update one existing UTF-8 file using strict unified-diff hunks and expected_sha256. Supply @@ -old_start[,count] +new_start[,count] @@ and space/-/+ lines ending in LF, with optional \\ No newline at end of file markers. No file headers, paths, fuzz, renames or multi-file operations. Exact coordinates, context and counts required. CR before LF remains content. Patch maximum 64 KiB, result maximum 1 MiB.",
+                "Stream and atomically update one existing UTF-8 file using strict unified-diff hunks. Optional expected_sha256 guards a revision. Supply @@ -old_start[,count] +new_start[,count] @@ and space/-/+ lines ending in LF, with optional \\ No newline at end of file markers. No file headers, paths, fuzz, renames or multi-file operations. Exact coordinates, context and counts required, without a file-size/line-coordinate cap. CR before LF remains content. Request patch maximum 64 KiB.",
                 Some((
                     "patch",
                     "Single-file unified hunks only, without ---/+++ file headers.",
                 )),
-                vec!["path", "patch", "expected_sha256"],
+                vec!["path", "patch"],
                 false,
             ),
         ] {
@@ -374,11 +381,18 @@ impl ToolRegistry {
                 name,
                 "read_file" | "list_dir" | "find_files" | "search_files"
             ) {
-                properties["offset"] = serde_json::json!({"type":"integer","minimum":0,"maximum":if read {1048576} else {4096}});
+                properties["offset"] = serde_json::json!({"type":"integer","minimum":0});
                 if !read {
+                    properties["offset"]["maximum"] = serde_json::json!(4096);
                     properties["offset"]["default"] = serde_json::json!(0);
                 }
                 properties["limit"] = serde_json::json!({"type":"integer","minimum":1,"maximum":if read {16384} else {256},"default":if read {4096} else {100}});
+                if read {
+                    properties["include_sha256"] = serde_json::json!({
+                        "type":"boolean","default":false,
+                        "description":"Explicitly stream the full raw file for sha256. Expensive for huge files; ordinary reads hash/validate only the returned page."
+                    });
+                }
             }
             if let Some((field, desc)) = extra {
                 properties[field] = serde_json::json!({"type":"string","description":desc,"maxLength":if matches!(field, "content" | "patch") {65536} else {1024}});
@@ -390,6 +404,10 @@ impl ToolRegistry {
                 });
             }
             if name == "search_files" {
+                properties["scan_offset"] = serde_json::json!({
+                    "type":"integer","minimum":0,
+                    "description":"Byte-work continuation for a regular-file path, from next_scan.offset. Distinct from collected-result offset."
+                });
                 properties["file_pattern"] = serde_json::json!({
                     "type":"string","maxLength":1024,
                     "description":"Optional literal substring of the scope-relative path (basename for a file scope); not a glob."
@@ -468,7 +486,7 @@ impl ToolRegistry {
                 reason: "command matches the forbidden-command policy".to_owned(),
             })
         } else if command.len() <= MAX_INLINE_SHELL_COMMAND_BYTES {
-            let argv = if self.rust_environment.is_some() {
+            let argv = if self.rust_requested {
                 vec![
                     self.bash.to_string_lossy().into_owned(),
                     "-c".to_owned(),
@@ -502,8 +520,10 @@ impl ToolRegistry {
                 argv: vec![
                     self.bash.to_string_lossy().into_owned(),
                     "-c".to_owned(),
-                    if self.rust_environment.is_some() {
-                        format!("source /rust/runtime/initialize; {STAGED_SCRIPT_WRAPPER}")
+                    if self.rust_requested {
+                        format!(
+                            "if test -r /rust/runtime/initialize; then source /rust/runtime/initialize; fi; {STAGED_SCRIPT_WRAPPER}"
+                        )
                     } else {
                         STAGED_SCRIPT_WRAPPER.to_owned()
                     },

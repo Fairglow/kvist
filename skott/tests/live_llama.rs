@@ -55,7 +55,7 @@ fn real_sandbox_confines_native_files_and_denies_host_network() {
     assert_eq!(written.status, Some(0), "{}", written.error_text(1000));
     let read = invoke(
         "read_file",
-        serde_json::json!({"path":"/workspace/file.txt"}),
+        serde_json::json!({"path":"/workspace/file.txt","include_sha256":true}),
     );
     assert_eq!(read.status, Some(0));
     let page: serde_json::Value = serde_json::from_slice(&read.stdout).unwrap();

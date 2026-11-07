@@ -11,9 +11,8 @@ fn observing(cancellation: &CancellationToken) -> Result<()> {
     Ok(())
 }
 
-fn revision_bytes(reader: impl Read, cancellation: &CancellationToken) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    let mut reader = reader.take((MAX_FILE_BYTES + 1) as u64);
+fn revision_bytes(mut reader: impl Read, cancellation: &CancellationToken) -> Result<[u8; 32]> {
+    let mut hash = Sha256::new();
     let mut chunk = [0_u8; 8192];
     loop {
         observing(cancellation)?;
@@ -22,18 +21,15 @@ fn revision_bytes(reader: impl Read, cancellation: &CancellationToken) -> Result
         let count = match read {
             Ok(count) => count,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(error) => return Err(io_error("read bounded mutation revision", None, error)),
+            Err(error) => return Err(io_error("stream mutation revision", None, error)),
         };
         if count == 0 {
             break;
         }
-        bytes.extend_from_slice(&chunk[..count]);
-        if bytes.len() > MAX_FILE_BYTES {
-            return Err(failure("file exceeds the complete-file byte bound"));
-        }
+        hash.update(&chunk[..count]);
     }
     observing(cancellation)?;
-    Ok(bytes)
+    Ok(hash.finalize().into())
 }
 
 fn observed_revision(
@@ -65,12 +61,7 @@ fn observed_revision(
     if !metadata.is_file() {
         return Err(failure("target must be a regular file"));
     }
-    if metadata.len() > MAX_FILE_BYTES as u64 {
-        return Err(failure("file exceeds the complete-file byte bound"));
-    }
-    let bytes = revision_bytes(file, cancellation)?;
-    observing(cancellation)?;
-    let digest = Sha256::digest(&bytes).into();
+    let digest = revision_bytes(file, cancellation)?;
     observing(cancellation)?;
     Ok(MutationRevision::Present(digest))
 }

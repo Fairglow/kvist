@@ -7,10 +7,12 @@ use std::path::Path;
 use sav::{CancellationToken, ToolIntent};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use skott::file_tools::{FileRequest, MAX_FILE_BYTES, execute_file_request};
+use skott::file_tools::{FileRequest, execute_file_request};
 use skott::session::ToolExecutor;
 use skott::{ExecContext, HostExecutor, SandboxExecutor, SandboxPaths, ToolPolicy, ToolRegistry};
 use tempfile::{Builder, TempDir};
+
+const MAX_FILE_BYTES: usize = 1024 * 1024; // Retired source-size threshold, used only as fixture size.
 
 fn fixture() -> TempDir {
     Builder::new()
@@ -111,12 +113,242 @@ fn native_sandbox_discovers_exact_workspace_root_in_an_ordinary_project() {
 }
 
 #[test]
+fn live_large_files_use_the_actual_sandbox_mutation_and_observation_route() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    fs::write(
+        root.join("text"),
+        format!("{}needle\r\nlast", "x\n".repeat(1_048_580)),
+    )
+    .unwrap();
+    fs::set_permissions(root.join("text"), fs::Permissions::from_mode(0o640)).unwrap();
+    let executor = SandboxExecutor::new(
+        ToolRegistry::new(ToolPolicy::minimum()).with_file_helper(
+            Path::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+                .canonicalize()
+                .unwrap(),
+        ),
+        SandboxPaths {
+            runner: std::env::var_os("KVIST_GALLA")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(SandboxPaths::default_runner),
+            backend: SandboxPaths::default_backend(),
+        },
+        root.clone(),
+    );
+    for (name, arguments, change) in [
+        (
+            "read_file",
+            json!({"path":"/workspace/text","offset":2097160}),
+            false,
+        ),
+        (
+            "edit_file",
+            json!({"path":"/workspace/text","old_text":"needle","new_text":"changed"}),
+            true,
+        ),
+        (
+            "apply_patch",
+            json!({"path":"/workspace/text","patch":"@@ -1048581 +1048581 @@\n-changed\r\n+patched\r\n"}),
+            true,
+        ),
+        (
+            "append_file",
+            json!({"path":"/workspace/text","content":" tail"}),
+            true,
+        ),
+        (
+            "append_file",
+            json!({"path":"/workspace/text","content":""}),
+            false,
+        ),
+    ] {
+        let intent = ToolIntent {
+            id: format!("{name}-{change}"),
+            provider_id: None,
+            name: name.into(),
+            arguments,
+        };
+        let out = executor
+            .execute(&intent, &CancellationToken::new())
+            .unwrap();
+        assert!(!out.failed(), "{name}: {}", out.error_text(4096));
+        assert_eq!(
+            executor.progress(&intent, &out).unwrap(),
+            if change {
+                sav::loop_detection::ProgressEvidence::StateChanged
+            } else {
+                sav::loop_detection::ProgressEvidence::None
+            }
+        );
+    }
+    assert!(
+        fs::read_to_string(root.join("text"))
+            .unwrap()
+            .ends_with("patched\r\nlast tail")
+    );
+    assert_eq!(
+        fs::metadata(root.join("text"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o640
+    );
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+}
+
+#[test]
+fn live_sparse_read_hashes_a_large_source_under_a_bounded_address_space() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    let source = root.join("sparse");
+    let length = 128 * 1024 * 1024;
+    fs::File::create(&source).unwrap().set_len(length).unwrap();
+    let payload = root.join("request.json");
+    fs::write(
+        &payload,
+        request(
+            &root,
+            "read_file",
+            json!({"path":source,"offset":length,"limit":1,"include_sha256":true}),
+        )
+        .to_bytes()
+        .unwrap(),
+    )
+    .unwrap();
+    let out = std::process::Command::new("/usr/bin/bash")
+        .args(["-c", "ulimit -v 65536; exec \"$1\" \"$2\"", "bounded-read"])
+        .arg(env!("CARGO_BIN_EXE_skott-file-tool"))
+        .arg(payload)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["total_bytes"], length);
+    assert_eq!(result["content"], "");
+    let mut hash = Sha256::new();
+    for _ in 0..length / 8192 {
+        hash.update([0; 8192]);
+    }
+    assert_eq!(
+        result["sha256"],
+        format!("sha256:{}", hex::encode(hash.finalize()))
+    );
+}
+
+#[test]
+fn sparse_terabyte_head_and_tail_pages_return_promptly_without_full_file_preflight() {
+    use std::io::{Seek, SeekFrom, Write};
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    let source = root.join("sparse");
+    let length = (1_u64 << 40) + 4096;
+    let mut file = fs::File::create(&source).unwrap();
+    file.set_len(length).unwrap();
+    file.write_all(b"head").unwrap();
+    file.seek(SeekFrom::Start(length - 4)).unwrap();
+    file.write_all(b"tail").unwrap();
+    let payload = root.join("request.json");
+    for (offset, content) in [(0, "head"), (length - 4, "tail"), (length - 3, "ail")] {
+        fs::write(
+            &payload,
+            request(
+                &root,
+                "read_file",
+                json!({
+                    "path":source,"offset":offset,"limit":4
+                }),
+            )
+            .to_bytes()
+            .unwrap(),
+        )
+        .unwrap();
+        let started = Instant::now();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+            .arg(&payload)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut deadline_exceeded = false;
+        while child.try_wait().unwrap().is_none() {
+            if started.elapsed() >= Duration::from_secs(3) {
+                deadline_exceeded = true;
+                child.kill().unwrap();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            !deadline_exceeded,
+            "a four-byte page scanned the terabyte source before returning"
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let page: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(page["content"], content);
+        assert_eq!(page["offset"], offset);
+        assert_eq!(page["total_bytes"], length);
+        assert!(page["sha256"].is_null());
+        assert_eq!(page["page_sha256"], digest(content.as_bytes()));
+    }
+}
+
+#[test]
+fn ordinary_read_validates_only_requested_page_but_explicit_digest_guards_the_complete_file() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    let path = root.join("text");
+    let bytes = b"head\xfftail";
+    fs::write(&path, bytes).unwrap();
+    let head = run(&root, "read_file", json!({"path":path,"limit":4})).unwrap();
+    assert_eq!(head["content"], "head");
+    assert!(head["sha256"].is_null());
+    assert_eq!(head["page_sha256"], digest(b"head"));
+    let guarded = run(
+        &root,
+        "read_file",
+        json!({
+            "path":path,"offset":5,"limit":4,"expected_sha256":digest(bytes)
+        }),
+    )
+    .unwrap();
+    assert_eq!(guarded["content"], "tail");
+    assert_eq!(guarded["sha256"], digest(bytes));
+    assert!(
+        run(
+            &root,
+            "read_file",
+            json!({"path":path,"offset":4,"limit":1})
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn paginated_read_is_byte_bounded_and_hashes_complete_file() {
     let dir = fixture();
     let root = dir.path().canonicalize().unwrap();
     let path = root.join("text");
     fs::write(&path, "aé\r\nlast").unwrap();
-    let first = run(&root, "read_file", json!({"path":path,"limit":3})).unwrap();
+    let first = run(
+        &root,
+        "read_file",
+        json!({"path":path,"limit":3,"include_sha256":true}),
+    )
+    .unwrap();
     assert_eq!(first["content"], "aé");
     assert_eq!(first["sha256"], digest("aé\r\nlast".as_bytes()));
     assert_eq!(first["next_offset"], 3);
@@ -124,20 +356,20 @@ fn paginated_read_is_byte_bounded_and_hashes_complete_file() {
     let rest = run(&root, "read_file", json!({"path":path,"offset":3})).unwrap();
     assert_eq!(rest["content"], "\r\nlast");
     assert!(rest["next_offset"].is_null());
-    assert!(run(&root, "read_file", json!({"path":path,"offset":2})).is_err());
+    let moved = run(&root, "read_file", json!({"path":path,"offset":2})).unwrap();
+    assert_eq!(moved["offset"], 3);
+    assert_eq!(moved["offset_adjustment"], "utf8_boundary");
 }
 
 #[test]
-fn read_and_write_sizes_are_explicitly_bounded() {
+fn large_reads_are_allowed_while_request_text_stays_bounded() {
     let dir = fixture();
     let root = dir.path().canonicalize().unwrap();
     let path = root.join("oversized");
     fs::write(&path, vec![b'x'; MAX_FILE_BYTES + 1]).unwrap();
-    assert!(
-        run(&root, "read_file", json!({"path":path}))
-            .unwrap_err()
-            .to_string()
-            .contains("bound")
+    assert_eq!(
+        run(&root, "read_file", json!({"path":path})).unwrap()["total_bytes"],
+        MAX_FILE_BYTES + 1
     );
     assert!(
         FileRequest::new(
@@ -431,15 +663,13 @@ fn traversal_depth_oversized_scan_and_long_lines_are_bounded_explicitly() {
         json!({"path":root.join("scan"),"query":"x"}),
     )
     .unwrap();
-    assert_eq!(skipped["skipped_oversized"], 1);
-    assert_eq!(skipped["scanned_bytes"], 0);
-    assert_eq!(skipped["total"], 0);
-    assert_eq!(skipped["complete"], false);
-    assert!(
-        run(&root, "read_file", json!({"path":root.join("scan/large")}))
-            .unwrap_err()
-            .to_string()
-            .contains("byte bound")
+    assert_eq!(skipped["skipped_oversized"], 0);
+    assert_eq!(skipped["scanned_bytes"], MAX_FILE_BYTES + 1);
+    assert_eq!(skipped["total"], 1);
+    assert_eq!(skipped["complete"], true);
+    assert_eq!(
+        run(&root, "read_file", json!({"path":root.join("scan/large")})).unwrap()["total_bytes"],
+        MAX_FILE_BYTES + 1
     );
     fs::write(
         root.join("scan/large"),
@@ -632,7 +862,8 @@ fn phase3_failed_native_edit_has_no_progress_and_preserves_error_and_bytes() {
 }
 
 #[test]
-fn followup_ambiguous_public_host_executions_fail_instead_of_certifying_the_wrong_write() {
+fn followup_ambiguous_public_host_executions_report_no_progress_without_certifying_the_wrong_write()
+{
     let dir = fixture();
     let root = dir.path().canonicalize().unwrap();
     let executor = HostExecutor::new(
@@ -658,8 +889,10 @@ fn followup_ambiguous_public_host_executions_fail_instead_of_certifying_the_wron
     assert_eq!(first.stderr, second.stderr);
     assert_eq!(first.status, second.status);
     for out in [&second, &first] {
-        let error = executor.progress(&intent, out).unwrap_err();
-        assert!(error.describe().contains("ambiguous"), "{error}");
+        assert_eq!(
+            executor.progress(&intent, out).unwrap(),
+            sav::loop_detection::ProgressEvidence::None
+        );
     }
     assert_eq!(fs::read(root.join("text")).unwrap(), b"same");
 }
@@ -864,7 +1097,7 @@ fn failed_spawn_also_removes_private_payload() {
 }
 
 #[test]
-fn binary_skips_are_reported_and_ordinary_unsupported_entries_fail() {
+fn binary_and_special_entries_are_skipped_without_blocking_inspection() {
     use nix::sys::stat::Mode;
     use nix::unistd::mkfifo;
     let dir = fixture();
@@ -877,13 +1110,29 @@ fn binary_skips_are_reported_and_ordinary_unsupported_entries_fail() {
     assert_eq!(result["total"], 1);
     assert_eq!(result["complete"], false);
     mkfifo(&root.join("pipe"), Mode::from_bits_truncate(0o600)).unwrap();
-    assert!(
-        run(&root, "search_files", json!({"path":root,"query":"needle"}))
+    let _socket = std::os::unix::net::UnixListener::bind(root.join("control.sock")).unwrap();
+    let result = run(&root, "search_files", json!({"path":root,"query":"needle"})).unwrap();
+    assert_eq!(result["total"], 1);
+    assert_eq!(result["skipped_special"], 2);
+    assert_eq!(result["skipped_binary"], 2);
+    assert_eq!(result["complete"], false);
+    let found = run(&root, "find_files", json!({"path":root,"pattern":"text"})).unwrap();
+    assert_eq!(found["files"], json!([root.join("text")]));
+    assert_eq!(found["skipped_special"], 2);
+    assert_eq!(found["complete"], false);
+    assert!(run(&root, "read_file", json!({"path":root.join("pipe")})).is_err());
+    for name in ["pipe", "control.sock"] {
+        assert!(
+            run(
+                &root,
+                "search_files",
+                json!({"path":root.join(name),"query":"needle"})
+            )
             .unwrap_err()
             .to_string()
-            .contains("unsupported ordinary")
-    );
-    assert!(run(&root, "read_file", json!({"path":root.join("pipe")})).is_err());
+            .contains("regular file or directory")
+        );
+    }
 }
 
 #[test]
@@ -930,9 +1179,10 @@ fn native_search_generated_sources_are_excluded_and_counted_by_default() {
     .unwrap();
     assert_eq!(included["total"], 8);
     assert_eq!(included["skipped_generated"], 0);
-    assert_eq!(included["skipped_oversized"], 6);
+    assert_eq!(included["skipped_oversized"], 0);
+    assert_eq!(included["skipped_binary"], 6);
     assert_eq!(included["visited_entries"], 22);
-    assert_eq!(included["scanned_bytes"], 56);
+    assert_eq!(included["scanned_bytes"], 56 + 6 * 8192);
     assert_eq!(included["complete"], false);
 }
 
@@ -1007,7 +1257,8 @@ fn native_search_literal_file_filter_is_bounded_closed_and_reports_exclusions() 
     .unwrap();
     assert_eq!(empty["total"], 2);
     assert_eq!(empty["excluded_files"], 0);
-    assert_eq!(empty["skipped_oversized"], 1);
+    assert_eq!(empty["skipped_oversized"], 0);
+    assert_eq!(empty["scanned_bytes"], MAX_FILE_BYTES + 15);
     let direct = run(
         &root,
         "search_files",
@@ -1058,12 +1309,10 @@ fn native_search_literal_file_filter_is_bounded_closed_and_reports_exclusions() 
         } else {
             json!({"path":root,"pattern":"absent"})
         };
-        assert!(
-            run(&root, tool, args)
-                .unwrap_err()
-                .to_string()
-                .contains("unsupported ordinary")
-        );
+        let result = run(&root, tool, args).unwrap();
+        assert_eq!(result["total"], 0);
+        assert_eq!(result["skipped_special"], 1);
+        assert_eq!(result["complete"], false);
     }
 }
 
@@ -1142,10 +1391,10 @@ fn native_search_skips_preserve_deterministic_pages_and_terminal_bounds() {
         assert_eq!(page, run(&root, "search_files", args).unwrap());
         assert_eq!(page["matches"][0]["path"], json!(root.join(name)));
         assert_eq!(page["total"], 3);
-        assert_eq!(page["skipped_oversized"], 1);
+        assert_eq!(page["skipped_oversized"], 0);
         assert_eq!(page["skipped_binary"], 1);
         assert_eq!(page["skipped_symlinks"], 1);
-        assert_eq!(page["scanned_bytes"], 22);
+        assert_eq!(page["scanned_bytes"], MAX_FILE_BYTES + 23);
         assert_eq!(page["complete"], false);
         assert!(serde_json::to_vec(&page).unwrap().len() < 7000);
         assert_eq!(
@@ -1198,7 +1447,7 @@ fn native_search_exclusions_are_directory_names_not_arbitrary_path_substrings() 
 }
 
 #[test]
-fn native_search_sparse_oversized_files_are_counted_without_reading_their_contents() {
+fn native_search_sparse_files_are_streamed_until_binary_detection_without_size_skips() {
     let dir = fixture();
     let root = dir.path().canonicalize().unwrap();
     let huge = root.join("huge");
@@ -1209,19 +1458,24 @@ fn native_search_sparse_oversized_files_are_counted_without_reading_their_conten
     fs::write(root.join("source"), "needle").unwrap();
     let page = run(&root, "search_files", json!({"path":root,"query":"needle"})).unwrap();
     assert_eq!(page["total"], 1);
-    assert_eq!(page["skipped_oversized"], 1);
-    assert_eq!(page["scanned_bytes"], 6);
+    assert_eq!(page["skipped_oversized"], 0);
+    assert_eq!(page["skipped_binary"], 1);
+    assert_eq!(page["scanned_bytes"], 8198);
     assert_eq!(page["complete"], false);
     let direct = run(&root, "search_files", json!({"path":huge,"query":"needle"})).unwrap();
     assert_eq!(direct["total"], 0);
-    assert_eq!(direct["skipped_oversized"], 1);
-    assert_eq!(direct["scanned_bytes"], 0);
+    assert_eq!(direct["skipped_oversized"], 0);
+    assert_eq!(direct["skipped_binary"], 1);
+    assert_eq!(direct["scanned_bytes"], 8192);
     assert_eq!(direct["complete"], false);
-    assert!(run(&root, "read_file", json!({"path":huge})).is_err());
+    assert_eq!(
+        run(&root, "read_file", json!({"path":huge,"offset":1073741824})).unwrap()["total_bytes"],
+        1073741824
+    );
 }
 
 #[test]
-fn scan_bytes_entry_count_and_encoded_pages_fail_at_explicit_bounds() {
+fn scan_bytes_entry_count_and_encoded_pages_preserve_explicit_bounds() {
     let dir = fixture();
     let root = dir.path().canonicalize().unwrap();
     let scan = root.join("scan");
@@ -1231,12 +1485,14 @@ fn scan_bytes_entry_count_and_encoded_pages_fail_at_explicit_bounds() {
         fs::write(scan.join(index.to_string()), &bytes).unwrap();
     }
 
-    assert!(
-        run(&root, "search_files", json!({"path":scan,"query":"absent"}))
-            .unwrap_err()
-            .to_string()
-            .contains("total scanned byte bound")
-    );
+    let partial = run(&root, "search_files", json!({"path":scan,"query":"absent"})).unwrap();
+    assert_eq!(partial["scan_limit_reached"], true);
+    assert_eq!(partial["complete"], false);
+    assert_eq!(partial["scanned_bytes"], 8 * MAX_FILE_BYTES);
+    assert_eq!(partial["total"], 0);
+    assert!(partial["next_offset"].is_null());
+    let guidance = partial["next_step"].as_str().unwrap();
+    assert!(guidance.contains("8 MiB") && guidance.contains("file_pattern"));
     let count = root.join("count");
     fs::create_dir(&count).unwrap();
     for index in 0..4097 {
@@ -1273,6 +1529,133 @@ fn scan_bytes_entry_count_and_encoded_pages_fail_at_explicit_bounds() {
             .len(),
         1
     );
+}
+
+#[test]
+fn partial_search_retains_pages_and_narrowed_sandbox_search_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let mut bytes = vec![b'x'; MAX_FILE_BYTES];
+    bytes[..7].copy_from_slice(b"needle\n");
+    for index in 0..8 {
+        fs::write(root.join(format!("bulk{index}.txt")), &bytes).unwrap();
+    }
+    let exact = run(&root, "search_files", json!({"path":root,"query":"needle"})).unwrap();
+    assert_eq!(exact["total"], 8);
+    assert_eq!(exact["scanned_bytes"], 8 * MAX_FILE_BYTES);
+    assert_eq!(exact["scan_limit_reached"], false);
+    assert_eq!(exact["complete"], true);
+    assert!(exact["next_step"].is_null());
+
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(root.join("src/answer.rs"), "needle\n").unwrap();
+    let _socket = std::os::unix::net::UnixListener::bind(root.join("control.sock")).unwrap();
+    for offset in [0, 2, 4, 6] {
+        let page = run(
+            &root,
+            "search_files",
+            json!({"path":root,"query":"needle","offset":offset,"limit":2}),
+        )
+        .unwrap();
+        assert_eq!(page["total"], 8);
+        assert_eq!(page["matches"].as_array().unwrap().len(), 2);
+        assert_eq!(page["scan_limit_reached"], true);
+        assert_eq!(page["scanned_bytes"], 8 * MAX_FILE_BYTES);
+        assert_eq!(page["skipped_special"], 1);
+        assert_eq!(page["complete"], false);
+        assert!(serde_json::to_vec(&page).unwrap().len() < 7000);
+        assert_eq!(
+            page["next_offset"],
+            if offset == 6 {
+                Value::Null
+            } else {
+                json!(offset + 2)
+            }
+        );
+        assert_eq!(
+            page["matches"][0]["path"],
+            json!(root.join(format!("bulk{offset}.txt")))
+        );
+    }
+    let filtered = run(
+        &root,
+        "search_files",
+        json!({"path":root,"query":"needle","file_pattern":".rs"}),
+    )
+    .unwrap();
+    assert_eq!(filtered["total"], 1);
+    assert_eq!(filtered["scanned_bytes"], 7);
+    assert_eq!(filtered["excluded_files"], 8);
+    assert_eq!(filtered["scan_limit_reached"], false);
+    assert_eq!(
+        filtered["matches"][0]["path"],
+        json!(root.join("src/answer.rs"))
+    );
+
+    fs::write(root.join("bulk7.txt"), &bytes[..MAX_FILE_BYTES - 3]).unwrap();
+    let remainder = run(&root, "search_files", json!({"path":root,"query":"needle"})).unwrap();
+    assert_eq!(remainder["total"], 8);
+    assert_eq!(remainder["scanned_bytes"], 8 * MAX_FILE_BYTES - 3);
+    assert_eq!(remainder["scan_limit_reached"], true);
+
+    let executor = SandboxExecutor::new(
+        ToolRegistry::new(ToolPolicy::minimum()).with_file_helper(
+            Path::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+                .canonicalize()
+                .unwrap(),
+        ),
+        SandboxPaths {
+            runner: std::env::var_os("KVIST_GALLA")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(SandboxPaths::default_runner),
+            backend: SandboxPaths::default_backend(),
+        },
+        root,
+    );
+    for (name, arguments, total, limited) in [
+        (
+            "find_files",
+            json!({"path":"/workspace","pattern":".rs"}),
+            1,
+            false,
+        ),
+        (
+            "search_files",
+            json!({"path":"/workspace","query":"needle"}),
+            8,
+            true,
+        ),
+        (
+            "search_files",
+            json!({"path":"/workspace/src","query":"needle"}),
+            1,
+            false,
+        ),
+    ] {
+        let outcome = executor
+            .execute(
+                &ToolIntent {
+                    id: format!("{name}-{limited}"),
+                    provider_id: None,
+                    name: name.into(),
+                    arguments,
+                },
+                &CancellationToken::new(),
+            )
+            .unwrap();
+        assert!(!outcome.failed(), "{}", outcome.error_text(4096));
+        let result: Value = serde_json::from_slice(&outcome.stdout).unwrap();
+        assert_eq!(result["total"], total);
+        if name == "search_files" {
+            assert_eq!(result["scan_limit_reached"], limited);
+            if !limited {
+                assert_eq!(result["complete"], true);
+                assert_eq!(result["matches"][0]["path"], "/workspace/src/answer.rs");
+            }
+        } else {
+            assert_eq!(result["skipped_special"], 1);
+        }
+    }
 }
 
 #[test]
@@ -1351,7 +1734,7 @@ fn escaped_control_and_cjk_read_pages_are_complete_json_with_lossless_progress()
             let output = run(
                 &root,
                 "read_file",
-                json!({"path":path,"offset":offset,"limit":16384}),
+                json!({"path":path,"offset":offset,"limit":16384,"include_sha256":true}),
             )
             .unwrap();
             let encoded = serde_json::to_vec(&output).unwrap();
@@ -1376,9 +1759,13 @@ fn escaped_control_and_cjk_read_pages_are_complete_json_with_lossless_progress()
         let payload = root.join("request.json");
         fs::write(
             &payload,
-            request(&root, "read_file", json!({"path":path,"limit":16384}))
-                .to_bytes()
-                .unwrap(),
+            request(
+                &root,
+                "read_file",
+                json!({"path":path,"limit":16384,"include_sha256":true}),
+            )
+            .to_bytes()
+            .unwrap(),
         )
         .unwrap();
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_skott-file-tool"))

@@ -270,9 +270,7 @@ impl SandboxPaths {
 /// The default sandbox write root: everything the agent writes stays under it.
 pub const DEFAULT_WRITE_ROOT: &str = "/workspace";
 
-/// The tool authority policy: a safe-by-default shell denylist plus the sandbox
-/// write root. User configuration may only widen the denylist, never remove the
-/// built-in minimum.
+/// Operator-selected shell filters and the OS-confined sandbox write root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolPolicy {
     /// Shell command strings containing any of these substrings are forbidden.
@@ -284,27 +282,16 @@ pub struct ToolPolicy {
 }
 
 impl ToolPolicy {
-    /// The safe minimum denylist applied to every configuration.
+    /// Default scope without categorical command-name restrictions.
     pub fn minimum() -> Self {
         ToolPolicy {
-            shell_deny_substrings: vec![
-                "rm -rf".to_owned(),
-                "rm -fr".to_owned(),
-                "mkfs".to_owned(),
-                "dd if=".to_owned(),
-                "dd bs=".to_owned(),
-                "> /dev/".to_owned(),
-                ":() {".to_owned(),
-                "exec 9<>".to_owned(),
-                "reboot".to_owned(),
-                "shutdown".to_owned(),
-            ],
-            shell_deny_prefixes: vec!["mknod ".to_owned()],
+            shell_deny_substrings: Vec::new(),
+            shell_deny_prefixes: Vec::new(),
             write_root: DEFAULT_WRITE_ROOT.to_owned(),
         }
     }
 
-    /// Parses the `[tool_policy]` table on top of the built-in minimum.
+    /// Parses operator-selected filters and scope from `[tool_policy]`.
     fn from_policy_table(raw: &RawToolPolicy) -> Result<Self> {
         let mut policy = Self::minimum();
         policy

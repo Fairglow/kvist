@@ -39,9 +39,19 @@ constraint set injected into component work.
   network access and builds offline from that vendored registry. Agents must not
   write queues, intent, implementation records, approval state, or canonical
   evidence.
-- Use `--offline --locked` for sandboxed Cargo builds, tests, and dependency
-  resolution. Provision a matching `Cargo.lock` and vendored dependencies
-  separately; builds must not create or update the dependency lock.
+- Protected maerg verification uses its approved `--offline --locked` policy.
+  Skott workspace Cargo remains offline but may resolve the writable project
+  lock. Live installed tools and available vendored sources do not require a
+  frozen lock digest, application receipt or session restart (ADR 0019).
+  Acquisition remains separate from network-denied workspace execution.
+- Workspace isolation protects the host from unapproved sandbox effects, not
+  the sandbox from host edits. Read-only mounts are live inputs; legitimate
+  external changes must not be classified as breaches or global tool blockers.
+  No general file-size quota is imposed on workspace files. Use bounded streaming,
+  working memory, result pages and process budgets; never enforce payload limits
+  by scanning or deleting operator-owned files. Exact mutation matching and
+  optional explicit preconditions may prevent lost user edits without freezing
+  ordinary reads. Privileged command names are not authority; OS confinement is.
 - Prefer safe Rust. Unsafe is not categorically prohibited, but each use must
   be necessary, minimally scoped, and justified by documented safety
   invariants, targeted verification, and independent review. Existing

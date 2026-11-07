@@ -2,7 +2,27 @@
 
 # Galla Design
 
+Promotion intent alone supplies no trusted publication destination. Do not
+derive or inspect a sibling project-cache. CLI execution may retain successful
+attempt output but must report incomplete promotion until provider-owned
+descriptors are supplied to the existing immutable generation primitive.
+
 ## Design overview
+
+ADR 0019 replaces filtered administrative trees with live read-only System
+binds and removes host-file polling/deletion. Optional file-write limits are
+applied to the child process; absence requests no quota. Retain bounded protocol
+parsing, namespace/capability/network/grant enforcement and owned-process cleanup.
+Host edits never become file-size breach evidence.
+Walk ordinary source ancestors with `openat(O_PATH|O_DIRECTORY|O_NOFOLLOW)` and
+open the final ordinary node without following links. Bind final descriptors
+using the backend's FD operations, retaining RAII owners through spawn; the
+backend consumes/closes them before payload execution. Open any workspace vendor
+overlay relative to the pinned workspace descriptor, not a second mutable host
+pathname. No content hash, old inode, shared lease or inventory is compared.
+This preserves origin authority through rename/link races without claiming an
+atomic snapshot. Existing ordinary vendor nodes receive a readable read-only
+overlay; nonmaterialized paths do not introduce new mounts or stop unrelated work.
 
 This runner enforces isolated Linux execution for approved Kvist task requests.
 A core library strictly validates the version-one protocol types and bounds;
@@ -26,19 +46,40 @@ sandbox invocations and aggregate failures, so a probe failure cannot hide a
 request blocked on stdin. Each inner process has a cleared environment and an
 open, empty stdin pipe, and must exit 3 promptly without stdout.
 
-`enforcement/system_layout.rs` constructs a namespace-only filtered `/usr`
-view, binding its immediate children read-only except `sbin` and handling
-`local` with the same bounded, sorted one-level enumeration. This avoids
-following a host `/usr/sbin -> bin` link and accidentally masking `/usr/bin`.
-Other child links retain their link text. Missing `/usr/local` uses only
-namespace backing; present `/usr` and `/usr/local` must be non-link directories.
-Each directory is bounded to 1024 children; inspection/read/link errors fail
-explicitly. Mode-000 read-only tmpfs reserves the three administrative paths;
-filtered parent mounts are remounted read-only and payload capabilities are
-dropped. No host mountpoint or permissions are changed. Root and administrative
-overmount grants are rejected; exact read-only Toolchain self-grants for the
-filtered roots are not rebound. Native tests check access denial and successful
-bin execution; unit fixtures include merged-bin aliases and absent local roots.
+`enforcement/system_layout.rs` provides live read-only standard system trees,
+preserving host alias text rather than enumerating/filtering administrative
+children. Drop all payload capabilities. No host mountpoint or permission is
+changed. System self-grants reuse this view. Native tests distinguish denied
+writes/host networking from successful bin/sbin reads and execution.
+Pin ordinary explicit origins using close-on-exec descriptors, then enable
+inheritance only for backend bind handoff. Qualification exercises both FD-bind
+flags and confirms the payload receives no raw source descriptors. Origin
+pinning does not freeze bytes or promise an atomic multi-mount snapshot.
+Before payload launch, `enforcement/host_code.rs` retains close-on-exec
+`O_PATH` guards for the kernel `/proc/self/exe` image, any installed replacement,
+resolved host enforcers and loader-control inputs. Inspect active executable
+mapping paths and kernel device/inode metadata. Discover the actual backend
+and prlimit transitive dependency/loader closure by invoking each trusted
+installed ELF binary with a cleared environment, only
+`LD_TRACE_LOADED_OBJECTS=1`, and `--version`. Supervise nonblocking bounded
+stdout/stderr and a deadline with process-group cleanup. Bounded ELF program
+headers distinguish static images from missing/unsupported loader traces;
+dynamic images require a complete resolved trace including their interpreter.
+Reject writable pathname containment and direct pinned regular-file
+device/inode aliases. Missing old runner paths after legitimate replacement
+are not prerequisites; unavailable installed launchers/dependencies are.
+For every bounded known code pathname, inspect its ancestor selector slots:
+retain the original slot name and the canonical parent's corresponding slot.
+Follow encountered symlink-target ancestor paths within a deduplicated,
+bounded selector closure; do not enumerate directories. This catches a
+writable selector parent hidden between an outside lookup alias and outside
+final code. The closure permits at most 16,384 distinct ancestor nodes and
+16,384 selector slots; retain the ELF interpreter lookup independently of
+its canonical trace identity. Missing deleted-path slots remain optional. Recompute this
+per-call topology without comparing old content or rejecting operator updates.
+Descriptors remain close-on-exec and are never handed to the payload.
+This bounded code closure is not a recursive alias inventory, content freeze
+or host-content drift comparison.
 
 | Path                   | Responsibility                                                                                                                                                        |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -59,16 +100,14 @@ Bubblewrap execution — resolved mounts, namespace boundaries, `prlimit`
 resources, the source-aware network guard, and process supervision — without
 importing maerg types.
 
-After binding grants, prepared Rust authoring with writable `/workspace` and
-read-only toolchain `/rust/vendor` inspects the workspace source's `.kvist`
-and `vendored` directories without following links. Existing registry content
-is covered by mode-000 tmpfs, then remounted read-only; drop all child
-capabilities so privileged execution cannot bypass its permissions. Missing
-paths require no overlay and cause no host directory creation. Inspection
-errors and non-directory/link paths fail enforcement explicitly. This fixed
-mask neither hides sibling workflow files nor changes disjoint grant
-validation. Tests check denial of listing, reads, writes and permission
-changes, successful offline resolution, host non-mutation and unaffected
+After binding grants, authoring with writable `/workspace` inspects `.kvist`
+and `vendored` relative to the pinned workspace descriptor without following
+links. Existing ordinary vendor files/directories receive a readable read-only
+descriptor bind even without Rust preparation. Missing, linked or nontraversable
+nodes require no overlay or host directory creation. All child capabilities
+remain dropped. This overlay neither hides sibling workflow files nor changes
+disjoint grant validation. Tests check readable/live contents, denied writes and
+permission changes, offline resolution, host non-mutation and unaffected
 non-Rust requests.
 
 ## Interactions and state

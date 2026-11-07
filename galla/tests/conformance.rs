@@ -116,6 +116,287 @@ fn valid_request() -> Value {
     })
 }
 
+#[test]
+fn file_write_limit_can_be_omitted_or_null() {
+    for value in [None, Some(Value::Null)] {
+        let mut request = valid_request();
+        match value {
+            None => {
+                request["resources"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("max_file_bytes");
+            }
+            Some(value) => request["resources"]["max_file_bytes"] = value,
+        }
+        validation::parse_and_validate(&encode(&request)).expect("no file-write quota requested");
+    }
+}
+
+#[test]
+fn native_existing_host_files_are_not_payload_size_violations() {
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+        .arg("--kvist-sandbox-probe-v1")
+        .env_clear()
+        .output()
+        .unwrap();
+    assert!(
+        probe_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&probe_output.stderr)
+    );
+    let probe: Value = serde_json::from_slice(&probe_output.stdout).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let context = temp.path().join("context");
+    let work = temp.path().join("work");
+    let scratch = temp.path().join("scratch");
+    std::fs::write(&context, "live context").unwrap();
+    std::fs::create_dir(&work).unwrap();
+    std::fs::create_dir(&scratch).unwrap();
+    let existing = work.join("operator-data");
+    std::fs::write(&existing, vec![b'x'; 4096]).unwrap();
+    let outside = temp.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    std::fs::write(outside.join("secret"), "host-owned").unwrap();
+    std::os::unix::fs::symlink(&outside, work.join("external")).unwrap();
+    let mut request = valid_request();
+    request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
+    request["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
+    request["grants"][0]["source"] = json!(context);
+    request["grants"][1]["source"] = json!(work);
+    request["grants"][3]["source"] = json!(scratch);
+    request["resources"]["max_file_bytes"] = json!(32);
+    request["argv"] = json!([
+        "/usr/bin/bash",
+        "-c",
+        "sleep 0.2; test -r tests/operator-data; if printf bad >tests/external/secret; then exit 1; fi; printf 'inspection complete'"
+    ]);
+    let output = run_runner(&encode(&request));
+    assert_eq!(
+        std::fs::read(&existing).unwrap(),
+        vec![b'x'; 4096],
+        "operator file must survive"
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(outside.join("secret")).unwrap(),
+        "host-owned"
+    );
+}
+
+#[test]
+fn native_host_updates_are_live_and_do_not_block_unrelated_tools() {
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+        .arg("--kvist-sandbox-probe-v1")
+        .env_clear()
+        .output()
+        .unwrap();
+    assert!(probe_output.status.success());
+    let probe: Value = serde_json::from_slice(&probe_output.stdout).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let context = temp.path().join("context");
+    let work = temp.path().join("work");
+    let scratch = temp.path().join("scratch");
+    let cache = temp.path().join("project-cache");
+    for directory in [&work, &scratch, &cache] {
+        std::fs::create_dir(directory).unwrap();
+    }
+    std::fs::write(&context, "before").unwrap();
+    std::fs::write(work.join("operator-data"), "before").unwrap();
+    std::fs::write(cache.join("data"), "before").unwrap();
+    let mut request = valid_request();
+    request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
+    request["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
+    request["grants"][0]["source"] = json!(context);
+    request["grants"][1]["source"] = json!(work);
+    request["grants"][3]["source"] = json!(scratch);
+    request["resources"]["max_file_bytes"] = json!(32);
+    request["argv"] = json!([
+        "/usr/bin/bash",
+        "-c",
+        "set -eu; touch tests/ready; while ! test -e tests/updated; do sleep 0.01; done; test \"$(cat REQUIREMENTS.md)\" = 'host updated'; test \"$(wc -c <tests/operator-data)\" = 4096; if printf bad >REQUIREMENTS.md; then exit 1; fi; printf 'live host inputs retained'"
+    ]);
+    let bytes = encode(&request);
+    let output = std::thread::scope(|scope| {
+        let worker = scope.spawn(|| run_runner_from(&bytes, Some(temp.path())));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !work.join("ready").exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(work.join("ready").exists(), "payload readiness deadline");
+        std::fs::write(work.join("operator-data"), vec![b'x'; 4096]).unwrap();
+        std::fs::write(&context, "host updated").unwrap();
+        std::fs::write(cache.join("data"), "outside update").unwrap();
+        std::fs::write(work.join("updated"), "").unwrap();
+        worker.join().unwrap()
+    });
+    assert_eq!(
+        std::fs::read(work.join("operator-data")).unwrap(),
+        vec![b'x'; 4096]
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("live host inputs retained"));
+}
+
+#[test]
+fn native_source_ancestor_links_cannot_expand_host_grants() {
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+        .arg("--kvist-sandbox-probe-v1")
+        .env_clear()
+        .output()
+        .unwrap();
+    assert!(probe_output.status.success());
+    let probe: Value = serde_json::from_slice(&probe_output.stdout).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let work = temp.path().join("work");
+    let outside = temp.path().join("outside");
+    let scratch = temp.path().join("scratch");
+    for directory in [&work, &outside, &scratch] {
+        std::fs::create_dir(directory).unwrap();
+    }
+    std::fs::write(outside.join("data"), "unapproved outside fixture").unwrap();
+    std::os::unix::fs::symlink(&outside, work.join("redirect")).unwrap();
+    let mut request = valid_request();
+    request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
+    request["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
+    request["grants"][0]["source"] = json!(work.join("redirect/data"));
+    request["grants"][1]["source"] = json!(work);
+    request["grants"][3]["source"] = json!(scratch);
+    request["argv"] = json!(["/usr/bin/cat", "/workspace/component/REQUIREMENTS.md"]);
+    let output = run_runner(&encode(&request));
+    assert!(
+        !output.status.success(),
+        "a source pointer must not authorize another host origin"
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("unapproved outside fixture"));
+}
+
+#[test]
+fn native_enforcers_cannot_be_regranted_through_a_writable_alias() {
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+        .arg("--kvist-sandbox-probe-v1")
+        .env_clear()
+        .output()
+        .unwrap();
+    assert!(probe_output.status.success());
+    let probe: Value = serde_json::from_slice(&probe_output.stdout).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let context = temp.path().join("context");
+    let scratch = temp.path().join("scratch");
+    std::fs::write(&context, "fixture context").unwrap();
+    std::fs::create_dir(&scratch).unwrap();
+    let mut request = valid_request();
+    request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
+    request["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
+    request["grants"][0]["source"] = json!(context);
+    request["grants"][1]["source"] = json!("/usr");
+    request["grants"][3]["source"] = json!(scratch);
+    request["argv"] = json!(["/usr/bin/true"]);
+    let output = run_runner(&encode(&request));
+    assert!(
+        !output.status.success(),
+        "read-only enforcers must not acquire a writable alias"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("enforcer"));
+}
+
+#[test]
+fn authoring_path_can_select_workspace_scripts_and_system_sbin() {
+    let mut request = valid_request();
+    request["environment"]["PATH"] = json!("/workspace/component/tests/bin:/usr/sbin");
+    request["environment"]["LD_LIBRARY_PATH"] = json!("/workspace/component/lib");
+    request["environment"]["GIT_CONFIG_GLOBAL"] = json!("/workspace/component/gitconfig");
+    galla::validation::parse_and_validate(&encode(&request)).unwrap();
+}
+
+#[test]
+fn authoring_loader_environment_does_not_run_in_host_enforcers() {
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+        .arg("--kvist-sandbox-probe-v1")
+        .env_clear()
+        .output()
+        .unwrap();
+    assert!(probe_output.status.success());
+    let probe: Value = serde_json::from_slice(&probe_output.stdout).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let work = temp.path().join("work");
+    let scratch = temp.path().join("scratch");
+    let context = temp.path().join("context");
+    let marker = temp.path().join("host-only-marker");
+    let library = temp.path().join("fixture.so");
+    let source = temp.path().join("fixture.c");
+    std::fs::create_dir(&work).unwrap();
+    std::fs::create_dir(&scratch).unwrap();
+    std::fs::write(&context, "context").unwrap();
+    std::fs::write(&source, format!("#include <stdio.h>\n__attribute__((constructor)) static void fixture(void) {{ FILE *file = fopen(\"{}\", \"w\"); if (file) {{ fputs(\"unconfined\", file); fclose(file); }} }}\n", marker.display())).unwrap();
+    let compiler = Command::new("/usr/bin/cc")
+        .args(["-shared", "-fPIC"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&library)
+        .output()
+        .unwrap();
+    assert!(
+        compiler.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiler.stderr)
+    );
+    let mut request = valid_request();
+    request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
+    request["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
+    request["grants"][0]["source"] = json!(context);
+    request["grants"][1]["source"] = json!(work);
+    request["grants"][3]["source"] = json!(scratch);
+    request["environment"]["LD_PRELOAD"] = json!(library);
+    request["argv"] = json!(["/usr/bin/true"]);
+    let output = run_runner(&encode(&request));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !marker.exists(),
+        "payload loader environment reached an unconfined host enforcer"
+    );
+    std::fs::write(&source, "#include <stdio.h>\n__attribute__((constructor)) static void fixture(void) { FILE *file = fopen(\"/workspace/component/tests/payload-marker\", \"w\"); if (file) { fputs(\"confined\", file); fclose(file); } }\n").unwrap();
+    let compiler = Command::new("/usr/bin/cc")
+        .args(["-shared", "-fPIC"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&library)
+        .output()
+        .unwrap();
+    assert!(
+        compiler.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiler.stderr)
+    );
+    request["grants"].as_array_mut().unwrap().push(json!({
+        "source": library, "destination": "/fixture.so", "access": "read-only",
+        "purpose": "context", "identity": digest(b"payload-library")
+    }));
+    request["environment"]["LD_PRELOAD"] = json!("/fixture.so");
+    let output = run_runner(&encode(&request));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(work.join("payload-marker")).unwrap(),
+        "confined"
+    );
+}
+
 fn cargo_identity() -> String {
     digest(b"exact-cargo")
 }
@@ -526,51 +807,29 @@ fn accepts_a_path_entry_within_a_granted_read_only_directory() {
 }
 
 #[test]
-fn rejects_a_path_entry_pointing_at_writable_scratch() {
-    let mut request = path_baseline_request();
-    request["environment"]["PATH"] = json!("/workspace/scratch");
-    let error = validation::parse_and_validate(&encode(&request))
-        .expect_err("a PATH entry inside writable scratch must be rejected");
-    assert!(
-        error.to_string().contains("PATH"),
-        "rejection must name PATH: {error}"
-    );
-}
-
-#[test]
-fn rejects_a_path_entry_pointing_at_a_writable_authoring_grant() {
-    let mut request = path_baseline_request();
-    request["environment"]["PATH"] = json!("/workspace/component/tests");
-    let error = validation::parse_and_validate(&encode(&request))
-        .expect_err("a PATH entry inside a writable authoring grant must be rejected");
-    assert!(error.to_string().contains("PATH"));
-}
-
-#[test]
-fn rejects_a_path_entry_outside_every_grant() {
-    let mut request = path_baseline_request();
-    request["environment"]["PATH"] = json!("/tmp");
-    let error = validation::parse_and_validate(&encode(&request))
-        .expect_err("a PATH entry outside every grant must be rejected");
-    assert!(error.to_string().contains("PATH"));
-}
-
-#[test]
-fn rejects_a_path_entry_selecting_an_unmounted_directory() {
-    let mut request = path_baseline_request();
-    request["environment"]["PATH"] = json!("/tooling/rustup");
-    let error = validation::parse_and_validate(&encode(&request))
-        .expect_err("a PATH entry into an unmounted directory must be rejected");
-    assert!(error.to_string().contains("PATH"));
-}
-
-#[test]
-fn rejects_a_path_entry_selecting_a_grandchild_of_writable_scratch() {
-    let mut request = path_baseline_request();
-    request["environment"]["PATH"] = json!("/workspace/scratch/home");
-    let error = validation::parse_and_validate(&encode(&request))
-        .expect_err("a PATH entry into a scratch descendant must be rejected");
-    assert!(error.to_string().contains("PATH"));
+fn authoring_path_is_not_an_additional_mount_or_write_authorization() {
+    for path in [
+        "/workspace/scratch",
+        "/workspace/component/tests",
+        "/tmp",
+        "/tooling/rustup",
+        "/workspace/scratch/home",
+    ] {
+        let mut request = path_baseline_request();
+        request["environment"]["PATH"] = json!(path);
+        let validated = validation::parse_and_validate(&encode(&request)).unwrap();
+        assert_eq!(
+            validated.grants.len(),
+            request["grants"].as_array().unwrap().len()
+        );
+        assert_eq!(validated.network.mode, galla::protocol::NetworkMode::Deny);
+    }
+    for path in ["relative/bin", "/workspace/../outside", "/tmp/"] {
+        let mut request = path_baseline_request();
+        request["environment"]["PATH"] = json!(path);
+        let error = validation::parse_and_validate(&encode(&request)).unwrap_err();
+        assert!(error.to_string().contains("PATH"), "{error}");
+    }
 }
 
 #[test]
@@ -1088,22 +1347,14 @@ fn executable_rejects_legacy_request_with_actionable_diagnostic() {
 }
 
 #[test]
-fn rejects_administrative_search_and_covering_grants() {
-    for administrative in [
-        "/sbin",
-        "/usr/sbin",
-        "/usr/local/sbin",
-        "/usr/bin/../sbin",
-        "/usr/./sbin",
-    ] {
+fn administrative_names_do_not_replace_grant_authority() {
+    for administrative in ["/usr/sbin", "/usr/local/sbin"] {
         let mut request = valid_request();
         request["environment"]["PATH"] = json!(format!("/usr/bin:{administrative}"));
-        let error = validation::parse_and_validate(&encode(&request))
-            .expect_err("administrative PATH must fail");
-        assert!(error.to_string().contains("administrative"), "{error}");
+        validation::parse_and_validate(&encode(&request))
+            .expect("read-only granted System directories are usable");
     }
     for destination in [
-        "/",
         "/usr",
         "/usr/local",
         "/sbin",
@@ -1121,16 +1372,11 @@ fn rejects_administrative_search_and_covering_grants() {
             "purpose": "context",
             "identity": digest(b"additional")
         }));
-        let error = validation::parse_and_validate(&encode(&request))
-            .expect_err("administrative covering grant must fail");
-        if destination == "/" {
-            assert!(error.to_string().contains("canonical"), "{error}");
-        } else {
-            assert!(error.to_string().contains("administrative"), "{error}");
-        }
+        validation::parse_and_validate(&encode(&request))
+            .expect("explicit read-only grant names do not confer privileges");
     }
     validation::parse_and_validate(&encode(&valid_request()))
-        .expect("filtered System self-grants remain valid");
+        .expect("System self-grants remain valid");
 }
 
 #[test]
@@ -1198,7 +1444,7 @@ fn executable_executes_successfully_on_valid_request() {
     request["argv"] = json!([
         "/usr/bin/bash",
         "-c",
-        "set -eu; for path in /sbin /usr/sbin /usr/local/sbin; do test ! -r \"$path\"; test ! -w \"$path\"; test ! -x \"$path\"; if ls \"$path\"; then exit 1; fi; if touch \"$path/kvist-forbidden\"; then exit 1; fi; if chmod 755 \"$path\"; then exit 1; fi; done; /usr/bin/true; gcc --version; test -r /usr/local/bin"
+        "set -eu; for path in /sbin /usr/sbin /usr/local/sbin; do if test -d \"$path\"; then test -r \"$path\"; test -x \"$path\"; ls \"$path\" >/dev/null; if touch \"$path/kvist-forbidden\"; then exit 1; fi; if chmod 755 \"$path\"; then exit 1; fi; fi; done; /usr/bin/true; gcc --version; test -r /usr/local/bin"
     ]);
     for phase in ["authoring", "verification"] {
         request["phase"] = json!(phase);
@@ -1209,7 +1455,7 @@ fn executable_executes_successfully_on_valid_request() {
         let output = run_runner(&encode(&request));
         assert!(
             output.status.success(),
-            "{phase} administrative exclusion failed: {}",
+            "{phase} read-only System access failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
     }
@@ -1430,7 +1676,15 @@ fn schema_mirrors_parser_enumerants_and_required_fields() {
 }
 
 fn run_runner(request: &[u8]) -> std::process::Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    run_runner_from(request, None)
+}
+
+fn run_runner_from(request: &[u8], directory: Option<&std::path::Path>) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_galla-runner"));
+    if let Some(directory) = directory {
+        command.current_dir(directory);
+    }
+    let mut child = command
         .arg("--kvist-sandbox-request-v1")
         .env_clear()
         .stdin(Stdio::piped())

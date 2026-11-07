@@ -37,6 +37,50 @@ request MUST fail closed.
 
 ## Functional requirements
 
+### SR-REQ-ONE-WAY-ISOLATION
+
+Promotion MUST NOT infer a host destination from a mutable source pathname.
+Without a provider-owned publication capability, report incomplete promotion
+and retain actual fetched output; never follow a sibling link or replay fetch.
+
+ADR 0019 replaces categorical administrative-directory exclusion and mandatory
+per-file caps for workspace execution. Standard system trees, including sbin,
+MUST be read-only and usable without host modification. Namespace/capability,
+network and explicit grant enforcement remain authoritative.
+`Resources.max_file_bytes` MUST be optional; absence means no payload file-size
+quota. An explicit cap MUST apply to payload writes, never host files merely
+present in writable grants. Enforcement MUST NOT scan/delete operator files or
+classify legitimate host edits as sandbox abuse. Host edits to read-only mounted
+material MUST be visible. Tests MUST cover uncapped large files, survival of
+pre-existing/operator-created files under explicit caps, live read-only changes
+and denied writes outside grants.
+This human-requested bundle has an explicit local advisory exception while
+receipt enforcement is unavailable.
+
+Source-origin protection MUST remain independent of content stability. Open
+ordinary grant nodes through no-follow, descriptor-relative traversal and keep
+them alive until descriptor-backed binds are consumed. Never pass host directory
+capabilities to the payload. This per-call origin pin prevents sandbox-controlled
+symlink races from adding host mounts; it does not freeze contents or require
+old fingerprints. Native probes/tests MUST qualify descriptor-backed binds and
+descriptor closure. Existing workspace vendor nodes MUST be readable but
+read-only through an internal overlay even when Rust integration is unavailable.
+Unusable/nonmaterialized vendor paths MUST not globally block independent tools.
+Writable grants MUST NOT include the running runner inode, its installed
+replacement, backend, process-limit launcher or their resolved transitive
+loader/dependency closure. Direct writable file grants MUST also be checked
+by their pinned device/inode identity, not just pathname containment.
+Writable origins MUST NOT contain selector slots along those bounded known
+code paths, including slots reached through canonical parent directories
+and symlink-target ancestors. An outside-named lookup and outside final
+library MUST NOT hide an intervening writable selector parent.
+A legitimately unlinked/replaced running image MUST remain usable through
+its kernel executable reference, without requiring its old pathname to exist.
+Dependency discovery MUST be bounded, clear host-launcher environments and
+keep protection descriptors close-on-exec. Payload edits to host enforcers could
+widen host authority. Report the conflicting origin and a narrower scope or
+outside-scope installation, not a file-content freeze or host-edit violation.
+
 The following requirements define mandatory behavior of the enforcement component.
 
 ### SR-REQ-NO-NESTING
@@ -53,17 +97,17 @@ the enforcement component.
 
 ### SR-REQ-BIN-ONLY-SYSTEM
 
-Every execution phase MUST deny listing, traversal, reads, writes and permission
-changes at `/sbin`, `/usr/sbin` and `/usr/local/sbin`. Host administrative
-directory contents and symlink aliases MUST NOT be exposed at those paths.
-The remaining System directories and `/usr/local/bin` MUST remain usable,
-including on hosts whose `/usr/sbin` is a symlink to `/usr/bin`.
-Host content, permissions and links MUST remain unchanged. Request PATH must
-not select these administrative directories; grants must not cover or recreate
-them. Read-only Toolchain self-grants at `/usr` and `/usr/local` consume the
-filtered System view rather than rebinding the unfiltered host tree.
-This is directory exclusion, not classification of every administrative binary
-or approved resource alias. It does not replace namespace and capability limits.
+Standard System trees, including `/sbin`, `/usr/sbin` and `/usr/local/sbin`,
+MUST remain readable/executable read-only, including merged-directory aliases.
+Host content, permissions and links MUST remain unchanged. Executable names
+MUST NOT substitute for namespace, capability, network or filesystem authority.
+Authoring PATH MAY select canonical sandbox directories, including writable
+workspace scripts; it does not authorize host paths or effects. Closed Cargo
+verification/acquisition PATH rules remain separate.
+Explicit authoring environment values such as `LD_PRELOAD`, language paths and
+Git configuration paths MAY affect the isolated payload. They MUST NOT be
+inherited by the host runner/process-limit/backend launchers. Portable names,
+NUL/encoding bounds and fixed Cargo-phase environments remain enforced.
 
 The protocol-validation boundary and production enforcement have separate,
 explicit requirements so protocol capability cannot be confused with
@@ -180,14 +224,13 @@ filtered System mounts and verify the latter by actual execution.
 
 ### SR-REQ-WORKSPACE-VENDOR-MASK
 
-For authoring requests with a writable `/workspace` grant and a read-only
-toolchain grant at `/rust/vendor`, the runner MUST make an existing workspace
-`.kvist/vendored` directory inaccessible in the sandbox. The immutable resolver
-mount MUST remain readable. Masking MUST NOT change host registry content or
+For authoring requests with a writable `/workspace` grant, the runner MUST make
+an existing ordinary workspace `.kvist/vendored` node readable read-only in the
+sandbox, independently of Rust integration. The resolver mount, when supplied,
+MUST remain readable. Overlaying MUST NOT change host registry content or
 permissions, hide sibling `.kvist` files, relax grant-overlap validation, or
-create host directories when the registry is absent. Unsafe or uninspectable
-mask paths MUST fail explicitly. Requests without this prepared Rust topology
-MUST retain their existing visibility.
+create host directories when the registry is absent. Unsupported or absent
+paths MUST NOT disable independent tools or follow new host origins.
 
 ## Quality requirements and constraints
 

@@ -731,8 +731,9 @@ unchanged. Do not retain runtime shims under the writable project's `.kvist`.
 Prepared authoring PATH is `/rust/runtime/bin:/usr/bin:/bin:/usr/local/bin`,
 without sbin directories. Language verification rejects standard
 administrative path aliases before and after canonicalization and uses
-`/usr/bin:/bin:/usr/local/bin`. Galla supplies the filtered read-only System
-view for all phases; the maerg never adds an administrative overmount.
+`/usr/bin:/bin:/usr/local/bin`. Galla supplies live read-only standard System
+trees, including sbin, for all phases; the maerg's local selection policy does
+not alter those shared mounts or grant host write authority.
 
 Non-Rust generic authoring serializes the approved environment unchanged.
 Rust components (a local Cargo manifest) prepare bounded standard-layout installed

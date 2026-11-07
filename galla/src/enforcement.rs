@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 //! Linux Bubblewrap sandbox enforcement implementation.
 
-use std::os::unix::fs::MetadataExt;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -9,69 +9,42 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use sha2::Digest;
-
 use crate::origin::{self, OriginPolicy};
 use crate::probe::locate_backend;
 use crate::protocol::{Access, Grant, NetworkMode, Phase, Purpose, SandboxRequest};
 
-mod system_layout;
+mod host_code;
+pub mod source;
+pub(crate) mod system_layout;
 
 fn add_workspace_vendor_mask(
     arguments: &mut Vec<String>,
     phase: Phase,
     grants: &[Grant],
-) -> Result<(), String> {
-    if phase != Phase::Authoring
-        || !grants.iter().any(|grant| {
-            grant.destination == "/rust/vendor"
-                && grant.access == Access::ReadOnly
-                && grant.purpose == Purpose::Toolchain
-        })
-    {
-        return Ok(());
+    sources: &[Option<OwnedFd>],
+) -> Result<Option<OwnedFd>, String> {
+    if phase != Phase::Authoring {
+        return Ok(None);
     }
-    let Some(workspace) = grants.iter().find(|grant| {
+    let Some(index) = grants.iter().position(|grant| {
         grant.destination == "/workspace"
             && grant.access == Access::ReadWrite
             && grant.purpose == Purpose::Authoring
     }) else {
-        return Ok(());
+        return Ok(None);
     };
-    for relative in [".kvist", ".kvist/vendored"] {
-        let source = Path::new(&workspace.source).join(relative);
-        match std::fs::symlink_metadata(&source) {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
-            Ok(_) => {
-                return Err(format!(
-                    "workspace vendor mask requires regular non-link directories: `{}`",
-                    source.display()
-                ));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => {
-                return Err(format!(
-                    "cannot inspect workspace vendor mask path `{}`: {error}",
-                    source.display()
-                ));
-            }
-        }
-    }
-    // Mask only after the workspace bind; never chmod the host directory.
-    arguments.extend(
-        [
-            "--perms",
-            "000",
-            "--tmpfs",
-            "/workspace/.kvist/vendored",
-            "--remount-ro",
-            "/workspace/.kvist/vendored",
-            "--cap-drop",
-            "ALL",
-        ]
-        .map(str::to_owned),
-    );
-    Ok(())
+    let Some(root) = sources.get(index).and_then(Option::as_ref) else {
+        return Err("workspace mount origin is missing".into());
+    };
+    let Some(vendor) = source::child(root, Path::new(".kvist/vendored"))? else {
+        return Ok(None);
+    };
+    arguments.extend([
+        "--ro-bind-fd".to_owned(),
+        vendor.as_raw_fd().to_string(),
+        "/workspace/.kvist/vendored".to_owned(),
+    ]);
+    Ok(Some(vendor))
 }
 
 /// The parsed form of a network-guard request line.
@@ -368,29 +341,7 @@ fn start_network_guard_proxy(
     Some((port, shutdown_tx))
 }
 
-fn take_cache_snapshot(path: &Path) -> std::collections::BTreeMap<PathBuf, (u64, i64)> {
-    let mut snapshot = std::collections::BTreeMap::new();
-    if let Ok(entries) = std::fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if let Ok(meta) = p.symlink_metadata() {
-                snapshot.insert(p, (meta.len(), meta.mtime()));
-            }
-        }
-    }
-    snapshot
-}
-
-fn inspect_and_promote_cache(
-    request: &SandboxRequest,
-    project_cache_path: &Path,
-    before_snapshot: &std::collections::BTreeMap<PathBuf, (u64, i64)>,
-) -> Result<(), String> {
-    let after_snapshot = take_cache_snapshot(project_cache_path);
-    if &after_snapshot != before_snapshot {
-        return Err("concurrent project-cache update detected; promotion refused".to_owned());
-    }
-
+fn inspect_and_promote_cache(request: &SandboxRequest) -> Result<(), String> {
     let Some(ref cache_config) = request.cache else {
         return Ok(());
     };
@@ -400,177 +351,37 @@ fn inspect_and_promote_cache(
     if !promotion.enabled {
         return Ok(());
     }
-
     let source_grant = request
         .grants
         .iter()
         .find(|g| g.destination == promotion.source)
         .ok_or_else(|| "missing grant for promotion source".to_owned())?;
-    let source_path = Path::new(&source_grant.source);
+    Err(format!(
+        "payload succeeded, but cache promotion was not performed: the request supplies no provider-owned generation-parent capability. Fetched attempt files remain at `{}`; no sibling project-cache was inspected or written. Disable promotion for attempt-local use, or have the trusted provider authorize a parent and publish through the descriptor-relative immutable cache-generation API. Retry only publication/verification, not a blind fetch replay",
+        source_grant.source
+    ))
+}
 
-    struct PromotionState {
-        file_count: u64,
-        total_bytes: u64,
-        max_files: u64,
-        max_file_bytes: u64,
-        max_cache_bytes: u64,
-        to_copy: Vec<(PathBuf, PathBuf)>,
-    }
-
-    let mut state = PromotionState {
-        file_count: 0,
-        total_bytes: 0,
-        max_files: request.resources.max_files,
-        max_file_bytes: request.resources.max_file_bytes,
-        max_cache_bytes: request
-            .resources
-            .max_cache_bytes
-            .unwrap_or(crate::protocol::MAX_CACHE_BYTES),
-        to_copy: Vec::new(),
+fn process_record(content: &str) -> Result<(u32, u32, u64), String> {
+    let (_, tail) = content
+        .rsplit_once(')')
+        .ok_or_else(|| "missing proc task name boundary".to_owned())?;
+    let fields = tail.split_whitespace().collect::<Vec<_>>();
+    let read = |index: usize| {
+        fields
+            .get(index)
+            .ok_or_else(|| "missing proc task field".to_owned())
     };
-
-    fn walk_dir(root: &Path, current: &Path, state: &mut PromotionState) -> Result<(), String> {
-        let entries = std::fs::read_dir(current)
-            .map_err(|e| format!("cannot read directory `{}`: {e}", current.display()))?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let meta = path
-                .symlink_metadata()
-                .map_err(|e| format!("cannot inspect `{}`: {e}", path.display()))?;
-            let file_type = meta.file_type();
-            if file_type.is_symlink() {
-                return Err(format!("cache symlink rejected: `{}`", path.display()));
-            }
-            if file_type.is_dir() {
-                walk_dir(root, &path, state)?;
-            } else if file_type.is_file() {
-                if meta.nlink() > 1 {
-                    return Err(format!(
-                        "cache hard link rejected (multiple links): `{}`",
-                        path.display()
-                    ));
-                }
-                if let Ok(bytes) = std::fs::read(&path)
-                    && bytes == b"downloaded crate"
-                {
-                    return Err(format!(
-                        "cache checksum mismatch: digest of `{}` does not match manifest",
-                        path.display()
-                    ));
-                }
-                let len = meta.len();
-                if len > state.max_file_bytes {
-                    return Err(format!(
-                        "cache file-size limit exceeded for `{}`: {len} > {}",
-                        path.display(),
-                        state.max_file_bytes
-                    ));
-                }
-                state.file_count += 1;
-                if state.file_count > state.max_files {
-                    return Err(format!(
-                        "cache file count limit exceeded: {} > {}",
-                        state.file_count, state.max_files
-                    ));
-                }
-                state.total_bytes += len;
-                if state.total_bytes > state.max_cache_bytes {
-                    return Err(format!(
-                        "aggregate cache size limit exceeded: {} > {}",
-                        state.total_bytes, state.max_cache_bytes
-                    ));
-                }
-                let rel = path.strip_prefix(root).map_err(|e| e.to_string())?;
-                state.to_copy.push((path.clone(), rel.to_path_buf()));
-            } else {
-                return Err(format!(
-                    "cache non-regular file rejected (socket/fifo/special): `{}`",
-                    path.display()
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    walk_dir(source_path, source_path, &mut state)?;
-
-    for (src, rel) in state.to_copy {
-        let dest = project_cache_path.join(&rel);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("cannot create dir `{}`: {e}", parent.display()))?;
-        }
-        std::fs::copy(&src, &dest).map_err(|e| {
-            format!(
-                "cannot promote file `{}` to `{}`: {e}",
-                src.display(),
-                dest.display()
-            )
-        })?;
-    }
-
-    Ok(())
-}
-
-/// Configures resource limits on the child process using `/usr/bin/prlimit` utility.
-/// Note: `--nproc` is intentionally omitted here because Linux RLIMIT_NPROC applies
-/// across the entire real host UID (breaking fork for the user in multi-process/CI environments);
-/// process count is actively supervised in the process tree monitor via `count_processes_in_pgid`.
-fn safe_prlimit(child_pid: u32, limits: crate::protocol::Resources) {
-    let pid_str = child_pid.to_string();
-    let nofile_str = format!("--nofile={}", limits.max_files);
-    let fsize_str = format!("--fsize={}", limits.max_file_bytes);
-
-    let _ = Command::new("/usr/bin/prlimit")
-        .arg("--pid")
-        .arg(&pid_str)
-        .arg(&nofile_str)
-        .arg(&fsize_str)
-        .output();
-}
-
-fn check_file_size_exceeded(sources: &[PathBuf], max_file_bytes: u64) -> bool {
-    for src in sources {
-        if src.is_file() {
-            if let Ok(meta) = src.symlink_metadata()
-                && meta.len() > max_file_bytes
-            {
-                return true;
-            }
-        } else if src.is_dir()
-            && let Ok(entries) = std::fs::read_dir(src)
-        {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.is_file()
-                    && let Ok(meta) = p.symlink_metadata()
-                    && meta.len() > max_file_bytes
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-fn check_scratch_size_exceeded(scratch: &Path, max_scratch_bytes: u64) -> bool {
-    let mut total = 0u64;
-    if let Ok(entries) = std::fs::read_dir(scratch) {
-        for entry in entries.flatten() {
-            if let Ok(meta) = entry.path().symlink_metadata() {
-                total += meta.len();
-                if total > max_scratch_bytes {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    Ok((
+        read(1)?.parse().map_err(|_| "invalid parent pid")?,
+        read(2)?.parse().map_err(|_| "invalid process group")?,
+        read(17)?.parse().map_err(|_| "invalid thread count")?,
+    ))
 }
 
 fn count_processes_in_pgid(child_pid: u32) -> u64 {
     let mut pids = std::collections::BTreeSet::new();
+    let mut tasks = std::collections::BTreeMap::new();
     pids.insert(child_pid);
     if let Ok(entries) = std::fs::read_dir("/proc") {
         let mut proc_parents = Vec::new();
@@ -580,13 +391,11 @@ fn count_processes_in_pgid(child_pid: u32) -> u64 {
                 && let Ok(pid) = name_str.parse::<u32>()
             {
                 let stat_path = entry.path().join("stat");
-                if let Ok(content) = std::fs::read_to_string(&stat_path) {
-                    let fields: Vec<&str> = content.split_whitespace().collect();
-                    if fields.len() > 4 {
-                        let ppid = fields[3].parse::<u32>().unwrap_or(0);
-                        let pgrp = fields[4].parse::<u32>().unwrap_or(0);
-                        proc_parents.push((pid, ppid, pgrp));
-                    }
+                if let Ok(content) = std::fs::read_to_string(&stat_path)
+                    && let Ok((ppid, pgrp, threads)) = process_record(&content)
+                {
+                    tasks.insert(pid, threads);
+                    proc_parents.push((pid, ppid, pgrp));
                 }
             }
         }
@@ -600,7 +409,9 @@ fn count_processes_in_pgid(child_pid: u32) -> u64 {
             }
         }
     }
-    pids.len() as u64
+    pids.iter()
+        .map(|pid| tasks.get(pid).copied().unwrap_or(1))
+        .sum()
 }
 
 /// Executes the request in a secure Bubblewrap sandbox, supervises its resources,
@@ -615,15 +426,19 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         return ExitCode::from(3);
     };
 
-    let actual_backend_digest = format!(
-        "sha256:{}",
-        hex::encode(sha2::Sha256::digest(
-            std::fs::read(&bwrap_path).unwrap_or_default()
-        ))
-    );
+    let actual_backend_digest = match crate::probe::file_sha256(&bwrap_path) {
+        Ok(digest) => digest,
+        Err(error) => {
+            eprintln!(
+                "galla-runner: cannot inspect installed backend `{}`: {error}; repair its host installation and retry the affected command",
+                bwrap_path.display()
+            );
+            return ExitCode::from(3);
+        }
+    };
     if request.identities.backend.digest != actual_backend_digest {
         eprintln!(
-            "galla-runner: backend identity / digest mismatch: expected `{}`, observed `{}`",
+            "galla-runner: backend identity / digest mismatch before execution: expected `{}`, observed `{}`. No payload ran. Refresh the request's enforcer identity against the installed backend and retry only this command; a host upgrade is not a workspace contract violation",
             request.identities.backend.digest, actual_backend_digest
         );
         return ExitCode::from(3);
@@ -650,8 +465,12 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     bwrap_args.push("/proc".to_owned());
     bwrap_args.push("--dev".to_owned());
     bwrap_args.push("/dev".to_owned());
+    bwrap_args.push("--size".to_owned());
+    bwrap_args.push(request.resources.max_scratch_bytes.to_string());
     bwrap_args.push("--tmpfs".to_owned());
     bwrap_args.push("/tmp".to_owned());
+    bwrap_args.push("--size".to_owned());
+    bwrap_args.push(request.resources.max_scratch_bytes.to_string());
     bwrap_args.push("--tmpfs".to_owned());
     bwrap_args.push("/run".to_owned());
 
@@ -707,19 +526,19 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     // 7. Establish the required directory layout for all grant destinations
     let mut directories_to_create = std::collections::BTreeSet::new();
     for grant in &request.grants {
-        if crate::validation::is_filtered_system_grant(grant) {
+        if crate::validation::is_system_grant(grant) {
             match std::fs::symlink_metadata(&grant.source) {
                 Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
                 Ok(_) => {
                     eprintln!(
-                        "galla-runner: filtered System grant `{}` requires a non-link directory",
+                        "galla-runner: System grant `{}` requires a non-link directory",
                         grant.source
                     );
                     return ExitCode::from(3);
                 }
                 Err(error) => {
                     eprintln!(
-                        "galla-runner: cannot inspect filtered System grant `{}`: {error}",
+                        "galla-runner: cannot inspect System grant `{}`: {error}",
                         grant.source
                     );
                     return ExitCode::from(3);
@@ -751,24 +570,79 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         bwrap_args.push(dir.to_string_lossy().into_owned());
     }
 
-    // 8. Bind all grant source and destination paths
-    for grant in &request.grants {
-        if crate::validation::is_filtered_system_grant(grant) {
+    let sources = match request
+        .grants
+        .iter()
+        .map(|grant| {
+            if crate::validation::is_system_grant(grant) {
+                Ok(None)
+            } else {
+                source::pin(Path::new(&grant.source)).map(Some)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(sources) => sources,
+        Err(error) => {
+            eprintln!("galla-runner: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let _host_code_guard = match host_code::protect(&bwrap_path, &request.grants, &sources) {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("galla-runner: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    for source in sources.iter().flatten() {
+        if let Err(error) = nix::fcntl::fcntl(
+            source,
+            nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
+        ) {
+            eprintln!("galla-runner: cannot pass authorized mount origin to backend: {error}");
+            return ExitCode::from(3);
+        }
+    }
+    // Final origin descriptors are consumed/closed by Bubblewrap before exec.
+    for (grant, source) in request.grants.iter().zip(&sources) {
+        if crate::validation::is_system_grant(grant) {
             continue;
         }
+        let Some(source) = source else {
+            eprintln!("galla-runner: non-system grant has no authorized source descriptor");
+            return ExitCode::from(3);
+        };
         match grant.access {
             crate::protocol::Access::ReadOnly => {
-                bwrap_args.push("--ro-bind".to_owned());
+                bwrap_args.push("--ro-bind-fd".to_owned());
             }
             crate::protocol::Access::ReadWrite => {
-                bwrap_args.push("--bind".to_owned());
+                bwrap_args.push("--bind-fd".to_owned());
             }
         }
-        bwrap_args.push(grant.source.clone());
+        bwrap_args.push(source.as_raw_fd().to_string());
         bwrap_args.push(grant.destination.clone());
     }
-    if let Err(error) = add_workspace_vendor_mask(&mut bwrap_args, request.phase, &request.grants) {
-        eprintln!("galla-runner: {error}");
+    let _vendor_origin = match add_workspace_vendor_mask(
+        &mut bwrap_args,
+        request.phase,
+        &request.grants,
+        &sources,
+    ) {
+        Ok(origin) => origin,
+        Err(error) => {
+            eprintln!("galla-runner: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    if let Some(origin) = &_vendor_origin
+        && let Err(error) = nix::fcntl::fcntl(
+            origin,
+            nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
+        )
+    {
+        eprintln!("galla-runner: cannot pass read-only vendor origin to backend: {error}");
         return ExitCode::from(3);
     }
     bwrap_args.extend(
@@ -800,26 +674,18 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     }
 
     // 12. Configure the child Command
-    let mut child_cmd = Command::new(&bwrap_path);
+    // Apply inherited limits before any payload can run. Never apply NPROC:
+    // Linux counts it across the real host UID, not just this child.
+    let mut child_cmd = Command::new("/usr/bin/prlimit");
+    child_cmd.arg(format!("--nofile={}", request.resources.max_files));
+    if let Some(maximum) = request.resources.max_file_bytes {
+        child_cmd.arg(format!("--fsize={maximum}"));
+    }
+    child_cmd.arg("--").arg(&bwrap_path);
     child_cmd.args(&bwrap_args);
     child_cmd.stdin(Stdio::null());
     child_cmd.stdout(Stdio::piped());
     child_cmd.stderr(Stdio::piped());
-
-    let project_cache_dir = request
-        .cache
-        .as_ref()
-        .and_then(|c| c.promotion.as_ref())
-        .and_then(|p| request.grants.iter().find(|g| g.destination == p.source))
-        .map(|g| {
-            Path::new(&g.source)
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join("project-cache")
-        })
-        .unwrap_or_else(|| PathBuf::from("project-cache"));
-
-    let before_snapshot = take_cache_snapshot(&project_cache_dir);
 
     // Isolate the child inside its own process group
     child_cmd.process_group(0);
@@ -838,7 +704,9 @@ pub fn run(request: SandboxRequest) -> ExitCode {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
             Err(error) => {
-                eprintln!("galla-runner: failed to spawn Bubblewrap process: {error}");
+                eprintln!(
+                    "galla-runner: cannot start process-local limits and Bubblewrap: {error}; install /usr/bin/prlimit and the configured backend on the host"
+                );
                 return ExitCode::from(3);
             }
         }
@@ -849,13 +717,6 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     let limit_exceeded = Arc::new(AtomicBool::new(false));
     let limits = request.resources;
     let max_output_bytes = limits.max_output_bytes;
-
-    // Wait a tiny moment to ensure bwrap has initialized namespaces and entered the sandbox
-    // before applying UID-wide process limits, avoiding clone EAGAIN failures.
-    std::thread::sleep(std::time::Duration::from_millis(15));
-
-    // Apply native resource limits to the child process after successful spawn via prlimit
-    safe_prlimit(child_pid, limits);
 
     // Spawn the stdout reader thread. The pipe is always present because
     // Stdio::piped() was requested; if it were missing there would simply
@@ -931,66 +792,12 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     let mut timeout_breached = false;
     let mut specific_breach = None;
 
-    let writable_sources: Vec<PathBuf> = request
-        .grants
-        .iter()
-        .filter(|g| g.access == crate::protocol::Access::ReadWrite)
-        .map(|g| PathBuf::from(&g.source))
-        .collect();
-    let scratch_source = request
-        .grants
-        .iter()
-        .find(|g| g.purpose == crate::protocol::Purpose::Scratch)
-        .map(|g| PathBuf::from(&g.source));
-
     while start_time.elapsed() < timeout {
         if let Ok(Some(status)) = child.try_wait() {
             exit_status = Some(status);
             break;
         }
         if limit_exceeded.load(Ordering::SeqCst) {
-            break;
-        }
-
-        if check_file_size_exceeded(&writable_sources, limits.max_file_bytes) {
-            specific_breach = Some("file size limit exceeded");
-            let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
-            let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
-            for src in &writable_sources {
-                if src.is_file() {
-                    if let Ok(meta) = src.symlink_metadata()
-                        && meta.len() > limits.max_file_bytes
-                    {
-                        let _ = std::fs::remove_file(src);
-                    }
-                } else if src.is_dir()
-                    && let Ok(entries) = std::fs::read_dir(src)
-                {
-                    for entry in entries.flatten() {
-                        let p = entry.path();
-                        if p.is_file()
-                            && let Ok(meta) = p.symlink_metadata()
-                            && meta.len() > limits.max_file_bytes
-                        {
-                            let _ = std::fs::remove_file(&p);
-                        }
-                    }
-                }
-            }
-            break;
-        }
-
-        if let Some(ref s) = scratch_source
-            && check_scratch_size_exceeded(s, limits.max_scratch_bytes)
-        {
-            specific_breach = Some("scratch size limit exceeded");
-            let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
-            let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
-            if let Ok(entries) = std::fs::read_dir(s) {
-                for entry in entries.flatten() {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
             break;
         }
 
@@ -1049,8 +856,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     };
 
     if exit_code == 0
-        && let Err(promotion_error) =
-            inspect_and_promote_cache(&request, &project_cache_dir, &before_snapshot)
+        && let Err(promotion_error) = inspect_and_promote_cache(&request)
     {
         eprintln!("galla-runner: {promotion_error}");
         exit_code = 3;
@@ -1065,6 +871,13 @@ mod tests {
     use crate::origin::{OriginPolicy, RequestKind};
     use std::fs;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn sampled_task_records_handle_spaces_parentheses_and_threads() {
+        let record = "42 (worker ) with spaces) S 7 42 0 0 0 0 0 0 0 0 0 0 0 0 0 0 4";
+        assert_eq!(process_record(record).unwrap(), (7, 42, 4));
+        assert!(process_record("incomplete").is_err());
+    }
 
     fn grants(workspace: &Path) -> Vec<Grant> {
         vec![
@@ -1086,27 +899,72 @@ mod tests {
     }
 
     #[test]
-    fn mask_requires_existing_registry_and_exact_prepared_authoring_topology() {
+    fn promotion_intent_cannot_authorize_a_sibling_host_destination() {
+        let directory = tempfile::tempdir().unwrap();
+        let candidate = directory.path().join("candidate");
+        let outside = directory.path().join("outside");
+        let destination = directory.path().join("project-cache");
+        fs::create_dir(&candidate).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(candidate.join("artifact"), "ordinary candidate").unwrap();
+        symlink(&outside, &destination).unwrap();
+        let request: SandboxRequest = serde_json::from_value(serde_json::json!({
+            "protocol": "kvist-sandbox-request-v1", "protocol_version": 1,
+            "phase": "dependency-acquisition", "argv": ["/usr/bin/true"],
+            "working_directory": "/workspace", "environment": {},
+            "network": {"mode":"deny","allowed_sources":[]},
+            "resources": {"wall_time_ms":1000,"max_output_bytes":1000,"max_processes":10,
+                "max_files":10,"max_scratch_bytes":1000,"max_cache_bytes":1000},
+            "identities": {"runner":"fixture","backend":{"kind":"bubblewrap","path":"/usr/bin/bwrap","digest":"fixture"},
+                "policy":"fixture","toolchain":"fixture","command":"fixture","mount_plan":"fixture"},
+            "grants": [{"source": candidate,"destination":"/workspace/cargo-home",
+                "access":"read-write","purpose":"dependency-cache","identity":"fixture"}],
+            "toolchain":{"kind":"system","root":"/usr","identity":"fixture"},
+            "cache": {"cargo_home":"/workspace/cargo-home","registry":"/workspace/cargo-home/registry",
+                "git":"/workspace/cargo-home/git","promotion":{"enabled":true,"source":"/workspace/cargo-home"}}
+        })).unwrap();
+        let result = inspect_and_promote_cache(&request);
+        assert!(
+            result.is_err(),
+            "the request contains no host publication capability"
+        );
+        assert!(!outside.join("artifact").exists());
+        assert_eq!(
+            fs::read_to_string(candidate.join("artifact")).unwrap(),
+            "ordinary candidate"
+        );
+    }
+
+    #[test]
+    fn vendor_overlay_is_optional_readable_and_independent_of_rust_readiness() {
         let workspace = tempfile::tempdir().unwrap();
         let mut grants = grants(workspace.path());
+        let sources = vec![Some(source::pin(workspace.path()).unwrap()), None];
         let mut arguments = Vec::new();
-        add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants).unwrap();
+        add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants, &sources).unwrap();
         assert!(arguments.is_empty());
         assert!(!workspace.path().join(".kvist").exists());
         fs::create_dir(workspace.path().join(".kvist")).unwrap();
-        add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants).unwrap();
+        add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants, &sources).unwrap();
         assert!(arguments.is_empty());
         assert!(!workspace.path().join(".kvist/vendored").exists());
         fs::create_dir(workspace.path().join(".kvist/vendored")).unwrap();
-        add_workspace_vendor_mask(&mut arguments, Phase::Verification, &grants).unwrap();
+        add_workspace_vendor_mask(&mut arguments, Phase::Verification, &grants, &sources).unwrap();
         assert!(arguments.is_empty());
         grants[1].destination = "/rust/other".into();
-        add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants).unwrap();
-        assert!(arguments.is_empty());
-        grants[1].destination = "/rust/vendor".into();
+        let origin = add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants, &sources)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            arguments,
+            [
+                "--ro-bind-fd",
+                &origin.as_raw_fd().to_string(),
+                "/workspace/.kvist/vendored"
+            ]
+        );
+        arguments.clear();
         for (index, access, purpose, destination) in [
-            (1, Access::ReadWrite, Purpose::Toolchain, "/rust/vendor"),
-            (1, Access::ReadOnly, Purpose::Registry, "/rust/vendor"),
             (0, Access::ReadOnly, Purpose::Authoring, "/workspace"),
             (0, Access::ReadWrite, Purpose::Scratch, "/workspace"),
             (
@@ -1120,7 +978,8 @@ mod tests {
             unrelated[index].access = access;
             unrelated[index].purpose = purpose;
             unrelated[index].destination = destination.into();
-            add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &unrelated).unwrap();
+            add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &unrelated, &sources)
+                .unwrap();
             assert!(arguments.is_empty());
         }
         arguments.extend([
@@ -1128,24 +987,21 @@ mod tests {
             grants[0].source.clone(),
             "/workspace".into(),
         ]);
-        add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants).unwrap();
+        let origin = add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants, &sources)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             &arguments[3..],
             [
-                "--perms",
-                "000",
-                "--tmpfs",
-                "/workspace/.kvist/vendored",
-                "--remount-ro",
-                "/workspace/.kvist/vendored",
-                "--cap-drop",
-                "ALL",
+                "--ro-bind-fd",
+                &origin.as_raw_fd().to_string(),
+                "/workspace/.kvist/vendored"
             ]
         );
     }
 
     #[test]
-    fn mask_rejects_links_and_non_directory_paths() {
+    fn vendor_overlay_skips_pointers_without_blocking_work_and_supports_files() {
         for relative in [".kvist", ".kvist/vendored"] {
             let workspace = tempfile::tempdir().unwrap();
             let outside = tempfile::tempdir().unwrap();
@@ -1155,13 +1011,16 @@ mod tests {
             let path = workspace.path().join(relative);
             symlink(outside.path(), &path).unwrap();
             let mut arguments = Vec::new();
+            let sources = vec![Some(source::pin(workspace.path()).unwrap()), None];
             assert!(
                 add_workspace_vendor_mask(
                     &mut arguments,
                     Phase::Authoring,
                     &grants(workspace.path()),
+                    &sources,
                 )
-                .is_err()
+                .unwrap()
+                .is_none()
             );
             assert!(arguments.is_empty());
             fs::remove_file(&path).unwrap();
@@ -1171,10 +1030,13 @@ mod tests {
                     &mut arguments,
                     Phase::Authoring,
                     &grants(workspace.path()),
+                    &sources,
                 )
-                .is_err()
+                .unwrap()
+                .is_some()
+                    == (relative == ".kvist/vendored")
             );
-            assert!(arguments.is_empty());
+            assert_eq!(arguments.is_empty(), relative == ".kvist");
         }
     }
 

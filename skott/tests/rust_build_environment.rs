@@ -103,6 +103,19 @@ fn resolve(workdir: &std::path::Path) -> skott::Result<ToolRegistry> {
     ToolRegistry::resolve_for_workspace(ToolPolicy::default(), &settings, &HostProbe, None, workdir)
 }
 
+fn unavailable_rust(workdir: &std::path::Path) -> ToolRegistry {
+    let registry = resolve(workdir).expect("unavailable Rust must not block independent tools");
+    assert!(!registry.profiles().contains(&"rust"));
+    assert!(!registry.diagnostics().is_empty());
+    assert!(
+        registry
+            .tool_definitions()
+            .iter()
+            .any(|tool| tool.name == "shell")
+    );
+    registry
+}
+
 #[test]
 #[serial]
 fn rejects_malicious_ambiguous_and_oversized_pins() {
@@ -116,7 +129,7 @@ fn rejects_malicious_ambiguous_and_oversized_pins() {
     ] {
         let directory = fixture();
         fs::write(directory.path().join("rust-toolchain.toml"), pin).unwrap();
-        assert!(resolve(directory.path()).is_err(), "{pin}");
+        unavailable_rust(directory.path());
     }
     let directory = fixture();
     fs::write(
@@ -124,14 +137,14 @@ fn rejects_malicious_ambiguous_and_oversized_pins() {
         " ".repeat(65537),
     )
     .unwrap();
-    assert!(resolve(directory.path()).is_err());
+    unavailable_rust(directory.path());
     fs::write(
         directory.path().join("rust-toolchain.toml"),
         "[toolchain]\nchannel=\"stable\"",
     )
     .unwrap();
     fs::write(directory.path().join("rust-toolchain"), "stable").unwrap();
-    assert!(resolve(directory.path()).is_err());
+    unavailable_rust(directory.path());
 }
 
 #[test]
@@ -146,7 +159,7 @@ fn absent_install_is_actionable_and_auto_is_honest() {
     }
     let directory = fixture();
     fs::write(directory.path().join("rust-toolchain"), "9.99.99").unwrap();
-    let error = resolve(directory.path()).unwrap_err().to_string();
+    let error = unavailable_rust(directory.path()).diagnostics().join("\n");
     assert!(
         error.contains("host") && error.contains("9.99.99"),
         "{error}"
@@ -175,7 +188,7 @@ fn symlink_pin_and_vendor_roots_cannot_acquire_host_authority() {
         directory.path().join("rust-toolchain"),
     )
     .unwrap();
-    assert!(resolve(directory.path()).is_err());
+    unavailable_rust(directory.path());
     fs::remove_file(directory.path().join("rust-toolchain")).unwrap();
     fs::create_dir(directory.path().join(".kvist")).unwrap();
     symlink(
@@ -183,7 +196,213 @@ fn symlink_pin_and_vendor_roots_cannot_acquire_host_authority() {
         directory.path().join(".kvist/vendored"),
     )
     .unwrap();
-    assert!(resolve(directory.path()).is_err());
+    let registry = resolve(directory.path())
+        .expect("unsupported vendor pointer must not disable independent compiler tools");
+    assert!(
+        registry
+            .diagnostics()
+            .join("\n")
+            .contains("no extra origin")
+    );
+}
+
+#[test]
+#[serial]
+fn unusable_vendor_nodes_do_not_hide_the_compiler() {
+    for relative in [".kvist", ".kvist/vendored"] {
+        let directory = fixture();
+        if relative.contains('/') {
+            fs::create_dir(directory.path().join(".kvist")).unwrap();
+        }
+        fs::write(
+            directory.path().join(relative),
+            "operator-created ordinary file",
+        )
+        .unwrap();
+        let registry =
+            resolve(directory.path()).expect("compiler is independent of vendor node shape");
+        let executor = SandboxExecutor::new(
+            registry,
+            SandboxPaths {
+                runner: runner(),
+                backend: "/usr/bin/bwrap".into(),
+            },
+            directory.path().to_owned(),
+        );
+        checked_shell(&executor, "rustc --version");
+    }
+}
+
+#[test]
+#[serial]
+fn native_cargo_configuration_is_preserved_without_a_shared_manifest() {
+    let directory = fixture();
+    fs::create_dir_all(directory.path().join(".kvist/sandbox-cargo")).unwrap();
+    fs::write(directory.path().join(".kvist/sandbox-cargo/config.toml"), "[alias]\nhello=\"version\"\n[source.crates-io]\nreplace-with=\"local-vendor\"\n[source.local-vendor]\ndirectory=\"/host/not-granted\"\n").unwrap();
+    let registry =
+        resolve(directory.path()).expect("native Cargo tables need no application manifest");
+    let executor = SandboxExecutor::new(
+        registry,
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        directory.path().to_owned(),
+    );
+    assert!(
+        checked_shell(&executor, "cargo hello")
+            .output_text(8192)
+            .contains("cargo ")
+    );
+}
+
+#[test]
+#[serial]
+fn malformed_cargo_configuration_blocks_cargo_not_the_compiler() {
+    let directory = fixture();
+    fs::create_dir_all(directory.path().join(".kvist/sandbox-cargo")).unwrap();
+    fs::write(
+        directory.path().join(".kvist/sandbox-cargo/config.toml"),
+        "[malformed\n",
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("Cargo.toml"),
+        "[package]\nname=\"local-config-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
+    )
+    .unwrap();
+    fs::create_dir(directory.path().join("src")).unwrap();
+    fs::write(directory.path().join("src/lib.rs"), "pub fn local() {}\n").unwrap();
+    let registry = resolve(directory.path())
+        .expect("malformed Cargo configuration is not compiler unavailability");
+    assert!(registry.diagnostics().join("\n").contains("configuration"));
+    let executor = SandboxExecutor::new(
+        registry,
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        directory.path().to_owned(),
+    );
+    checked_shell(&executor, "rustc --version");
+    let cargo = shell(&executor, "cargo check --lib");
+    assert!(cargo.failed());
+    assert!(
+        cargo.error_text(8192).contains("config"),
+        "{}",
+        cargo.error_text(8192)
+    );
+}
+
+#[test]
+#[serial]
+fn auto_rust_recovers_from_initial_unavailability_without_restart() {
+    let directory = fixture();
+    fs::write(directory.path().join("rust-toolchain"), "999.99.999").unwrap();
+    let settings = ToolProfile::CONFIGURABLE
+        .iter()
+        .map(|profile| {
+            (
+                *profile,
+                if *profile == ToolProfile::Rust {
+                    ProfileSetting::Auto
+                } else {
+                    ProfileSetting::Off
+                },
+            )
+        })
+        .collect();
+    let registry = ToolRegistry::resolve_for_workspace(
+        ToolPolicy::default(),
+        &settings,
+        &HostProbe,
+        None,
+        directory.path(),
+    )
+    .unwrap();
+    assert!(registry.diagnostics().join("\n").contains("unavailable"));
+    let executor = SandboxExecutor::new(
+        registry,
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        directory.path().to_owned(),
+    );
+    checked_shell(&executor, "printf 'independent work'");
+    fs::remove_file(directory.path().join("rust-toolchain")).unwrap();
+    assert!(
+        checked_shell(&executor, "rustc --version")
+            .output_text(8192)
+            .contains("rustc ")
+    );
+}
+
+#[test]
+#[serial]
+fn requested_rust_unavailability_keeps_independent_workspace_tools() {
+    for forced in [None, Some(ToolProfile::Rust)] {
+        let directory = fixture();
+        fs::write(directory.path().join("rust-toolchain"), "999.99.999").unwrap();
+        let settings = [(ToolProfile::Rust, ProfileSetting::On)]
+            .into_iter()
+            .collect();
+        let registry = ToolRegistry::resolve_for_workspace(
+            ToolPolicy::default(),
+            &settings,
+            &HostProbe,
+            forced,
+            directory.path(),
+        )
+        .expect("requested unavailable Rust must not disable source work");
+        assert!(!registry.profiles().contains(&"rust"));
+        assert!(registry.diagnostics().join("\n").contains("unavailable"));
+        let executor = SandboxExecutor::new(
+            registry,
+            SandboxPaths {
+                runner: runner(),
+                backend: "/usr/bin/bwrap".into(),
+            },
+            directory.path().to_owned(),
+        );
+        checked_shell(&executor, "printf 'independent work'");
+    }
+}
+
+#[test]
+#[serial]
+fn workspace_selector_inside_its_grant_cannot_authorize_another_host_root() {
+    use std::os::unix::fs::symlink;
+    let directory = fixture();
+    let work = directory.path().join("work");
+    let outside = directory.path().join("outside");
+    fs::create_dir(&work).unwrap();
+    fs::create_dir(&outside).unwrap();
+    symlink(".", work.join("selector")).unwrap();
+    let executor = SandboxExecutor::new(
+        ToolRegistry::new(ToolPolicy::default()),
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        work.join("selector"),
+    );
+    let target = outside
+        .canonicalize()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .replace('\'', "'\\''");
+    checked_shell(&executor, &format!("ln -sfn '{target}' selector"));
+    checked_shell(&executor, "printf 'authorized work' > retained");
+    assert!(
+        work.join("retained").exists(),
+        "later grants must use the authorized directory origin"
+    );
+    assert!(
+        !outside.join("retained").exists(),
+        "a payload-written selector must not widen host authority"
+    );
 }
 
 fn shell(executor: &SandboxExecutor, command: &str) -> skott::ToolOutcome {
@@ -362,15 +581,12 @@ fn diagnostics_cover_the_chain_without_command_or_output_payloads() {
         "resolved concrete installed Rust toolchain",
         "offline shared vendor view prepared",
         "offline Rust resources prepared",
-        "offline Rust resources validated",
+        "offline Rust resources prepared",
         "sandbox preflight stage started",
         "stage=runner_identity",
         "stage=workspace_scope",
         "stage=rust_resources",
         "stage=request_validation",
-        "sandbox writable scope inspected",
-        "entries=",
-        "directories=",
         "sandbox request validated",
         "sandbox grant",
         "sandbox environment entry",
@@ -580,7 +796,7 @@ fn native_shared_vendor_overrides_host_paths_with_native_checks_and_masking() {
             fs::File::open(workdir.join(".kvist/vendored"))
                 .unwrap()
                 .try_lock()
-                .is_err()
+                .is_ok()
         );
         running.join().unwrap();
     });
@@ -602,7 +818,7 @@ fn native_shared_vendor_overrides_host_paths_with_native_checks_and_masking() {
     );
     checked_shell(
         &executor,
-        "stage alias-unreadable test ! -r .kvist/vendored\nstage alias-unwritable test ! -w .kvist/vendored\nstage alias-untraversable test ! -x .kvist/vendored\nstage sibling-state test -r .kvist/rust-toolchain.json\nif ls .kvist/vendored; then printf 'vendor alias listing unexpectedly succeeded\\n' >&2; exit 1; fi\nif cat .kvist/vendored/kvist-sandbox-dependency/Cargo.toml; then printf 'vendor alias read unexpectedly succeeded\\n' >&2; exit 1; fi\nif touch .kvist/vendored/forbidden; then printf 'vendor alias write unexpectedly succeeded\\n' >&2; exit 1; fi\nif chmod 755 .kvist/vendored; then printf 'vendor mask permissions unexpectedly changed\\n' >&2; exit 1; fi",
+        "stage alias-readable test -r .kvist/vendored\nstage alias-unwritable test ! -w .kvist/vendored\nstage alias-traversable test -x .kvist/vendored\nstage sibling-state test -r .kvist/rust-toolchain.json\nstage alias-listing ls .kvist/vendored\nstage alias-reading cat .kvist/vendored/kvist-sandbox-dependency/Cargo.toml\nif touch .kvist/vendored/forbidden; then printf 'vendor alias write unexpectedly succeeded\\n' >&2; exit 1; fi\nif chmod 755 .kvist/vendored; then printf 'vendor overlay permissions unexpectedly changed\\n' >&2; exit 1; fi",
     );
     let result = checked_shell(
         &executor,
@@ -612,9 +828,17 @@ fn native_shared_vendor_overrides_host_paths_with_native_checks_and_masking() {
     assert!(result.output_text(8192).contains("test result: ok"));
     // The clippy stage must have run and resolved the vendored dependency.
     assert!(result.output_text(8192).contains("stage: clippy"));
+    let published: toml::Table =
+        toml::from_str(&fs::read_to_string(workdir.join("Cargo.lock")).unwrap()).unwrap();
+    let dependency_lock = published["package"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|package| package["name"].as_str() == Some("kvist-sandbox-dependency"))
+        .unwrap();
     assert_eq!(
-        fs::read_to_string(workdir.join("Cargo.lock")).unwrap(),
-        lock
+        dependency_lock["checksum"].as_str(),
+        Some("0000000000000000000000000000000000000000000000000000000000000000")
     );
     assert!(workdir.join("target/doc/vendor_trial/index.html").is_file());
     assert_eq!(
@@ -652,9 +876,9 @@ fn native_shared_vendor_overrides_host_paths_with_native_checks_and_masking() {
     );
     let result = shell(
         &without_vendor,
-        "test ! -e /rust/vendor && test -r .kvist/vendored && test -w .kvist/vendored",
+        "test ! -e /rust/vendor && test -r .kvist/vendored && test ! -w .kvist/vendored",
     );
-    assert!(!result.failed());
+    assert!(!result.failed(), "{}", result.error_text(8192));
 }
 
 #[test]
@@ -940,16 +1164,30 @@ fn installed_minimal_pin_builds_without_optional_components() {
         format!("[toolchain]\nchannel=\"{channel}\"\ncomponents=[\"rustfmt\"]\n"),
     )
     .unwrap();
-    let error = resolve(&workdir).unwrap_err().to_string();
+    let executor = SandboxExecutor::new(
+        resolve(&workdir).expect("a missing optional formatter must not disable the compiler"),
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir.clone(),
+    );
+    checked_shell(&executor, "rustc --version && cargo check");
+    let formatter = shell(&executor, "cargo fmt --check");
     assert!(
-        error.contains("rustfmt") && error.contains("host"),
-        "{error}"
+        formatter.failed(),
+        "the missing formatter must fail only its own operation"
+    );
+    assert!(
+        formatter.error_text(8192).contains("cargo-fmt"),
+        "{}",
+        formatter.error_text(8192)
     );
 }
 
 #[test]
 #[serial]
-fn changing_project_pin_after_resolution_fails_before_effects() {
+fn unavailable_live_project_pin_does_not_block_independent_shell_work() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
     fs::write(workdir.join("rust-toolchain"), "stable\n").unwrap();
@@ -968,15 +1206,67 @@ fn changing_project_pin_after_resolution_fails_before_effects() {
             id: "drift".into(),
             provider_id: None,
             name: "shell".into(),
-            arguments: json!({"command":"touch should-not-exist"}),
+            arguments: json!({"command":"touch useful-work"}),
         },
         &CancellationToken::new(),
     );
+    let result = result.unwrap();
+    assert!(!result.failed(), "{}", result.error_text(8192));
+    assert!(workdir.join("useful-work").exists());
     assert!(
-        result.is_err(),
-        "changed project pin must not silently keep using the old compiler"
+        result.error_text(8192).contains("9.99.99"),
+        "{}",
+        result.error_text(8192)
     );
-    assert!(!workdir.join("should-not-exist").exists());
+    let cargo = shell(&executor, "cargo --version");
+    assert!(cargo.failed(), "must not silently use the old compiler");
+}
+
+#[test]
+#[serial]
+fn unavailable_live_rust_diagnostic_preserves_native_write_progress() {
+    let directory = fixture();
+    let workdir = directory.path().canonicalize().unwrap();
+    fs::write(workdir.join("rust-toolchain"), "stable\n").unwrap();
+    let registry = resolve(&workdir)
+        .unwrap()
+        .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool"));
+    assert!(registry.profiles().contains(&"rust"));
+    fs::write(workdir.join("rust-toolchain"), "9.99.99\n").unwrap();
+    let executor = SandboxExecutor::new(
+        registry,
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir.clone(),
+    );
+    let intent = ToolIntent {
+        id: "native-write-with-live-rust-diagnostic".into(),
+        provider_id: None,
+        name: "write_file".into(),
+        arguments: json!({
+            "path":"/workspace/native-progress",
+            "content":"preserved native work\n"
+        }),
+    };
+    let outcome = executor
+        .execute(&intent, &CancellationToken::new())
+        .unwrap();
+    assert!(!outcome.failed(), "{}", outcome.error_text(8192));
+    let diagnostic = outcome.error_text(8192);
+    assert!(
+        diagnostic.contains("9.99.99") && diagnostic.to_lowercase().contains("rust"),
+        "{diagnostic}"
+    );
+    assert_eq!(
+        fs::read(workdir.join("native-progress")).unwrap(),
+        b"preserved native work\n"
+    );
+    assert_eq!(
+        executor.progress(&intent, &outcome).unwrap(),
+        sav::loop_detection::ProgressEvidence::StateChanged
+    );
 }
 
 #[test]
@@ -1029,7 +1319,7 @@ fn native_installed_rust_compiles_links_and_documents_offline() {
 
 #[test]
 #[serial]
-fn normal_cargo_requires_matching_lock_without_creating_or_updating_it() {
+fn workspace_cargo_resolves_live_project_locks_offline() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
     fs::create_dir(workdir.join("src")).unwrap();
@@ -1049,42 +1339,38 @@ fn normal_cargo_requires_matching_lock_without_creating_or_updating_it() {
     );
     let lock = workdir.join("Cargo.lock");
     let missing = shell(&executor, "cargo check");
-    assert!(missing.failed(), "a missing lock must prevent the build");
-    assert!(missing.error_text(8192).contains("--locked"));
-    assert!(!lock.exists(), "a locked build must not create Cargo.lock");
+    assert!(!missing.failed(), "{}", missing.error_text(8192));
+    assert!(
+        lock.exists(),
+        "workspace Cargo may create its writable lock"
+    );
 
     let stale = b"version = 4\n[[package]]\nname = \"locked-trial\"\nversion = \"0.0.1\"\n";
     fs::write(&lock, stale).unwrap();
-    let executor = SandboxExecutor::new(
-        resolve(&workdir).unwrap(),
-        SandboxPaths {
-            runner: runner(),
-            backend: "/usr/bin/bwrap".into(),
-        },
-        workdir.clone(),
+    let guarded = shell(&executor, "cargo build --locked");
+    assert!(
+        guarded.failed(),
+        "explicit locked resolution must remain available"
     );
+    assert_eq!(fs::read(&lock).unwrap(), stale);
     for command in ["cargo build", "cargo metadata --format-version=1"] {
         let result = shell(&executor, command);
-        assert!(result.failed(), "{command} must reject an outdated lock");
-        assert!(result.error_text(8192).contains("--locked"));
-        assert_eq!(fs::read(&lock).unwrap(), stale);
+        assert!(!result.failed(), "{}", result.error_text(8192));
+        assert_ne!(fs::read(&lock).unwrap(), stale);
     }
 
     let matching = b"version = 4\n[[package]]\nname = \"locked-trial\"\nversion = \"0.1.0\"\n";
     fs::write(&lock, matching).unwrap();
-    let executor = SandboxExecutor::new(
-        resolve(&workdir).unwrap(),
-        SandboxPaths {
-            runner: runner(),
-            backend: "/usr/bin/bwrap".into(),
-        },
-        workdir.clone(),
-    );
     let result = shell(
         &executor,
         "cargo --version && cargo check && cargo metadata --format-version=1 --no-deps >/dev/null",
     );
     assert!(!result.failed(), "{}", result.error_text(8192));
-    assert_eq!(fs::read(&lock).unwrap(), matching);
+    let resolved: toml::Table = toml::from_str(&fs::read_to_string(&lock).unwrap()).unwrap();
+    assert_eq!(
+        resolved["package"][0]["name"].as_str(),
+        Some("locked-trial")
+    );
+    assert_eq!(resolved["package"][0]["version"].as_str(), Some("0.1.0"));
     assert!(workdir.join("target/debug/deps").is_dir());
 }

@@ -14,7 +14,7 @@ fn project() -> tempfile::TempDir {
     fs::create_dir(dir.path().join("src")).unwrap();
     fs::write(
         dir.path().join("Cargo.toml"),
-        "[package]\nname=\"vendor-cli-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
+        "[package]\nname=\"vendor-cli-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[workspace]\n",
     )
     .unwrap();
     fs::write(
@@ -85,26 +85,35 @@ fn rust_registry(root: &Path) -> skott::Result<ToolRegistry> {
 }
 
 #[test]
-fn managed_publication_fences_and_missing_locks_block_runtime_preparation() {
+fn managed_publication_fences_and_missing_locks_do_not_block_workspace_tools() {
     let dir = project();
     success(&cli(dir.path(), &["--vendor", "--offline"]));
     let root = dir.path().canonicalize().unwrap();
     let operation = root.join(".kvist/vendor-operation.lock");
     fs::write(&operation, "active or interrupted operator").unwrap();
-    let Err(error) = rust_registry(&root) else {
-        panic!("runtime must honor the publication fence");
-    };
-    assert!(error.to_string().contains("lock"), "{error}");
+    let registry = rust_registry(&root).unwrap();
+    assert!(registry.profiles().contains(&"rust"));
+    assert_eq!(
+        fs::read_to_string(&operation).unwrap(),
+        "active or interrupted operator"
+    );
+    let check = cli(&root, &["--vendor", "--check"]);
+    assert!(
+        !check.status.success(),
+        "explicit check retains its publication boundary: {check:?}"
+    );
     fs::remove_file(&operation).unwrap();
     fs::remove_file(root.join("Cargo.lock")).unwrap();
-    let Err(error) = rust_registry(&root) else {
-        panic!("managed state cannot bypass a missing Cargo.lock");
-    };
-    assert!(error.to_string().contains("Cargo.lock"), "{error}");
+    let registry = rust_registry(&root).unwrap();
+    assert!(registry.profiles().contains(&"rust"));
+    assert!(
+        !root.join("Cargo.lock").exists(),
+        "preparation itself must not rewrite the project"
+    );
 }
 
 #[test]
-fn recovery_only_and_empty_resolver_state_cannot_bypass_runtime_validation() {
+fn recovery_only_and_empty_resolver_state_do_not_hide_independent_rust() {
     for directory in [false, true] {
         let dir = project();
         fs::remove_file(dir.path().join("Cargo.lock")).unwrap();
@@ -119,10 +128,9 @@ fn recovery_only_and_empty_resolver_state_cannot_bypass_runtime_validation() {
             .unwrap();
         }
         let root = dir.path().canonicalize().unwrap();
-        let Err(error) = rust_registry(&root) else {
-            panic!("partial managed state must not be treated as absent");
-        };
-        assert!(error.to_string().contains("Cargo.lock"), "{error}");
+        let registry = rust_registry(&root).unwrap();
+        assert!(registry.profiles().contains(&"rust"));
+        assert!(!root.join("Cargo.lock").exists());
     }
 }
 
@@ -353,7 +361,7 @@ fn local_git_dependency_is_provisioned_once_and_builds_in_the_real_offline_sandb
     );
     let out = executor.execute(&ToolIntent {
         id: "offline-build".into(), provider_id: None, name: "shell".into(),
-        arguments: json!({"command":"cargo test && cargo clippy --all-targets && cargo doc --no-deps && test ! -w /rust/vendor && test ! -r .kvist/vendored"}),
+        arguments: json!({"command":"cargo test && cargo clippy --all-targets && cargo doc --no-deps && test ! -w /rust/vendor && test -r .kvist/vendored && test ! -w .kvist/vendored"}),
     }, &CancellationToken::new()).unwrap();
     assert!(!out.failed(), "{}", out.error_text(8192));
     assert_eq!(fs::read(dir.path().join("Cargo.lock")).unwrap(), lock);

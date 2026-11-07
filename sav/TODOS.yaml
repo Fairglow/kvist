@@ -10,6 +10,50 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:cd06c5851d83e39b324a929430af4d57a7549670f1ca827eb389c8dd2827e5df", "observed_revision": "sha256:750c2db2e20befb9a1c83d5ce99589e936d109e9ba214362db4b469f4b0e3691"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:390728e5867a1a299a56bec93b20373262c46d91339a42eb7f8981570e05c259", "observed_revision": "sha256:eb53c51c0021c3e295ea3764cab6a3c9f25338a4bcac7368c16f1e13b79b0e9b"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:7417b300a66353d6feef525d90339a0701247dffc56b790d9115ca8cc9fc74b2", "observed_revision": "sha256:49177cdcef45bf6d9a8fe1cd49cdad14d5a6e1d663695112ed649686e61ecfd0"}]
 tasks:
+  - id: workspace-offline-write-tests
+    title: "write_tests: workspace offline resolution"
+    description: "Execute rendered wrappers and assert workspace Cargo/Clippy omit forced locked flags while protected consumers retain them."
+    context: "User-directed ADR 0019; explicit local advisory exception."
+    purpose: "Expose unnecessary workspace lock restriction before code."
+    expected_outcome: "New workspace wrapper assertions fail against existing rendering."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#SAV-REQ-WORKSPACE-OFFLINE"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:00:52Z", completed_at: "2026-11-07T13:00:52Z"}
+  - id: workspace-offline-implement-code
+    title: "implement_code: workspace offline wrapper"
+    description: "Reuse fixed rendering with explicit locked/protected versus unlocked/workspace selection."
+    context: "Galla+Sav450/450 passed 917ee588-8ea5-4486-9953-e1c055a63091; Skott447/447 plus exclusive native checkout passed. Workspace lock creation/update and explicit locked rejection retain native coverage; protected wrapper remains offline/locked. Strict affected Clippy, workspace all-target check, formatting and consumer release build passed. No added network or host authority."
+    purpose: "Allow writable project lock resolution within the workspace."
+    expected_outcome: "Wrapper and consumer native tests pass."
+    kind: implementation
+    status: completed
+    depends_on: [workspace-offline-write-tests]
+    requirements: ["REQUIREMENTS.md#SAV-REQ-WORKSPACE-OFFLINE"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:00:52Z", completed_at: "2026-11-07T13:00:52Z"}
+  - id: workspace-offline-security-audit
+    title: "security_audit: independently observe wrapper authority"
+    description: "Read scoped source/tests without intent/history and derive implementation evidence."
+    context: "Independent source-only-live-records read only wrapper source/tests/export/manifest without intent/queues/old repository IMPL/docs/reviews/chat/Git and ran no tests. Scoped extracts are published in IMPL; rendered-string assertions and caller-owned isolation limitations remain distinct from attributed consumer native execution. No certification."
+    purpose: "Retain fixed paths, literal arguments and caller-owned authority."
+    expected_outcome: "Persist independent source-derived observations."
+    kind: security-audit
+    status: completed
+    depends_on: [workspace-offline-implement-code]
+    requirements: ["REQUIREMENTS.md#SAV-REQ-WORKSPACE-OFFLINE"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:17:34Z", completed_at: "2026-11-07T13:17:34Z"}
+  - id: workspace-offline-compliance-review
+    title: "compliance_review: compare workspace wrapper evidence"
+    description: "Separately compare intent with observed record and attributed tests without source."
+    context: "Separate source-blind-live-comparison read local intent and fresh independent records without source/tests/old repository IMPL/queues/Git/history/prior reviews. Scoped wrapper correspondence and caller-owned/unobserved-consumer limits are published in IMPL; separate Skott arbitration gaps remain unresolved. Completed review is not acceptance/certification, and accepted revisions/revalidation remain unchanged."
+    purpose: "Retain independent evidence correspondence and limitations."
+    expected_outcome: "Persist source-blind comparison."
+    kind: compliance-review
+    status: completed
+    depends_on: [workspace-offline-security-audit]
+    requirements: ["REQUIREMENTS.md#SAV-REQ-WORKSPACE-OFFLINE"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:21:23Z", completed_at: "2026-11-07T13:21:23Z"}
   - id: "offline-source-config-write-tests"
     title: "write_tests: fixed offline source resolver"
     description: "SAV-REQ-OFFLINE-SOURCE-CONFIG: generated Cargo and Clippy wrapper flags and consumer native Git build."

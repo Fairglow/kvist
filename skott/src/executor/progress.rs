@@ -32,13 +32,11 @@ fn failed(phase: &str, error: Error) -> Error {
     }
 }
 
-fn ambiguous() -> Error {
-    Error::SandboxExec {
-        tool: Some("file_tool".into()),
-        reason: "ambiguous matching native mutation observations; evidence cannot identify \
-                 this execution; effects may exist, reconcile before further work; no automatic replay"
-            .into(),
-    }
+fn unavailable(phase: &str, error: &Error) -> String {
+    tracing::warn!(%error, phase, "native mutation observation unavailable; retaining actual tool outcome");
+    format!(
+        "skott: mutation observation {phase} unavailable: {error}. Actual execution outcome is retained; no progress is claimed. Continue independent work; inspect the target before retrying an uncertain mutation. No automatic replay.\n"
+    )
 }
 
 fn identity(intent: &ToolIntent, outcome: &ToolOutcome) -> Result<[u8; 32]> {
@@ -101,43 +99,63 @@ impl NativeProgress {
     ) -> Result<ToolOutcome> {
         super::check_cancelled(cancellation)
             .map_err(|error| failed("before execution (not executed)", error))?;
-        let observation = request
+        let mut diagnostics = String::new();
+        let mut observation = match request
             .map(|request| request.observe_mutation(cancellation))
             .transpose()
-            .map_err(|error| failed("before execution (not executed)", error))?
-            .flatten();
-        if let Some((observer, _)) = &observation {
-            observer
-                .check_binding(cancellation)
-                .map_err(|error| failed("before execution (not executed)", error))?;
+        {
+            Ok(observation) => observation.flatten(),
+            Err(error) => {
+                super::check_cancelled(cancellation)?;
+                diagnostics.push_str(&unavailable("before execution", &error));
+                None
+            }
+        };
+        if let Some((observer, _)) = &observation
+            && let Err(error) = observer.check_binding(cancellation)
+        {
+            super::check_cancelled(cancellation)?;
+            diagnostics.push_str(&unavailable("before execution", &error));
+            observation = None;
         }
         super::check_cancelled(cancellation)
             .map_err(|error| failed("before execution (not executed)", error))?;
-        let outcome = execute()?;
-        if let Some((observer, before)) = observation {
-            let mut evidence = observer
-                .revision(cancellation)
-                .map_err(|error| failed("after execution (effects may be present)", error))
-                .map(|after| {
-                    if before != after {
-                        ProgressEvidence::StateChanged
-                    } else {
-                        ProgressEvidence::None
-                    }
-                });
+        let mut outcome = execute()?;
+        let observed = observation.is_some() || !diagnostics.is_empty();
+        let mut evidence = match observation {
+            Some((observer, before)) => match observer.revision(cancellation) {
+                Ok(after) if before != after => ProgressEvidence::StateChanged,
+                Ok(_) => ProgressEvidence::None,
+                Err(error) => {
+                    diagnostics.push_str(&unavailable("after execution", &error));
+                    ProgressEvidence::None
+                }
+            },
+            None => ProgressEvidence::None,
+        };
+        if !diagnostics.is_empty() {
+            outcome.stderr.extend_from_slice(diagnostics.as_bytes());
+        }
+        if observed {
             let mut observations = self.observations()?;
             let identity = identity(intent, &outcome)?;
             for entry in observations
                 .iter_mut()
                 .filter(|entry| entry.identity == identity)
             {
-                entry.evidence = Err(ambiguous());
-                evidence = Err(ambiguous());
+                tracing::warn!(
+                    "matching mutation observations are ambiguous; no progress is claimed, actual tool outcomes remain usable"
+                );
+                entry.evidence = Ok(ProgressEvidence::None);
+                evidence = ProgressEvidence::None;
             }
             if observations.len() == MAX_PENDING {
                 observations.pop_front();
             }
-            observations.push_back(Observation { identity, evidence });
+            observations.push_back(Observation {
+                identity,
+                evidence: Ok(evidence),
+            });
         }
         Ok(outcome)
     }
@@ -275,26 +293,29 @@ mod tests {
     }
 
     #[test]
-    fn pre_observation_errors_prevent_execution_and_post_errors_are_explicit() {
+    fn unavailable_observations_do_not_block_execution_or_claim_progress() {
         let dir = tempfile::tempdir_in(".").unwrap();
         let root = dir.path().canonicalize().unwrap();
         let path = root.join("text");
         let progress = NativeProgress::default();
         let intent = intent();
         let request = request(&intent);
-        std::fs::write(&path, vec![b'x'; crate::file_tools::MAX_FILE_BYTES + 1]).unwrap();
-        let error = progress
+        std::fs::create_dir(&path).unwrap();
+        let out = progress
             .execute(
                 &intent,
                 Some(&request),
                 &root,
                 &CancellationToken::new(),
-                || {
-                    panic!("must not execute after a failed pre-observation");
-                },
+                || Ok(outcome()),
             )
-            .unwrap_err();
-        assert!(error.describe().contains("before execution (not executed)"));
+            .unwrap();
+        assert!(out.error_text(8192).contains("observation"));
+        assert_eq!(
+            progress.progress(&intent, &out).unwrap(),
+            ProgressEvidence::None
+        );
+        std::fs::remove_dir(&path).unwrap();
         std::fs::write(&path, "bounded").unwrap();
         let out = progress
             .execute(
@@ -309,17 +330,15 @@ mod tests {
                 },
             )
             .unwrap();
-        let error = progress.progress(&intent, &out).unwrap_err();
-        assert!(
-            error
-                .describe()
-                .contains("after execution (effects may be present)")
+        assert_eq!(
+            progress.progress(&intent, &out).unwrap(),
+            ProgressEvidence::None
         );
-        assert!(error.describe().contains("reconcile"));
+        assert!(out.error_text(8192).contains("observation"));
     }
 
     #[test]
-    fn mutation_observation_rejects_links_without_following_the_target() {
+    fn link_observation_does_not_follow_targets_or_override_execution() {
         let dir = tempfile::tempdir_in(".").unwrap();
         let root = dir.path().canonicalize().unwrap();
         std::fs::create_dir(root.join("real")).unwrap();
@@ -330,18 +349,24 @@ mod tests {
         for path in ["/workspace/text", "/workspace/link/text"] {
             let mut intent = intent();
             intent.arguments["path"] = json!(path);
-            assert!(
-                progress
-                    .execute(
-                        &intent,
-                        Some(&request(&intent)),
-                        &root,
-                        &CancellationToken::new(),
-                        || {
-                            panic!("must not execute through links");
-                        }
-                    )
-                    .is_err()
+            let out = progress
+                .execute(
+                    &intent,
+                    Some(&request(&intent)),
+                    &root,
+                    &CancellationToken::new(),
+                    || {
+                        let mut out = outcome();
+                        out.status = Some(1);
+                        Ok(out)
+                    },
+                )
+                .unwrap();
+            assert!(out.failed());
+            assert!(out.error_text(8192).contains("observation"));
+            assert_eq!(
+                progress.progress(&intent, &out).unwrap(),
+                ProgressEvidence::None
             );
         }
         assert_eq!(std::fs::read(root.join("real/text")).unwrap(), b"safe");
@@ -372,10 +397,11 @@ mod tests {
                 },
             )
             .unwrap();
-        let error = progress.progress(&intent, &out).unwrap_err();
-        assert!(error.describe().contains("effects may"));
-        assert!(error.describe().contains("reconcile"));
-        assert!(error.describe().contains("replay"));
+        assert_eq!(
+            progress.progress(&intent, &out).unwrap(),
+            ProgressEvidence::None
+        );
+        assert!(out.error_text(8192).contains("observation"));
         assert_eq!(std::fs::read(parent.join("moved/text")).unwrap(), b"same");
     }
 
@@ -410,9 +436,10 @@ mod tests {
             )
             .unwrap();
         for out in [&second, &first] {
-            let error = progress.progress(&intent, out).unwrap_err();
-            assert!(error.describe().contains("ambiguous"), "{error}");
-            assert!(error.describe().contains("reconcile"), "{error}");
+            assert_eq!(
+                progress.progress(&intent, out).unwrap(),
+                ProgressEvidence::None
+            );
         }
         let fresh = progress
             .execute(
@@ -455,10 +482,11 @@ mod tests {
                 },
             )
             .unwrap();
-        let error = progress.progress(&intent, &out).unwrap_err();
-        assert!(error.describe().contains("effects may"), "{error}");
-        assert!(error.describe().contains("reconcile"), "{error}");
-        assert!(error.describe().contains("replay"), "{error}");
+        assert_eq!(
+            progress.progress(&intent, &out).unwrap(),
+            ProgressEvidence::None
+        );
+        assert!(out.error_text(8192).contains("observation"));
         assert_eq!(
             std::fs::read(parent.join("original/text")).unwrap(),
             b"before"
@@ -594,10 +622,11 @@ mod tests {
             )
             .unwrap();
         assert!(!out.failed());
-        let error = progress.progress(&intent, &out).unwrap_err();
-        assert!(error.describe().contains("cancel"), "{error}");
-        assert!(error.describe().contains("effects may"), "{error}");
-        assert!(error.describe().contains("reconcile"), "{error}");
+        assert_eq!(
+            progress.progress(&intent, &out).unwrap(),
+            ProgressEvidence::None
+        );
+        assert!(out.error_text(8192).contains("cancel"));
         assert_eq!(
             std::fs::read(root.join("text")).unwrap(),
             b"completed effect"

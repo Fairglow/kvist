@@ -2,6 +2,58 @@
 
 # Skott — Contract
 
+## Live workspace policy (ADR 0019)
+
+This user-directed consumer contract supersedes the older file-size/frozen
+resource policies in the sections below. Native regular files have no size
+quota; tools stream input and paginate output. Ordinary read continuation does
+not add a revision precondition. Explicit `expected_sha256` is optional for
+read/write/edit/append/patch; exact matching, atomic writes and lost-update
+protection remain. Large-file search exposes resumable scan offsets in addition
+to collected-result pagination, never implying complete unscanned coverage.
+
+Host changes to installed tools, project locks, vendored sources and selection/
+source configuration are legitimate. Existing mounts expose live data; changed
+mount topology and generated configuration refresh on subsequent tools without
+a restart or drift error. Workspace Rust uses available installed/read-only
+resources without an application manifest or reader lease prerequisite. Cargo
+is offline, but locked resolution is caller-selected, not forcibly injected.
+Native Cargo source metadata remains a language-tool requirement, not isolation.
+
+The workspace requests no process file-write cap. Operator-added shell filters
+remain supported; default command substrings and recursive host-side symlink
+scans do not substitute for OS grants. Read-only system resources, outside-write
+denial, masked writable vendor aliases, private scratch, network policy and
+bounded working memory/output/process supervision remain.
+The reserved workspace vendor alias is readable but read-only; it need not be
+hidden from ordinary inspection. Missing/unusable vendor material affects actual
+dependency resolution, not installed compiler/version/local-path operations.
+Native Cargo configuration tables are preserved; directory-source locations
+are retargeted to the approved vendor view. Invalid/unreadable configuration
+is reported explicitly and remains a Cargo configuration failure, not a
+reason to hide the installed compiler. Structured configuration parsing stays
+memory-bounded; this is not a general source-file quota.
+Named host registrations, including custom/linked toolchains, are supported
+when their resolved roots are outside the writable scope. No model-supplied
+host path becomes a grant. Auto Rust can become available after host provisioning
+on a subsequent invocation; explicit Off remains Off.
+Workspace selectors are resolved before effects. A selector slot inside the
+selected writable scope cannot steer later host grants: subsequent calls use
+its canonical directory origin instead. Operator-controlled selectors outside
+the writable scope may steer later invocations. Ordinary directory contents
+and host replacements remain live; this is grant-origin authorization, not a
+frozen workspace snapshot.
+The trusted Rustup launcher may be a system or host-home installation outside
+the write scope. Only that executable is granted read-only at `/rust/rustup`;
+host HOME and Cargo credentials are not mounted. Workspace wrappers and the
+`rustup` PATH facade use that live file view.
+Host tool/registration/extension selectors must be operator-controlled outside
+the write scope before canonicalization; an inside selector cannot authorize a
+new outside executable or mount. Unusable optional extensions are diagnosed and
+omitted, not used to disable the compiler. Workspace Rust On/forced requests
+also retain independent tools when unavailable, with honest diagnostics rather
+than advertising a compiler that is absent; cancellation remains terminal.
+
 ## Offline dependency provisioning
 
 `skott --vendor [--cwd DIR] [--check | --offline] [--force]` acts on DIR or the launch
@@ -27,10 +79,10 @@ material and conflicts with `--check`. Both applications read the optional share
 `.kvist/vendor.toml` limits, not model configuration. Cargo's own checksum
 metadata remains necessary; no independent file inventory is required.
 Runtime mounts the shared project vendor tree read-only without copying package
-contents, with its writable workspace alias masked. Read ownership lasts through
-each invocation, not idle sessions. Lock/directory replacement
-requires restarting Skott to refresh its prepared resource identities. No task replay
-is implied.
+contents. Its existing workspace alias is also readable read-only. Runtime
+consumption requires no shared reader lease, receipt or lock-digest gate.
+Host edits remain live and replacement nodes/configuration are refreshed on
+subsequent tool boundaries without restart or automatic replay.
 Installed Rust resource preparation has a 180-second cooperative budget;
 per-tool request preparation and execution retain their separate limits.
 Readiness is metadata coherence/presence, not independent source integrity or
@@ -231,7 +283,7 @@ consecutive-stall reset on a successful distinct action.
 Native search/discovery default to excluding generated dependency/build/VCS
 and runner-log directories, expose `include_generated` to include them, and
 accept bounded literal `file_pattern` filtering. Search additionally accepts
-a regular-file scope. Results identify excluded and oversized coverage; direct
+a regular-file scope. Results identify excluded and incomplete coverage; direct
 reads remain bounded and mutation link restrictions are unchanged.
 
 Rust resource selection occurs on the host before tools and consumes only
@@ -244,10 +296,9 @@ Prepared PATH Cargo resolves dependencies through the read-only `/rust/vendor`
 mount of the same host `.kvist/vendored` tree. Build output is written to
 `/workspace/target` in the writable workspace and persists across invocations;
 Cargo cache, HOME and rustup selection settings remain invocation-local scratch.
-The runner masks existing `/workspace/.kvist/vendored` contents with an
-inaccessible read-only namespace mount, leaving `/rust/vendor` as the only
-usable vendor view. This does not change the host registry or sibling `.kvist`
-files; the masked directory entry itself can remain visible.
+The runner overlays existing `/workspace/.kvist/vendored` contents read-only
+without hiding their data. Both views remain live. This does not change the
+host registry or sibling `.kvist` files.
 
 Journals retain bounded notices and request estimates, nullable provider usage,
 capacity provenance and terminal failures. Readable terminal records use
@@ -641,19 +692,20 @@ except `/`. Digests are `sha256:` plus 64 lowercase hexadecimal digits.
 | Tool           | Required arguments                                         | Optional arguments                                                                                                  |
 | -------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `shell`        | `command`: nonblank, NUL-free, at most 16384 bytes         | None. Commands over 4096 bytes execute as a staged `/context/0` script file, so the full bound is always executable |
-| `read_file`    | `path`                                                     | `offset` (0..=1048576 bytes), `limit=4096` (1..=16384 bytes), `expected_sha256`                                    |
+| `read_file`    | `path`                                                     | Nonnegative byte `offset`, `limit=4096` (1..=16384 bytes), `include_sha256=false`, `expected_sha256`                                    |
 | `write_file`   | `path`, `content`                                          | `expected_sha256`                                                                                                   |
 | `list_dir`     | `path`                                                     | `offset=0` (0..=4096 entries), `limit=100` (1..=256 entries)                                                        |
 | `find_files`   | `path`, `pattern` (literal substring, empty matches all)   | Same pagination as listing; `include_generated=false`                                                               |
-| `search_files` | `path`, `query` (nonempty literal substring)               | Same pagination as listing; `include_generated=false`, optional literal `file_pattern`                              |
-| `edit_file`    | `path`, nonempty `old_text`, `new_text`, `expected_sha256` | None                                                                                                                |
-| `append_file`  | `path`, `content`, `expected_sha256`                      | None; requires an existing UTF-8 file; no implicit newline                                                          |
-| `apply_patch`  | `path`, `patch`, `expected_sha256`                        | None; strict single-file unified hunks; no file headers                                                            |
+| `search_files` | `path`, `query` (nonempty literal substring)               | Same result pagination as listing; `include_generated=false`, literal `file_pattern`, nonnegative byte `scan_offset` (regular-file scope only) |
+| `edit_file`    | `path`, nonempty `old_text`, `new_text`                    | `expected_sha256`                                                                                                  |
+| `append_file`  | `path`, `content`                                         | `expected_sha256`; existing UTF-8 file; no implicit newline                                                        |
+| `apply_patch`  | `path`, `patch`                                           | `expected_sha256`; strict single-file unified hunks; no file headers                                               |
 
 Content/old/new/patch text each fit 65536 bytes; pattern/query/file_pattern fit 1024 bytes and
 reject NUL. Explicit null is not omission. Native request JSON fits 262144
-bytes. Complete reads, mutation preimages, scanned files and resulting edits
-fit 1048576 bytes/file. Complete native stdout, including LF, fits 7000 bytes.
+bytes. Regular source files, mutation preimages and resulting files have no
+size quota; input is streamed with bounded working memory. Complete native
+stdout, including LF, fits 7000 bytes.
 Pages shrink to fit encoded JSON without truncating digest or entry metadata;
 an irreducibly oversized entry is an explicit error.
 
@@ -661,46 +713,102 @@ Result objects:
 
 | Operation  | JSON fields                                                                                                                                                                                                                                                                      |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Read       | `content`, `sha256`, `offset`, `next_offset`, `total_bytes`                                                                                                                                                                                                                      |
+| Read       | `content`, `sha256` (full-file digest or null), `page_sha256` (digest of exactly returned UTF-8 content bytes), `offset`, `next_offset`, `total_bytes`; only when adjusted: `requested_offset`, `offset_adjustment` (`past_eof` or `utf8_boundary`) |
 | Write/edit/append/patch | `path`, `sha256`, `total_bytes`                                                                                                                                                                                                                                       |
 | List       | `entries:[{name,kind}]`, `offset`, `next_offset`, `total`                                                                                                                                                                                                                        |
-| Find       | `files:[absolute_path]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_generated`, `visited_entries`, `complete`                                                                                                                                                |
-| Search     | `matches:[{path,line,match_byte_offset,content,truncated}]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_binary`, `skipped_generated`, `skipped_oversized`, `excluded_files`, `visited_entries`, `scanned_bytes`, `complete`, `scope` (`file` or `directory`) |
+| Find       | `files:[absolute_path]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_generated`, `skipped_special`, `visited_entries`, `complete`                                                                                                                                                |
+| Search     | `matches:[{path,line,match_byte_offset,content,truncated}]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_binary`, `skipped_generated`, `skipped_oversized` (always zero), `skipped_special`, `excluded_files`, `visited_entries`, `scanned_bytes`, `prefix_scanned_bytes`, `scan_offset`, `effective_scan_offset` (null for directories), `scan_limit_reached`, `next_scan` (null or `{path,offset}`), `next_step`, `complete`, `scope` (`file` or `directory`) |
 
-`next_offset` is the actual continuation offset or null. Beyond-end offsets
-fail; exactly-at-end offsets return an empty terminal page. Read digests cover
-the whole bounded regular UTF-8 file; offsets must be UTF-8 boundaries and a
-limit too small for the next character fails. Reads may follow links to paths
+`next_offset` is the actual continuation offset or null. Beyond-end result
+offsets fail; exactly-at-end offsets return an empty terminal page. Ordinary
+reads seek directly to a bounded window, validate only the requested page and
+any scalar crossing its starting offset, and return `sha256:null`. Invalid UTF-8
+outside that window does not block the read. `page_sha256` always hashes exactly
+the returned content, never the whole-file revision. Explicit `include_sha256:true`
+or `expected_sha256` streams the entire raw file for the non-null full `sha256`;
+this intentionally costs file-length work and does not certify whole-file UTF-8.
+Only a full digest may be used as a mutation precondition. `total_bytes` is
+descriptor metadata, not a claim that all source bytes were read. A read byte offset beyond the
+current EOF clamps to EOF; one inside a UTF-8 scalar advances to the next
+boundary. Such pages report both requested and effective offsets and the
+adjustment reason. A limit too small for the next character fails.
+Reads may follow links to paths
 accessible in the sandbox namespace; the helper itself is not a read sandbox.
 Directory operations reject linked ancestors, list links and skip/count links
 in recursive traversal. Results sort by name/path, with search then by line.
-Search uses one-based line numbers and a first byte offset per matching line;
-previews exclude LF, retain CR and are bounded to 1024 UTF-8 bytes.
+Search uses one-based line numbers and the first byte offset per matching line
+in the scan window; literal queries may span LF or buffer boundaries. Previews
+exclude LF, retain CR and are bounded to 1024 UTF-8 bytes; `truncated=true`
+also identifies lines whose ends are beyond the scanned window. For a resumed
+offset at most 8 MiB, an additional bounded prefix pass counts absolute lines
+and obtains their leading previews (`prefix_scanned_bytes` reports that work).
+Beyond this prefix-work budget, `line=null` and `line_in_scan` counts lines
+from the effective scan beginning, not from file start. A first partial-line
+preview additionally carries `preview_offset` and `truncated=true`; later
+previews begin at observed LF boundaries. No invented absolute line numbers
+or complete-line claims are returned.
 
 In `Skott::run`/`run_controlled`, omitted read offsets start at zero once, then
 continue the last successful page for that exact path. Cursors are per prompt,
 not global, and survive context compaction/steering. Explicit `offset` wins;
 `offset: 0` restarts. Changing `limit` does not reset a cursor. Automatic
-continuation supplies the last full-file digest; a changed file fails and asks
-for an explicit restart. Supplied digests must match as well. Failed reads do
-not advance. After EOF, omission requests an empty page at `total_bytes`,
-never restarts; repeated terminal proposals enter the ordinary repeat breaker.
+continuation never supplies an implicit digest. Changed content is observed
+normally; an explicitly supplied digest remains a local stale-request guard.
+Cursor progress compares page digests only at identical offsets and byte
+lengths, or observed length changes; full revisions are compared only when both
+observations explicitly included one. Advancing to a different page does not
+invent a whole-file change. Successful output must contain a valid digest of
+its actual content and exactly the full-digest presence requested by the caller.
+Failed reads do not advance. After EOF, omission requests the last byte position:
+growth can supply new bytes and shrinkage clamps it to the new EOF. Repeated
+unchanged terminal proposals enter the ordinary repeat breaker.
 Direct stateless `FileRequest`/executor calls still default omission to zero;
 the run adapter owns continuation and its returned page metadata is journaled.
 
 Listing caps 4096 entries/directory. Recursive operations cap 4096 visited
 descendants and depth 32. Search caps 8388608 scanned bytes and 4096 matching
 lines; binary files are counted and skipped. Discovery does not inspect file
-contents. Unreadable/unsupported ordinary entries fail explicitly.
+contents. Sockets, FIFOs and other nonregular descendants are counted in
+`skipped_special` without opening them, making `complete=false`. Explicit
+special-file scopes, unreadable ordinary entries and detected substitutions
+still fail. Hard traversal/result-limit errors include narrowing guidance.
+
+When scan work reaches the byte budget before EOF, search retains its collected
+matches with `scan_limit_reached=true`, `complete=false`, `next_scan:{path,offset}`
+and helpful `next_step`. Resume that regular-file `path` with
+`scan_offset=next_scan.offset` and result `offset=0`. The byte cursor overlaps
+enough UTF-8-aligned suffix bytes to retain cross-budget queries. Backing across
+a multibyte scalar can repeat a completed budget-edge occurrence; consumers
+collecting successive windows may deduplicate `(path,match_byte_offset)`.
+A nearly exhausted directory budget can defer the
+next file at offset zero. Directory resumption covers that file, not later
+siblings; narrow the directory or literal `file_pattern` to inspect those.
+Otherwise `scan_limit_reached=false`, `next_scan=null` and `next_step=null`.
+`total` and `next_offset` describe only collected matches, not unscanned files:
+null ends that result's pages, not incomplete coverage. Result `offset` and byte
+`scan_offset` are distinct. Each call observes live data; continuation is not an
+atomic snapshot or a revision freeze. An empty partial result cannot establish
+absence in the original scope. `scanned_bytes` counts at most 8 MiB of scan
+input, excluding the separate prefix pass and one-byte EOF lookahead. Only the
+observed window is validated as UTF-8/NUL-free; unscanned tails are not certified.
 
 Generated directory basenames `.git`, `target`, `node_modules`, `vendor`,
 `vendored` and `.skott` are pruned unless `include_generated=true`;
 an explicitly selected generated scope remains accessible. `skipped_generated`
 counts pruned directory roots, not hidden descendants. Search accepts a regular
 file as well as a directory. `file_pattern` matches a literal substring of the
-scope-relative path, or the basename for a file scope. Oversized scanned files
-are metadata-skipped before allocation; direct reads still fail their bound.
-`complete` is false when coverage is skipped/filtered, independent of pagination.
+scope-relative path, or the basename for a file scope. No regular file is skipped
+because of its length. `complete` is false when coverage is skipped/filtered,
+budget-limited or begins at a nonzero `scan_offset`, independent of pagination.
+
+Sandbox agent instructions require diagnostic-driven recovery and useful,
+operation-specific blocker explanations, not a blanket stop on an inspection
+limit or unavailable compiler. Source inspection and user-requested manifest
+edits may continue within the existing workspace grant. Downloads, dependency
+acquisition and lock regeneration are separate explicit host operations:
+use `skott --vendor --cwd DIR`, optionally check with
+`skott --vendor --check --cwd DIR`, then retry the affected offline build.
+Workspace Cargo may create/update its writable lock; `--locked` is explicit.
 
 Write/edit parents must exist. New files use mode 0644; replacements preserve
 mode bits, not ownership, ACLs, xattrs or hard-link alias updates. Whole-file
@@ -757,15 +865,15 @@ All hunks validate before the existing per-file atomic replacement.
   otherwise the standard host rustup default is used. No installation, user
   home/config/credential mount or network is authorized. Concrete resources
   are read-only under `/rust`, with private Cargo scratch. Normal PATH Cargo
-  prepends `--offline --locked`; commands requiring resolution need an existing,
-  matching `Cargo.lock` and fail without updating it when it is missing or
-  stale. Provision locks and vendors separately. This wrapper is not a promise
+  prepends `--offline` without forced `--locked`; native Cargo may create/update
+  the writable project lock. Acquire missing packages separately. This wrapper is not a promise
   to rewrite explicit alternate Cargo paths or prevent authorized workspace
   edits to lockfiles.
   The shared `.kvist/vendored` view uses sandbox-native paths rather than
-  trusting host-absolute paths in project configuration. Pin drift fails closed;
-  restart after legitimate pin/lock/vendor-directory changes. Old `resolve` remains System-only.
-  Rustup queries see every validated installed toolchain in the standard host
+  trusting host-absolute paths in project configuration. Host pin/configuration
+  changes trigger live preparation at the next tool boundary without restart;
+  unavailable Rust does not block independent tools. Old `resolve` remains System-only.
+  Rustup queries see usable host-installed standard/custom-linked registrations
   layout. The initial selection is mounted at `/rust/toolchain`; other versions
   are mounted at disjoint `/rust/toolchains/N` destinations, with all installed
   targets and manifests retained. Every name is registered by a sandbox-native
@@ -777,23 +885,24 @@ All hunks validate before the existing per-file atomic replacement.
   (including installed `stable`) changes only the current invocation. A project
   pin sets `RUSTUP_TOOLCHAIN` and retains precedence over default changes.
   Automatic installation is disabled,
-  and `HOME=/tmp` is writable private scratch. Requested formatter/Clippy
-  executables are checked and drift-tracked along with the compiler.
+  and `HOME=/tmp` is writable private scratch. Missing optional formatter/Clippy
+  resources fail only their own operations, not compiler preparation.
   `cargo +<name>`, `rustc +<name>`, `rustdoc +<name>`, `rustup run <name> ...`
   and invocation-local `RUSTUP_TOOLCHAIN` may select another installed version.
-  PATH Cargo retains offline/locked vendored resolution for those selections;
+  PATH Cargo retains offline vendored resolution for those selections;
   its compiler and rustdoc follow the selected version rather than a fixed
   default compiler. PATH rustc/rustdoc and `RUSTC`/`RUSTDOC` use trusted
   selection-aware wrappers under `/rust/runtime/bin`.
   Prepared Rust PATH retains every bin-only System directory, including
   `/usr/local/bin`. Rust shim, compiler and optional Cargo-extension precedence
   remain first; remaining bin precedence is preserved and omitted bin
-  directories are appended. Standard sbin directories are excluded from
-  search and profile availability. Host PATH is not inherited, and no additional
+  directories are appended. Standard sbin directories are usable read-only and
+  canonical sbin PATH entries are included. Host PATH is not inherited, and no additional
   resource mounts or write authority are granted.
-  Unsafe/custom-linked or malformed installations are rejected, not omitted.
-  Inventory is resolved at startup: installation/target/registration drift
-  requires restart after host provisioning. No host updates are performed.
+  Unsafe/unusable optional registrations and failed optional inventory queries
+  produce explicit diagnostics while retaining the selected usable compiler.
+  A bounded mount plan includes the selection and at most 127 other names;
+  pin an omitted registration to include it. No host updates are performed.
   `SKOTT_LOG` (or fallback `RUST_LOG`) enables stderr diagnostics: debug
   records preparation/dispatch/completion, trace records grant metadata and
   environment names, never command text, environment values or tool output.
@@ -814,16 +923,16 @@ must preserve exclusivity when running this repository-wide trial.
 
 ```
 struct ToolPolicy {
-    shell_deny_prefixes: Vec<String>,          // safe defaults present
-    shell_deny_substrings: Vec<String>,        // safe defaults present
+    shell_deny_prefixes: Vec<String>,          // empty by default
+    shell_deny_substrings: Vec<String>,        // empty by default
     write_root: String,                        // sandbox path, default "/workspace"
 }
 ```
 
 The denylists are applied to the shell command string before any sandbox
-request is built. Defaults forbid clearly destructive commands
-(`rm -rf`, `mkfs`, `dd`, `:(){ :|:& };`, kernel reloads, etc.). Defaults are
-safe; configuration may add entries but must not remove the built-in minimum.
+request is built. Defaults contain no command-name bans. The operator may
+configure literal filters; namespace/grant enforcement, not command spelling,
+protects outside resources.
 
 - The `write_root` confines every `write_file` target. Enforcement is on a
   slash boundary, so a sibling such as `/workspace-evil` is rejected when the
@@ -885,19 +994,14 @@ with `output_text`/`error_text` truncation helpers so non-UTF-8 output never
 panics.
 
 Sandbox request preflight streams regular non-link identity files in 64-KiB
-blocks, with a 256-MiB/file read-time bound. Workspace inspection bounds
-1,000,000 entries, depth 128 (root depth zero), and 32 MiB of charged directory
-path bytes for its two retained representations. Both stages check cancellation
-between I/O operations and share a cooperative preflight limit equal to the
+blocks without a general file-size quota. There is no recursive workspace
+inventory or frozen-content scan. Preparation checks cancellation between I/O
+operations and uses a cooperative preflight limit equal to the
 requested `resources.wall_time_ms`, capped at 120 seconds (120 seconds with
 default resources). The limit covers the entire request, not each stage or worker;
-the executor supplies the prompt's cancellation/deadline token. Oversized
-workspaces fail explicitly with narrowing guidance. Filesystem/kernel calls
+the executor supplies the prompt's cancellation/deadline token. Filesystem/kernel calls
 are not preemptible, and preflight is not a substitute for namespace enforcement.
-Workspace inspection uses at most eight owned workers sharing the same aggregate
-quotas and deadline, never a per-worker allowance. All workers are joined before
-return, including failure and cancellation. Debug logs identify preflight stages
-and report inspected entries/directories and elapsed time without payloads;
+Debug logs identify actual preflight stages and elapsed time without payloads;
 preflight timeout errors name the effective limit, active stage, total elapsed
 milliseconds and stage elapsed milliseconds. This preparation allowance is
 separate from runner execution time; the prompt cancellation/deadline token
@@ -1170,14 +1274,15 @@ runner = "/usr/local/bin/galla-runner"
 backend = "/usr/bin/bwrap"
 
 [tool_policy]
-# Denylist entries are appended to the built-in safe minimum.
+# Optional operator command filters; defaults contain no substring/prefix bans.
 shell_deny_substrings = []
 shell_deny_prefixes = []
 
 # Per-language tool-chain advertisement. Each key is a configurable profile id
 # (python, rust, javascript, go, c). `Generic` is always present and is not
 # configured. `auto` advertises only when the interpreter reaches the sandbox;
-# `on` advertises and fails at startup when it does not; `off` never advertises.
+# `on` requires System availability; workspace Rust preparation failures instead
+# remain diagnostic/unadvertised so independent tools continue. `off` never advertises.
 [tool_profiles]
 python = "auto"
 rust = "auto"

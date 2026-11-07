@@ -11,24 +11,69 @@ broker or an external coding agent's private tool loop.
 
 | Need | Skott tool | Guidance |
 | --- | --- | --- |
-| Inspect files | `read_file` | Bounded UTF-8 byte pages with full-file digest; omission continues per path within a prompt. Explicit `offset: 0` restarts. Stop at null `next_offset`. |
+| Inspect files | `read_file` | Bounded UTF-8 byte pages and `page_sha256`; full raw-file SHA is opt-in. Omission continues per path within a prompt. Explicit `offset: 0` restarts. Stop at null `next_offset`. |
 | Navigate | `list_dir`, `find_files` | Sorted scoped pages; discovery uses literal path substrings, not globs. |
 | Find code/text | `search_files` | Scoped literal search, file filtering and explicit skipped-coverage counts; not regex or semantic search. |
 | Create/replace | `write_file` | Whole content; use `expected_sha256` when replacing observed content. |
-| Focused change | `edit_file` | One exact occurrence and required preimage digest; rejects ambiguity. |
-| Several changes in one file | `apply_patch` | Required digest and strict unified hunks; no file headers, fuzzy matching or hidden targets. |
-| Extend an existing file | `append_file` | Required digest; adds bytes verbatim without an implicit newline. |
+| Focused change | `edit_file` | One exact occurrence; optional preimage digest; rejects ambiguity. |
+| Several changes in one file | `apply_patch` | Optional digest and strict unified hunks; no file headers, fuzzy matching or hidden targets. |
+| Extend an existing file | `append_file` | Optional digest; adds bytes verbatim without an implicit newline. |
 | Build, test, format, inspect Git | `shell` | Existing sandboxed shell, available installed language tools and bounded output; network remains denied. |
 
 Read cursors use actual returned offsets, so UTF-8 and JSON-escaped output
 shrinking cannot skip data. Paths have independent cursors; changing `limit`
 does not restart. Cursors survive compaction and steering but reset for a new
-prompt. Automatic continuation guards the previous digest: if a file changes,
-restart explicitly instead of combining revisions. After EOF it requests an
+prompt. Ordinary continuation does not freeze the file revision or synthesize
+a guard. External edits are legitimate; page metadata records what was actually
+read, not an atomic multi-page snapshot. `sha256` is null unless
+`include_sha256:true` or `expected_sha256` requests a streamed full raw-file
+digest. Never use `page_sha256` as a full-file mutation guard. After EOF it requests an
 empty terminal page; identical terminal calls receive correction and eventually
 the circuit breaker. Earlier explicit offsets remain deliberate observations.
 Stateless helper/executor use outside the prompt loop still starts at zero.
 The journal retains proposed arguments and actual result offsets.
+
+## Recovering from inspection limits
+
+### Restriction audit
+
+| Area | Removed | Retained safeguard |
+| --- | --- | --- |
+| Files | General size caps, implicit whole-file hashes/guards | Bounded streaming/pages; explicit revisions and atomic local conflict checks |
+| Host edits | Frozen manifests, reader leases, drift/restart gates | Live contents; no-follow grant origins and trusted outside selectors |
+| Search | Discarded partial results and whole-file scan admission | Bounded work, explicit scan continuation and honest coverage |
+| Commands | Default substring bans and administrative-directory exclusions | OS namespaces/capabilities, read-only systems, explicit operator filters |
+| Environment | Read-only-only authoring PATH and blanket payload loader/Git bans | Cleared host enforcer environments; closed protected Cargo-phase controls |
+| Rust | Mandatory runtime receipt/lock readiness and forced workspace locking | Offline Cargo, private credentials/cache, usable tools plus command-local errors |
+| Publication | Inferred mutable sibling-cache writes | Explicit provider-owned descriptor authority; preserved attempt data |
+
+These are finite object-grant guarantees, not a whole-host alias/socket
+inventory. Process supervision is sampled; it is not kernel admission control.
+
+Native discovery/search skip sockets, FIFOs and other nonregular descendants
+without opening them and report `skipped_special`. Their presence is not a
+security denial or a reason to abandon code inspection. Explicit special-file
+scopes, unreadable ordinary files and detected substitutions still fail.
+
+Search scans at most 8 MiB per call, including bounded partial-file work. It
+keeps collected matches and returns `scan_limit_reached=true`, `complete=false`,
+`next_scan` and continuation/narrowing guidance in `next_step`. `total` and
+`next_offset` describe those collected matches only; null is not proof of full
+coverage. An empty partial result cannot establish absence. Narrow `path` to a
+relevant source directory or file, or add a literal `file_pattern`, such as
+`.rs`. Result offsets paginate collected matches; `scan_offset` resumes scanning
+the indicated file. Deep windows may have unknown absolute line numbers and
+overlap may repeat matches. Depth, entry and matching-line
+limits still fail explicitly with scope/filter guidance.
+
+For example, a workspace-wide search for `answer>` in this repository should
+be narrowed to `/workspace/maerg/src/bark` with `file_pattern: ".rs"` before
+reading the relevant files. A native inspection failure does not imply source
+changes occurred: generic `may_have_effects` failure metadata is conservative
+process evidence, not a claim that a read mutated the workspace. Reconcile
+state before repeating an effectful or uncertain command, not before every
+already-authorized narrower search. Explain any actual blocker and continue
+independent safe work rather than silently abandoning the goal.
 
 Append and patch use the existing private payload, installed native helper and
 atomic per-file replacement. They preserve modes and unrelated bytes, reject
@@ -63,15 +108,19 @@ not a claim of formal acceptance or blanket compliance.
 
 There is deliberately **no model-facing install/update/vendor tool yet**.
 Adding a shell wrapper around `cargo add`, `npm install` or `kvist vendor`
-would cross the authoring network boundary, potentially execute package scripts,
-and leave the prepared read-only dependency snapshot stale. A successful vendor
+would cross the authoring network boundary and potentially execute package scripts.
+A successful vendor
 command also does not prove that the exact model-requested dependency/version
 was fulfilled.
 
 Today, report the package, exact requested version/features and missing-build
-diagnostic. An operator updates/reviews manifests and locks on the host,
-provisions the registry through `kvist vendor`, then restarts Skott so it
-prepares fresh read-only resources. See
+diagnostic. User-requested manifest authoring within the workspace need not be
+blocked; offline Cargo may create/update the writable project lock.
+Acquisition remains an explicit host operation. An operator reviews manifests,
+provisions the registry through `skott --vendor --cwd DIR` (or `kvist vendor`),
+optionally checks `skott --vendor --check --cwd DIR`, then retries only the
+affected build. Live workspace resources refresh without restart, receipt,
+reader lease or frozen lock digest. See
 [toolchains and vendoring](sandbox-toolchains-and-vendoring.md).
 Protected maerg authoring also explicitly refuses automatic dependency
 fulfillment while its request-to-lock/vendor binding is absent.

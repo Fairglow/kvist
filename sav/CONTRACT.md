@@ -2,6 +2,16 @@
 
 # Sav Contract
 
+## Workspace Rust wrappers (ADR 0019)
+
+`offline_rust::workspace_wrapper(RustTool)` supplies the existing fixed runtime
+selection/source configuration with Cargo/Clippy `--offline` but no injected
+`--locked`. Caller arguments remain literal and may explicitly request locked
+resolution. `offline_rust::wrapper` retains locked semantics for protected
+consumers. Neither wrapper grants installation, networking or host write access.
+Workspace wrappers call the host-provided read-only launcher at `/rust/rustup`;
+protected wrappers retain their `/usr/bin/rustup` path.
+
 ## Resilience delivery
 
 The native runtime provides shared, bounded stream/action/observation resilience.

@@ -10,6 +10,50 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: one-way-write-tests
+    title: "write_tests: live mounts and optional payload file caps"
+    description: "Reproduce host-file deletion/polling, test uncapped files, live read-only updates and administrative tools without outside writes; reproduce missing host-enforcer dependencies, direct writable inode aliases, hidden writable ancestor selectors and unlinked/replaced live runner images."
+    context: "User-directed ADR 0019; explicit local advisory exception."
+    purpose: "Prevent enforcement from interfering with legitimate operator files."
+    expected_outcome: "New regressions fail before production repair."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:00:52Z", completed_at: "2026-11-07T13:00:52Z"}
+  - id: one-way-implement-code
+    title: "implement_code: one-way process and mount enforcement"
+    description: "Make file-write caps optional, remove host polling/deletion and expose system trees read-only without categorical sbin denial; protect bounded host-enforcer loader/dependency and ancestor-selector closure and pinned direct-file aliases while retaining live running/replacement images."
+    context: "Galla+Sav450/450 passed 917ee588-8ea5-4486-9953-e1c055a63091; host-code focused10 tests passed three consecutive runs, with red evidence 75953307-332d-468e-8e24-6613ccce016a. Native Skott isolation and exclusive checkout passed. Strict affected Clippy, workspace all-target check, formatting and release runner build passed. Cache promotion reports the missing provider-owned publication capability and preserves attempt data without inferred sibling writes. Process accounting remains sampled, not a hard kernel admission ceiling."
+    purpose: "Protect the host from payload effects, not the payload from host edits."
+    expected_outcome: "Native isolation and regression cases pass."
+    kind: implementation
+    status: completed
+    depends_on: [one-way-write-tests]
+    requirements: ["REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:00:52Z", completed_at: "2026-11-07T13:00:52Z"}
+  - id: one-way-security-audit
+    title: "security_audit: independently observe one-way enforcement"
+    description: "Derive scoped source/test observations without intent, queue, prior records/reviews or history."
+    context: "Independent source-only-live-records excluded intent/queues/old repository IMPL/docs/reviews/chat/Git and ran no tests; scoped observations and final host-code source-only follow-up are published in IMPL. A separate security reviewer marked all four original findings and the related ancestor-selector gap fixed. Retain sampled accounting, alias/launch transaction and pre-existing package-network/schema/output limitations; no certification."
+    purpose: "Verify direction of authority and resource effects."
+    expected_outcome: "Persist independent record and limitations."
+    kind: security-audit
+    status: completed
+    depends_on: [one-way-implement-code]
+    requirements: ["REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:17:34Z", completed_at: "2026-11-07T13:17:34Z"}
+  - id: one-way-compliance-review
+    title: "compliance_review: compare one-way enforcement evidence"
+    description: "Compare scoped intent and independent record with attributed test evidence without source."
+    context: "Separate source-blind-live-comparison read current scoped intent and fresh independent records without source/tests/old repository IMPL/queues/Git/history/prior reviews. Scoped correspondence and narrow superseded vendor-prose cleanup are published in IMPL; alias/launch limits and pre-existing package-network/resource/schema limitations prevent blanket certification. Skott arbitration findings remain separate. Recorded revisions/revalidation were not updated or accepted."
+    purpose: "Keep intended policy separate from observed behavior."
+    expected_outcome: "Persist source-blind correspondence and gaps."
+    kind: compliance-review
+    status: completed
+    depends_on: [one-way-security-audit]
+    requirements: ["REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"]
+    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:21:23Z", completed_at: "2026-11-07T13:21:23Z"}
   - id: "ci-system-path-write-tests"
     title: "write_tests: reproduce native CI PATH rejection"
     description: "Run the native system trial with GitHub runner PATH entries and retain the existing grant-validation failure."

@@ -164,13 +164,15 @@ impl ToolExecutor for RecordingExecutor {
             .unwrap()
             .push((intent.name.clone(), result.to_string()));
         let stdout = if intent.name == "read_file" {
+            use sha2::Digest;
             let offset = intent
                 .arguments
                 .get("offset")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
             serde_json::to_vec(&serde_json::json!({
-                "content":"ok", "sha256":format!("sha256:{}", "0".repeat(64)),
+                "content":"ok", "sha256":null,
+                "page_sha256":format!("sha256:{}", hex::encode(sha2::Sha256::digest(b"ok"))),
                 "offset":offset, "next_offset":offset + 2, "total_bytes":1048576,
             }))
             .unwrap()
