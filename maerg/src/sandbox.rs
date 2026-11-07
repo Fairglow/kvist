@@ -2150,6 +2150,10 @@ pub fn execute_offline_cargo_verification(
     })?;
     let toolchain_identity = digest_label(&cargo_bytes);
 
+    let _vendor_read = kvist_dependencies::rust::read_lease(
+        request.vendored_registry,
+        &sav::CancellationToken::new(),
+    )?;
     let encoded = build_offline_cargo_verification_request(
         config,
         &request.expected_runner.digest,

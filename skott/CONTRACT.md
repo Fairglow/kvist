@@ -4,7 +4,7 @@
 
 ## Offline dependency provisioning
 
-`skott --vendor [--cwd DIR] [--check | --offline]` acts on DIR or the launch
+`skott --vendor [--cwd DIR] [--check | --offline] [--force]` acts on DIR or the launch
 directory and exits before loading application/model configuration or starting
 the UI. No configuration-derived workspace participates:
 configuration/run options conflict with this operation. It requires an existing
@@ -14,7 +14,7 @@ The operator command is explicit host package-management authority: Cargo may
 read project/user source configuration and use network sources. It is not a
 sandboxed agent command. `--offline` asks Cargo to use cached material with
 `--locked --offline`; it is not OS network isolation. `--check` starts no
-process and writes no files, fails nonzero on incomplete/stale/corrupt material,
+process and writes no files, fails nonzero on incomplete/stale managed metadata,
 and requires no provider or Rust installation. No automatic fallback/retry,
 toolchain installation, lock resolution or model-requested acquisition occurs.
 
@@ -22,13 +22,19 @@ The common provider is `dependencies/CONTRACT.md`. Data remains in shared
 `.kvist` storage. Complete material is reused; provisioning publishes validated
 material without overwriting project `.cargo/config.toml`. Diagnostics identify
 scope, recovery and `skott --vendor --cwd DIR`; no raw package-manager output
-or credentials are printed. Resource drift or legitimate vendoring refresh
-requires restarting Skott to rebuild its immutable resources. No task replay
+or credentials are printed. `--force` explicitly rebuilds otherwise reusable
+material and conflicts with `--check`. Both applications read the optional shared
+`.kvist/vendor.toml` limits, not model configuration. Cargo's own checksum
+metadata remains necessary; no independent file inventory is required.
+Runtime mounts the shared project vendor tree read-only without copying package
+contents, with its writable workspace alias masked. Read ownership lasts through
+each invocation, not idle sessions. Lock/directory replacement
+requires restarting Skott to refresh its prepared resource identities. No task replay
 is implied.
 Installed Rust resource preparation has a 180-second cooperative budget;
 per-tool request preparation and execution retain their separate limits.
-Vendor files changed between enumeration and copying fail preparation instead
-of increasing the approved aggregate snapshot size.
+Readiness is metadata coherence/presence, not independent source integrity or
+archive/Git attestation. Cargo reports source/checksum failures when used.
 
 ## Standalone configuration bootstrap
 
@@ -235,11 +241,11 @@ network. It never receives the user's home, rustup settings or credentials.
 These resources are not maerg task approval or compliance evidence.
 
 Prepared PATH Cargo resolves dependencies through the read-only `/rust/vendor`
-snapshot of the host workspace's `.kvist/vendored`. Build output is written to
+mount of the same host `.kvist/vendored` tree. Build output is written to
 `/workspace/target` in the writable workspace and persists across invocations;
 Cargo cache, HOME and rustup selection settings remain invocation-local scratch.
 The runner masks existing `/workspace/.kvist/vendored` contents with an
-inaccessible read-only namespace mount, leaving the snapshot as the only
+inaccessible read-only namespace mount, leaving `/rust/vendor` as the only
 usable vendor view. This does not change the host registry or sibling `.kvist`
 files; the masked directory entry itself can remain visible.
 
@@ -756,9 +762,9 @@ All hunks validate before the existing per-file atomic replacement.
   stale. Provision locks and vendors separately. This wrapper is not a promise
   to rewrite explicit alternate Cargo paths or prevent authorized workspace
   edits to lockfiles.
-  A bounded `.kvist/vendored` snapshot uses sandbox-native paths rather than
+  The shared `.kvist/vendored` view uses sandbox-native paths rather than
   trusting host-absolute paths in project configuration. Pin drift fails closed;
-  restart after legitimate pin/vendor changes. Old `resolve` remains System-only.
+  restart after legitimate pin/lock/vendor-directory changes. Old `resolve` remains System-only.
   Rustup queries see every validated installed toolchain in the standard host
   layout. The initial selection is mounted at `/rust/toolchain`; other versions
   are mounted at disjoint `/rust/toolchains/N` destinations, with all installed

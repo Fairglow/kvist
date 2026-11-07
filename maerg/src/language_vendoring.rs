@@ -223,6 +223,7 @@ pub fn enforce_vendoring(
                 crate::vendor_command::VendorOptions {
                     vendored_dir: None,
                     populate: true,
+                    force: false,
                     sandbox: sandbox_config.cloned(),
                 },
             )
@@ -1289,14 +1290,7 @@ mod tests {
         );
         let manifest = rust_vendoring::VendorManifest {
             schema_version: rust_vendoring::VENDOR_SCHEMA_VERSION,
-            generated_at_unix_secs: 1,
-            project_root: "/opt/proj/kvist".to_owned(),
-            lockfile_path: "Cargo.lock".to_owned(),
             lockfile_digest: lockfile_digest.clone(),
-            vendored_dir: "/opt/proj/kvist/.kvist/vendored".to_owned(),
-            sandbox_cargo_dir: "/opt/proj/kvist/.kvist/sandbox-cargo".to_owned(),
-            sandbox_vendored_mount: rust_vendoring::VENDOR_SANDBOX_MOUNT.to_owned(),
-            verified: true,
         };
         manifest.save(project).expect("save manifest");
 

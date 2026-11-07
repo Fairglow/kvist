@@ -66,6 +66,11 @@ The repository layout places the root Rust workspace manifest at the project
 root (`/Cargo.toml`), with `maerg/`, `sav/`, `dependencies/`, `galla/`, `skott/`, and `blad/`
 as top-level peer components. Maerg and Skott depend on `dependencies` for
 shared Rust provisioning; that library depends on Sav, never a frontend.
+Both use one project `.kvist/vendored` tree with shared read/exclusive publication
+locks, a minimal lock receipt and optional common vendor-limit policy. Skott
+mounts it read-only without copying packages; the runner masks its writable
+workspace alias. Cargo owns native file-checksum validation, not an additional
+application inventory (ADR 0018).
 `kvist.maerg` depends on `sav` as a
 Rust library and on `blad` for Markdown rendering in its interactive TUI, while
 `galla` is an independent execution boundary.

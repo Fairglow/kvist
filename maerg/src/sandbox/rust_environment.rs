@@ -7,6 +7,7 @@ pub(super) type Fingerprint = (u64, u64, u64, i64, i64, i64, i64);
 
 pub(super) struct RustEnvironment {
     _staging: tempfile::TempDir,
+    _vendor_read: Option<kvist_dependencies::rust::ReadLease>,
     grants: Vec<SandboxGrant>,
     selected: String,
     pinned: bool,
@@ -151,10 +152,25 @@ impl RustEnvironment {
         component: &Path,
     ) -> Result<Self> {
         let started = Instant::now();
+        let limits = kvist_dependencies::VendorLimits::load(project)?;
+        let mut vendor_read = match fs::symlink_metadata(project.join(".kvist/vendored")) {
+            Ok(_) => Some(kvist_dependencies::rust::read_lease(
+                &project.join(".kvist/vendored"),
+                &sav::CancellationToken::new(),
+            )?),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(sandbox_error(
+                    config,
+                    "inspect shared vendor directory",
+                    error,
+                ));
+            }
+        };
         // A standalone child can have no root lock or managed Rust state.
         for path in [
             "Cargo.lock",
-            ".kvist/vendoring-v1.json",
+            ".kvist/vendor.json",
             ".kvist/vendor-operation.lock",
             ".kvist/vendor-publication",
             ".kvist/vendored",
@@ -278,7 +294,10 @@ impl RustEnvironment {
         match fs::symlink_metadata(&resolver) {
             Ok(_) => {
                 let before = inspect(config, &resolver)?;
-                if !before.is_file() || before.len() > 64 << 10 || before.nlink() != 1 {
+                if !before.is_file()
+                    || before.len() > limits.max_metadata_bytes
+                    || before.nlink() != 1
+                {
                     return Err(failure(
                         config,
                         "offline source config must be a bounded regular single-link file",
@@ -300,15 +319,22 @@ impl RustEnvironment {
                 }
                 let mut bytes = Vec::new();
                 opened
-                    .take((64 << 10) + 1)
+                    .take(limits.max_metadata_bytes.saturating_add(1))
                     .read_to_end(&mut bytes)
                     .map_err(|error| sandbox_error(config, "read bounded source config", error))?;
-                if bytes.len() > 64 << 10 {
-                    return Err(failure(config, "offline source config exceeded 64 KiB"));
+                if bytes.len() as u64 > limits.max_metadata_bytes {
+                    return Err(failure(
+                        config,
+                        "offline source config exceeded configured metadata limit",
+                    ));
                 }
                 let text = std::str::from_utf8(&bytes)
                     .map_err(|_| failure(config, "offline source config must be UTF-8"))?;
-                let contents = kvist_dependencies::rust::resolver_config(text, "/rust/vendor")?;
+                let contents = kvist_dependencies::rust::resolver_config_with_limits(
+                    text,
+                    "/rust/vendor",
+                    &limits,
+                )?;
                 let staged = staging.path().join("runtime/vendor-config.toml");
                 fs::write(&staged, contents)
                     .and_then(|_| fs::set_permissions(&staged, fs::Permissions::from_mode(0o400)))
@@ -486,6 +512,15 @@ impl RustEnvironment {
         let canonical_vendor = vendor
             .canonicalize()
             .map_err(|e| sandbox_error(config, "canonicalize authoring vendor", e))?;
+        if canonical_vendor == project.join(".kvist/vendored") && vendor_read.is_none() {
+            vendor_read = Some(kvist_dependencies::rust::read_lease(
+                &canonical_vendor,
+                &sav::CancellationToken::new(),
+            )?);
+        }
+        if let Some(owner) = &vendor_read {
+            owner.check(&sav::CancellationToken::new())?;
+        }
         grants.push(SandboxGrant {
             source: canonical_vendor.to_string_lossy().into_owned(),
             destination: "/rust/vendor".into(),
@@ -540,6 +575,7 @@ impl RustEnvironment {
         tracked.extend(context.tracked);
         Ok(Self {
             _staging: staging,
+            _vendor_read: vendor_read,
             grants,
             selected: selected_name,
             pinned: pin.pinned,
@@ -691,6 +727,7 @@ mod tests {
             )],
             _staging: staging,
             selected: "stable-x86_64-unknown-linux-gnu".into(),
+            _vendor_read: None,
             pinned: false,
             component: path.join("component"),
             build_directory: "/rust/project/component".into(),

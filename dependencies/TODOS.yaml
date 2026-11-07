@@ -14,6 +14,50 @@ component:
         expected_revision: sha256:b4faacbb8b257350cddba894cbc3383c914600bcf7fa6e9cad6d8ff5eb2877f3
         observed_revision: sha256:599801ba008e862798464d6511ac9236a4a87fc6764d507cb83aaefe6386cd38
 tasks:
+  - id: shared-area-write-tests
+    title: "write_tests: one shared vendor area"
+    description: "Pin lightweight readiness, minimal receipt, configurable quotas and shared use/publication exclusion."
+    context: "User explicitly replaces duplicate copies and full file-checksum attestation; local advisory exception while receipts are unavailable."
+    purpose: "Define useful bounded sharing before implementation."
+    expected_outcome: "Regressions fail against copied/fully hashed or hardcoded behavior."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#DEP-REQ-LIMITS", "REQUIREMENTS.md#DEP-REQ-SHARED-AREA"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
+  - id: shared-area-implement-code
+    title: "implement_code: minimal shared vendoring"
+    description: "Use one directory, minimal lock receipt and configured quotas; eliminate file hashing and redundant scans."
+    context: "Shared library mechanics retain caller authority and transactional fences."
+    purpose: "Share packages without duplicate trees or speculative attestation."
+    expected_outcome: "Focused regressions pass with safe reader/writer ownership."
+    kind: implementation
+    status: completed
+    depends_on: [shared-area-write-tests]
+    requirements: ["REQUIREMENTS.md#DEP-REQ-LIMITS", "REQUIREMENTS.md#DEP-REQ-SHARED-AREA", "REQUIREMENTS.md#DEP-REQ-VALIDATION"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
+  - id: shared-area-security-audit
+    title: "security_audit: shared vendor ownership"
+    description: "Derive source-only observations of directory locks, publication, bounds and eliminated attestation."
+    context: "No intent, queue, prior record or history in the independent source context."
+    purpose: "Retain independent boundary evidence."
+    expected_outcome: "Persist scoped observations and concrete limits."
+    kind: security-audit
+    status: completed
+    depends_on: [shared-area-implement-code]
+    requirements: ["REQUIREMENTS.md#DEP-REQ-PUBLICATION", "REQUIREMENTS.md#DEP-REQ-SHARED-AREA"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
+  - id: shared-area-compliance-review
+    title: "compliance_review: shared vendor simplicity"
+    description: "Compare local intent with independent observations and attributed tests without raw source."
+    context: "Review completion is not acceptance; retain discrepancies for arbitration."
+    purpose: "Keep simplicity and safety claims bounded."
+    expected_outcome: "Persist source-blind comparison and evidence limits."
+    kind: compliance-review
+    status: completed
+    depends_on: [shared-area-security-audit]
+    requirements: ["REQUIREMENTS.md#DEP-REQ-LIMITS", "REQUIREMENTS.md#DEP-REQ-SHARED-AREA"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:06:47Z", completed_at: "2026-11-07T01:06:47Z"}
   - id: rust-write-tests
     title: "write_tests: shared Rust provisioning"
     description: "Reproduce full-readiness, transaction, concurrency and malicious-input failures before implementation."

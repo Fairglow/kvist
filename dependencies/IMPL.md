@@ -113,3 +113,75 @@ duplicate-key fixture. No persisting concrete discrepancy was identified
 within those corrections. Comprehensive adversarial ancestor-race resistance,
 backend confinement and source-origin attestation were not proven. Parent-run
 test results are separate evidence; this observer executed no tests.
+
+## Shared-area source observations - 2026-11-07
+
+Independent `deps-source-audit` read current local source and test assertions,
+excluding all intent, queues, previous records/reviews, peers and history.
+It ran no tests, changed no files and reported no high-confidence exploitable
+vulnerability within its scope. These observations supersede earlier descriptions
+of checksum inventories, copied snapshots and fixed vendor quotas, not historical
+execution evidence.
+
+- Descriptor-relative traversal uses `O_NOFOLLOW`. Regular reads require a
+  single link, enforce bounds and compare identities before/after reading.
+  Directory identity is rechecked against the displayed path. These checks
+  do not establish UID/GID ownership or reject writable permissions
+  (`src/fs.rs:75-248`).
+- Lock versions 3/4, package identities, registry checksum shape and immutable
+  Git revision shape are validated. Exact lock bytes receive a SHA-256 digest
+  and are rechecked with identity. Package origin/content is not independently
+  attested (`src/integrity.rs:79-220`).
+- Managed readiness gates operation/recovery fences, receipt/lock binding,
+  resolver binding and required package metadata. Catalogue validation reads
+  package name/version and checks regular native checksum metadata presence,
+  without parsing the file inventory or hashing package source. Legacy catalogue
+  helpers additionally accept numbered directories without inspecting contents
+  (`src/rust.rs:83-262`, `src/integrity.rs:361-407`,
+  `src/vendoring.rs:153-173`).
+- Matching material is reused without acquisition. Otherwise, an exclusive
+  operation file and advisory vendor-directory locks coordinate cooperating
+  operations. Staged trees receive structural/quota validation. Publication
+  fences directory renames and atomic resolver/receipt writes; interrupted
+  publication retains recovery material rather than automatically rolling back
+  (`src/rust.rs:420-656`, `src/publication.rs:24-129`).
+- Closed resolver parsing rejects unrelated Cargo configuration and requires
+  one-hop directory replacements, retargeted through TOML serialization.
+  Managed replacements bind locked sources to `/workspace/vendored`; accepted
+  URL schemes include HTTP and local files (`src/resolver.rs:37-248`).
+- Optional policy rejects unknown fields and zero limits but allows increases
+  beyond defaults. Reuse does not fully rescan source-tree quotas. Acquisition
+  passes literal `vendor --locked [--offline]` arguments, timeout/output bounds
+  and zero retries to Sav. Executable validation checks the canonical target
+  outside the project but executes the selected original path. This interface
+  configures no OS sandbox; supervisor internals were not inspected
+  (`src/limits.rs:62-102`, `src/rust.rs:280-393,510-539`).
+
+Implementer-attributed evidence: initial targeted regressions reproduced the
+retired receipt, checksum inventory, ignored policy and shared-reader publication
+behavior before repairs. Production-runner nextest
+`21afbe63-ae2a-482d-a3f4-36c6ab3d20b2` passed all 399 affected tests across three
+components, including all dependency tests and exact quota/process boundaries.
+Strict workspace Clippy, formatting, affected doctests and offline release builds
+subsequently passed. The audit did not execute or independently verify those
+runs. Queue timestamps record later bookkeeping, not test execution chronology.
+No acceptance, review receipt, exhaustive race proof or certification is claimed.
+
+Separate `deps-blind-comparison` compared only current local requirements,
+contract and design with the new independent observations, without raw source,
+tests, queues or peers. It found scoped correspondence for lightweight readiness,
+reuse/locking, configurable policy and fenced publication, with no concrete active
+contradiction. Earlier inventory/copy/fixed-quota descriptions were explicitly
+superseded history. It retained missing itemized proof of the exact two-field
+receipt/retired-format rejection, TOML dialect/parser bound/default propagation,
+and consumer-side ownership/masking/restart behavior. Attributed multi-component
+tests support but do not independently certify those details; the component-only
+observer did not inspect consumer implementations. Advisory locks and uninspected
+supervisor internals do not establish exhaustive race/confinement proof.
+
+Final implementer-run production nextest
+`7eb7fff4-82b4-4b8d-83a5-9c8e576971ab` passed all 399 affected tests after the lint
+correction and operational queue updates. Both freshly built release frontends
+reported the same ready root tree: 365 registry, zero Git and six local packages.
+Kvist reused it with host offline policy, without acquisition. These results
+remain attributed execution, not accepted intent revisions or certification.

@@ -2276,3 +2276,77 @@ unchanged checkpoint test then passed isolated, in the 29-test parallel
 checkpoint/continuous group, in 40/40 stress iterations and in the full rerun.
 Its cause remains unestablished; no lock-recovery fix or certification is claimed.
 The capacity-fixture observation does not cover that transient failure.
+
+## Shared-area source observations - 2026-11-07
+
+Independent `maerg-source-audit` read scoped current local source and executable
+assertions without intent, queues, previous records/reviews, peers or history.
+It made no changes, executed no tests and identified no high-confidence
+exploitable vulnerability in scope. This replaces older descriptions of the
+changed vendor receipt/reader mechanics, not historical evidence or unrelated
+observations. Shared-library guarantees below are called interfaces, not
+independently inspected peer behavior.
+
+- The vendor operator exposes project selection, optional registry destination
+  and force. Both presentation branches authorize population and propagate
+  configuration errors. Rust provisioning loads shared limits and selects a
+  refusing callback, configured sandbox acquisition or explicit host provisioning
+  (`src/cli.rs:135-147,876-905,1539-1557`,
+  `src/vendor_command.rs:103-109,336-385`).
+- Unbound protected dependency requests are refused without filesystem inspection
+  or provisioning. Separate inspection checks cancellation/budget, policy identity,
+  runner, Rust strategy, receipt version, lock digest and called readiness
+  interfaces. It does not fulfill a requested dependency
+  (`src/vendor_command.rs:135-239`).
+- Acquisition owns private scratch, stages bounded stable single-link
+  manifests/locks and empty targets, excludes project Cargo configuration and
+  generates approved registry settings. It declares Cargo fetch, package-source
+  authority and writable acquisition resources. Success requires unchanged staged
+  and project locks before called host offline repacking. Scratch cleanup finishes
+  before callback return (`src/vendor_command.rs:400-612`,
+  `src/sandbox/cargo_context.rs:559-679`, `src/sandbox.rs:1812-2030`).
+- Authoring owns staging and an optional Rust read lease through supervised
+  execution. Preparation inventories installed toolchains, rejects linked/special
+  resources, bounds metadata reads and tracks fingerprints. Application rechecks
+  resources and writable overlap, with a local authoring-context exception, and
+  replaces Rust/Cargo settings (`src/sandbox/rust_environment.rs:8-17,150-669`,
+  `src/sandbox.rs:1127-1140,1442-1452`).
+- Offline Rust adaptation calls readiness interfaces and builds registry/config
+  mounts with a lock digest. Verification retains a registry read lease through
+  construction and supervision, declaring seven grants, denied network and exact
+  `cargo test --locked` arguments. Some identities describe paths/catalogues rather
+  than complete content. Component lock normalization can invoke host
+  `cargo metadata --offline`; offline is not OS confinement
+  (`src/language_vendoring.rs:317-400`,
+  `src/sandbox.rs:1509-1760,2160-2190,2523-2592`).
+
+Implementer-attributed production-runner nextest
+`21afbe63-ae2a-482d-a3f4-36c6ab3d20b2` passed 399 affected cases across components,
+including shared-vendoring, native authoring and closed offline verification.
+Strict workspace Clippy, formatting, affected doctests and offline release builds
+subsequently passed. The observer did not execute these checks. Queue timestamps
+record later bookkeeping; review is not human acceptance or a fabricated receipt.
+Earlier broader acquisition and durable-baseline intent discrepancies remain
+historical unresolved limits, not silently implemented features.
+
+Separate `maerg-blind-comparison` read scoped local intent and the new independent
+observations without source, tests, queues or peers. It found correspondence for
+shared-limit loading, separate acquisition authority, bounded scratch/lock checks,
+protected refusal and read ownership through verification. It reported a command
+inventory omission: the older `vendor` entry did not list the already documented
+and observed `--force`. The entry now includes that approved option; the finding
+is retained here rather than hidden by rewriting the observation.
+
+The comparison retained missing itemized provider proof of exact receipt fields,
+policy dialect/default parity and budget propagation, no independent content
+attestation, exclusive publication and force bypassing reuse rather than authority.
+Read-lease retention is not independently inspected peer publication proof.
+Exact Git admission, non-Rust preservation and each recovery case were not
+individually established by this source-only supplement. These are evidence gaps,
+not reported behavioral violations. Broader historical discrepancies remain.
+
+Final implementer-run production nextest
+`7eb7fff4-82b4-4b8d-83a5-9c8e576971ab` passed 399 affected cases. Both release
+frontends reported the same ready project tree; Kvist reused it with offline
+host policy and no acquisition. Review completion neither accepts stale revisions
+nor certifies all requirements.

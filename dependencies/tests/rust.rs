@@ -56,7 +56,7 @@ fn checksum(vendor: &Path) {
 }
 fn provision(dir: &Path) {
     assert!(
-        rust::provision_with(dir, None, &CancellationToken::new(), populate)
+        rust::provision_with(dir, None, &CancellationToken::new(), false, populate)
             .unwrap()
             .ready()
     );
@@ -64,7 +64,7 @@ fn provision(dir: &Path) {
 fn published(dir: &Path) -> Vec<Vec<u8>> {
     [
         "vendored/demo/src/lib.rs",
-        "vendoring-v1.json",
+        "vendor.json",
         "sandbox-cargo/config.toml",
     ]
     .map(|file| fs::read(dir.join(".kvist").join(file)).unwrap())
@@ -72,12 +72,247 @@ fn published(dir: &Path) -> Vec<Vec<u8>> {
 }
 
 #[test]
-fn manifest_assertion_rejects_publication_fences_and_corrupt_content() {
-    for failure in [
-        "vendor-operation.lock",
-        "vendor-publication",
-        "corrupt-content",
+fn shared_receipt_records_only_version_and_lock_binding() {
+    let dir = project();
+    provision(dir.path());
+    let receipt = kvist_dependencies::vendoring::VendorManifest::load(dir.path())
+        .unwrap()
+        .unwrap();
+    let value = serde_json::to_value(receipt).unwrap();
+    let mut keys = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+    assert_eq!(keys, ["lockfile_digest", "schema_version"]);
+}
+
+#[test]
+fn shared_reader_blocks_replacement_without_backend_work() {
+    let dir = project();
+    provision(dir.path());
+    let reader = fs::File::open(dir.path().join(".kvist/vendored")).unwrap();
+    reader.try_lock_shared().unwrap();
+    let previous = published(dir.path());
+    let mut changed = lock("demo", SUM);
+    changed.push('\n');
+    fs::write(dir.path().join("Cargo.lock"), changed).unwrap();
+    let invoked = std::cell::Cell::new(false);
+    assert!(
+        rust::provision_with(
+            dir.path(),
+            None,
+            &CancellationToken::new(),
+            false,
+            |vendor| {
+                invoked.set(true);
+                populate(vendor)
+            }
+        )
+        .is_err(),
+        "an active reader must prevent replacement"
+    );
+    assert!(
+        !invoked.get(),
+        "busy publication must not perform unnecessary acquisition"
+    );
+    assert_eq!(published(dir.path()), previous);
+    drop(reader);
+    assert!(
+        rust::provision_with(dir.path(), None, &CancellationToken::new(), false, populate)
+            .unwrap()
+            .ready()
+    );
+}
+
+#[test]
+fn shared_readiness_does_not_hash_source_files_or_native_file_inventory() {
+    let dir = project();
+    provision(dir.path());
+    fs::write(
+        dir.path().join(".kvist/vendored/demo/src/lib.rs"),
+        "changed source",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join(".kvist/vendored/demo/.cargo-checksum.json"),
+        "Cargo checks this when used",
+    )
+    .unwrap();
+    assert!(
+        rust::check(dir.path(), &CancellationToken::new())
+            .unwrap()
+            .ready()
+    );
+    fs::remove_file(dir.path().join(".kvist/vendored/demo/.cargo-checksum.json")).unwrap();
+    assert!(
+        rust::check(dir.path(), &CancellationToken::new()).is_err(),
+        "required native metadata must remain present"
+    );
+}
+
+#[test]
+fn shared_vendor_policy_rejects_invalid_settings_and_enforces_selected_limits() {
+    for settings in [
+        "[limits]\nmax_total_bytes=1\n",
+        "[limits]\nmax_total_bytes=0\n",
+        "[limits]\nunknown=1\n",
+        "[limits]\nmax_entries='wrong'\n",
     ] {
+        let dir = project();
+        fs::create_dir(dir.path().join(".kvist")).unwrap();
+        fs::write(dir.path().join(".kvist/vendor.toml"), settings).unwrap();
+        assert!(
+            rust::provision_with(dir.path(), None, &CancellationToken::new(), false, populate)
+                .is_err(),
+            "{settings}"
+        );
+        assert!(
+            !dir.path().join(".kvist/vendored").exists(),
+            "invalid or exceeded limits must not publish"
+        );
+    }
+}
+
+#[test]
+fn configured_vendor_tree_and_control_quotas_accept_exact_boundaries() {
+    let sample = project();
+    let vendor = sample.path().join("sample");
+    populate(&vendor).unwrap();
+    let files = [
+        "demo/Cargo.toml",
+        "demo/src/lib.rs",
+        "demo/.cargo-checksum.json",
+    ];
+    let sizes: Vec<_> = files
+        .iter()
+        .map(|file| fs::metadata(vendor.join(file)).unwrap().len())
+        .collect();
+    let paths = [
+        "demo",
+        "demo/src",
+        "demo/Cargo.toml",
+        "demo/src/lib.rs",
+        "demo/.cargo-checksum.json",
+    ];
+    for (key, boundary) in [
+        ("max_total_bytes", sizes.iter().sum()),
+        ("max_file_bytes", *sizes.iter().max().unwrap()),
+        ("max_entries", paths.len() as u64),
+        (
+            "max_path_bytes",
+            paths.iter().map(|path| path.len() as u64).sum(),
+        ),
+        ("max_depth", 2),
+        (
+            "max_lockfile_bytes",
+            fs::metadata(sample.path().join("Cargo.lock"))
+                .unwrap()
+                .len(),
+        ),
+        ("max_metadata_bytes", *sizes.iter().max().unwrap()),
+        ("max_sources", 2),
+    ] {
+        for (value, accepted) in [(boundary, true), (boundary - 1, false)] {
+            let dir = project();
+            fs::create_dir(dir.path().join(".kvist")).unwrap();
+            fs::write(
+                dir.path().join(".kvist/vendor.toml"),
+                format!("[limits]\n{key}={value}\n"),
+            )
+            .unwrap();
+            let result =
+                rust::provision_with(dir.path(), None, &CancellationToken::new(), false, populate);
+            assert_eq!(result.is_ok(), accepted, "{key}={value}: {result:?}");
+            assert_eq!(dir.path().join(".kvist/vendor.json").exists(), accepted);
+        }
+    }
+}
+
+#[test]
+fn configured_package_quota_is_applied_to_actual_lock_entries() {
+    for bound in [1, 2] {
+        let dir = project();
+        fs::write(dir.path().join("Cargo.lock"), "version=4\n[[package]]\nname='one'\nversion='1.0.0'\n[[package]]\nname='two'\nversion='1.0.0'\n").unwrap();
+        fs::create_dir(dir.path().join(".kvist")).unwrap();
+        fs::write(
+            dir.path().join(".kvist/vendor.toml"),
+            format!("[limits]\nmax_packages={bound}\n"),
+        )
+        .unwrap();
+        let result =
+            rust::provision_with(dir.path(), None, &CancellationToken::new(), false, |_| {
+                panic!("local graph needs no acquisition")
+            });
+        assert_eq!(result.is_ok(), bound == 2, "{result:?}");
+    }
+}
+
+#[test]
+fn configured_depth_can_exceed_the_old_default_without_recursive_stack_growth() {
+    for depth in [64, 128] {
+        let dir = project();
+        fs::create_dir(dir.path().join(".kvist")).unwrap();
+        fs::write(
+            dir.path().join(".kvist/vendor.toml"),
+            format!("[limits]\nmax_depth={depth}\n"),
+        )
+        .unwrap();
+        let result = rust::provision_with(
+            dir.path(),
+            None,
+            &CancellationToken::new(),
+            false,
+            |vendor| {
+                let config = populate(vendor)?;
+                let mut directory = vendor.join("demo");
+                for _ in 0..96 {
+                    directory.push("nested");
+                    fs::create_dir(&directory).unwrap();
+                }
+                fs::write(
+                    directory.join("extra"),
+                    "bounded but not independently hashed",
+                )
+                .unwrap();
+                Ok(config)
+            },
+        );
+        assert_eq!(result.is_ok(), depth == 128, "{result:?}");
+    }
+}
+
+#[test]
+fn lowered_tree_quota_does_not_rescan_or_rebuild_ready_material() {
+    let dir = project();
+    provision(dir.path());
+    let before = published(dir.path());
+    fs::write(
+        dir.path().join(".kvist/vendor.toml"),
+        "[limits]\nmax_total_bytes=1\n",
+    )
+    .unwrap();
+    assert!(
+        rust::check(dir.path(), &CancellationToken::new())
+            .unwrap()
+            .ready()
+    );
+    rust::provision_with(dir.path(), None, &CancellationToken::new(), false, |_| {
+        panic!("must reuse metadata-ready material")
+    })
+    .unwrap();
+    assert_eq!(published(dir.path()), before);
+    assert!(
+        rust::provision_with(dir.path(), None, &CancellationToken::new(), true, populate).is_err()
+    );
+    assert_eq!(published(dir.path()), before);
+}
+
+#[test]
+fn manifest_assertion_rejects_publication_fences() {
+    for failure in ["vendor-operation.lock", "vendor-publication"] {
         let dir = project();
         provision(dir.path());
         let manifest = kvist_dependencies::vendoring::VendorManifest::load(dir.path())
@@ -124,7 +359,7 @@ fn publishes_full_state_and_reuses_without_backend_or_rewrite() {
             .unwrap()
             .ready()
     );
-    rust::provision_with(dir.path(), None, &CancellationToken::new(), |_| {
+    rust::provision_with(dir.path(), None, &CancellationToken::new(), false, |_| {
         panic!("must reuse")
     })
     .unwrap();
@@ -134,7 +369,16 @@ fn publishes_full_state_and_reuses_without_backend_or_rewrite() {
         "corrupt",
     )
     .unwrap();
-    assert!(rust::check(dir.path(), &CancellationToken::new()).is_err());
+    assert!(
+        rust::check(dir.path(), &CancellationToken::new())
+            .unwrap()
+            .ready()
+    );
+    rust::provision_with(dir.path(), None, &CancellationToken::new(), true, populate).unwrap();
+    assert_eq!(
+        fs::read(dir.path().join(".kvist/vendored/demo/src/lib.rs")).unwrap(),
+        b"pub fn demo() {}\n"
+    );
 }
 
 #[test]
@@ -151,24 +395,24 @@ fn empty_graph_check_is_write_free_but_explicit_provision_publishes_without_back
             .ready()
     );
     assert!(!dir.path().join(".kvist").exists());
-    rust::provision_with(dir.path(), None, &CancellationToken::new(), |_| {
+    rust::provision_with(dir.path(), None, &CancellationToken::new(), false, |_| {
         panic!("empty graph")
     })
     .unwrap();
     assert!(dir.path().join(".kvist/vendored").is_dir());
-    assert!(dir.path().join(".kvist/vendoring-v1.json").is_file());
+    assert!(dir.path().join(".kvist/vendor.json").is_file());
     assert!(
         dir.path()
             .join(".kvist/sandbox-cargo/config.toml")
             .is_file()
     );
-    let before = fs::read(dir.path().join(".kvist/vendoring-v1.json")).unwrap();
-    rust::provision_with(dir.path(), None, &CancellationToken::new(), |_| {
+    let before = fs::read(dir.path().join(".kvist/vendor.json")).unwrap();
+    rust::provision_with(dir.path(), None, &CancellationToken::new(), false, |_| {
         panic!("empty reuse")
     })
     .unwrap();
     assert_eq!(
-        fs::read(dir.path().join(".kvist/vendoring-v1.json")).unwrap(),
+        fs::read(dir.path().join(".kvist/vendor.json")).unwrap(),
         before
     );
     fs::write(
@@ -200,33 +444,32 @@ fn rejects_malformed_lock_utf8_and_traversal() {
 }
 
 #[test]
-fn immutable_catalogue_integrity_rejects_links_hardlinks_extra_files_and_bad_metadata() {
-    let dir = project();
-    let vendor = dir.path().join("snapshot");
-    populate(&vendor).unwrap();
-    assert!(
-        rust::check_catalogue(dir.path(), &vendor, &CancellationToken::new())
-            .unwrap()
-            .ready()
-    );
-    let file = vendor.join("demo/src/lib.rs");
-    fs::rename(&file, dir.path().join("outside")).unwrap();
-    symlink(dir.path().join("outside"), &file).unwrap();
-    assert!(rust::check_catalogue(dir.path(), &vendor, &CancellationToken::new()).is_err());
-    fs::remove_file(&file).unwrap();
-    fs::hard_link(dir.path().join("outside"), &file).unwrap();
-    assert!(rust::check_catalogue(dir.path(), &vendor, &CancellationToken::new()).is_err());
-    fs::remove_file(&file).unwrap();
-    fs::write(&file, "pub fn demo() {}\n").unwrap();
-    fs::write(vendor.join("demo/extra"), "unhashed").unwrap();
-    assert!(rust::check_catalogue(dir.path(), &vendor, &CancellationToken::new()).is_err());
-    fs::remove_file(vendor.join("demo/extra")).unwrap();
-    fs::write(
-        vendor.join("demo/.cargo-checksum.json"),
-        r#"{"package":null,"files":{"../outside":"bad"}}"#,
-    )
-    .unwrap();
-    assert!(rust::check_catalogue(dir.path(), &vendor, &CancellationToken::new()).is_err());
+fn provisioning_rejects_source_links_hardlinks_and_special_files() {
+    for kind in ["symlink", "hardlink", "fifo"] {
+        let dir = project();
+        let outside = dir.path().join("outside");
+        fs::write(&outside, "unchanged").unwrap();
+        let result = rust::provision_with(
+            dir.path(),
+            None,
+            &CancellationToken::new(),
+            false,
+            |vendor| {
+                let config = populate(vendor)?;
+                let file = vendor.join("demo/src/lib.rs");
+                fs::remove_file(&file).unwrap();
+                match kind {
+                    "symlink" => symlink(&outside, file).unwrap(),
+                    "hardlink" => fs::hard_link(&outside, file).unwrap(),
+                    _ => nix::unistd::mkfifo(&file, nix::sys::stat::Mode::S_IRUSR).unwrap(),
+                }
+                Ok(config)
+            },
+        );
+        assert!(result.is_err(), "{kind}");
+        assert!(!dir.path().join(".kvist/vendor.json").exists());
+        assert_eq!(fs::read(&outside).unwrap(), b"unchanged");
+    }
 }
 
 #[test]
@@ -262,23 +505,24 @@ fn backend_failure_lock_drift_and_reentrant_writers_preserve_previous_bytes() {
     let dir = project();
     provision(dir.path());
     let before = published(dir.path());
-    // Corrupt content forces acquisition while retaining the published bytes.
+    // Explicit force requests acquisition while retaining the published bytes.
     fs::write(
         dir.path().join(".kvist/vendored/demo/src/lib.rs"),
         "old corrupt",
     )
     .unwrap();
     let before_corrupt = published(dir.path());
-    let err = rust::provision_with(dir.path(), None, &CancellationToken::new(), |_| {
+    let err = rust::provision_with(dir.path(), None, &CancellationToken::new(), true, |_| {
         Err(Error::Cancelled)
     })
     .unwrap_err();
     assert!(matches!(err, Error::Cancelled));
     assert_eq!(before_corrupt, published(dir.path()));
-    let err = rust::provision_with(dir.path(), None, &CancellationToken::new(), |stage| {
-        let nested = rust::provision_with(dir.path(), None, &CancellationToken::new(), |_| {
-            panic!("exclusive")
-        });
+    let err = rust::provision_with(dir.path(), None, &CancellationToken::new(), true, |stage| {
+        let nested =
+            rust::provision_with(dir.path(), None, &CancellationToken::new(), false, |_| {
+                panic!("exclusive")
+            });
         assert!(matches!(nested, Err(Error::OperationLocked { .. })));
         let config = populate(stage)?;
         fs::write(dir.path().join("Cargo.lock"), lock("demo", &"b".repeat(64))).unwrap();
@@ -297,14 +541,16 @@ fn occupied_lock_and_state_links_are_not_stolen_or_followed() {
     let lock = dir.path().join(".kvist/vendor-operation.lock");
     fs::write(&lock, "stale operator evidence").unwrap();
     assert!(matches!(
-        rust::provision_with(dir.path(), None, &CancellationToken::new(), populate),
+        rust::provision_with(dir.path(), None, &CancellationToken::new(), false, populate),
         Err(Error::OperationLocked { .. })
     ));
     assert_eq!(fs::read_to_string(lock).unwrap(), "stale operator evidence");
     let other = project();
     fs::remove_dir_all(dir.path().join(".kvist")).unwrap();
     symlink(other.path(), dir.path().join(".kvist")).unwrap();
-    assert!(rust::provision_with(dir.path(), None, &CancellationToken::new(), populate).is_err());
+    assert!(
+        rust::provision_with(dir.path(), None, &CancellationToken::new(), false, populate).is_err()
+    );
     assert!(!other.path().join("vendor-operation.lock").exists());
 }
 
@@ -312,13 +558,13 @@ fn occupied_lock_and_state_links_are_not_stolen_or_followed() {
 fn cancellation_during_population_does_not_publish() {
     let dir = project();
     let token = CancellationToken::new();
-    let result = rust::provision_with(dir.path(), None, &token, |stage| {
+    let result = rust::provision_with(dir.path(), None, &token, false, |stage| {
         let config = populate(stage)?;
         token.cancel();
         Ok(config)
     });
     assert!(matches!(result, Err(Error::Cancelled)));
-    assert!(!dir.path().join(".kvist/vendoring-v1.json").exists());
+    assert!(!dir.path().join(".kvist/vendor.json").exists());
     assert!(!dir.path().join(".kvist/vendored").exists());
 }
 
@@ -332,10 +578,16 @@ fn source_mismatch_never_publishes() {
             "[source.crates-io]\ngit='https://wrong-source.example.invalid/repo'",
         ),
     ] {
-        let result = rust::provision_with(dir.path(), None, &CancellationToken::new(), |stage| {
-            populate(stage)?;
-            Ok(config)
-        });
+        let result = rust::provision_with(
+            dir.path(),
+            None,
+            &CancellationToken::new(),
+            false,
+            |stage| {
+                populate(stage)?;
+                Ok(config)
+            },
+        );
         assert!(result.is_err());
         assert!(!dir.path().join(".kvist/vendored").exists());
     }
@@ -345,7 +597,7 @@ fn source_mismatch_never_publishes() {
 fn publication_failure_is_not_ready_and_retains_recovery() {
     let dir = project();
     fs::create_dir_all(dir.path().join(".kvist/sandbox-cargo/config.toml")).unwrap();
-    let result = rust::provision_with(dir.path(), None, &CancellationToken::new(), populate);
+    let result = rust::provision_with(dir.path(), None, &CancellationToken::new(), false, populate);
     assert!(result.is_err());
     assert!(rust::check(dir.path(), &CancellationToken::new()).is_err());
 }
@@ -358,6 +610,7 @@ fn script(dir: &Path, body: &str) -> PathBuf {
 }
 fn host_options(cargo: PathBuf, timeout: u64) -> ProvisionOptions {
     ProvisionOptions {
+        force: false,
         cargo,
         offline: true,
         vendored_dir: None,
@@ -418,7 +671,7 @@ fn supervised_failures_are_typed_bounded_and_payload_free() {
             "{error:?}"
         );
         assert!(!format!("{error:?}").contains("SECRET"));
-        assert!(!dir.path().join(".kvist/vendoring-v1.json").exists());
+        assert!(!dir.path().join(".kvist/vendor.json").exists());
     }
     let error = rust::provision(
         dir.path(),
@@ -462,25 +715,15 @@ fn native_cargo_consumes_fixture_offline_locked() {
 }
 
 #[test]
-fn malformed_manifest_paths_and_duplicate_checksum_keys_are_refused() {
+fn retired_receipt_path_fields_are_refused() {
     let dir = project();
     provision(dir.path());
-    let path = dir.path().join(".kvist/vendoring-v1.json");
+    let path = dir.path().join(".kvist/vendor.json");
     let mut manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     manifest["vendored_dir"] = "../host-grant".into();
     fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
     assert!(rust::check(dir.path(), &CancellationToken::new()).is_err());
-    let snapshot = dir.path().join("snapshot");
-    populate(&snapshot).unwrap();
-    let original = fs::read_to_string(snapshot.join("demo/.cargo-checksum.json")).unwrap();
-    let bad = original.replacen("\"files\":{", "\"files\":{\"Cargo.toml\":\"bad\",", 1);
-    assert_ne!(
-        bad, original,
-        "fixture must inject a duplicate checksum key"
-    );
-    fs::write(snapshot.join("demo/.cargo-checksum.json"), bad).unwrap();
-    assert!(rust::check_catalogue(dir.path(), &snapshot, &CancellationToken::new()).is_err());
 }
 
 #[test]
@@ -500,8 +743,7 @@ fn git_revision_and_metadata_are_checked_and_source_config_must_bind() {
             .unwrap()
             .ready()
     );
-    checksum.as_object_mut().unwrap().remove("package");
-    fs::write(&metadata, serde_json::to_vec(&checksum).unwrap()).unwrap();
+    fs::remove_file(&metadata).unwrap();
     assert!(rust::check_catalogue(dir.path(), &snapshot, &CancellationToken::new()).is_err());
     fs::write(
         dir.path().join("Cargo.lock"),
@@ -510,15 +752,21 @@ fn git_revision_and_metadata_are_checked_and_source_config_must_bind() {
     .unwrap();
     assert!(rust::check_catalogue(dir.path(), &snapshot, &CancellationToken::new()).is_err());
     fs::write(dir.path().join("Cargo.lock"), git_lock).unwrap();
-    let error = rust::provision_with(dir.path(), None, &CancellationToken::new(), |stage| {
-        populate(stage)?;
-        let path = stage.join("demo/.cargo-checksum.json");
-        let mut checksum: serde_json::Value =
-            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        checksum["package"] = serde_json::Value::Null;
-        fs::write(path, serde_json::to_vec(&checksum).unwrap()).unwrap();
-        Ok(CONFIG.into())
-    })
+    let error = rust::provision_with(
+        dir.path(),
+        None,
+        &CancellationToken::new(),
+        false,
+        |stage| {
+            populate(stage)?;
+            let path = stage.join("demo/.cargo-checksum.json");
+            let mut checksum: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            checksum["package"] = serde_json::Value::Null;
+            fs::write(path, serde_json::to_vec(&checksum).unwrap()).unwrap();
+            Ok(CONFIG.into())
+        },
+    )
     .unwrap_err();
     assert!(matches!(error, Error::VendoringUnavailable { .. }));
 }
@@ -534,16 +782,22 @@ fn once_only_populate_uses_explicit_cache_and_literal_locked_offline_arguments()
         "test \"$1\" = vendor && test \"$2\" = --locked && test \"$3\" = --offline && test \"$#\" = 4 && test -d \"$CARGO_HOME\" || exit 18\nprintf \"[source.crates-io]\\nreplace-with='vendored-sources'\\n[source.vendored-sources]\\ndirectory='discarded-host-path'\\n\"",
     );
     let options = host_options(cargo, 3);
-    rust::provision_with(dir.path(), None, &CancellationToken::new(), |stage| {
-        populate(stage)?;
-        rust::populate(
-            dir.path(),
-            stage,
-            &options,
-            Some(&cache),
-            &CancellationToken::new(),
-        )
-    })
+    rust::provision_with(
+        dir.path(),
+        None,
+        &CancellationToken::new(),
+        false,
+        |stage| {
+            populate(stage)?;
+            rust::populate(
+                dir.path(),
+                stage,
+                &options,
+                Some(&cache),
+                &CancellationToken::new(),
+            )
+        },
+    )
     .unwrap();
     assert!(
         rust::check(dir.path(), &CancellationToken::new())
@@ -604,16 +858,23 @@ fn concurrent_writer_is_excluded_while_callback_is_active() {
     let leave = std::sync::Barrier::new(2);
     std::thread::scope(|scope| {
         let writer = scope.spawn(|| {
-            rust::provision_with(dir.path(), None, &CancellationToken::new(), |stage| {
-                entered.wait();
-                leave.wait();
-                populate(stage)
-            })
+            rust::provision_with(
+                dir.path(),
+                None,
+                &CancellationToken::new(),
+                false,
+                |stage| {
+                    entered.wait();
+                    leave.wait();
+                    populate(stage)
+                },
+            )
         });
         entered.wait();
-        let result = rust::provision_with(dir.path(), None, &CancellationToken::new(), |_| {
-            panic!("concurrent backend")
-        });
+        let result =
+            rust::provision_with(dir.path(), None, &CancellationToken::new(), false, |_| {
+                panic!("concurrent backend")
+            });
         assert!(matches!(result, Err(Error::OperationLocked { .. })));
         assert!(matches!(
             rust::check(dir.path(), &CancellationToken::new()),
@@ -633,25 +894,31 @@ fn concurrent_writer_is_excluded_while_callback_is_active() {
 fn populated_vendor_links_missing_files_and_wrong_sources_never_publish() {
     let dir = project();
     for mutation in 0..4 {
-        let result = rust::provision_with(dir.path(), None, &CancellationToken::new(), |stage| {
-            populate(stage)?;
-            match mutation {
-                0 => fs::remove_file(stage.join("demo/src/lib.rs")).unwrap(),
-                1 => {
-                    fs::remove_file(stage.join("demo/src/lib.rs")).unwrap();
-                    symlink("/dev/null", stage.join("demo/src/lib.rs")).unwrap();
+        let result = rust::provision_with(
+            dir.path(),
+            None,
+            &CancellationToken::new(),
+            false,
+            |stage| {
+                populate(stage)?;
+                match mutation {
+                    0 => fs::remove_file(stage.join("demo/.cargo-checksum.json")).unwrap(),
+                    1 => {
+                        fs::remove_file(stage.join("demo/src/lib.rs")).unwrap();
+                        symlink("/dev/null", stage.join("demo/src/lib.rs")).unwrap();
+                    }
+                    2 => fs::write(
+                        stage.join("demo/Cargo.toml"),
+                        "[package]\nname='other'\nversion='1.0.0'\n",
+                    )
+                    .unwrap(),
+                    _ => {
+                        fs::write(stage.join("demo/Cargo.toml"), "invalid = [").unwrap();
+                    }
                 }
-                2 => fs::write(
-                    stage.join("demo/Cargo.toml"),
-                    "[package]\nname='other'\nversion='1.0.0'\n",
-                )
-                .unwrap(),
-                _ => {
-                    fs::write(stage.join("demo/src/lib.rs"), "pub fn corrupt() {}\n").unwrap();
-                }
-            }
-            Ok(CONFIG.into())
-        });
+                Ok(CONFIG.into())
+            },
+        );
         assert!(result.is_err());
         assert!(!dir.path().join(".kvist/vendored").exists());
         assert!(!dir.path().join(".kvist/vendor-operation.lock").exists());
@@ -676,6 +943,7 @@ fn stale_lock_never_mutates_and_custom_manifest_paths_are_not_host_grants() {
         dir.path(),
         Some(&custom),
         &CancellationToken::new(),
+        false,
         populate,
     )
     .unwrap();
@@ -687,9 +955,13 @@ fn stale_lock_never_mutates_and_custom_manifest_paths_are_not_host_grants() {
     );
     fs::remove_dir_all(dir.path().join(".kvist/vendored")).unwrap();
     assert!(rust::check(dir.path(), &CancellationToken::new()).is_err());
-    rust::provision_with(dir.path(), Some(&custom), &CancellationToken::new(), |_| {
-        panic!("complete custom view")
-    })
+    rust::provision_with(
+        dir.path(),
+        Some(&custom),
+        &CancellationToken::new(),
+        false,
+        |_| panic!("complete custom view"),
+    )
     .unwrap();
 }
 
@@ -704,18 +976,64 @@ fn pre_cancelled_and_invalid_timeout_provisioning_is_write_free() {
         Err(Error::Cancelled)
     ));
     assert!(matches!(
-        rust::provision_with(dir.path(), None, &token, |_| panic!("cancelled")),
+        rust::provision_with(dir.path(), None, &token, false, |_| panic!("cancelled")),
         Err(Error::Cancelled)
     ));
-    for timeout in [0, 901] {
-        let result = rust::provision(
+    let result = rust::provision(
+        dir.path(),
+        host_options(script(host.path(), "exit 0"), 0),
+        &CancellationToken::new(),
+    );
+    assert!(matches!(result, Err(Error::VendoringUnavailable { .. })));
+    assert!(!dir.path().join(".kvist").exists());
+}
+
+#[test]
+fn shared_policy_controls_real_acquisition_output_and_time_and_can_raise_defaults() {
+    for (policy, body, timeout, failure) in [
+        (
+            "[limits]\nmax_output_bytes=32\n",
+            "printf '%080d' 0".to_owned(),
+            3,
+            Some(ProcessFailure::OutputLimit),
+        ),
+        (
+            "[limits]\ntimeout_secs=1\n",
+            "sleep 3".to_owned(),
+            3,
+            Some(ProcessFailure::Timeout),
+        ),
+        (
+            "[limits]\ntimeout_secs=1200\n",
+            format!("printf '%s' \"{CONFIG}\""),
+            1200,
+            None,
+        ),
+    ] {
+        let dir = project();
+        let host = project();
+        fs::create_dir(dir.path().join(".kvist")).unwrap();
+        fs::write(dir.path().join(".kvist/vendor.toml"), policy).unwrap();
+        let result = rust::populate(
             dir.path(),
-            host_options(script(host.path(), "exit 0"), timeout),
+            &dir.path().join("candidate"),
+            &host_options(script(host.path(), &body), timeout),
+            None,
             &CancellationToken::new(),
         );
-        assert!(matches!(result, Err(Error::VendoringUnavailable { .. })));
+        if let Some(expected) = failure {
+            assert!(
+                matches!(result, Err(Error::Process { failure }) if failure == expected),
+                "{result:?}"
+            );
+        } else {
+            assert!(result.is_ok(), "{result:?}");
+        }
+        assert!(
+            !dir.path().join(".kvist/vendor.json").exists(),
+            "populate must not publish"
+        );
     }
-    assert!(!dir.path().join(".kvist").exists());
 }
 
 #[test]
@@ -747,10 +1065,14 @@ fn managed_snapshot_binds_controls_but_never_rehashes_original_vendor() {
     )
     .unwrap();
     let (report, config) =
-        rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).unwrap();
+        rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).unwrap();
     assert_eq!(report.vendored_dir, snapshot.to_string_lossy());
     assert!(config.unwrap().contains("/workspace/vendored"));
-    assert!(rust::check(dir.path(), &CancellationToken::new()).is_err());
+    assert!(
+        rust::check(dir.path(), &CancellationToken::new())
+            .unwrap()
+            .ready()
+    );
 }
 
 #[test]
@@ -762,7 +1084,7 @@ fn snapshot_refuses_operation_and_recovery_fences_while_catalogue_remains_pure()
     for fence in ["vendor-operation.lock", "vendor-publication"] {
         let path = dir.path().join(".kvist").join(fence);
         fs::write(&path, "explicit inspectable fence").unwrap();
-        assert!(rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).is_err());
+        assert!(rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).is_err());
         assert!(
             rust::check_catalogue(dir.path(), &snapshot, &CancellationToken::new())
                 .unwrap()
@@ -778,7 +1100,7 @@ fn snapshot_refuses_stale_unverified_malformed_or_partial_managed_state() {
     provision(dir.path());
     let snapshot = dir.path().join("private-snapshot");
     populate(&snapshot).unwrap();
-    let path = dir.path().join(".kvist/vendoring-v1.json");
+    let path = dir.path().join(".kvist/vendor.json");
     let original = fs::read(&path).unwrap();
     let manifest: serde_json::Value = serde_json::from_slice(&original).unwrap();
     for (key, value) in [
@@ -793,17 +1115,17 @@ fn snapshot_refuses_stale_unverified_malformed_or_partial_managed_state() {
         let mut mutated = manifest.clone();
         mutated[key] = value;
         fs::write(&path, serde_json::to_vec(&mutated).unwrap()).unwrap();
-        assert!(rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).is_err());
+        assert!(rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).is_err());
     }
     fs::write(&path, "malformed").unwrap();
-    assert!(rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).is_err());
+    assert!(rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).is_err());
     fs::remove_file(&path).unwrap();
-    assert!(rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).is_err());
+    assert!(rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).is_err());
     fs::write(&path, original).unwrap();
     fs::remove_file(dir.path().join(".kvist/sandbox-cargo/config.toml")).unwrap();
-    assert!(rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).is_err());
+    assert!(rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).is_err());
     fs::remove_file(dir.path().join("Cargo.lock")).unwrap();
-    assert!(rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).is_err());
+    assert!(rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).is_err());
 }
 
 #[test]
@@ -823,11 +1145,11 @@ fn snapshot_gates_resolver_keys_and_locked_source_binding() {
         CONFIG.replace("discarded-host-path", "/host/arbitrary"),
     ] {
         fs::write(&path, config).unwrap();
-        assert!(rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).is_err());
+        assert!(rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).is_err());
     }
     fs::remove_file(&path).unwrap();
     symlink("/dev/null", &path).unwrap();
-    assert!(rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).is_err());
+    assert!(rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).is_err());
 }
 
 #[test]
@@ -837,17 +1159,17 @@ fn snapshot_allows_unmanaged_crates_io_but_not_unbound_alternate_or_git_sources(
     let snapshot = dir.path().join("private-snapshot");
     populate(&snapshot).unwrap();
     let (report, config) =
-        rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).unwrap();
+        rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).unwrap();
     assert!(report.ready());
     assert!(config.is_none());
-    assert!(!dir.path().join(".kvist/vendoring-v1.json").exists());
+    assert!(!dir.path().join(".kvist/vendor.json").exists());
     assert!(!dir.path().join(".kvist/sandbox-cargo").exists());
     fs::write(
         dir.path().join("Cargo.lock"),
         lock("demo", SUM).replace(SOURCE, "registry+https://alternate.example.invalid/index"),
     )
     .unwrap();
-    assert!(rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).is_err());
+    assert!(rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).is_err());
     let git = "version=4\n[[package]]\nname='demo'\nversion='1.0.0'\nsource='git+https://example.invalid/repo#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n";
     fs::write(dir.path().join("Cargo.lock"), git).unwrap();
     let metadata = snapshot.join("demo/.cargo-checksum.json");
@@ -855,5 +1177,5 @@ fn snapshot_allows_unmanaged_crates_io_but_not_unbound_alternate_or_git_sources(
         serde_json::from_slice(&fs::read(&metadata).unwrap()).unwrap();
     checksum["package"] = serde_json::Value::Null;
     fs::write(metadata, serde_json::to_vec(&checksum).unwrap()).unwrap();
-    assert!(rust::check_snapshot(dir.path(), &snapshot, &CancellationToken::new()).is_err());
+    assert!(rust::check_view(dir.path(), &snapshot, &CancellationToken::new()).is_err());
 }

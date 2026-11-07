@@ -1,5 +1,5 @@
 use crate::{
-    Result,
+    Result, VendorLimits,
     integrity::{LockedGraph, Origin},
     unavailable,
 };
@@ -8,8 +8,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
-
-pub(crate) const CONFIG_LIMIT: usize = 1024 * 1024;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -87,18 +85,18 @@ pub(crate) fn destination(raw: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn parse(text: &str) -> Result<Config> {
+pub(crate) fn parse(text: &str, limits: &VendorLimits) -> Result<Config> {
     let bad = || {
         unavailable(
             Path::new("resolver"),
             "invalid or unsupported source-replacement configuration",
         )
     };
-    if text.len() > CONFIG_LIMIT {
+    if text.len() as u64 > limits.max_metadata_bytes {
         return Err(bad());
     }
     let config: Config = toml::from_str(text).map_err(|_| bad())?;
-    if config.source.is_empty() || config.source.len() > 1024 {
+    if config.source.is_empty() || config.source.len() > limits.max_sources {
         return Err(bad());
     }
     for (key, source) in &config.source {
@@ -169,9 +167,9 @@ pub(crate) fn parse(text: &str) -> Result<Config> {
     Ok(config)
 }
 
-pub(crate) fn retarget(text: &str, target: &str) -> Result<String> {
+pub(crate) fn retarget(text: &str, target: &str, limits: &VendorLimits) -> Result<String> {
     destination(target)?;
-    let mut config = parse(text)?;
+    let mut config = parse(text, limits)?;
     for source in config.source.values_mut() {
         if source.directory.is_some() {
             source.directory = Some(target.into());

@@ -184,6 +184,7 @@ fn offline_cargo_verification_builds_tested_project_denied_network() {
     let report = match vendor_project(
         project.path(),
         VendorOptions {
+            force: false,
             populate: true,
             vendored_dir: None,
             sandbox: None,
@@ -322,6 +323,7 @@ fn acquisition_sandbox_provisions_vendored_registry_before_verification() {
     let report = match vendor_project(
         project.path(),
         VendorOptions {
+            force: false,
             populate: true,
             vendored_dir: None,
             sandbox: Some(config.clone()),
@@ -503,6 +505,7 @@ fn offline_cargo_verification_uses_pinned_toolchain() {
     let report = match vendor_project(
         project.path(),
         VendorOptions {
+            force: false,
             populate: true,
             vendored_dir: None,
             sandbox: None,
@@ -700,6 +703,7 @@ fn offline_cargo_verification_uses_pinned_nightly_toolchain() {
     let report = match vendor_project(
         project.path(),
         VendorOptions {
+            force: false,
             populate: true,
             vendored_dir: None,
             sandbox: None,

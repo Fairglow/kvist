@@ -7,6 +7,10 @@
 !/.config/nextest.toml
 /.idea
 .kvist
+# Shared vendor policy may be version controlled; generated state stays local.
+!/.kvist/
+/.kvist/*
+!/.kvist/vendor.toml
 /.vscode
 /.zed
 skott.toml
@@ -18,6 +22,10 @@ kvist.toml
 /_*.md
 .kvist-attempts
 .review-scratch
+.vendor-stage-*/
+.vendor-write-*
+.skott-rust-*/
+.maerg-rust-*/
 
 # Ignore skott runtime data (session journals + transcripts)
 .skott/

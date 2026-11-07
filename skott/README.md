@@ -43,8 +43,9 @@ skott --setup               # shared discover/test/configure wizard; no config n
 skott --setup --registry ./providers.toml
 skott --registry ./providers.toml -m local-coder
 skott --vendor --cwd /path/to/project    # explicit host Rust vendoring; no config needed
-skott --vendor --check                  # process-free, read-only integrity check
+skott --vendor --check                  # process-free, read-only metadata check
 skott --vendor --offline                # reuse only existing Cargo cache
+skott --vendor --offline --force        # explicit cached-only repair/rebuild
 ```
 
 Interactive execution requires a terminal; use `--headless` for unattended
@@ -68,19 +69,27 @@ command. Package-manager failure stops without automatic retries or fallback.
 
 Kvist and Skott use the same headless `kvist-dependencies` library and existing
 `.kvist/vendored`, `.kvist/sandbox-cargo/config.toml`, and
-`.kvist/vendoring-v1.json` layout. The generated resolver accepts source
+`.kvist/vendor.json` minimal receipt. Both load optional `.kvist/vendor.toml`
+limits with shared defaults. The generated resolver accepts source
 replacements only, including locked Git sources; your `.cargo/config.toml`
-is not rewritten. Readiness verifies package/checksum/file integrity, not
-just directory names. Provisioning stages privately, rejects conflicting
+is not rewritten. Readiness checks package/native metadata presence and coherent
+lock/resolver/receipt state, without hashing source files. Cargo retains and
+checks its own required checksum metadata when consuming packages. Provisioning
+stages privately, rejects conflicting
 writers and lock drift, and preserves previous material before publication.
 Interrupted publication or a remaining `.kvist/vendor-operation.lock`
 requires inspecting the recorded state and reconciling it explicitly; never
 blindly remove the lock while another operator may be active.
 
-Agent execution stays network-denied and consumes a private read-only
-snapshot at `/rust/vendor`; its writable workspace vendor alias remains
+Agent execution stays network-denied and mounts the same shared tree read-only
+at `/rust/vendor`, without copying packages; its writable workspace vendor alias remains
 masked. **Restart the session after provisioning or dependency changes**
-to refresh that snapshot. Availability does not guarantee that arbitrary
+to refresh directory/lock identities and runtime config. Per-tool read locks
+prevent publication while used, but idle sessions do not block it. Direct host
+edits are outside that lock protocol. Use `--force` for damaged source; `--check`
+does not attest full source integrity. See
+[shared limits and rationale](../docs/sandbox-toolchains-and-vendoring.md#shared-configurable-limits).
+Availability does not guarantee that arbitrary
 build scripts, system libraries, or out-of-workspace path dependencies work.
 The shared backend and Skott command support **Rust first**. Other languages
 still need deliberately tested offline provisioning and sandbox resource

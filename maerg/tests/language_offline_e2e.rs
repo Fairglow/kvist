@@ -156,6 +156,7 @@ fn provision(project: &Path) -> bool {
     match vendor_project(
         project,
         VendorOptions {
+            force: false,
             populate: true,
             vendored_dir: None,
             sandbox: None,

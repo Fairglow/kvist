@@ -7,6 +7,7 @@ use clap::Parser;
 
 /// A first-class, sandbox-integrated interactive agent runner shell.
 #[derive(Debug, Parser)]
+#[command(group(clap::ArgGroup::new("force_target").args(["setup", "vendor"])))]
 #[command(
     name = "skott",
     version,
@@ -77,8 +78,8 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub registry: Option<PathBuf>,
 
-    /// Save a setup profile even if live qualification fails.
-    #[arg(long, requires = "setup")]
+    /// Save an unqualified setup profile, or explicitly rebuild vendor material.
+    #[arg(long, requires = "force_target", conflicts_with = "check")]
     pub force: bool,
 
     /// Select a configured model id, or a shared native profile for --init-config.

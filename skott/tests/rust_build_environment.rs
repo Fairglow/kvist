@@ -360,7 +360,7 @@ fn diagnostics_cover_the_chain_without_command_or_output_payloads() {
         "querying installed Rust selection",
         "installed Rust selection query completed",
         "resolved concrete installed Rust toolchain",
-        "offline vendor snapshot prepared",
+        "offline shared vendor view prepared",
         "offline Rust resources prepared",
         "offline Rust resources validated",
         "sandbox preflight stage started",
@@ -490,7 +490,7 @@ fn repository_nextest_recipe_uses_default_discovery() {
 
 #[test]
 #[serial]
-fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation() {
+fn native_shared_vendor_overrides_host_paths_with_native_checks_and_masking() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
     fs::create_dir_all(workdir.join("src")).unwrap();
@@ -539,11 +539,9 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
     .unwrap();
     let registry = resolve(&workdir).unwrap();
     let diagnostics = registry.diagnostics().join("\n");
-    assert!(diagnostics.contains("read-only snapshot"));
-    assert!(diagnostics.contains("vendor snapshot sha256:"));
-    // Changes through the writable workspace alias cannot mutate the resource.
-    fs::write(dependency.join("Cargo.toml"), "malicious replacement").unwrap();
-    use std::os::unix::fs::PermissionsExt;
+    assert!(diagnostics.contains("shared read-only"));
+    assert!(diagnostics.contains("vendor view sha256:"));
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let host_vendor_mode = fs::metadata(workdir.join(".kvist/vendored"))
         .unwrap()
         .permissions()
@@ -556,6 +554,40 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
         },
         workdir.clone(),
     );
+    let vendor_metadata = fs::metadata(workdir.join(".kvist/vendored")).unwrap();
+    checked_shell(
+        &executor,
+        &format!(
+            "stage shared-inode test \"$(stat -c '%d:%i' /rust/vendor)\" = '{}:{}'",
+            vendor_metadata.dev(),
+            vendor_metadata.ino(),
+        ),
+    );
+    let writer = fs::File::open(workdir.join(".kvist/vendored")).unwrap();
+    writer.try_lock().unwrap();
+    drop(writer);
+    std::thread::scope(|scope| {
+        let running = scope.spawn(|| checked_shell(&executor, "touch lease-started; sleep 1"));
+        let started = std::time::Instant::now();
+        while !workdir.join("lease-started").exists() {
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(10),
+                "native tool did not start"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            fs::File::open(workdir.join(".kvist/vendored"))
+                .unwrap()
+                .try_lock()
+                .is_err()
+        );
+        running.join().unwrap();
+    });
+    fs::File::open(workdir.join(".kvist/vendored"))
+        .unwrap()
+        .try_lock()
+        .unwrap();
     let host_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let network_trial = shell(
         &executor,
@@ -587,7 +619,7 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
     assert!(workdir.join("target/doc/vendor_trial/index.html").is_file());
     assert_eq!(
         fs::read_to_string(dependency.join("Cargo.toml")).unwrap(),
-        "malicious replacement"
+        files[0].1
     );
     assert_eq!(
         fs::metadata(workdir.join(".kvist/vendored"))
@@ -597,6 +629,18 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
         host_vendor_mode
     );
     assert!(!workdir.join(".kvist/vendored/forbidden").exists());
+    fs::write(dependency.join("lib.rs"), "pub fn answer() -> u8 { 43 }\n").unwrap();
+    let damaged = shell(&executor, "cargo clean && cargo test");
+    assert!(
+        damaged.failed(),
+        "Cargo must detect changed package content"
+    );
+    assert!(
+        damaged.error_text(8192).contains("checksum"),
+        "{}",
+        damaged.error_text(8192)
+    );
+    fs::write(dependency.join("lib.rs"), files[1].1).unwrap();
 
     let without_vendor = SandboxExecutor::new(
         ToolRegistry::new(ToolPolicy::default()),
@@ -1011,6 +1055,14 @@ fn normal_cargo_requires_matching_lock_without_creating_or_updating_it() {
 
     let stale = b"version = 4\n[[package]]\nname = \"locked-trial\"\nversion = \"0.0.1\"\n";
     fs::write(&lock, stale).unwrap();
+    let executor = SandboxExecutor::new(
+        resolve(&workdir).unwrap(),
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir.clone(),
+    );
     for command in ["cargo build", "cargo metadata --format-version=1"] {
         let result = shell(&executor, command);
         assert!(result.failed(), "{command} must reject an outdated lock");
@@ -1020,6 +1072,14 @@ fn normal_cargo_requires_matching_lock_without_creating_or_updating_it() {
 
     let matching = b"version = 4\n[[package]]\nname = \"locked-trial\"\nversion = \"0.1.0\"\n";
     fs::write(&lock, matching).unwrap();
+    let executor = SandboxExecutor::new(
+        resolve(&workdir).unwrap(),
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir.clone(),
+    );
     let result = shell(
         &executor,
         "cargo --version && cargo check && cargo metadata --format-version=1 --no-deps >/dev/null",

@@ -32,7 +32,8 @@ constraint set injected into component work.
   write only attempt-local dependency and workspace state, and MAY provision
   versioned, enforced vendored registries on the host through shared
   dependency mechanics (ADR 0017, Rust first; application authority remains
-  separate), a language-aware model:
+  separate; ADR 0018 makes Rust share one tree, a minimal lock receipt and
+  configurable common vendor limits, leaving file checksums to Cargo), a language-aware model:
   Rust enforced exactly through Cargo.lock; Python/uv, Node/npm, and Conan
   enforced through their respective lock files. Verification runs without
   network access and builds offline from that vendored registry. Agents must not

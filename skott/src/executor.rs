@@ -145,6 +145,12 @@ impl ToolExecutor for SandboxExecutor {
             read_roots.push(script.path().to_owned());
         }
         let argv = rendered.argv.clone();
+        let _vendor_read = self
+            .registry
+            .rust_environment()
+            .map(|rust| rust.read_lease(cancellation))
+            .transpose()
+            .map_err(|error| prerequisite_error(intent, error, cancellation))?;
         let build = BuildRequest {
             argv: &argv,
             working_directory: &self.working_directory,

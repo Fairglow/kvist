@@ -110,18 +110,7 @@ fn manifest_round_trips_and_detects_staleness() {
     .unwrap();
     let manifest = VendorManifest {
         schema_version: VENDOR_SCHEMA_VERSION,
-        generated_at_unix_secs: 1,
-        project_root: root.to_string_lossy().into_owned(),
-        lockfile_path: CARGO_LOCK_FILENAME.into(),
         lockfile_digest: lockfile_digest(lock.as_bytes()),
-        vendored_dir: vendor.to_string_lossy().into_owned(),
-        sandbox_cargo_dir: root
-            .join(".kvist")
-            .join(SANDBOX_CARGO_CONFIG_DIRNAME)
-            .to_string_lossy()
-            .into_owned(),
-        sandbox_vendored_mount: VENDOR_SANDBOX_MOUNT.into(),
-        verified: true,
     };
     manifest.save(root).unwrap();
     assert_eq!(VendorManifest::load(root).unwrap(), Some(manifest.clone()));
@@ -145,8 +134,23 @@ fn stale_package_helpers_match_name_version_but_refuse_traversal() {
     fs::create_dir_all(vendor.join("old-1.0.0")).unwrap();
     let stale = find_stale_vendored_packages(dir.path(), &vendor).unwrap();
     assert_eq!(stale, ["old-1.0.0"]);
-    assert!(remove_stale_vendored_packages(&vendor, &["../outside".into()]).is_err());
-    assert_eq!(remove_stale_vendored_packages(&vendor, &stale).unwrap(), 1);
+    assert!(
+        remove_stale_vendored_packages(
+            &vendor,
+            &["../outside".into()],
+            &kvist_dependencies::VendorLimits::default()
+        )
+        .is_err()
+    );
+    assert_eq!(
+        remove_stale_vendored_packages(
+            &vendor,
+            &stale,
+            &kvist_dependencies::VendorLimits::default()
+        )
+        .unwrap(),
+        1
+    );
 }
 
 #[test]

@@ -1,18 +1,17 @@
-//! Full locked Rust readiness and explicitly authorized acquisition.
+//! Lightweight locked Rust readiness and explicitly authorized acquisition.
 //!
 //! No application configuration is read. Host Cargo inherits operator policy;
 //! `--offline` constrains Cargo, not the operating system.
 
 use crate::{
     Error, ProcessFailure, Result,
-    fs::{Dir, Identity, METADATA_LIMIT, absolute, io_error},
+    fs::{Dir, Identity, absolute, io_error},
     integrity::{self, LockedGraph, control},
     publication::{Publication, RECOVERY},
     resolver, unavailable,
     vendoring::{
         DEFAULT_VENDORED_DIRNAME, SANDBOX_CARGO_CONFIG_DIRNAME, VENDOR_MANIFEST_FILENAME,
         VENDOR_SANDBOX_MOUNT, VENDOR_SCHEMA_VERSION, VendorManifest, VendoringReport,
-        now_unix_secs,
     },
 };
 use sav::{CancellationToken, CommandSpec, SupervisionPolicy, run_supervised_observed};
@@ -25,7 +24,6 @@ use std::{
 };
 
 const OPERATION_LOCK: &str = "vendor-operation.lock";
-const OUTPUT_LIMIT: usize = 1024 * 1024;
 
 /// Explicit host acquisition controls. There are deliberately no defaults.
 #[derive(Debug, Clone)]
@@ -36,8 +34,33 @@ pub struct ProvisionOptions {
     pub offline: bool,
     /// Operator-owned destination; None uses `.kvist/vendored`.
     pub vendored_dir: Option<PathBuf>,
-    /// Wall-clock and idle bound, between 1 and 900 seconds.
+    /// Positive wall-clock and idle bound, capped by shared project policy.
     pub timeout: Duration,
+    /// Explicitly rebuild otherwise reusable material.
+    pub force: bool,
+}
+
+/// Owned shared vendor-directory lock; released automatically on drop.
+#[derive(Debug)]
+pub struct ReadLease {
+    directory: Dir,
+}
+
+impl ReadLease {
+    /// Confirm the opened directory still occupies its original non-link path.
+    pub fn check(&self, cancellation: &CancellationToken) -> Result<()> {
+        control(cancellation)?;
+        self.directory.still_at_path()
+    }
+}
+
+/// Hold shared read ownership through mount preparation and tool completion.
+pub fn read_lease(vendor: &Path, cancellation: &CancellationToken) -> Result<ReadLease> {
+    control(cancellation)?;
+    let directory = Dir::open(vendor)?;
+    directory.lock(true)?;
+    control(cancellation)?;
+    Ok(ReadLease { directory })
 }
 
 fn state_clear(state: &Dir) -> Result<()> {
@@ -67,9 +90,10 @@ fn inspect_controls(
         if allow_legacy {
             // The built-in crates.io resolver is the only implicit source policy.
             resolver::bind(
-                &resolver::parse(&crate::vendoring::offline_cargo_config(
-                    VENDOR_SANDBOX_MOUNT,
-                ))?,
+                &resolver::parse(
+                    &crate::vendoring::offline_cargo_config(VENDOR_SANDBOX_MOUNT),
+                    &graph.limits,
+                )?,
                 graph,
                 true,
             )?;
@@ -101,10 +125,10 @@ fn inspect_controls(
     }
     let manifest_identity = validate_manifest(project, graph, &state)?;
     let cargo = state.child(SANDBOX_CARGO_CONFIG_DIRNAME)?;
-    let (bytes, resolver_identity) = cargo.read("config.toml", resolver::CONFIG_LIMIT as u64)?;
+    let (bytes, resolver_identity) = cargo.read("config.toml", graph.limits.max_metadata_bytes)?;
     let text = std::str::from_utf8(&bytes)
         .map_err(|_| unavailable(&cargo.display, "resolver is not UTF-8"))?;
-    let config = resolver::parse(text)?;
+    let config = resolver::parse(text, &graph.limits)?;
     resolver::bind(&config, graph, true)?;
     let config = toml::to_string(&config)
         .map_err(|_| unavailable(&cargo.display, "cannot serialize source configuration"))?;
@@ -117,34 +141,17 @@ fn inspect_controls(
 }
 
 fn validate_manifest(project: &Dir, graph: &LockedGraph, state: &Dir) -> Result<Identity> {
-    let (bytes, identity) = state.read(VENDOR_MANIFEST_FILENAME, METADATA_LIMIT)?;
+    let (bytes, identity) =
+        state.read(VENDOR_MANIFEST_FILENAME, graph.limits.max_metadata_bytes)?;
     let manifest: VendorManifest = serde_json::from_slice(&bytes)
         .map_err(|_| unavailable(&project.display, "malformed vendoring manifest"))?;
     if manifest.schema_version != VENDOR_SCHEMA_VERSION
-        || !manifest.verified
-        || manifest.lockfile_path != "Cargo.lock"
-        || manifest.sandbox_vendored_mount != VENDOR_SANDBOX_MOUNT
         || !manifest
             .lockfile_digest
             .strip_prefix("sha256:")
             .is_some_and(integrity::digest_shape)
     {
-        return Err(unavailable(
-            &project.display,
-            "invalid or unverified vendoring manifest",
-        ));
-    }
-    for recorded in [
-        &manifest.project_root,
-        &manifest.vendored_dir,
-        &manifest.sandbox_cargo_dir,
-    ] {
-        if !Path::new(recorded).is_absolute() || absolute(Path::new(recorded)).is_err() {
-            return Err(unavailable(
-                &project.display,
-                "malformed informational manifest path",
-            ));
-        }
+        return Err(unavailable(&project.display, "invalid vendoring receipt"));
     }
     if manifest.lockfile_digest != graph.digest {
         return Err(Error::VendoringStale {
@@ -193,14 +200,14 @@ fn check_at(
         confirm_controls(project, graph, &observed, refuse_writer, false)?;
         return Ok(graph.report(vendor));
     }
-    let report = integrity::catalogue(graph, &Dir::open(vendor)?, token)?;
+    let lease = read_lease(vendor, token)?;
+    let report = integrity::catalogue(graph, &lease.directory, token)?;
     graph.unchanged(project, token)?;
     confirm_controls(project, graph, &observed, refuse_writer, false)?;
     Ok(report)
 }
 
-/// Process-free, write-free full readiness from project-local state.
-/// Informational manifest host paths are never used to select storage.
+/// Process-free, write-free metadata coherence and required package presence.
 pub fn check(project: &Path, cancellation: &CancellationToken) -> Result<VendoringReport> {
     control(cancellation)?;
     let project = Dir::open(project)?;
@@ -212,7 +219,7 @@ pub fn check(project: &Path, cancellation: &CancellationToken) -> Result<Vendori
     check_at(&project, &graph, &vendor, cancellation, true)
 }
 
-/// Validate locked packages and every declared file in an immutable vendor view.
+/// Validate locked package identities and native metadata presence.
 /// This catalogue-only check needs no application manifest or generated resolver.
 /// Git locks must name immutable revisions; source replacement binding is checked
 /// separately by project readiness and resolver validation.
@@ -224,19 +231,20 @@ pub fn check_catalogue(
     control(cancellation)?;
     let project = Dir::open(project)?;
     let graph = LockedGraph::read(&project, cancellation)?;
-    let report = integrity::catalogue(&graph, &Dir::open(vendor)?, cancellation)?;
+    let lease = read_lease(vendor, cancellation)?;
+    let report = integrity::catalogue(&graph, &lease.directory, cancellation)?;
     graph.unchanged(&project, cancellation)?;
     Ok(report)
 }
 
-/// Full readiness against a caller-owned private vendor copy and project controls.
+/// Lightweight readiness against a read-only shared view and project controls.
 ///
 /// Managed fences, manifest/lock binding and source replacement are checked without
 /// inspecting the original vendor tree. The optional resolver is structurally
 /// sanitized and retains the managed `/workspace/vendored` destination.
 /// Unmanaged legacy catalogues may omit it only for crates.io/local locked graphs.
 /// Partial managed state and missing locks always fail; nothing is written or run.
-pub fn check_snapshot(
+pub fn check_view(
     project: &Path,
     vendor: &Path,
     cancellation: &CancellationToken,
@@ -245,7 +253,8 @@ pub fn check_snapshot(
     let project = Dir::open(project)?;
     let graph = LockedGraph::read(&project, cancellation)?;
     let observed = inspect_controls(&project, &graph, true, true)?;
-    let report = integrity::catalogue(&graph, &Dir::open(vendor)?, cancellation)?;
+    let lease = read_lease(vendor, cancellation)?;
+    let report = integrity::catalogue(&graph, &lease.directory, cancellation)?;
     graph.unchanged(&project, cancellation)?;
     confirm_controls(&project, &graph, &observed, true, true)?;
     control(cancellation)?;
@@ -255,17 +264,24 @@ pub fn check_snapshot(
 /// Parse closed Cargo-vendor source tables, retargeting directory sources only.
 /// Build/env/alias/credential keys, replacement cycles, and unsafe destinations fail.
 pub fn resolver_config(config: &str, destination: &str) -> Result<String> {
-    resolver::retarget(config, destination)
+    resolver_config_with_limits(config, destination, &crate::VendorLimits::default())
+}
+
+/// Retarget safe source tables using an explicitly loaded project policy.
+pub fn resolver_config_with_limits(
+    config: &str,
+    destination: &str,
+    limits: &crate::VendorLimits,
+) -> Result<String> {
+    limits.validate(Path::new("resolver"))?;
+    resolver::retarget(config, destination, limits)
 }
 
 fn host_cargo(project: &Path, options: &ProvisionOptions) -> Result<PathBuf> {
-    if options.timeout < Duration::from_secs(1)
-        || options.timeout > Duration::from_secs(900)
-        || !options.cargo.is_absolute()
-    {
+    if options.timeout < Duration::from_secs(1) || !options.cargo.is_absolute() {
         return Err(unavailable(
             project,
-            "Cargo must be absolute; timeout must be between 1 and 900 seconds",
+            "Cargo must be absolute; timeout must be at least one second",
         ));
     }
     absolute(&options.cargo)?;
@@ -349,11 +365,17 @@ pub fn populate(
     }
     .in_directory(&project.display);
     let policy = SupervisionPolicy {
-        idle_timeout: options.timeout,
-        attempt_timeout: Some(options.timeout),
+        idle_timeout: options
+            .timeout
+            .min(Duration::from_secs(graph.limits.timeout_secs)),
+        attempt_timeout: Some(
+            options
+                .timeout
+                .min(Duration::from_secs(graph.limits.timeout_secs)),
+        ),
         detect_loops: false,
         max_retries: 0,
-        max_output_bytes: OUTPUT_LIMIT,
+        max_output_bytes: graph.limits.max_output_bytes,
     };
     let output = run_supervised_observed(&policy, &command, cancellation, &mut |_, _| Ok(()))
         .map_err(process_error)?;
@@ -367,7 +389,7 @@ pub fn populate(
     } else {
         text
     };
-    resolver::bind(&resolver::parse(&text)?, &graph, false)?;
+    resolver::bind(&resolver::parse(&text, &graph.limits)?, &graph, false)?;
     Ok(text)
 }
 
@@ -384,6 +406,7 @@ pub fn provision(
         &project,
         options.vendored_dir.as_deref(),
         cancellation,
+        options.force,
         |stage| populate(&project, stage, &options, None, cancellation),
     )
 }
@@ -421,7 +444,7 @@ impl<'a> Operation<'a> {
     }
     fn intact(&self) -> Result<()> {
         self.state.still_at_path()?;
-        let file = self.state.regular(OPERATION_LOCK, METADATA_LIMIT)?;
+        let file = self.state.regular(OPERATION_LOCK, u64::MAX)?;
         if Identity::of(&file, &self.state.display.join(OPERATION_LOCK))? != self.identity
             || Identity::of(&self.file, &self.state.display.join(OPERATION_LOCK))? != self.identity
         {
@@ -452,6 +475,7 @@ pub fn provision_with(
     project: &Path,
     destination: Option<&Path>,
     cancellation: &CancellationToken,
+    force: bool,
     populate: impl FnOnce(&Path) -> Result<String>,
 ) -> Result<VendoringReport> {
     control(cancellation)?;
@@ -486,7 +510,7 @@ pub fn provision_with(
         }
         has_manifest = state.exists(VENDOR_MANIFEST_FILENAME)?;
     }
-    if has_manifest {
+    if has_manifest && !force {
         match check_at(&project, &graph, &vendor, cancellation, true) {
             Ok(report) => return Ok(report),
             Err(Error::Cancelled) => return Err(Error::Cancelled),
@@ -509,7 +533,8 @@ pub fn provision_with(
     state_clear(&state)?;
     let operation = Operation::acquire(&state)?;
     graph.unchanged(&project, cancellation)?;
-    if state.exists(VENDOR_MANIFEST_FILENAME)?
+    if !force
+        && state.exists(VENDOR_MANIFEST_FILENAME)?
         && let Ok(report) = check_at(&project, &graph, &vendor, cancellation, false)
     {
         return Ok(report);
@@ -522,9 +547,13 @@ pub fn provision_with(
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| unavailable(&vendor, "invalid vendor name"))?;
-    if parent.exists(name)? {
-        parent.child(name)?;
-    }
+    let previous = if parent.exists(name)? {
+        let directory = parent.child(name)?;
+        directory.lock(false)?;
+        Some(directory)
+    } else {
+        None
+    };
     let staging = tempfile::Builder::new()
         .prefix(".vendor-stage-")
         .tempdir_in(parent.path())
@@ -544,62 +573,72 @@ pub fn provision_with(
         crate::vendoring::offline_cargo_config(VENDOR_SANDBOX_MOUNT)
     };
     control(cancellation)?;
-    if stage.entries()? != ["vendor"] {
+    if stage.entries(1)? != ["vendor"] {
         return Err(unavailable(
             &stage.display,
             "acquisition wrote outside its vendor target",
         ));
     }
-    let config = resolver_config(&source_config, VENDOR_SANDBOX_MOUNT)?;
-    resolver::bind(&resolver::parse(&config)?, &graph, true)?;
-    integrity::catalogue(&graph, &stage.child("vendor")?, cancellation)?;
+    let config = resolver::retarget(&source_config, VENDOR_SANDBOX_MOUNT, &graph.limits)?;
+    resolver::bind(&resolver::parse(&config, &graph.limits)?, &graph, true)?;
+    let candidate = stage.child("vendor")?;
+    candidate.lock(false)?;
+    integrity::catalogue(&graph, &candidate, cancellation)?;
     graph.unchanged(&project, cancellation)?;
     operation.intact()?;
     // Preflight safe destinations before the first published byte changes.
     let cargo = state.ensure_child(SANDBOX_CARGO_CONFIG_DIRNAME)?;
     if cargo.exists("config.toml")? {
-        cargo.regular("config.toml", METADATA_LIMIT)?;
+        cargo.regular("config.toml", graph.limits.max_metadata_bytes)?;
     }
     if state.exists(VENDOR_MANIFEST_FILENAME)? {
-        state.regular(VENDOR_MANIFEST_FILENAME, METADATA_LIMIT)?;
+        state.regular(VENDOR_MANIFEST_FILENAME, graph.limits.max_metadata_bytes)?;
     }
     let manifest = VendorManifest {
         schema_version: VENDOR_SCHEMA_VERSION,
-        generated_at_unix_secs: now_unix_secs(),
-        project_root: project.display.to_string_lossy().into_owned(),
-        lockfile_path: "Cargo.lock".into(),
         lockfile_digest: graph.digest.clone(),
-        vendored_dir: vendor.to_string_lossy().into_owned(),
-        sandbox_cargo_dir: cargo.display.to_string_lossy().into_owned(),
-        sandbox_vendored_mount: VENDOR_SANDBOX_MOUNT.into(),
-        verified: true,
     };
     let manifest = serde_json::to_vec_pretty(&manifest)
         .map_err(|_| unavailable(&project.display, "cannot serialize vendoring manifest"))?;
     // Synchronize every staged file and directory before publishing renames.
-    synchronize_tree(&stage.child("vendor")?, cancellation, 0, &mut 0)?;
+    if manifest.len() as u64 > graph.limits.max_metadata_bytes
+        || config.len() as u64 > graph.limits.max_metadata_bytes
+    {
+        return Err(unavailable(
+            &project.display,
+            "generated vendor metadata exceeds configured limit",
+        ));
+    }
+    integrity::validate_tree(&candidate, &graph.limits, cancellation, true)?;
     control(cancellation)?;
     graph.unchanged(&project, cancellation)?;
+    let published = std::cell::Cell::new(false);
     let result = Publication {
         stage: &stage,
         parent: &parent,
         name,
         state: &state,
         cancellation,
+        limits: &graph.limits,
     }
     .commit(
         || {
             graph.unchanged(&project, cancellation)?;
+            if !published.get()
+                && let Some(previous) = &previous
+            {
+                previous.still_at_path()?;
+            }
             operation.intact()
         },
         || {
+            published.set(true);
             graph.unchanged(&project, cancellation)?;
             cargo.atomic("config.toml", config.as_bytes())?;
             control(cancellation)?;
             graph.unchanged(&project, cancellation)?;
             state.atomic(VENDOR_MANIFEST_FILENAME, &manifest)?;
             control(cancellation)?;
-            integrity::catalogue(&graph, &parent.child(name)?, cancellation)?;
             graph.unchanged(&project, cancellation)?;
             operation.intact()?;
             Ok(())
@@ -614,41 +653,4 @@ pub fn provision_with(
     let mut report = graph.report(&vendor);
     report.vendored_dir = vendor.to_string_lossy().into_owned();
     Ok(report)
-}
-
-fn synchronize_tree(
-    directory: &Dir,
-    token: &CancellationToken,
-    depth: usize,
-    entries: &mut usize,
-) -> Result<()> {
-    if depth > 64 {
-        return Err(unavailable(
-            &directory.display,
-            "staged tree depth exceeded",
-        ));
-    }
-    for name in directory.entries()? {
-        control(token)?;
-        *entries += 1;
-        if *entries > 100_000 {
-            return Err(unavailable(
-                &directory.display,
-                "staged tree entry bound exceeded",
-            ));
-        }
-        let m = std::fs::symlink_metadata(directory.path().join(&name))
-            .map_err(|e| io_error("inspect staged file", &directory.display.join(&name), e))?;
-        if m.is_dir() {
-            synchronize_tree(&directory.child(&name)?, token, depth + 1, entries)?;
-        } else {
-            directory
-                .regular(&name, 256 * 1024 * 1024)?
-                .sync_all()
-                .map_err(|e| {
-                    io_error("synchronize staged file", &directory.display.join(&name), e)
-                })?;
-        }
-    }
-    directory.sync()
 }

@@ -3,16 +3,16 @@
 //! This is not the maerg provisioning or Cargo verification authority. It
 //! never installs anything, reads Cargo credentials, or trusts manifest paths.
 //! The existing System/Authoring protocol grants the compiler, fixed Cargo shim
-//! and dependency snapshot as read-only Toolchain build resources at disjoint
+//! and shared vendor area as read-only Toolchain build resources at disjoint
 //! `/rust/*` destinations. No Cargo-phase topology or cache authority is added.
-//! A snapshot is essential: a read-only alias of `.kvist/vendored` would still
-//! be mutable through the workspace's writable bind.
+//! The runner masks the writable workspace vendor alias. Per-tool directory
+//! read locks coordinate publication without copying package contents.
 //!
 //! Selection ignores ambient Rust/Cargo overrides and uses the standard
 //! `$HOME/.rustup/toolchains` installation layout. Channels, requested
 //! components/targets and executable/layout identities are checked without
 //! installing anything. Missing material must be provisioned separately on the
-//! host. The snapshot is bounded to 1 GiB, 100,000 entries and 180 seconds;
+//! host. Installed-resource preparation is bounded to 180 seconds;
 //! cache/selection state is private to each sandbox invocation; build targets
 //! persist in the writable workspace.
 
@@ -41,14 +41,13 @@ const TOOLCHAIN_DEST: &str = "/rust/toolchain";
 const RUNTIME_DEST: &str = "/rust/runtime";
 const RUSTUP_HOME_DEST: &str = "/rust/rustup-home";
 const MAX_FILE_BYTES: u64 = 256 << 20;
-const MAX_VENDOR_BYTES: u64 = 1 << 30;
 const MAX_ENTRIES: usize = 100_000;
 const PREPARATION_BUDGET: Duration = Duration::from_secs(180);
 
 /// A complete installed inventory, initial selection and private sandbox resources.
 ///
 /// Clones share the staging owner; the final registry/executor drop removes
-/// staged wrappers and vendor bytes. No installed toolchain is modified.
+/// staged wrappers and an optional empty vendor view. No packages are copied.
 #[derive(Debug, Clone)]
 pub struct RustEnvironment {
     resources: Arc<Resources>,
@@ -85,6 +84,7 @@ struct Resources {
     staging: tempfile::TempDir,
     vendor_identity: String,
     has_vendor: bool,
+    lock_fingerprint: Option<Fingerprint>,
     pin_identity: String,
     pinned: bool,
     user_cargo_bin: Option<PathBuf>,
@@ -112,11 +112,6 @@ struct PinToolchain {
 /// The strict per-inode identity fields that detect any modification, truncation
 /// or replacement of a file.
 type Fingerprint = (u64, u64, u64, i64, i64, i64, i64);
-
-/// One copied vendor file's SHA-256 digest bytes and copied byte count.
-type FileDigest = (Vec<u8>, u64);
-/// The copy-and-digest outcome of one scheduled vendor file.
-type CopyOutcome = Result<FileDigest>;
 
 struct Preparation<'a> {
     started: Instant,
@@ -707,8 +702,21 @@ impl RustEnvironment {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
             Err(e) => return Err(io_error("inspect local vendored registry", None, e)),
         };
-        let vendor_identity = if has_vendor {
-            snapshot_vendor(&vendor, &staging.path().join("vendor"), &preparation)?
+        let _vendor_read = if has_vendor {
+            Some(
+                kvist_dependencies::rust::read_lease(&vendor, cancellation)
+                    .map_err(crate::dependencies::from_error)?,
+            )
+        } else {
+            None
+        };
+        let mut vendor_identity = if has_vendor {
+            let metadata = inspect_path(&vendor)?;
+            if !metadata.is_dir() {
+                return Err(failure("vendor resource must be a non-link directory"));
+            }
+            directories.push((vendor.clone(), (metadata.dev(), metadata.ino())));
+            label(format!("{}:{}", metadata.dev(), metadata.ino()).as_bytes())
         } else {
             fs::create_dir(staging.path().join("vendor"))
                 .map_err(|e| io_error("create empty offline vendor resource", None, e))?;
@@ -718,7 +726,7 @@ impl RustEnvironment {
             has_vendor,
             vendor_identity = %vendor_identity,
             elapsed_ms = preparation.started.elapsed().as_millis() as u64,
-            "offline vendor snapshot prepared"
+            "offline shared vendor view prepared"
         );
         fs::create_dir(staging.path().join("runtime"))
             .map_err(|e| io_error("create private Rust runtime", None, e))?;
@@ -727,7 +735,7 @@ impl RustEnvironment {
         let mut has_locked_state = false;
         for marker in [
             "Cargo.lock",
-            ".kvist/vendoring-v1.json",
+            ".kvist/vendor.json",
             ".kvist/vendor-operation.lock",
             ".kvist/vendor-publication",
             ".kvist/sandbox-cargo",
@@ -739,15 +747,24 @@ impl RustEnvironment {
             }
         }
         if has_locked_state {
-            let (_, resolver) = kvist_dependencies::rust::check_snapshot(
-                &workspace,
-                &staging.path().join("vendor"),
-                cancellation,
-            )
-            .map_err(crate::dependencies::from_error)?;
-            if let Some(resolver) = resolver {
-                let contents = kvist_dependencies::rust::resolver_config(&resolver, "/rust/vendor")
+            let limits = kvist_dependencies::VendorLimits::load(&workspace)
+                .map_err(crate::dependencies::from_error)?;
+            let view = if has_vendor {
+                vendor.clone()
+            } else {
+                staging.path().join("vendor")
+            };
+            let (report, resolver) =
+                kvist_dependencies::rust::check_view(&workspace, &view, cancellation)
                     .map_err(crate::dependencies::from_error)?;
+            vendor_identity = report.lockfile_digest;
+            if let Some(resolver) = resolver {
+                let contents = kvist_dependencies::rust::resolver_config_with_limits(
+                    &resolver,
+                    "/rust/vendor",
+                    &limits,
+                )
+                .map_err(crate::dependencies::from_error)?;
                 let staged = staging.path().join("runtime/vendor-config.toml");
                 let mut file = OpenOptions::new()
                     .write(true)
@@ -770,6 +787,11 @@ impl RustEnvironment {
                 });
             }
         }
+        let lock_fingerprint = if has_locked_state {
+            Some(fingerprint(&inspect_path(&workspace.join("Cargo.lock"))?))
+        } else {
+            None
+        };
         let initialization = staging.path().join("runtime/initialize");
         fs::write(&initialization, sav::offline_rust::INITIALIZE)
             .map_err(|e| io_error("write sandbox-only Rust initialization", None, e))?;
@@ -856,6 +878,7 @@ impl RustEnvironment {
                 staging,
                 vendor_identity,
                 has_vendor,
+                lock_fingerprint,
                 pin_identity,
                 pinned,
                 user_cargo_bin: if has_user_cargo_bin {
@@ -898,7 +921,7 @@ impl RustEnvironment {
     /// An inspectable exact selection, identity and offline-material diagnostic.
     pub fn diagnostic(&self) -> String {
         format!(
-            "Rust authoring: {} initially selects installed `{}` at `{}`; identity {}; pin digest {}; network denied, Cargo explicitly offline and locked, private HOME/cache/target; {}; vendor snapshot {}. Rustup exposes {} installed toolchains and their targets through read-only sandbox-native registrations; choose with cargo +<name>, rustup run or invocation-local rustup default (a project pin takes precedence). Automatic installation disabled. Provision a matching Cargo.lock separately. No host home/Cargo credentials mounted; ambient Cargo/Rust overrides ignored.",
+            "Rust authoring: {} initially selects installed `{}` at `{}`; identity {}; pin digest {}; network denied, Cargo explicitly offline and locked, private HOME/cache/target; {}            ; vendor view {}. Rustup exposes {} installed toolchains and their targets through read-only sandbox-native registrations; choose with cargo +<name>, rustup run or invocation-local rustup default (a project pin takes precedence). Automatic installation disabled. Provision a matching Cargo.lock separately. No host home/Cargo credentials mounted; ambient Cargo/Rust overrides ignored.",
             if self.resources.pinned {
                 "project pin"
             } else {
@@ -909,7 +932,7 @@ impl RustEnvironment {
             self.resources.identity,
             self.resources.pin_identity,
             if self.resources.has_vendor {
-                "read-only snapshot of workspace .kvist/vendored"
+                "shared read-only workspace .kvist/vendored"
             } else {
                 "no vendored registry: only dependency-free/local-path builds can resolve; provision dependencies on the host"
             },
@@ -931,6 +954,28 @@ impl RustEnvironment {
             return Err(failure(
                 "resolved Rust resources belong to a different writable workspace",
             ));
+        }
+        let lock = workspace.join("Cargo.lock");
+        let current = match fs::symlink_metadata(&lock) {
+            Ok(_) => Some(fingerprint(&inspect_path(&lock)?)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(io_error("inspect current Rust lock", None, error)),
+        };
+        if current != self.resources.lock_fingerprint {
+            return Err(failure(
+                "Rust lock changed since startup; restart after explicit host vendoring",
+            ));
+        }
+        for marker in [".kvist/vendor-operation.lock", ".kvist/vendor-publication"] {
+            match fs::symlink_metadata(workspace.join(marker)) {
+                Ok(_) => {
+                    return Err(failure(
+                        "vendor operation/publication is active or interrupted; inspect before restarting",
+                    ));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(io_error("inspect vendor operation state", None, error)),
+            }
         }
         if pin_identity(workspace)? != self.resources.pin_identity {
             return Err(failure(
@@ -1018,13 +1063,7 @@ impl RustEnvironment {
                 identity: self.resources.identity.clone(),
             },
             Grant {
-                source: self
-                    .resources
-                    .staging
-                    .path()
-                    .join("vendor")
-                    .to_string_lossy()
-                    .into_owned(),
+                source: self.vendor_path().to_string_lossy().into_owned(),
                 destination: "/rust/vendor".into(),
                 access: Access::ReadOnly,
                 purpose: Purpose::Toolchain,
@@ -1052,6 +1091,22 @@ impl RustEnvironment {
             }
         }
         grants
+    }
+
+    fn vendor_path(&self) -> PathBuf {
+        if self.resources.has_vendor {
+            self.resources.workspace.join(".kvist/vendored")
+        } else {
+            self.resources.staging.path().join("vendor")
+        }
+    }
+
+    pub(crate) fn read_lease(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<kvist_dependencies::rust::ReadLease> {
+        kvist_dependencies::rust::read_lease(&self.vendor_path(), cancellation)
+            .map_err(crate::dependencies::from_error)
     }
 
     pub(crate) fn identity(&self) -> &str {
@@ -1090,242 +1145,6 @@ impl RustEnvironment {
     }
 }
 
-/// One bounded vendor file scheduled for the parallel copy phase.
-struct SnapshotFile {
-    source: PathBuf,
-    destination: PathBuf,
-    fingerprint: Fingerprint,
-    /// The source-root-relative path as encoded bytes, used by the identity.
-    relative: Vec<u8>,
-}
-
-/// The number of copy workers; bounded so a large registry neither oversubscribes
-/// the host nor stays serial.
-fn copy_worker_count() -> usize {
-    std::thread::available_parallelism()
-        .map(|parallelism| parallelism.get())
-        .unwrap_or(1)
-        .min(8)
-}
-
-/// Copies and digests one vendor file, re-checking its own source fingerprint
-/// immediately after the copy so a concurrent host change fails this file
-/// without any worker trusting a stale global recheck.
-fn copy_vendor_file(entry: &SnapshotFile, preparation: &Preparation<'_>) -> CopyOutcome {
-    let mut input = file(&entry.source, MAX_FILE_BYTES)?;
-    let before = input
-        .metadata()
-        .map_err(|e| io_error("inspect vendor snapshot input", None, e))?;
-    if fingerprint(&before) != entry.fingerprint {
-        return Err(failure(
-            "vendored file changed after enumeration; refresh on the host and restart",
-        ));
-    }
-    let mut output = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o400)
-        .open(&entry.destination)
-        .map_err(|e| io_error("create private vendor snapshot file", None, e))?;
-    let mut hash = Sha256::new();
-    let mut bytes = [0; 65536];
-    let mut file_bytes = 0_u64;
-    loop {
-        preparation.check()?;
-        let n = input
-            .read(&mut bytes)
-            .map_err(|e| io_error("read local vendor snapshot", None, e))?;
-        if n == 0 {
-            break;
-        }
-        file_bytes += n as u64;
-        if file_bytes > before.len() || file_bytes > MAX_FILE_BYTES {
-            return Err(failure(
-                "vendor file grew beyond its approved snapshot size; refresh on the host and restart",
-            ));
-        }
-        output
-            .write_all(&bytes[..n])
-            .map_err(|e| io_error("write private vendor snapshot", None, e))?;
-        hash.update(&bytes[..n]);
-    }
-    if file_bytes != before.len()
-        || fingerprint(&before) != fingerprint(&inspect_path(&entry.source)?)
-    {
-        return Err(failure(
-            "vendored file changed while snapshotting; refresh on the host and restart",
-        ));
-    }
-    Ok((hash.finalize().to_vec(), file_bytes))
-}
-
-/// Snapshots the local vendored registry into a private, read-only-bounded
-/// destination and returns its content identity.
-///
-/// Two phases: a serial enumeration that validates every entry, bounds the
-/// tree, creates the destination directories, and schedules files in a
-/// deterministic order, followed by a bounded parallel copy where each worker
-/// re-checks its own file fingerprint right after copying. The identity folds
-/// the per-file SHA-256 digests in that deterministic order, so it is stable
-/// across runs and binds every relative path and byte without re-reading the
-/// tree serially.
-fn snapshot_vendor(
-    source: &Path,
-    destination: &Path,
-    preparation: &Preparation<'_>,
-) -> Result<String> {
-    let source_root = source.to_owned();
-    let mut stack = vec![(source.to_owned(), destination.to_owned(), 0_usize)];
-    let mut count = 0_usize;
-    let mut total = 0_u64;
-    let mut directories = Vec::new();
-    let mut files: Vec<SnapshotFile> = Vec::new();
-    let mut path_bytes = 0_usize;
-    while let Some((source, destination, depth)) = stack.pop() {
-        preparation.check()?;
-        let directory = inspect_path(&source)?;
-        if depth > 64 || !directory.is_dir() {
-            return Err(failure(
-                "vendor resource must be a non-link directory tree of depth at most 64",
-            ));
-        }
-        directories.push((source.clone(), fingerprint(&directory)));
-        fs::create_dir(&destination)
-            .map_err(|e| io_error("create private vendor snapshot directory", None, e))?;
-        let mut entries = Vec::new();
-        for entry in
-            fs::read_dir(&source).map_err(|e| io_error("read local vendored registry", None, e))?
-        {
-            preparation.check()?;
-            count += 1;
-            if count > MAX_ENTRIES {
-                return Err(failure("vendored registry exceeds 100000 snapshot entries"));
-            }
-            let entry =
-                entry.map_err(|e| io_error("enumerate local vendored registry", None, e))?;
-            path_bytes =
-                path_bytes.saturating_add(entry.path().as_os_str().len().saturating_mul(3));
-            if path_bytes > 32 << 20 {
-                return Err(failure(
-                    "vendor snapshot exceeds its 32 MiB retained-path bound",
-                ));
-            }
-            entries.push(entry);
-        }
-        entries.sort_by_key(|entry| entry.file_name());
-        for entry in entries {
-            preparation.check()?;
-            let src = entry.path();
-            let dst = destination.join(entry.file_name());
-            let metadata = inspect_path(&src)?;
-            if metadata.is_dir() {
-                stack.push((src, dst, depth + 1));
-                continue;
-            }
-            if !metadata.is_file() || metadata.nlink() != 1 {
-                return Err(failure(
-                    "vendored registry must contain only regular single-link files/directories, not links or special entries",
-                ));
-            }
-            if metadata.len() > MAX_FILE_BYTES {
-                return Err(failure(
-                    "vendor snapshot exceeds 256 MiB/file or 1 GiB aggregate",
-                ));
-            }
-            total += metadata.len();
-            if total > MAX_VENDOR_BYTES {
-                return Err(failure(
-                    "vendor snapshot exceeds 256 MiB/file or 1 GiB aggregate",
-                ));
-            }
-            let relative = src
-                .strip_prefix(&source_root)
-                .map_err(|_| failure("invalid vendor entry"))?
-                .as_os_str()
-                .as_encoded_bytes()
-                .to_vec();
-            files.push(SnapshotFile {
-                source: src,
-                destination: dst,
-                fingerprint: fingerprint(&metadata),
-                relative,
-            });
-        }
-    }
-    tracing::debug!(
-        entries = count,
-        files = files.len(),
-        directories = directories.len(),
-        bytes = total,
-        elapsed_ms = preparation.started.elapsed().as_millis() as u64,
-        "vendor snapshot enumeration completed"
-    );
-    // Parallel copy phase: contiguous index ranges keep scheduling simple and
-    // deterministic; a single worker handles small trees without thread setup.
-    let workers = copy_worker_count().min(files.len());
-    let mut results: Vec<Option<CopyOutcome>> = (0..files.len()).map(|_| None).collect();
-    if files.len() > 1 && workers > 1 {
-        let files = &files;
-        std::thread::scope(|scope| -> Result<()> {
-            let mut handles = Vec::new();
-            let mut start = 0_usize;
-            for worker in 0..workers {
-                let base = files.len() / workers;
-                let rem = files.len() % workers;
-                let extra = if worker < rem { 1 } else { 0 };
-                let range = start..start + base + extra;
-                start = range.end;
-                handles.push(scope.spawn(move || {
-                    let mut copied: Vec<(usize, CopyOutcome)> = Vec::with_capacity(range.len());
-                    for index in range {
-                        copied.push((index, copy_vendor_file(&files[index], preparation)));
-                    }
-                    copied
-                }));
-            }
-            for handle in handles {
-                let copied = handle
-                    .join()
-                    .map_err(|_| failure("vendor snapshot worker terminated abnormally"))?;
-                for (index, result) in copied {
-                    results[index] = Some(result);
-                }
-            }
-            Ok(())
-        })?;
-    } else {
-        for index in 0..files.len() {
-            results[index] = Some(copy_vendor_file(&files[index], preparation));
-        }
-    }
-    tracing::debug!(
-        workers,
-        elapsed_ms = preparation.started.elapsed().as_millis() as u64,
-        "vendor snapshot copy completed"
-    );
-    for (path, before) in directories {
-        preparation.check()?;
-        if fingerprint(&inspect_path(&path)?) != before {
-            return Err(failure(
-                "vendor directory changed while snapshotting; refresh on the host and restart",
-            ));
-        }
-    }
-    let mut identity = Sha256::new();
-    for (index, entry) in files.iter().enumerate() {
-        preparation.check()?;
-        let result = results[index]
-            .take()
-            .ok_or_else(|| failure("vendor snapshot worker did not report a result"))?;
-        let (digest, bytes) = result?;
-        identity.update((entry.relative.len() as u64).to_be_bytes());
-        identity.update(&entry.relative);
-        identity.update(bytes.to_be_bytes());
-        identity.update(digest);
-    }
-    Ok(format!("sha256:{}", hex::encode(identity.finalize())))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1340,31 +1159,6 @@ mod tests {
         };
         let error = preparation.check().unwrap_err();
         assert!(error.to_string().contains("180 seconds"), "{error}");
-    }
-
-    #[test]
-    fn vendor_file_growth_after_enumeration_is_rejected_before_copy() {
-        let source = tempfile::tempdir().unwrap();
-        let destination = tempfile::tempdir().unwrap();
-        let path = source.path().join("file");
-        fs::write(&path, "initial").unwrap();
-        let entry = SnapshotFile {
-            source: path.clone(),
-            destination: destination.path().join("file"),
-            fingerprint: fingerprint(&inspect_path(&path).unwrap()),
-            relative: b"file".to_vec(),
-        };
-        fs::write(&path, "grown after enumeration").unwrap();
-        let cancellation = CancellationToken::new();
-        let preparation = Preparation {
-            started: Instant::now(),
-            cancellation: &cancellation,
-        };
-        assert!(copy_vendor_file(&entry, &preparation).is_err());
-        assert!(
-            !entry.destination.exists(),
-            "changed file must fail before snapshot writes"
-        );
     }
 
     fn fixture() -> tempfile::TempDir {
@@ -1420,6 +1214,7 @@ mod tests {
                 staging,
                 vendor_identity: label(b"empty"),
                 has_vendor: false,
+                lock_fingerprint: None,
                 pinned: false,
                 user_cargo_bin: None,
                 rustup_home,
@@ -1433,6 +1228,75 @@ mod tests {
                 },
             }),
         }
+    }
+
+    #[test]
+    fn shared_vendor_grant_uses_the_project_tree_not_a_package_copy() {
+        let directory = fixture();
+        let mut environment = synthetic_environment(directory.path());
+        let vendor = environment.resources.workspace.join(".kvist/vendored");
+        fs::create_dir_all(&vendor).unwrap();
+        Arc::get_mut(&mut environment.resources).unwrap().has_vendor = true;
+        let resource = environment
+            .grants()
+            .into_iter()
+            .find(|resource| resource.destination == "/rust/vendor")
+            .unwrap();
+        assert_eq!(Path::new(&resource.source), vendor);
+        assert_eq!(resource.access, Access::ReadOnly);
+        assert!(!environment.resources.staging.path().join("vendor").exists());
+    }
+
+    #[test]
+    fn shared_vendor_read_ownership_is_per_call_and_replacement_requires_restart() {
+        let directory = fixture();
+        let mut environment = synthetic_environment(directory.path());
+        let vendor = environment.resources.workspace.join(".kvist/vendored");
+        fs::create_dir_all(&vendor).unwrap();
+        let metadata = inspect_path(&vendor).unwrap();
+        let resources = Arc::get_mut(&mut environment.resources).unwrap();
+        resources.has_vendor = true;
+        resources
+            .directories
+            .push((vendor.clone(), (metadata.dev(), metadata.ino())));
+        let writer = File::open(&vendor).unwrap();
+        writer.try_lock().unwrap();
+        drop(writer);
+        let lease = environment.read_lease(&CancellationToken::new()).unwrap();
+        let writer = File::open(&vendor).unwrap();
+        assert!(writer.try_lock().is_err());
+        drop(lease);
+        writer.try_lock().unwrap();
+        drop(writer);
+        fs::rename(&vendor, vendor.with_file_name("retired-vendor")).unwrap();
+        fs::create_dir(&vendor).unwrap();
+        assert!(
+            environment
+                .validate(&environment.resources.workspace, &CancellationToken::new())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn same_bytes_lock_replacement_requires_restart() {
+        let directory = fixture();
+        let mut environment = synthetic_environment(directory.path());
+        let lock = environment.resources.workspace.join("Cargo.lock");
+        fs::write(&lock, "version=4\n").unwrap();
+        Arc::get_mut(&mut environment.resources)
+            .unwrap()
+            .lock_fingerprint = Some(fingerprint(&inspect_path(&lock).unwrap()));
+        environment
+            .validate(&environment.resources.workspace, &CancellationToken::new())
+            .unwrap();
+        let replacement = lock.with_file_name("replacement.lock");
+        fs::write(&replacement, "version=4\n").unwrap();
+        fs::rename(replacement, lock).unwrap();
+        assert!(
+            environment
+                .validate(&environment.resources.workspace, &CancellationToken::new())
+                .is_err()
+        );
     }
 
     #[test]
@@ -1616,91 +1480,6 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_rejects_linked_files_special_files_and_linked_ancestors() {
-        let directory = fixture();
-        let source = directory.path().join("vendor");
-        fs::create_dir(&source).unwrap();
-        let cancellation = CancellationToken::new();
-        let preparation = Preparation {
-            started: Instant::now(),
-            cancellation: &cancellation,
-        };
-        symlink("/etc/passwd", source.join("link")).unwrap();
-        assert!(
-            snapshot_vendor(
-                &source.canonicalize().unwrap(),
-                &directory.path().join("snapshot1"),
-                &preparation
-            )
-            .is_err()
-        );
-        fs::remove_file(source.join("link")).unwrap();
-        nix::unistd::mkfifo(&source.join("fifo"), nix::sys::stat::Mode::S_IRUSR).unwrap();
-        assert!(
-            snapshot_vendor(
-                &source.canonicalize().unwrap(),
-                &directory.path().join("snapshot2"),
-                &preparation
-            )
-            .is_err()
-        );
-        fs::remove_file(source.join("fifo")).unwrap();
-        fs::write(directory.path().join("outside"), b"not registry material").unwrap();
-        fs::hard_link(directory.path().join("outside"), source.join("hardlink")).unwrap();
-        assert!(
-            snapshot_vendor(
-                &source.canonicalize().unwrap(),
-                &directory.path().join("snapshot-hardlink"),
-                &preparation
-            )
-            .is_err()
-        );
-        fs::remove_file(source.join("hardlink")).unwrap();
-        symlink(
-            source.canonicalize().unwrap(),
-            directory.path().join("alias"),
-        )
-        .unwrap();
-        assert!(
-            snapshot_vendor(
-                &directory.path().join("alias"),
-                &directory.path().join("snapshot3"),
-                &preparation
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn snapshot_identity_binds_paths_and_bytes_and_copy_is_independent() {
-        let directory = fixture();
-        let source = directory.path().join("vendor");
-        fs::create_dir(&source).unwrap();
-        fs::create_dir(source.join("crate-a")).unwrap();
-        fs::write(source.join("crate-a/file"), b"initial").unwrap();
-        let source = source.canonicalize().unwrap();
-        let cancellation = CancellationToken::new();
-        let preparation = Preparation {
-            started: Instant::now(),
-            cancellation: &cancellation,
-        };
-        let first =
-            snapshot_vendor(&source, &directory.path().join("copy1"), &preparation).unwrap();
-        fs::rename(source.join("crate-a"), source.join("crate-b")).unwrap();
-        let second =
-            snapshot_vendor(&source, &directory.path().join("copy2"), &preparation).unwrap();
-        assert_ne!(first, second);
-        fs::write(source.join("crate-b/file"), b"replacement").unwrap();
-        let third =
-            snapshot_vendor(&source, &directory.path().join("copy3"), &preparation).unwrap();
-        assert_ne!(second, third);
-        assert_eq!(
-            fs::read(directory.path().join("copy1/crate-a/file")).unwrap(),
-            b"initial"
-        );
-    }
-
-    #[test]
     fn same_size_executable_drift_is_rejected_by_fingerprint() {
         let directory = fixture();
         let environment = synthetic_environment(directory.path());
@@ -1715,63 +1494,6 @@ mod tests {
         )
         .unwrap();
         assert!(environment.validate(workspace, &cancellation).is_err());
-    }
-
-    #[test]
-    fn parallel_snapshot_is_complete_and_identity_is_deterministic() {
-        let directory = fixture();
-        let source = directory.path().join("vendor");
-        let crates = source.join("registry/src");
-        fs::create_dir_all(&crates).unwrap();
-        for index in 0..120 {
-            let name = format!("crate-{index:03}");
-            fs::create_dir(crates.join(&name)).unwrap();
-            fs::write(
-                crates.join(&name).join("lib.rs"),
-                format!("// crate {index}\n{}", "x".repeat(7000)),
-            )
-            .unwrap();
-        }
-        fs::write(source.join("registry/CACHEDIR.TAG"), b"some\n").unwrap();
-        let source = source.canonicalize().unwrap();
-        let cancellation = CancellationToken::new();
-        let preparation = Preparation {
-            started: Instant::now(),
-            cancellation: &cancellation,
-        };
-        let first =
-            snapshot_vendor(&source, &directory.path().join("copy-a"), &preparation).unwrap();
-        let second =
-            snapshot_vendor(&source, &directory.path().join("copy-b"), &preparation).unwrap();
-        assert_eq!(
-            first, second,
-            "the identity must be deterministic across runs"
-        );
-        for index in 0..120 {
-            let name = format!("crate-{index:03}");
-            let src = fs::read(source.join("registry/src").join(&name).join("lib.rs")).unwrap();
-            let dst = fs::read(
-                directory
-                    .path()
-                    .join("copy-a/registry/src")
-                    .join(&name)
-                    .join("lib.rs"),
-            )
-            .unwrap();
-            assert_eq!(src, dst, "snapshot copy must be byte-identical");
-        }
-        assert_eq!(
-            fs::read(source.join("registry/CACHEDIR.TAG")).unwrap(),
-            fs::read(directory.path().join("copy-a/registry/CACHEDIR.TAG")).unwrap()
-        );
-        // A same-size byte change must move the identity.
-        let target = source.join("registry/src/crate-000/lib.rs");
-        let mut bytes = fs::read(&target).unwrap();
-        bytes[3] = b'Y';
-        fs::write(&target, &bytes).unwrap();
-        let third =
-            snapshot_vendor(&source, &directory.path().join("copy-c"), &preparation).unwrap();
-        assert_ne!(first, third);
     }
 
     #[test]

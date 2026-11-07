@@ -11,15 +11,15 @@ installed host Cargo outside the workspace, prints concise authority/scope
 diagnostics and invokes the shared supervised backend once. No sandbox/model
 loop opt-out or new writable agent tool is introduced.
 
-Validate locked external packages against the already bounded private vendor
-snapshot, not a mutable host alias. Retarget shared generated source tables to
-`/rust/vendor`; managed state also passes the shared snapshot coherence gate
+Validate locked package/native metadata against the shared read-only vendor
+view, not its mutable workspace alias. Retarget shared generated source tables to
+`/rust/vendor`; managed state also passes the lightweight shared coherence gate
 (manifest, publication fences and resolver/lock binding). Partial publication
 must not be bypassed merely because package content is present. Stage that
 config as a read-only runtime file. Sav's Cargo/Clippy
 wrappers select this fixed config in addition to the existing crates.io override.
-Keep dependency-free/legacy manually provisioned Cargo trees working without
-trusting a maerg manifest's host paths. Missing packages remain actionable
+Keep dependency-free and unmanaged crates.io trees working without arbitrary
+receipt-derived paths. Missing packages remain actionable
 startup diagnostics, with no automatic acquisition. Do not rehash the complete
 host vendor tree on every tool call.
 
@@ -633,7 +633,7 @@ the sandbox, never against the host `PATH`.
 
 The System gate lives in `ToolRegistry::resolve`. Sandboxed terminal/headless
 startup uses `resolve_for_workspace`, adding validated installed Rust resources
-and a bounded private vendor snapshot without changing the maerg Cargo topology.
+and the shared project vendor view without changing the maerg Cargo topology.
 The fixed Cargo shim prepends `--offline --locked` and source overrides to every
 normal PATH Cargo invocation; Cargo handles missing/stale locks before a build
 can update them. Flags also apply to metadata and checks; version/help remain
@@ -645,17 +645,21 @@ rustdoc and native libraries for the initial selection remain under
 is under `/rust/runtime`. `HOME=/tmp` and `CARGO_HOME=/tmp/cargo-home` are
 private invocation scratch, not host caches. `CARGO_TARGET_DIR=/workspace/target`
 keeps build output in the writable workspace across invocations. Mount the
-validated vendor snapshot read-only at `/rust/vendor`, outside the writable
-workspace grant, and point the shared Cargo wrapper there.
+shared `.kvist/vendored` tree read-only at `/rust/vendor` and point the shared
+Cargo wrapper there. Only that exact read-only vendor resource may have a source
+inside the writable workspace; other Rust/context source overlaps remain refused.
 The runner's fixed prepared-Rust rule masks existing workspace vendor content
 behind mode-000 read-only tmpfs after binding grants. There is no second usable
 registry inside the sandbox and no generalized overlapping grant exception.
 Selection uses the standard host rustup layout, ignoring ambient overrides and
 custom linked roots; maerg `.kvist/rust-toolchain.json` is not authorization.
-Preparation bounds are 180 seconds, 1 GiB vendor aggregate, 256 MiB/file,
-with enumeration-time file fingerprints retained and checked before copy so
-the approved aggregate size cannot grow between phases;
-100,000 entries, depth 64 and 32 MiB retained paths. Stage ownership is shared
+Installed-resource preparation retains its 180-second cooperative budget.
+Vendor-specific quotas come from the shared library/project configuration.
+Do not enumerate/copy/hash vendor source files at startup or per tool call.
+Retain only shared directory identity, lock binding and a small staged resolver.
+Obtain a shared vendor read owner before request preparation and retain it through
+execution; publication uses an exclusive directory lock. Idle registry clones
+hold no vendor read lock. Stage ownership is shared
 with the registry/executor and removed when the final owner drops. Pin/root
 substitution and tracked executable/library/shim drift fail before dispatch;
 the identity is not a complete toolchain-tree digest.
@@ -690,8 +694,8 @@ Optional user Cargo
 bin remains a validated non-link directory outside the workspace; it is not a
 credential/configuration mount.
 
-Debug events mark selection queries, executable/layout validation, vendor
-snapshot completion, resource preparation, preflight and runner completion,
+Debug events mark selection queries, executable/layout validation, shared vendor
+view preparation, resource preparation, preflight and runner completion,
 including elapsed times and bounded counts/identities. Trace emits individual
 grant metadata and environment names only. Neither level emits argv payloads,
 environment values or captured output. Native trials use stage-labelled shell
@@ -766,23 +770,22 @@ the matching enforcement implementation.
 CI provisions the vendor registry, Cargo extensions and the full/minimal Rust
 installations on the host before native tests; test bodies never install them.
 
-The vendor snapshot is two-phase: a serial enumeration validates every entry,
-enforces the bounds, creates destination directories and schedules files in a
-deterministic order, then a bounded pool (minimum of 8 and host parallelism)
-copies and digests files concurrently. Each worker re-checks its own source
-fingerprint immediately after copying its files, so a concurrent host change
-fails that file without trusting a global recheck; the directory fingerprints
-are re-checked after all copies. The identity folds the per-file SHA-256
-digests (length-prefixed relative path, copied byte count, digest) in the
-deterministic enumeration order, so it is stable across runs and binds every
-path and byte without a serial re-read.
+Vendor startup checks package/native metadata, directory identity, lock binding
+and managed controls without copying or hashing package contents. It stages only
+small runtime configuration. Each executor invocation obtains directory read
+ownership before preparing/spawning the request and retains it through completion;
+idle resources retain no lock. Shared publication exclusively owns the old and
+candidate directories. Only the exact project vendor source may overlap the
+writable `/workspace` grant, with its alias masked by the existing runner.
+Directory/lock replacement requires restart. Cargo owns its source checksums;
+direct host edits are outside cooperative publication guarantees.
 
 Per-invocation validation compares each tracked executable/library/shim against
 the dev/ino/size/mtime/ctime fingerprint captured at resolve time; any
 modification, truncation or replacement updates at least one field, so strict
-drift detection no longer re-hashes hundreds of megabytes per tool call. The
-exact byte identities remain captured once at resolve time and bound into the
-environment and grant identities.
+drift detection no longer re-hashes hundreds of megabytes per tool call.
+Installed-resource identities bound into the environment and grants are derived
+from these metadata fingerprints, not a full-content attestation.
 Explicit host execution keeps the System-only registry. The System gate
 combines three inputs:
 

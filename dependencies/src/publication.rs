@@ -1,6 +1,6 @@
 use crate::{
-    Error, Result,
-    fs::{Dir, METADATA_LIMIT, io_error},
+    Error, Result, VendorLimits,
+    fs::{Dir, io_error},
     integrity::control,
     unavailable,
     vendoring::{SANDBOX_CARGO_CONFIG_DIRNAME, VENDOR_MANIFEST_FILENAME},
@@ -16,6 +16,7 @@ pub(crate) struct Publication<'a> {
     pub(crate) name: &'a str,
     pub(crate) state: &'a Dir,
     pub(crate) cancellation: &'a CancellationToken,
+    pub(crate) limits: &'a VendorLimits,
 }
 
 impl Publication<'_> {
@@ -25,7 +26,7 @@ impl Publication<'_> {
         precondition: impl Fn() -> Result<()>,
         metadata: impl FnOnce() -> Result<()>,
     ) -> Result<()> {
-        if self.stage.entries()? != ["vendor"] {
+        if self.stage.entries(1)? != ["vendor"] {
             return Err(unavailable(
                 &self.stage.display,
                 "private stage contains unexpected entries",
@@ -38,12 +39,14 @@ impl Publication<'_> {
         if self.state.exists(SANDBOX_CARGO_CONFIG_DIRNAME)? {
             let cargo = self.state.child(SANDBOX_CARGO_CONFIG_DIRNAME)?;
             if cargo.exists("config.toml")? {
-                let (old, _) = cargo.read("config.toml", METADATA_LIMIT)?;
+                let (old, _) = cargo.read("config.toml", self.limits.max_metadata_bytes)?;
                 self.stage.atomic("old-config.toml", &old)?;
             }
         }
         if self.state.exists(VENDOR_MANIFEST_FILENAME)? {
-            let (old, _) = self.state.read(VENDOR_MANIFEST_FILENAME, METADATA_LIMIT)?;
+            let (old, _) = self
+                .state
+                .read(VENDOR_MANIFEST_FILENAME, self.limits.max_metadata_bytes)?;
             self.stage.atomic("old-manifest.json", &old)?;
         }
         let recovery_path = self.state.display.join(RECOVERY);
@@ -142,7 +145,7 @@ mod tests {
         let state = root.ensure_child(".kvist").unwrap();
         let vendor = state.ensure_child("vendored").unwrap();
         std::fs::write(vendor.path().join("old"), b"previous registry").unwrap();
-        std::fs::write(state.path().join("vendoring-v1.json"), b"previous manifest").unwrap();
+        std::fs::write(state.path().join("vendor.json"), b"previous manifest").unwrap();
         let cargo = state.ensure_child("sandbox-cargo").unwrap();
         cargo
             .atomic(
@@ -161,6 +164,7 @@ mod tests {
             name: "vendored",
             state: &state,
             cancellation: &token,
+            limits: &VendorLimits::default(),
         }
         .commit(
             || Ok(()),
@@ -185,7 +189,7 @@ mod tests {
             b"previous registry"
         );
         assert_eq!(
-            std::fs::read(state.path().join("vendoring-v1.json")).unwrap(),
+            std::fs::read(state.path().join("vendor.json")).unwrap(),
             b"previous manifest"
         );
         assert_eq!(
@@ -220,6 +224,7 @@ mod tests {
             name: "vendored",
             state: &state,
             cancellation: &token,
+            limits: &VendorLimits::default(),
         }
         .commit(
             || {

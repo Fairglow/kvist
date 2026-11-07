@@ -5,6 +5,8 @@
 Accepted direction by the human request on 2026-11-06. Rust is the first
 consolidated backend; later language environments remain explicitly deferred.
 Implementation and independent evidence belong in component queues and records.
+Private-copy/content-attestation choices are superseded by
+[ADR 0018](0018-single-shared-vendor-area.md); this decision remains historical.
 
 ## Decision
 

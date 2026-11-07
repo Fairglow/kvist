@@ -21,17 +21,22 @@ configuration are copied. Generate alternate registry index definitions only
 from approved acquisition policy. Compare the staged and original lock digests
 with the prefetch identity before any host offline repack or shared publication.
 Keep the existing closed runner request and source-aware network authority.
-Use the shared full check for protected readiness and Rust preparation rather
+Use the shared coherent check for protected readiness and Rust preparation rather
 than cheap catalogue presence; propagate cancellation and retain budget checks.
 Before acquisition dispatch, validate Git dependency tables (including target,
 workspace, patch and replacement declarations) and Git lock sources against
 approved HTTPS repository/full-revision pairs. Reject other transports before
-any fetch rather than relying on proxy-aware Git clients. Full preparation
+any fetch rather than relying on proxy-aware Git clients. Coherent preparation
 readiness applies when root Cargo.lock or managed Rust controls exist; an
 unmanaged standalone child can retain the existing empty-registry build view.
 The explicit no-sandbox operator path uses the shared bounded Cargo backend.
 No new model acquisition path or cross-component task authority is introduced.
 Other language provisioning remains local pending its deliberate extraction.
+Share the one project vendor tree and minimal receipt with Skott. Load common
+vendor limits for host and configured acquisition budgets. Retain a shared
+directory lock through authoring/verification; publication takes an exclusive
+lock. No vendor snapshot or custom file-checksum inventory is added. An explicit
+force request bypasses metadata reuse, not acquisition authority.
 
 ## Shared registry realization (ADR 0015)
 

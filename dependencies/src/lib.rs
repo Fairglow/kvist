@@ -5,10 +5,13 @@ use std::{io, path::PathBuf};
 
 mod fs;
 mod integrity;
+mod limits;
 mod publication;
 mod resolver;
 pub mod rust;
 pub mod vendoring;
+
+pub use limits::VendorLimits;
 
 /// Shared dependency failure domains, without captured subprocess payloads.
 #[derive(Debug, thiserror::Error)]
@@ -45,6 +48,9 @@ pub enum Error {
     /// Another operation owns the project lock; stale locks are never stolen.
     #[error("dependency operation lock occupied at `{path}`; inspect before reconciliation")]
     OperationLocked { path: PathBuf },
+    /// A cooperating reader or publisher owns the vendor directory.
+    #[error("vendor directory in use at `{path}`; retry after active tools or publication finish")]
+    InUse { path: PathBuf },
     /// A bounded Cargo process failed. No diagnostic payload is retained.
     #[error("Cargo acquisition failed: {failure:?}")]
     Process { failure: ProcessFailure },

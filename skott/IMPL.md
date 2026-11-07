@@ -1791,3 +1791,93 @@ the final all-feature workspace nextest run passed 2219 tests, zero failures
 and 15 existing skips. Strict workspace Clippy, formatting and the workspace
 documentation test passed. These attributed results are not acceptance,
 review receipts or broad certification.
+
+## Shared-area source observations - 2026-11-07
+
+Independent `skott-source-audit` inspected scoped current local source and
+assertions without intent, queues, old records/reviews, peer implementations or
+history. It changed nothing, ran no tests and found no high-confidence exploitable
+vulnerability in scope. These observations supersede older copied-vendor and
+full-content readiness descriptions, not their historical evidence.
+
+- Vendoring dispatch precedes application configuration loading; CLI conflicts
+  separate it from agent execution. Checking delegates before compiler resolution.
+  Provisioning requires bounded regular lock metadata and passes explicit offline,
+  force and timeout options. Offline is not OS isolation
+  (`src/main.rs:28-49`, `src/cli.rs:18-37,81-83`,
+  `src/dependencies.rs:16-59`).
+- Rustup queries use argv, a cleared environment, `/` and disabled automatic
+  installation. Cargo must resolve to its standard host installation outside the
+  workspace. Inventory accepts 1-128 installed toolchains and records bounded,
+  non-link runtime trees (`src/rust_environment/host.rs:14-96`,
+  `src/rust_environment.rs:455-497`,
+  `src/rust_environment/inventory.rs:18-194`).
+- Toolchains, staged runtime/registrations, optional user Cargo binaries and vendor
+  material receive read-only Toolchain grants. Existing vendor material uses the
+  workspace directory directly, not copied packages. Only its exact source may
+  overlap the writable workspace; alias masking is delegated to the runner
+  (`src/rust_environment.rs:1036-1101`, `src/sandbox.rs:181-207`).
+- A startup read lease covers preparation. Each executor call acquires a lease
+  before request construction and retains it through synchronous execution/error
+  unwinding, not idle time. Arc-owned private staging survives clones and is
+  removed by its final owner (`src/rust_environment.rs:678-714,856-892,1104-1110`,
+  `src/executor.rs:148-180`).
+- Per-call validation checks lock fingerprints, pin digest, publication fences,
+  inventory fingerprints, resource identities, tracked files and registration
+  links. Installed-material SHA labels derive from metadata, not comprehensive
+  content attestation. Resolver configuration is staged during preparation.
+  Vendor children are not comprehensively rehashed; a local assertion permits
+  readiness after source tampering and then expects native Cargo checksum failure
+  (`src/rust_environment.rs:225-235,749-789,944-1033`,
+  `tests/vendoring_cli.rs:362-395`).
+- Requests declare denied network, private homes/caches and persistent workspace
+  targets. Bounded synchronous supervision is delegated; no host fallback appears
+  in these paths (`src/rust_environment.rs:1116-1152`,
+  `src/sandbox.rs:258-300,596-660`). Dependency, wrapper, process-supervisor and
+  backend implementations were outside this observation.
+
+Implementer-attributed production-runner nextest
+`21afbe63-ae2a-482d-a3f4-36c6ab3d20b2` passed 399 affected tests across components.
+Native cases assert shared host/sandbox device/inode, writable-alias read/write/
+chmod denial, active but not idle reader retention, Cargo checksum failure and
+explicit offline force repair. Strict workspace Clippy, formatting, affected
+doctests and offline release builds subsequently passed.
+
+A separate warm actual-checkout native trial reported shared vendor preparation
+at 109 ms and total installed-Rust preparation at 592 ms with eight toolchains
+and 87 tracked files. Full Git/list/Cargo execution took 1.253 seconds. The prior
+copying trial reported 81,342 ms and 376,894,920 copied bytes. These are attributed
+individual observations, not matched cold/representative-hardware benchmarks or
+an SLA; the older general performance obligation is not certified by them.
+Queue timestamps record later bookkeeping. No acceptance or review receipt is
+claimed.
+
+Separate `skott-blind-comparison` compared current scoped intent with this new
+independent observation without source, tests, queues or peers. It found
+correspondence for direct read-only views, exact overlap, startup/per-call rather
+than idle ownership, drift checks, early dispatch, denied network and native
+sharing/masking/checksum/repair evidence.
+
+It reported that the older design sentence claiming exact byte identities at
+resolve time conflicted with the observed metadata-derived installed-resource
+labels. The design now states metadata-derived identities rather than full-content
+attestation, preserving this reported discrepancy and its explicit correction.
+The comparison retained missing itemized proof of complete provider readiness,
+source-table retargeting, shared policy/default parity, every restart diagnostic,
+absence of all inventory hashing and all recovery/ownership cases. Excluded peer
+internals and finite attributed native tests do not independently establish those
+provider guarantees or exhaustive races. The general representative-hardware
+30-second obligation remains unverified; warm observations are not matched
+speedup or cold-contention proof.
+
+Final implementer-run production nextest
+`7eb7fff4-82b4-4b8d-83a5-9c8e576971ab` passed all 399 affected tests after the
+lint correction and queue updates. Both release frontends reported the same ready
+root tree. This does not accept stale intent, fabricate receipts or certify an SLA.
+
+At `2026-11-07T01:11:50Z`, the implementing context atomically installed
+byte-identical release `kvist`, `skott` and `skott-file-tool` binaries without
+stopping existing sessions. Installed CLI versions were Kvist 0.3.0 and Skott
+0.3.1; both installed frontends reported the same ready vendor tree. The retired
+root receipt was removed, generated state/staging ignore rules were checked, and
+the optional root policy remains trackable. Final native queue validation passed.

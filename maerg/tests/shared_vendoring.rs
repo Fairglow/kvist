@@ -4,6 +4,30 @@ use std::fs;
 use std::process::{Command, Stdio};
 
 #[test]
+fn both_operator_frontends_honor_the_same_vendor_policy() {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(project.path().join("Cargo.lock"), "version=4\n").unwrap();
+    fs::write(project.path().join("Cargo.toml"), "[workspace]\n").unwrap();
+    fs::create_dir(project.path().join(".kvist")).unwrap();
+    fs::write(
+        project.path().join(".kvist/vendor.toml"),
+        "[limits]\nmax_entries=0\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .arg("vendor")
+        .arg(project.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "Kvist ignored the shared invalid policy: {output:?}"
+    );
+    assert!(!project.path().join(".kvist/vendored").exists());
+}
+
+#[test]
 fn changed_component_queues_conform_to_the_native_schema() {
     for (component, queue) in [
         (

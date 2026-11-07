@@ -8,10 +8,12 @@ add or change vendored dependencies for each supported toolchain.
 
 `skott --vendor [--cwd DIR]` provisions an ordinary Rust project with an existing
 `Cargo.lock`, without `kvist.toml`, `skott.toml`, model setup, or a UI.
-`skott --vendor --check` performs filesystem-only full readiness checks;
+`skott --vendor --check` performs filesystem-only metadata readiness checks;
 `skott --vendor --offline` uses Cargo's existing host cache only.
-Both Skott and `kvist vendor` share the `kvist-dependencies` library, not a
-subprocess call to the other application.
+Both Skott and `kvist vendor` share the `kvist-dependencies` library and one
+physical project `.kvist/vendored` tree, not a subprocess call or second cache.
+`skott --vendor --force [--offline]` or `kvist vendor --force` explicitly rebuilds
+otherwise reusable material after damage. Neither changes the lockfile.
 
 Acquisition is explicit operator host authority; normal agent execution stays
 strictly network-denied. Host Cargo may read operator configuration and contact
@@ -26,11 +28,75 @@ Other-language maerg strategies remain in place, but Skott's consolidated
 offline backend is Rust-only until each language's resource wiring is tested.
 
 The common `.kvist` layout is retained for interoperability and alias masking.
-Private staging, an exclusive operation lock, exact lock rechecking, checksum
-validation and bounded process execution protect publication. A failed
+Private provisioning staging, exclusive operation/publication locks, exact lock
+rechecking and bounded process execution protect publication. A failed
 multi-file publication is not reported ready; inspect retained recovery
 state before another explicit action. Restart Skott after dependency changes,
-because running sessions deliberately retain their immutable vendor snapshot.
+because sessions retain directory/lock identities and small runtime configuration,
+not copied packages. Each tool holds a shared directory lock through execution;
+idle sessions do not block publication. Busy publication fails explicitly.
+
+### Minimal state and native Cargo validation
+
+`.kvist/vendor.json` contains only `schema_version` and `lockfile_digest`.
+`.kvist/sandbox-cargo/config.toml` contains source replacements only. There is no
+additional file inventory, package checksum database or independent full-content
+verification pass. Readiness checks locked package identities, required native
+metadata presence, receipt/resolver binding and operation/recovery fences.
+
+Cargo-generated `.cargo-checksum.json` files stay in the vendor tree because
+directory-source Cargo builds require them. Cargo validates its own checksums
+when consuming packages; we do not duplicate that work. A passing `--check`
+therefore does not prove arbitrary source integrity, archive/Git provenance or
+build success. Repair damaged source with explicit `--force`, not automatic
+downloads, retry or hand-edited receipts.
+
+Read locks coordinate these applications' shared-library publication, not direct
+host edits or package managers outside that protocol. Do not modify an in-use
+vendor tree in place. Prepared Rust makes `/rust/vendor` read-only and masks
+`/workspace/.kvist/vendored`; unprepared requests retain their ordinary workspace
+policy. Sharing is project-local, not a global cross-project cache. An explicit
+Kvist custom destination is operator authority and does not redirect Skott's
+default storage. See [ADR 0018](decisions/0018-single-shared-vendor-area.md)
+for the simplicity, performance and safety rationale.
+
+### Shared configurable limits
+
+Both applications load optional `.kvist/vendor.toml` independently of model
+configuration. Use a single `[limits]` table; omissions use defaults. Unknown
+keys, wrong types and nonpositive values fail explicitly. For example:
+
+```toml
+[limits]
+max_total_bytes = 2147483648
+timeout_secs = 1200
+```
+
+| Setting | Default |
+| --- | ---: |
+| `max_packages` | 100000 |
+| `max_sources` | 1024 |
+| `max_entries` | 100000 |
+| `max_total_bytes` | 1073741824 (1 GiB) |
+| `max_file_bytes` | 268435456 (256 MiB) |
+| `max_path_bytes` | 33554432 (32 MiB) |
+| `max_depth` | 64 |
+| `max_lockfile_bytes` | 16777216 (16 MiB) |
+| `max_metadata_bytes` | 16777216 (16 MiB) |
+| `max_output_bytes` | 1048576 (1 MiB) |
+| `timeout_secs` | 900 |
+
+Provisioning performs one bounded metadata/link/quota/synchronization walk,
+without reading source contents. Each explicitly selected cleanup subtree is
+bounded similarly. Reuse and readiness do not rescan package source files to
+retest a lowered tree quota; explicit forced provisioning applies new quotas.
+The policy parser has a separate 1 MiB input boundary. Filesystem path syntax,
+installed-toolchain inventory and sandbox protocol bounds are separate intrinsic
+restrictions, not vendor quotas.
+
+The repository ignores generated vendor/receipt/recovery/runtime state while
+allowing the optional root `.kvist/vendor.toml` policy to be version controlled.
+Retired receipt formats are not recognized; there is no implicit migration.
 
 ## Toolchain Mount Architecture
 
@@ -62,7 +128,7 @@ The mount layout is:
 | `/rust/toolchain`                                      | Initially selected host toolchain directory                                          | Read-only default compiler, standard library, and targets                         |
 | `/rust/toolchains/N`                                   | Other validated installed toolchains, sorted by name                                 | Read-only access to every other installed version and its targets                 |
 | `/rust/runtime/bin/cargo`                              | Kvist-provided Cargo shim                                                            | A wrapper that forces `--offline --locked` and the vendored sources configuration |
-| `/rust/vendor`                                         | Snapshot of `.kvist/vendored`                                                        | Read-only snapshot of the vendored dependency registry                            |
+| `/rust/vendor`                                         | Same host `.kvist/vendored` tree                                                     | Read-only shared dependency registry, without package copies                      |
 | `/rust/runtime/vendor-config.toml`                     | Validated generated source-replacement config, retargeted to `/rust/vendor`          | Optional read-only locked Git/alternate-registry resolver                          |
 | `/rust/runtime/bin/rustc`, `/rust/runtime/bin/rustdoc` | Fixed selection-aware wrappers                                                       | Compiler and documentation selection follows Cargo or a leading `+name`           |
 | `/rust/rustup-home`                                    | Private generated settings and sandbox-native registrations for every installed name | Read-only complete installed inventory discovery                                  |
@@ -137,10 +203,11 @@ Links and out-of-project resources fail explicitly. This build context is not
 implicit prompt context and never grants peer writes. The closed Cargo
 verification topology is unchanged.
 
-The vendor destination remains `/rust/vendor` for both consumers. The host
-source of truth is `.kvist/vendored`; Skott snapshots it before mounting.
-Resolving directly through `/workspace/.kvist/vendored` would use a mutable
-workspace alias, and a separate grant there would overlap the workspace mount.
+The vendor destination remains `/rust/vendor` for both Rust authoring consumers.
+The default host source of truth is `.kvist/vendored`, mounted directly under a
+read lease without package copies. Resolving through
+`/workspace/.kvist/vendored` would use a mutable workspace alias. Only the exact
+read-only vendor source may overlap the writable workspace grant.
 When prepared Rust authoring also mounts the workspace, the runner covers its
 existing `.kvist/vendored` directory with an empty, inaccessible read-only
 mount. The directory entry may be visible, but listing, reading, writing and
@@ -245,7 +312,7 @@ git, and common Linux tools, cargo, rustc, and the Rust standard toolchain."
 
 When the Rust toolchain is available, the tool description also includes:
 "Rust uses an already installed read-only concrete toolchain; cargo is
-explicitly offline with a private read-only vendor snapshot, HOME/cache are scratch and
+explicitly offline with a shared read-only vendor area, HOME/cache are scratch and
 build output persists at /workspace/target. Missing dependencies require host provisioning; sandbox builds
 never download."
 
@@ -314,7 +381,8 @@ Rust vendoring is enforced exactly through `Cargo.lock`. The workflow is:
 1. Edit `Cargo.toml` to add or change dependency specifications.
 2. Run `cargo update` or `cargo add` on the host to update `Cargo.lock`.
 3. Run `kvist vendor .` to synchronize the vendored registry.
-4. Commit `Cargo.toml`, `Cargo.lock`, and the updated vendored registry.
+4. Commit `Cargo.toml`, `Cargo.lock`, and any changed shared vendor policy.
+   This repository regenerates its ignored vendor tree/receipt locally.
 
 The sandbox build will then use the updated dependencies. No network access
 is needed inside the sandbox.

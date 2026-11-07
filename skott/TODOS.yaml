@@ -10,6 +10,50 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:3086d1bd8a18b675b1468721f662518abda2fa56473e02eaa032b4cc61d3fda4", "observed_revision": "sha256:02b7979e6f81e2815f5503538266d13034718471afe061ee55f71a37a7075ed5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03", "observed_revision": "sha256:4bec0afba47fcba5472c45f6a3b225cf7920bad53eacf3926f90205b36676f62"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:0c1cfae82b7f2f6819b5a1898fc15a1608e08b91c738fb405507e0b2b458f9fb", "observed_revision": "sha256:a21376824ea18202c8dbe373530fc9f92b44cc2e01a562ba610a8ac8b55bb93c"}]
 tasks:
+  - id: shared-area-write-tests
+    title: "write_tests: no vendor package copy"
+    description: "Pin direct shared-directory grants, masked writable aliases, per-call ownership and lightweight checks."
+    context: "User explicitly requests one shared area; deliberate local advisory exception."
+    purpose: "Make efficient sharing measurable before code."
+    expected_outcome: "Copy-based/hardcoded behavior fails new regressions."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
+  - id: shared-area-implement-code
+    title: "implement_code: direct shared vendor view"
+    description: "Remove package snapshots; retain only directory/lock identity and small runtime configuration with per-call read ownership."
+    context: "Only the exact read-only vendor source may overlap the writable workspace; native masking remains required."
+    purpose: "Avoid duplicate storage, content hashing and idle reader locks."
+    expected_outcome: "Native tooling uses the host shared tree without writable aliases."
+    kind: implementation
+    status: completed
+    depends_on: [shared-area-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
+  - id: shared-area-security-audit
+    title: "security_audit: direct shared vendor view"
+    description: "Independently observe source grants, masking, reader lifetime and drift handling."
+    context: "Source-only observation excludes intent, queue, old observations and history."
+    purpose: "Preserve safety while eliminating copied package trees."
+    expected_outcome: "Persist bounded observations and concrete limitations."
+    kind: security-audit
+    status: completed
+    depends_on: [shared-area-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
+  - id: shared-area-compliance-review
+    title: "compliance_review: useful shared vendor view"
+    description: "Compare scoped intent with independent observations and native evidence without raw source."
+    context: "No acceptance/certification; retain finite performance and concurrency evidence."
+    purpose: "Record correspondence and discrepancies."
+    expected_outcome: "Persist source-blind comparison with limits."
+    kind: compliance-review
+    status: completed
+    depends_on: [shared-area-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:06:47Z", completed_at: "2026-11-07T01:06:47Z"}
   - id: "scope-reliability-write-tests"
     title: "write_tests: first-tool preflight budget"
     description: "Pin preparation beyond 30 seconds, exact and smaller effective budgets, unchanged stage/cancellation behavior and fresh escape detection; exercise initial Git inspection and native root listing."

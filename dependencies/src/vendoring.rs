@@ -1,26 +1,23 @@
 //! Extracted maerg catalogue/report/manifest API.
 //!
 //! Name/version observations deliberately retain their cheap legacy semantics.
-//! Use [`crate::rust`] for full locked source and content integrity.
+//! Use [`crate::rust`] for coherent locked metadata readiness.
 
 use crate::{
-    Error, Result,
-    fs::{Dir, LOCK_LIMIT, METADATA_LIMIT, segment},
+    Error, Result, VendorLimits,
+    fs::{Dir, segment},
     unavailable,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::{Path, PathBuf};
 
 /// Vendoring manifest schema version.
 pub const VENDOR_SCHEMA_VERSION: u32 = 1;
 /// Lockfile name enforced by Rust vendoring.
 pub const CARGO_LOCK_FILENAME: &str = "Cargo.lock";
 /// Manifest name under `.kvist`.
-pub const VENDOR_MANIFEST_FILENAME: &str = "vendoring-v1.json";
+pub const VENDOR_MANIFEST_FILENAME: &str = "vendor.json";
 /// Default registry directory under `.kvist`.
 pub const DEFAULT_VENDORED_DIRNAME: &str = "vendored";
 /// Directory containing generated sandbox Cargo configuration.
@@ -79,11 +76,18 @@ struct RawLockPackage {
 /// Parse the cheap catalogue; unknown keys and absent packages retain legacy semantics.
 /// Parse diagnostics never include untrusted TOML snippets.
 pub fn parse_cargo_lock(contents: &str) -> std::result::Result<Vec<LockPackage>, String> {
-    if contents.len() as u64 > LOCK_LIMIT {
+    parse_lock(contents, &VendorLimits::default())
+}
+
+fn parse_lock(
+    contents: &str,
+    limits: &VendorLimits,
+) -> std::result::Result<Vec<LockPackage>, String> {
+    if contents.len() as u64 > limits.max_lockfile_bytes {
         return Err("Cargo.lock exceeds size limit".into());
     }
     let lock: CargoLockFile = toml::from_str(contents).map_err(|_| "cannot parse Cargo.lock")?;
-    if lock.package.len() > 100_000 {
+    if lock.package.len() > limits.max_packages {
         return Err("Cargo.lock exceeds package limit".into());
     }
     lock.package
@@ -106,47 +110,57 @@ pub fn lockfile_digest(contents: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(contents)))
 }
 
-fn lock(project: &Path) -> Result<Vec<u8>> {
+fn lock(project: &Path, limits: &VendorLimits) -> Result<Vec<u8>> {
     Dir::open(project)?
-        .read(CARGO_LOCK_FILENAME, LOCK_LIMIT)
+        .read(CARGO_LOCK_FILENAME, limits.max_lockfile_bytes)
         .map(|(bytes, _)| bytes)
 }
 
-fn packages(project: &Path, bytes: &[u8]) -> Result<Vec<LockPackage>> {
+fn packages(project: &Path, bytes: &[u8], limits: &VendorLimits) -> Result<Vec<LockPackage>> {
     let text =
         std::str::from_utf8(bytes).map_err(|_| unavailable(project, "Cargo.lock is not UTF-8"))?;
-    parse_cargo_lock(text).map_err(|reason| Error::VendoringUnavailable {
+    parse_lock(text, limits).map_err(|reason| Error::VendoringUnavailable {
         path: project.to_string_lossy().into_owned(),
         reason,
     })
 }
 
-fn package_field(directory: &Dir, key: &str) -> Result<Option<String>> {
+fn package_fields(
+    directory: &Dir,
+    limits: &VendorLimits,
+) -> Result<(Option<String>, Option<String>)> {
     let name = if directory.exists("Cargo.toml")? {
         "Cargo.toml"
     } else if directory.exists("Cargo.toml.orig")? {
         "Cargo.toml.orig"
     } else {
-        return Ok(None);
+        return Ok((None, None));
     };
-    let (bytes, _) = directory.read(name, METADATA_LIMIT)?;
+    let (bytes, _) = directory.read(name, limits.max_metadata_bytes)?;
     let text = std::str::from_utf8(&bytes)
         .map_err(|_| unavailable(&directory.display, "package manifest is not UTF-8"))?;
-    let prefix = format!("{key} = \"");
-    Ok(text.lines().find_map(|line| {
-        let line = line.trim();
-        line.strip_prefix(&prefix)
-            .map(|value| value.trim_end_matches('"').to_owned())
-    }))
+    let field = |key| {
+        let prefix = format!("{key} = \"");
+        text.lines().find_map(|line| {
+            let line = line.trim();
+            line.strip_prefix(&prefix)
+                .map(|value| value.trim_end_matches('"').to_owned())
+        })
+    };
+    Ok((field("name"), field("version")))
 }
 
-fn durable_source_present(vendor: Option<&Dir>, pkg: &LockPackage) -> Result<bool> {
+fn durable_source_present(
+    vendor: Option<&Dir>,
+    pkg: &LockPackage,
+    limits: &VendorLimits,
+) -> Result<bool> {
     let Some(vendor) = vendor else {
         return Ok(false);
     };
     if vendor.exists(&pkg.name)? {
         let flat = vendor.child(&pkg.name)?;
-        if package_field(&flat, "version")?.as_deref() == Some(pkg.version.as_str()) {
+        if package_fields(&flat, limits)?.1.as_deref() == Some(pkg.version.as_str()) {
             return Ok(true);
         }
     }
@@ -215,8 +229,9 @@ pub fn enforce_offline_readiness(
     project_root: &Path,
     vendored_dir: &Path,
 ) -> Result<VendoringReport> {
-    let contents = lock(project_root)?;
-    let packages = packages(project_root, &contents)?;
+    let limits = VendorLimits::load(project_root)?;
+    let contents = lock(project_root, &limits)?;
+    let packages = packages(project_root, &contents, &limits)?;
     let parent = vendored_dir
         .parent()
         .ok_or_else(|| unavailable(vendored_dir, "registry has no parent"))?;
@@ -249,7 +264,7 @@ pub fn enforce_offline_readiness(
             LockSource::Path => report.path_dependencies += 1,
         }
         if package.source.needs_durable_source()
-            && !durable_source_present(vendor.as_ref(), &package)?
+            && !durable_source_present(vendor.as_ref(), &package, &limits)?
         {
             report
                 .missing_dependencies
@@ -264,15 +279,16 @@ pub fn find_stale_vendored_packages(
     project_root: &Path,
     vendored_dir: &Path,
 ) -> Result<Vec<String>> {
-    let contents = lock(project_root)?;
-    let expected: std::collections::HashSet<_> = packages(project_root, &contents)?
+    let limits = VendorLimits::load(project_root)?;
+    let contents = lock(project_root, &limits)?;
+    let expected: std::collections::HashSet<_> = packages(project_root, &contents, &limits)?
         .into_iter()
         .filter(|pkg| pkg.source.needs_durable_source())
         .map(|pkg| (pkg.name, pkg.version))
         .collect();
     let vendor = Dir::open(vendored_dir)?;
     let mut stale = Vec::new();
-    for name in vendor.entries()? {
+    for name in vendor.entries(limits.max_packages)? {
         let metadata = std::fs::symlink_metadata(vendor.path().join(&name)).map_err(|e| {
             crate::fs::io_error("inspect catalogue entry", &vendor.display.join(&name), e)
         })?;
@@ -286,8 +302,9 @@ pub fn find_stale_vendored_packages(
         let fallback = name
             .rsplit_once('-')
             .filter(|(_, version)| version.chars().next().is_some_and(|c| c.is_ascii_digit()));
-        if let Some(version) = package_field(&entry, "version")? {
-            let pkg_name = package_field(&entry, "name")?
+        let (pkg_name, version) = package_fields(&entry, &limits)?;
+        if let Some(version) = version {
+            let pkg_name = pkg_name
                 .unwrap_or_else(|| fallback.map(|(pkg, _)| pkg).unwrap_or(&name).to_owned());
             if !expected.contains(&(pkg_name, version)) {
                 stale.push(name);
@@ -305,8 +322,10 @@ pub fn find_stale_vendored_packages(
 pub fn remove_stale_vendored_packages(
     vendored_dir: &Path,
     stale_packages: &[String],
+    limits: &VendorLimits,
 ) -> Result<usize> {
     let vendor = Dir::open(vendored_dir)?;
+    vendor.lock(false)?;
     let mut removed = 0;
     for package in stale_packages {
         if !segment(package) {
@@ -314,7 +333,7 @@ pub fn remove_stale_vendored_packages(
         }
         if vendor.exists(package)? {
             let entry = vendor.child(package)?;
-            crate::integrity::validate_tree(&entry, &sav::CancellationToken::new())?;
+            crate::integrity::validate_tree(&entry, limits, &sav::CancellationToken::new(), false)?;
             std::fs::remove_dir_all(vendor.path().join(package)).map_err(|e| {
                 crate::fs::io_error(
                     "remove stale vendored package",
@@ -329,28 +348,14 @@ pub fn remove_stale_vendored_packages(
     Ok(removed)
 }
 
-/// Versioned legacy manifest. Recorded host paths are informational, never grants.
+/// Minimal versioned publication receipt, not a package-file inventory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VendorManifest {
     /// Independent schema version.
     pub schema_version: u32,
-    /// Timestamp of publication.
-    pub generated_at_unix_secs: u64,
-    /// Informational producer path.
-    pub project_root: String,
-    /// Relative lock filename.
-    pub lockfile_path: String,
     /// Exact locked graph digest.
     pub lockfile_digest: String,
-    /// Informational producer registry path.
-    pub vendored_dir: String,
-    /// Informational producer configuration path.
-    pub sandbox_cargo_dir: String,
-    /// Informational sandbox registry destination.
-    pub sandbox_vendored_mount: String,
-    /// Whether publication was verified.
-    pub verified: bool,
 }
 impl VendorManifest {
     /// Default project manifest path.
@@ -367,7 +372,10 @@ impl VendorManifest {
         if !state.exists(VENDOR_MANIFEST_FILENAME)? {
             return Ok(None);
         }
-        let (bytes, _) = state.read(VENDOR_MANIFEST_FILENAME, METADATA_LIMIT)?;
+        let (bytes, _) = state.read(
+            VENDOR_MANIFEST_FILENAME,
+            VendorLimits::load(project_dir)?.max_metadata_bytes,
+        )?;
         serde_json::from_slice(&bytes)
             .map(Some)
             .map_err(|_| unavailable(project_dir, "cannot parse vendoring manifest"))
@@ -377,11 +385,20 @@ impl VendorManifest {
         let state = Dir::open(project_dir)?.ensure_child(".kvist")?;
         let bytes = serde_json::to_vec_pretty(self)
             .map_err(|_| unavailable(project_dir, "cannot serialize vendoring manifest"))?;
+        if bytes.len() as u64 > VendorLimits::load(project_dir)?.max_metadata_bytes {
+            return Err(unavailable(
+                project_dir,
+                "vendor receipt exceeds configured metadata limit",
+            ));
+        }
         state.atomic(VENDOR_MANIFEST_FILENAME, &bytes)
     }
     /// Digest of current bounded regular lock bytes.
     pub fn current_digest(project_dir: &Path) -> Result<String> {
-        Ok(lockfile_digest(&lock(project_dir)?))
+        Ok(lockfile_digest(&lock(
+            project_dir,
+            &VendorLimits::load(project_dir)?,
+        )?))
     }
     /// Default registry derived from this checkout, never the recorded producer path.
     pub fn vendored_registry(&self, project_dir: &Path) -> PathBuf {
@@ -397,7 +414,7 @@ impl VendorManifest {
     pub fn report(&self, project_dir: &Path) -> Result<VendoringReport> {
         enforce_offline_readiness(project_dir, &self.vendored_registry(project_dir))
     }
-    /// Enforce the expected lock binding and full current managed readiness.
+    /// Enforce the expected lock binding and coherent current managed readiness.
     pub fn assert_ready(&self, project_dir: &Path) -> Result<VendoringReport> {
         let current = Self::current_digest(project_dir)?;
         if current != self.lockfile_digest {
@@ -420,11 +437,4 @@ pub fn offline_cargo_config(directory: &str) -> String {
         [source.crates-io]\nreplace-with = \"vendored-sources\"\n\n\
         [source.vendored-sources]\ndirectory = \"{directory}\"\n"
     )
-}
-/// Unix seconds used for a freshly published manifest.
-pub fn now_unix_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default()
 }

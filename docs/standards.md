@@ -30,6 +30,11 @@ does not claim process conformance to either lifecycle standard because doing
 so would require a broader organizational assessment with no current product
 benefit.
 
+Rust uses one shared project vendor tree and a minimal lock-bound receipt
+(ADR 0018). Cargo's native checksum metadata remains required; Kvist/Skott do
+not maintain a second per-file inventory or claim independent source-content
+attestation. Readiness is coherent metadata/presence, not proof of build success.
+
 IEEE 1016 software design description guidance was considered. Its enduring
 view-based separation of design information is useful, but Kvist uses
 ISO/IEC/IEEE 42010 plus arc42 as the primary architecture/design profile rather

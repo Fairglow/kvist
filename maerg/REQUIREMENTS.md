@@ -23,9 +23,9 @@ policy, not inherited host configuration. Changed acquisition lock bytes MUST
 fail before repack/publication. Native tests MUST exercise locked workspace
 fetch with the installed enforcement boundary without downloading packages.
 
-Protected readiness and Rust runtime preparation MUST honor shared full
+Protected readiness and Rust runtime preparation MUST honor shared coherent
 readiness and publication/operation fences. Tests MUST cover interrupted
-same-lock publication, corrupt files and unchanged protected fulfillment
+same-lock publication, missing metadata and unchanged protected fulfillment
 refusal. These human-requested repairs use the existing local advisory exception.
 Configured acquisition MUST reject unsupported Git transports and unapproved
 repository/revision bindings in local manifests and Cargo.lock before fetching.
@@ -33,6 +33,12 @@ Only exact approved canonical HTTPS Git repositories with immutable revisions
 are supported there; native Git/SSH transports must not bypass proxy policy.
 Standalone child authoring without root Cargo.lock or managed Rust state remains
 supported with the existing empty offline registry.
+Kvist MUST use the same `.kvist/vendored` tree, minimal lock receipt and
+configurable vendor limits as Skott, without independent file-content
+attestation. Authoring/verification MUST hold shared vendor read ownership
+through execution so library publication cannot retire an in-use tree.
+Explicit `kvist vendor --force` MAY rebuild otherwise reusable source material.
+This user-directed simplification uses the existing local advisory exception.
 
 ## Shared registry configuration acceptance (ADR 0015)
 

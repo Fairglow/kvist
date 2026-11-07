@@ -10,6 +10,50 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:1339c23f9bfbeacaf136e951c4f62ecec394c932101691fdc241a19402cc62c5", "observed_revision": "sha256:91d5b83ce9c19639c2d381062413d6e60c4e6f06a3e889589e2d6661cf4dddd5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:2bceb93227d8669a775839cc66a3551913d53273c8917973b2fe447399bbd300", "observed_revision": "sha256:f9c3f0229bc4968cc099e3a139ea7dd8fc75933cd7ac6465a01596ff4a3a0029"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:e18eae35428b3e86a5aed9f4feaff20b3d7aff10c1bdb652f5d23b25f0fe4206", "observed_revision": "sha256:0ca9db51d23c506aad7f648c9ceca5784d613846b1d109ea618f6a2dfac64c2c"}]
 tasks:
+  - id: shared-area-write-tests
+    title: "write_tests: shared Rust vendor ownership"
+    description: "Pin shared metadata, limits and read ownership through native authoring/verification."
+    context: "User requests one shared area and lightweight checks; explicit local advisory exception."
+    purpose: "Preserve protected authority without redundant package copies."
+    expected_outcome: "Focused shared-use regressions fail before implementation."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
+  - id: shared-area-implement-code
+    title: "implement_code: shared Rust vendor ownership"
+    description: "Use common receipt/limits and hold read owners through Rust execution; expose explicit force rebuild."
+    context: "Configured acquisition and protected refusal retain separate authority."
+    purpose: "Safely share the project registry with Skott."
+    expected_outcome: "Native Rust and shared-use regressions pass."
+    kind: implementation
+    status: completed
+    depends_on: [shared-area-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
+  - id: shared-area-security-audit
+    title: "security_audit: shared Rust vendor boundary"
+    description: "Independently observe reader ownership, minimal metadata and unchanged acquisition authority."
+    context: "Source-only context excludes intent, queue, old observations and history."
+    purpose: "Retain independent safety observations."
+    expected_outcome: "Record scoped observations and limitations."
+    kind: security-audit
+    status: completed
+    depends_on: [shared-area-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
+  - id: shared-area-compliance-review
+    title: "compliance_review: shared Rust vendor boundary"
+    description: "Compare scoped local intent and independent observations without raw source."
+    context: "Retain discrepancies rather than certify or accept stale revisions."
+    purpose: "Keep implementation and intended behavior distinct."
+    expected_outcome: "Persist bounded source-blind comparison."
+    kind: compliance-review
+    status: completed
+    depends_on: [shared-area-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:06:47Z", completed_at: "2026-11-07T01:06:47Z"}
   - id: "shared-dependencies-write-tests"
     title: "write_tests: shared offline Rust provider"
     description: "REQ-SHARED-OFFLINE-DEPENDENCIES: failure/no fallback, common readiness and retained protected refusals."

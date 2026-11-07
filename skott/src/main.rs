@@ -39,7 +39,8 @@ fn run() -> skott::Result<ExitCode> {
                 },
             );
         }
-        let report = skott::dependencies::run(&project, cli.check, cli.offline, &cancellation)?;
+        let report =
+            skott::dependencies::run(&project, cli.check, cli.offline, cli.force, &cancellation)?;
         println!("{report}");
         return Ok(ExitCode::SUCCESS);
     }

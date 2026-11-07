@@ -13,8 +13,8 @@ Unsupported languages MUST fail explicitly. Future language support needs
 shared provisioning and actual tested offline environment wiring, not just
 language-tool discovery.
 
-Rust startup MUST validate available external dependencies against the locked
-catalogue in its private immutable snapshot and surface missing/corrupt material
+Rust startup MUST check available package/native metadata against the locked
+catalogue in the shared `.kvist/vendored` tree and surface missing/stale metadata
 with the exact Skott provisioning command. Safe generated source configuration
 MUST support locked registry/Git replacements without trusting host paths.
 Existing dependency-free/local builds, sandbox masking, locked Cargo, no host
@@ -28,11 +28,18 @@ exercise installed compiler/target selection, build/run, unit/integration/doc
 tests, formatting, Clippy, documentation, locked registry/Git dependencies and
 the existing isolation assertions; availability is not a promise of arbitrary
 system libraries, credentials or out-of-workspace path dependencies.
-Vendor snapshot files MUST retain their enumeration-time identity/size through
-copying, so concurrent file growth cannot bypass the 1 GiB aggregate bound.
+Skott MUST NOT copy vendor package contents or hash their file inventory.
+The shared vendor tree MUST be read-only at `/rust/vendor`, with its writable
+workspace alias inaccessible. A shared read owner MUST survive each tool call,
+but not block provisioning while the session is idle. Directory/lock replacement
+requires restart; direct host source edits are left to Cargo's native checks.
+Both applications MUST use shared vendor limits/defaults. Explicit `--force`
+rebuilds damaged material without automatic downloads or fallback.
 
 This human-requested Rust consolidation has a local advisory exception while
 receipts are unavailable; observations/reviews are not acceptance.
+The user-directed 2026-11-07 simplification deliberately replaces the older
+copy/content-attestation policy using the same local advisory exception.
 
 ## RUN-REQ-STANDALONE-BOOTSTRAP
 
@@ -247,8 +254,8 @@ claim their presence.
 
 Build output MUST use the writable workspace's `/workspace/target` so it
 survives shell invocations. Cargo cache and selection settings remain private
-invocation scratch. Vendored resolution MUST consume the validated read-only
-snapshot, not the mutable workspace alias of `.kvist/vendored`.
+invocation scratch. Vendored resolution MUST consume the shared read-only
+vendor tree with per-tool read ownership, not its mutable workspace alias.
 The workspace alias MUST be inaccessible during prepared sandbox execution
 without changing the host registry or concealing unrelated project state.
 
@@ -412,9 +419,9 @@ rendering forms.
 
 Sandbox preparation cost MUST stay comfortably within the documented 30-second
 bounds on representative hardware: per-invocation validation MUST NOT re-read
-or re-hash full toolchain binaries, and the startup vendor snapshot MUST copy
-bounded files concurrently without weakening its determinism, bounds, or
-per-file drift detection.
+or re-hash full toolchain binaries. Vendor startup MUST reuse the shared tree
+without copying or scanning source files; publication and sandbox write
+exclusion remain enforced rather than relying on a second package copy.
 
 Operational logs MUST retain retry and compaction notices, resolved capacity
 provenance, actual failure reasons, per-prompt counts and unknown usage rather

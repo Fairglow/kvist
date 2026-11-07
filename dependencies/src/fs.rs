@@ -13,8 +13,6 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub(crate) const LOCK_LIMIT: u64 = 16 * 1024 * 1024;
-pub(crate) const METADATA_LIMIT: u64 = 16 * 1024 * 1024;
 pub(crate) const O_NOFOLLOW: i32 = nix::libc::O_NOFOLLOW;
 
 pub(crate) fn io_error(operation: &'static str, path: &Path, source: std::io::Error) -> Error {
@@ -67,6 +65,7 @@ pub(crate) fn absolute(path: &Path) -> Result<PathBuf> {
 }
 
 /// Descriptor-anchored directories keep ancestor replacement from redirecting I/O.
+#[derive(Debug)]
 pub(crate) struct Dir {
     file: File,
     pub(crate) display: PathBuf,
@@ -134,6 +133,23 @@ impl Dir {
             .map_err(|e| io_error("synchronize directory", &self.display, e))
     }
 
+    pub(crate) fn lock(&self, shared: bool) -> Result<()> {
+        let result = if shared {
+            self.file.try_lock_shared()
+        } else {
+            self.file.try_lock()
+        };
+        result.map_err(|error| match error {
+            std::fs::TryLockError::WouldBlock => Error::InUse {
+                path: self.display.clone(),
+            },
+            std::fs::TryLockError::Error(source) => {
+                io_error("lock vendor directory", &self.display, source)
+            }
+        })?;
+        self.still_at_path()
+    }
+
     pub(crate) fn still_at_path(&self) -> Result<()> {
         let current = Self::open(&self.display)?;
         let original = self
@@ -165,7 +181,7 @@ impl Dir {
         }
     }
 
-    pub(crate) fn entries(&self) -> Result<Vec<String>> {
+    pub(crate) fn entries(&self, limit: usize) -> Result<Vec<String>> {
         let mut result = Vec::new();
         for entry in std::fs::read_dir(self.path())
             .map_err(|e| io_error("enumerate directory", &self.display, e))?
@@ -175,7 +191,7 @@ impl Dir {
                 .file_name()
                 .into_string()
                 .map_err(|_| unavailable(&self.display, "non-UTF-8 tree entry"))?;
-            if !segment(&name) || result.len() >= 100_000 {
+            if !segment(&name) || result.len() >= limit {
                 return Err(unavailable(
                     &self.display,
                     "unsafe or over-limit tree entries",
@@ -219,7 +235,7 @@ impl Dir {
         let before = Identity::of(&file, &display)?;
         let mut bytes = Vec::new();
         (&mut file)
-            .take(limit + 1)
+            .take(limit.saturating_add(1))
             .read_to_end(&mut bytes)
             .map_err(|e| io_error("read bounded regular file", &display, e))?;
         if bytes.len() as u64 > limit || before != Identity::of(&file, &display)? {
@@ -236,7 +252,7 @@ impl Dir {
             return Err(unavailable(&self.display, "unsafe publication name"));
         }
         if self.exists(name)? {
-            self.regular(name, METADATA_LIMIT)?;
+            self.regular(name, u64::MAX)?;
         }
         let mut temp = tempfile::Builder::new()
             .prefix(".vendor-write-")
@@ -275,7 +291,7 @@ impl Dir {
 pub(crate) struct Identity {
     device: u64,
     inode: u64,
-    size: u64,
+    pub(crate) size: u64,
     modified: i64,
     modified_ns: i64,
     changed: i64,

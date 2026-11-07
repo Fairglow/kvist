@@ -20,13 +20,19 @@ apply; unsupported layouts fail explicitly. Approved alternate registry
 definitions are generated from acquisition policy. Fetch uses the runner's
 unchanged closed argv; changed lock bytes are rejected before offline repack.
 The standalone explicit host operator command remains separate authority, not
-fallback or protected model fulfillment. Full managed readiness gates protected
+fallback or protected model fulfillment. Coherent managed readiness gates protected
 inspection and prepared Rust resources, including publication/operation fences.
 Configured Git fetch requires an exact approved HTTPS repository and full
 immutable revision in both manifests and the lock; unsupported transports,
 branch/tag-only declarations and unapproved bindings fail before fetch.
 Authoring a standalone child with no root lock or managed Rust state retains
 the empty offline registry rather than requiring nonexistent root metadata.
+`kvist vendor [PROJECT_DIR] --force` explicitly rebuilds reusable Rust material.
+Both applications use the same `.kvist/vendored`, `.kvist/vendor.json` minimal
+receipt, source resolver and optional `.kvist/vendor.toml` policy. Kvist retains
+vendor read ownership through Rust authoring/verification. Readiness checks
+metadata/presence rather than independently hashing package files; Cargo owns
+its required checksum inventory. No automatic repair/fallback is introduced.
 
 ## Shared registry configuration (ADR 0015)
 
@@ -217,7 +223,7 @@ The `kvist` executable provides (the authoritative design is
 - `task recover [COMPONENT_DIR] TASK_ID ATTEMPT_ID --disposition execution-did-not-start`
 - `task finalize [COMPONENT_DIR] TASK_ID ATTEMPT_ID DISPOSITION [--commit]
 [--reason TEXT]` with DISPOSITION `accept` or `block`
-- `vendor [PROJECT_DIR] [--vendored-dir PATH]`
+- `vendor [PROJECT_DIR] [--vendored-dir PATH] [--force]`
 - `toolchain [PROJECT_DIR]`
 - `prompt` with one explicit prompt source or redirected input, optional
   `--role`, `--model`, and `--reasoning-effort`
@@ -1051,8 +1057,10 @@ All current formats are version 1 and independently versioned:
   every non-current project state;
 - attempt logs: bounded JSON Lines evidence;
 - sandbox request: `protocol_version: 1`;
-- vendoring manifest (`.kvist/vendoring-v1.json`): `schema_version: 1` with
-  the lock-file digest, vendored directory, and sandbox mount destinations;
+- Rust vendor receipt (`.kvist/vendor.json`): only `schema_version: 1` and
+  `lockfile_digest`; host paths, timestamps and file inventories are absent;
+- optional shared vendor policy (`.kvist/vendor.toml`): native TOML 1.1,
+  `[limits]` fields/defaults defined by `kvist_dependencies::VendorLimits`;
 - toolchain manifest (`.kvist/rust-toolchain.json`): `schema_version: 1` with
   the pinned channel, toolchain root, cargo path, cargo content digest, and
   provisioning timestamp.

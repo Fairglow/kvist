@@ -141,6 +141,9 @@ pub enum Command {
         /// `<project>/.kvist/vendored`.
         #[arg(long, value_name = "PATH")]
         vendored_dir: Option<PathBuf>,
+        /// Explicitly rebuild otherwise reusable Rust material.
+        #[arg(long)]
+        force: bool,
     },
     /// Provision the project's pinned Rust toolchain on the host, outside the
     /// sandbox (ADR-0012).
@@ -873,6 +876,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             Command::Vendor {
                 project_dir,
                 vendored_dir,
+                force,
             } => {
                 let project = context::ProjectContext::resolve(project_dir.as_deref())?;
                 // When the project has a sandbox configured, `kvist vendor`
@@ -885,6 +889,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     vendor_command::VendorOptions {
                         vendored_dir,
                         populate: true,
+                        force,
                         sandbox,
                     },
                 )
@@ -1534,6 +1539,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             Command::Vendor {
                 project_dir,
                 vendored_dir,
+                force,
             } => {
                 let project = context::ProjectContext::resolve(project_dir.as_deref())?;
                 let sandbox = vendor_command::configured_sandbox(&project.project_dir)?;
@@ -1542,6 +1548,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     vendor_command::VendorOptions {
                         vendored_dir,
                         populate: true,
+                        force,
                         sandbox,
                     },
                 )

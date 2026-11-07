@@ -185,9 +185,14 @@ pub(crate) fn build_request_with_rust(
         preflight.check()?;
         for resource in rust.grants() {
             let source = Path::new(&resource.source);
-            if roots_overlap(source, &workdir) {
+            let shared_vendor = source == workdir.join(".kvist/vendored")
+                && write_root == "/workspace"
+                && resource.destination == "/rust/vendor"
+                && resource.access == Access::ReadOnly
+                && resource.purpose == Purpose::Toolchain;
+            if roots_overlap(source, &workdir) && !shared_vendor {
                 return Err(Error::SandboxBuild {
-                    reason: "Rust resources must be outside the writable workspace".into(),
+                    reason: "Rust resources must be outside the writable workspace except the exact masked read-only vendor area".into(),
                 });
             }
             wires.push(GrantWire {

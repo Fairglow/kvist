@@ -80,6 +80,8 @@ const MAX_VENDOR_ERROR_BYTES: usize = 4096;
 /// Options controlling a vendoring pass.
 #[derive(Debug, Clone, Default)]
 pub struct VendorOptions {
+    /// Explicitly rebuild otherwise reusable Rust material.
+    pub force: bool,
     /// An explicit vendored-registry directory. Defaults to
     /// `<project>/.kvist/vendored` when `None`.
     pub vendored_dir: Option<PathBuf>,
@@ -210,9 +212,9 @@ pub fn check_protected_vendor_readiness(
                 .into(),
         )
     })?;
-    if manifest.schema_version != crate::vendoring::VENDOR_SCHEMA_VERSION || !manifest.verified {
+    if manifest.schema_version != crate::vendoring::VENDOR_SCHEMA_VERSION {
         return Err(refused(
-            "the existing Rust vendoring manifest is not verified at the supported version".into(),
+            "the existing Rust vendoring receipt has an unsupported version".into(),
         ));
     }
     let current = VendorManifest::current_digest(&project_dir)?;
@@ -247,6 +249,10 @@ pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<Vend
     let project_dir = canonical_or(project_dir)?;
     let strategy = crate::language_vendoring::detect_language_strategy(&project_dir)?;
     match strategy.id() {
+        language if options.force && language != "rust" => Err(KvistError::VendoringUnavailable {
+            path: project_dir.to_string_lossy().into_owned(),
+            reason: "--force rebuild is currently supported for Rust only".into(),
+        }),
         "rust" => Ok(VendorReport::Rust(vendor_rust_project(
             &project_dir,
             options,
@@ -332,11 +338,13 @@ fn vendor_rust_project(
     options: VendorOptions,
 ) -> Result<crate::vendoring::VendoringReport> {
     let cancellation = sav::CancellationToken::new();
+    let limits = kvist_dependencies::VendorLimits::load(project_dir)?;
     if !options.populate {
         return kvist_dependencies::rust::provision_with(
             project_dir,
             options.vendored_dir.as_deref(),
             &cancellation,
+            options.force,
             |_| Err(kvist_dependencies::Error::VendoringUnavailable {
                 path: project_dir.to_string_lossy().into_owned(),
                 reason: "locked dependency acquisition is required but population was not authorized; run the explicit operator vendor command".into(),
@@ -348,6 +356,7 @@ fn vendor_rust_project(
             project_dir,
             options.vendored_dir.as_deref(),
             &cancellation,
+            options.force,
             |staged| {
                 provision_rust_via_acquisition_sandbox(project_dir, sandbox, staged).map_err(
                     |error| kvist_dependencies::Error::VendoringUnavailable {
@@ -369,7 +378,8 @@ fn vendor_rust_project(
             cargo,
             offline: false,
             vendored_dir: options.vendored_dir,
-            timeout: std::time::Duration::from_secs(900),
+            timeout: std::time::Duration::from_secs(limits.timeout_secs),
+            force: options.force,
         },
         &cancellation,
     )
@@ -394,6 +404,7 @@ fn provision_rust_via_acquisition_sandbox(
 ) -> Result<String> {
     use crate::config::{PackageSource, VcsSelection};
     use crate::sandbox::{SandboxProbe, backend_identity, ensure_available, runner_identity};
+    let limits = kvist_dependencies::VendorLimits::load(project_dir)?;
 
     // Explicit standalone paths may not have project configuration.
     let vcs = match crate::config::load(project_dir) {
@@ -516,8 +527,8 @@ fn provision_rust_via_acquisition_sandbox(
             },
             crate::sandbox::ExecutionOptions {
                 // A fetch may download a large dependency set; give it ample time.
-                timeout: Some(std::time::Duration::from_secs(900)),
-                output_limit: Some(1 << 20),
+                timeout: Some(std::time::Duration::from_secs(limits.timeout_secs)),
+                output_limit: Some(limits.max_output_bytes),
                 live_stdout: None,
             },
         )?;
@@ -550,7 +561,8 @@ fn provision_rust_via_acquisition_sandbox(
             cargo: toolchain.cargo,
             offline: true,
             vendored_dir: None,
-            timeout: std::time::Duration::from_secs(900),
+            timeout: std::time::Duration::from_secs(limits.timeout_secs),
+            force: false,
         };
         kvist_dependencies::rust::populate(
             project_dir,
@@ -1166,7 +1178,7 @@ mod tests {
             "version=4\n[[package]]\nname=\"offline-fixture\"\nversion=\"0.1.0\"\nsource=\"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum=\"{checksum}\"\n"
         )).unwrap();
             let report = kvist_dependencies::rust::provision_with(
-            project.path(), destination.as_deref(), &sav::CancellationToken::new(),
+            project.path(), destination.as_deref(), &sav::CancellationToken::new(), false,
             |vendor| with_acquisition_scratch(project.path(), vendor, |scratch| {
                 std::fs::write(scratch.join("observed-fetch"), b"owned cache").unwrap();
                 let package = vendor.join("offline-fixture");
@@ -1189,7 +1201,7 @@ mod tests {
         ).expect("scratch cleanup must leave a publishable vendor-only candidate");
             assert!(report.ready());
             let vendor = destination.unwrap_or_else(|| project.path().join(".kvist/vendored"));
-            kvist_dependencies::rust::check_snapshot(
+            kvist_dependencies::rust::check_view(
                 project.path(),
                 &vendor,
                 &sav::CancellationToken::new(),
@@ -1249,7 +1261,7 @@ mod tests {
                 | KvistError::SandboxUnavailable { .. }
         ));
         assert_eq!(std::fs::read_dir(&vendored).unwrap().count(), 0);
-        assert!(!project.join(".kvist/vendoring-v1.json").exists());
+        assert!(!project.join(".kvist/vendor.json").exists());
     }
 
     /// Stale packages (present in vendored dir but not in Cargo.lock) should
@@ -1358,7 +1370,12 @@ mod tests {
         write_vendored_package(&vendored, "stale-pkg", "2.0.0");
 
         let stale = find_stale_vendored_packages(project.path(), &vendored).expect("find stale");
-        remove_stale_vendored_packages(&vendored, &stale).expect("remove stale");
+        remove_stale_vendored_packages(
+            &vendored,
+            &stale,
+            &kvist_dependencies::VendorLimits::default(),
+        )
+        .expect("remove stale");
 
         assert!(
             !vendored.join("stale-pkg").exists(),
