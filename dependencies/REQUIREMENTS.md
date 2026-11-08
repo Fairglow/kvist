@@ -85,6 +85,10 @@ advisory exception; earlier full-attestation/copy intent is deliberately replace
 Default Rust offline preparation MUST reuse the operator-selected native Cargo
 home's registry index, archives, expanded sources and Git state without
 vendoring, copying, inventorying, hashing or synchronizing package contents.
+The selected home's `registry` and `git` entries MAY link to shared native data
+directories. Resolve only those root selectors to canonical non-root directories
+before inspection or returning mount paths; deeper metadata/source links remain
+forbidden. A root MUST NOT resolve to the Cargo home or one of its ancestors.
 An explicit absolute `CARGO_HOME` takes precedence over absolute `HOME/.cargo`;
 neither receipts nor project configuration grants host cache paths.
 Catalogue inspection MUST be process/write/network-free and bounded to locked
@@ -92,6 +96,10 @@ packages and native metadata. It MUST distinguish missing material from unsafe
 paths and unsupported trustworthy source mapping. Alternate registry and Git
 origins MUST NOT be certified from name/version or invented Cargo cache hashes.
 Native mode MUST accept distinct sources with identical package name/version.
+
+The user-requested 2026-11-08 repair uses an explicit scoped advisory exception
+while review receipts are unavailable; independent observation and comparison
+remain separate from acceptance.
 
 ## DEP-REQ-NATIVE-PROVISION
 

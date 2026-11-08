@@ -1,4 +1,7 @@
-use super::{CacheView, inspect, native, optional, receipt_matches, selected, view};
+use super::{
+    CacheView, ensure_root, inspect, native, optional, optional_root, receipt_matches, selected,
+    view,
+};
 use crate::{
     Error, Result,
     fs::Dir,
@@ -61,13 +64,13 @@ pub fn sources(
     let home = optional(&parent, name)?;
     let registry = home
         .as_ref()
-        .map(|h| optional(h, "registry"))
+        .map(|h| optional_root(h, "registry"))
         .transpose()?
         .flatten()
         .map(|d| d.display);
     let git = home
         .as_ref()
-        .map(|h| optional(h, "git"))
+        .map(|h| optional_root(h, "git"))
         .transpose()?
         .flatten()
         .map(|d| d.display);
@@ -160,8 +163,8 @@ pub fn admit_with(
             if let Some(missing) = native::directory_missing(&graph, &home)? {
                 return Ok(missing);
             }
-            home.ensure_child("registry")?;
-            home.ensure_child("git")?;
+            ensure_root(&home, "registry")?;
+            ensure_root(&home, "git")?;
             graph.unchanged(&project, cancellation)?;
             let bytes = validate(&home.display)?;
             native::validate_bytes(&project, &graph, &home, &bytes, true, cancellation)

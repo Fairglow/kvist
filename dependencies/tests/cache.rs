@@ -275,16 +275,78 @@ fn lock_drift_preserves_acquired_sources_but_never_writes_receipt() {
 }
 
 #[test]
+fn linked_native_roots_return_canonical_mounts_and_reuse_warm_material() {
+    let dir = project();
+    let home = dir.path().join("cargo-home");
+    let shared = dir.path().join("shared");
+    fill(&shared);
+    fs::create_dir(shared.join("git")).unwrap();
+    for name in ["registry", "git"] {
+        symlink(shared.join(name), home.join(name)).unwrap();
+    }
+    let view = cache::provision_with(dir.path(), &home, &token(), false, |_| {
+        panic!("warm linked native roots must bypass acquisition")
+    })
+    .unwrap();
+    assert!(view.report.ready());
+    assert_eq!(view.registry, Some(shared.join("registry")));
+    assert_eq!(view.git, Some(shared.join("git")));
+    let sources = cache::sources(dir.path(), &home, &token()).unwrap();
+    assert_eq!(sources.registry, view.registry);
+    assert_eq!(sources.git, view.git);
+}
+
+#[test]
 fn unsafe_cache_roots_fail_before_acquisition_with_actual_io_cause() {
     let dir = project();
     let home = dir.path().join("cargo-home");
-    fs::create_dir(dir.path().join("outside")).unwrap();
-    symlink(dir.path().join("outside"), home.join("registry")).unwrap();
+    symlink(dir.path().join("missing"), home.join("registry")).unwrap();
     let result = cache::provision_with(dir.path(), &home, &token(), false, |_| {
         panic!("unsafe root must refuse callback")
     });
     assert!(matches!(result, Err(Error::Io { .. })));
     assert!(cache::view(dir.path(), Path::new("relative-home"), &token()).is_err());
+}
+
+#[test]
+fn linked_native_roots_reject_broad_targets_and_deeper_metadata_links() {
+    let dir = project();
+    let home = dir.path().join("cargo-home");
+    for target in [Path::new("/"), &home, dir.path()] {
+        symlink(target, home.join("registry")).unwrap();
+        assert!(cache::sources(dir.path(), &home, &token()).is_err());
+        fs::remove_file(home.join("registry")).unwrap();
+    }
+    let shared = dir.path().join("shared");
+    fill(&shared);
+    symlink(shared.join("registry"), home.join("registry")).unwrap();
+    let index = shared.join("registry/index");
+    fs::rename(&index, shared.join("index")).unwrap();
+    symlink(shared.join("index"), &index).unwrap();
+    assert!(cache::view(dir.path(), &home, &token()).is_err());
+}
+
+#[test]
+fn configured_metadata_admission_uses_resolved_native_root() {
+    let dir = project();
+    let home = dir.path().join("cargo-home");
+    let shared = dir.path().join("shared");
+    fill(&shared);
+    fs::create_dir(shared.join("git")).unwrap();
+    for name in ["registry", "git"] {
+        symlink(shared.join(name), home.join(name)).unwrap();
+    }
+    let source = "registry+sparse+https://other.example/index/";
+    fs::write(dir.path().join("Cargo.lock"), lock(source, SUM)).unwrap();
+    let view = cache::admit_with(dir.path(), &home, &token(), |_| {
+        Ok(serde_json::to_vec(&serde_json::json!({"packages":[{
+            "name":"demo", "version":"1.0.0", "source":source,
+            "manifest_path":format!("/workspace/cargo-registry/src/{NAMESPACE}/demo-1.0.0/Cargo.toml")
+        }]})).unwrap())
+    })
+    .unwrap();
+    assert!(view.report.ready());
+    assert_eq!(view.registry, Some(shared.join("registry")));
 }
 
 #[test]
@@ -509,6 +571,9 @@ fn actual_git_cache_is_validated_natively_and_reused_without_acquisition() {
     .unwrap();
     assert!(first.report.ready());
     assert_eq!(calls.get(), 1);
+    let shared_git = dir.path().join("shared-git");
+    fs::rename(home.join("git"), &shared_git).unwrap();
+    symlink(&shared_git, home.join("git")).unwrap();
     assert!(matches!(
         cache::view(dir.path(), &home, &token()),
         Err(Error::UnsupportedCacheSource { .. })
@@ -536,7 +601,8 @@ fn actual_git_cache_is_validated_natively_and_reused_without_acquisition() {
             .report
             .ready()
     );
-    fs::remove_dir_all(home.join("git")).unwrap();
+    assert_eq!(source_view.git, Some(shared_git));
+    fs::remove_file(home.join("git")).unwrap();
     assert!(matches!(
         cache::sources(dir.path(), &home, &token())
             .unwrap()

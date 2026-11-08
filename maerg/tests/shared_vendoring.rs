@@ -87,14 +87,39 @@ fn operator_custom_vendor_destination_preserves_relative_and_absolute_selection(
 }
 
 #[test]
-fn rust_enforcement_rejects_interrupted_same_lock_publication() {
+fn native_rust_enforcement_preserves_and_ignores_legacy_export_interruption() {
     let project = tempfile::tempdir().unwrap();
     fs::write(project.path().join("Cargo.lock"), "version=4\n").unwrap();
     fs::write(project.path().join("Cargo.toml"), "[workspace]\n").unwrap();
-    kvist::vendor_command::vendor_project(project.path(), Default::default()).unwrap();
-    fs::create_dir(project.path().join(".kvist/vendor-publication")).unwrap();
-    assert!(
-        kvist::language_vendoring::enforce_vendoring(project.path(), false, None).is_err(),
-        "interrupted publication was reported ready for Rust execution"
+    fs::create_dir_all(project.path().join(".kvist/vendor-publication")).unwrap();
+    let marker = project.path().join(".kvist/vendor-publication/retained");
+    fs::write(&marker, "interrupted export").unwrap();
+    let home = project.path().join("native-home");
+    fs::create_dir(&home).unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "native_rust_enforcement_probe"])
+        .env("CARGO_HOME", &home)
+        .env("KVIST_NATIVE_ENFORCEMENT_PROJECT", project.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(fs::read_to_string(marker).unwrap(), "interrupted export");
+    assert!(!project.path().join(".kvist/vendored").exists());
+    assert!(!project.path().join(".kvist/cargo-cache.json").exists());
+}
+
+#[test]
+fn native_rust_enforcement_probe() {
+    let Some(project) = std::env::var_os("KVIST_NATIVE_ENFORCEMENT_PROJECT") else {
+        return;
+    };
+    let enforcement =
+        kvist::language_vendoring::enforce_vendoring(std::path::Path::new(&project), false, None)
+            .unwrap();
+    assert_eq!(enforcement.language, "rust");
+    assert_eq!(
+        enforcement.vendored_dir,
+        std::path::PathBuf::from(std::env::var_os("CARGO_HOME").unwrap())
     );
+    assert!(enforcement.mounts.is_empty());
 }

@@ -10,6 +10,50 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: diagnostic-deadlock-write-tests
+    title: "write_tests: payload and proxy stderr deadlock"
+    description: "Reproduce the real-runner source denial stalled behind payload stderr forwarding."
+    context: "Executed source-aware denial failed in nextest 3d718dbe-6d0d-4591-8a8f-707d2b305ddf; explicit scoped advisory exception."
+    purpose: "Prevent diagnostic locks from stalling source denial."
+    expected_outcome: "Real-runner denial reaches the payload before its wall deadline."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:44:02Z", completed_at: "2026-11-08T18:44:02Z"}
+  - id: diagnostic-deadlock-implement-code
+    title: "implement_code: chunk-scoped output locks"
+    description: "Release host output locks while waiting for payload bytes and remove temporary proxy debugging."
+    context: "Output budget and transport authorization remain unchanged."
+    purpose: "Allow proxy diagnostics during quiet payload execution."
+    expected_outcome: "Source denial and existing output-limit/native runner cases pass."
+    kind: implementation
+    status: completed
+    depends_on: [diagnostic-deadlock-write-tests]
+    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
+  - id: diagnostic-deadlock-security-audit
+    title: "security_audit: output and transport ownership"
+    description: "Independently observe output lock ownership and retained transport/resource boundaries."
+    context: "Clean-slate source-only context; no intent or prior record."
+    purpose: "Expose ownership and authority regressions independently."
+    expected_outcome: "Scoped source-derived observations are retained in IMPL."
+    kind: security-audit
+    status: completed
+    depends_on: [diagnostic-deadlock-implement-code]
+    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
+  - id: diagnostic-deadlock-compliance-review
+    title: "compliance_review: independent deadlock evidence"
+    description: "Compare intent with clean-slate source observations and attributed real-runner evidence."
+    context: "Separate source-blind context; passing tests do not certify enforcement."
+    purpose: "Retain discrepancies for human arbitration."
+    expected_outcome: "Independent comparison is recorded without acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: [diagnostic-deadlock-security-audit]
+    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
   - id: transport-write-tests
     title: "write_tests: reproduce client-first CONNECT deadlock and transport bounds"
     description: "Add real-socket bidirectional CONNECT, parallel/idle-client, half-close, bounded header/inactivity, overload, upstream failure and cancellation regressions; record failures before transport repair."

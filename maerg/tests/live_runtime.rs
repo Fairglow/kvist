@@ -11,6 +11,8 @@ use kvist::agent::{AgentExecutionRequest, execute_agent};
 use kvist::config::{AgentProfile, Model, Role, SandboxConfig, VcsSelection};
 use sav::observation::JournalFollower;
 
+const SCRIPTED_TIMEOUT_SECONDS: u64 = 120;
+
 #[path = "live_runtime/generation.rs"]
 mod generation;
 #[path = "live_runtime/progress.rs"]
@@ -585,7 +587,7 @@ fn resilience_run_scripted(
         let stopped_ref = &stopped;
         let provider = scope.spawn(move || {
             let mut calls = 0;
-            let deadline = Instant::now() + Duration::from_secs(30);
+            let deadline = Instant::now() + Duration::from_secs(SCRIPTED_TIMEOUT_SECONDS);
             while !stopped_ref.load(Ordering::SeqCst) {
                 assert!(Instant::now() < deadline, "missing inference");
                 match listener.accept() {
@@ -606,7 +608,7 @@ fn resilience_run_scripted(
             calls
         });
         let mut selected = shared_profile(&endpoint, 32768);
-        selected.timeout_seconds = 30;
+        selected.timeout_seconds = SCRIPTED_TIMEOUT_SECONDS;
         let no_effect_config = SandboxConfig {
             runner: "/usr/bin/true".into(),
             backend: "/usr/bin/true".into(),

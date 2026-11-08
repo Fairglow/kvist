@@ -227,7 +227,7 @@ pub(super) fn directory_missing(graph: &LockedGraph, home: &Dir) -> Result<Optio
         if !required {
             continue;
         }
-        let Some(root) = super::optional(home, root)? else {
+        let Some(root) = super::optional_root(home, root)? else {
             return missing(graph, home).map(Some);
         };
         for child in children {
@@ -298,23 +298,43 @@ pub(super) fn validate_bytes(
         let Some(source) = package.source.as_deref() else {
             continue;
         };
-        let (native, sandbox_base) =
+        let (native, sandbox_base, data_base) =
             if source.starts_with("registry+") || source.starts_with("sparse+") {
-                ("registry/src", "/workspace/cargo-registry/src")
+                (
+                    "registry/src",
+                    "/workspace/cargo-registry/src",
+                    view.registry.as_ref().map(|p| p.join("src")),
+                )
             } else if source.starts_with("git+") {
-                ("git/checkouts", "/workspace/cargo-git/checkouts")
+                (
+                    "git/checkouts",
+                    "/workspace/cargo-git/checkouts",
+                    view.git.as_ref().map(|p| p.join("checkouts")),
+                )
             } else {
                 return Err(unsupported(
                     &home.display,
                     "native Cargo metadata source kind is unsupported",
                 ));
             };
+        let data_base = data_base.ok_or_else(|| {
+            unsupported(
+                &home.display,
+                "native metadata requires an absent data root",
+            )
+        })?;
         let base = if sandbox {
             PathBuf::from(sandbox_base)
         } else {
             home.display.join(native)
         };
-        let relative = package.manifest_path.strip_prefix(&base).map_err(|_| {
+        let relative = package.manifest_path.strip_prefix(&base).or_else(|error| {
+            if sandbox {
+                Err(error)
+            } else {
+                package.manifest_path.strip_prefix(&data_base)
+            }
+        }).map_err(|_| {
             unsupported(&home.display, "native Cargo resolved external material outside the selected native data roots; directory exports/configuration are not native cache")
         })?;
         if relative.components().count() < 3
@@ -329,7 +349,7 @@ pub(super) fn validate_bytes(
                 "native Cargo manifest path does not identify a bounded native source location",
             ));
         }
-        let actual = home.display.join(native).join(relative);
+        let actual = data_base.join(relative);
         let parent = actual
             .parent()
             .ok_or_else(|| unavailable(&home.display, "native package manifest has no parent"))?;

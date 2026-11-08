@@ -1,6 +1,48 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Independent boundary fixture repair observations - 2026-11-08
+
+Clean-slate `repair-source-observer` read current source/test assertions only,
+excluding intent, queues, prior records/reviews and history, and ran no tests.
+Assertions cover typed request rejection, protected-byte preservation, explicit
+disjoint grants, backend mismatch, network denial, source-origin filtering,
+promotion refusal without publication authority, and read-only offline/locked
+verification. File-cap and private-tmpfs probes require failed payload writes,
+prompt exit and no delayed effects; host scratch remains unchanged.
+
+Live-runtime assertions cover journals before provider completion, redaction,
+steering/context preservation, cumulative usage and retained earlier evidence.
+Repeated generation and tools share two correction opportunities; rejected tools
+do not dispatch, and observed revisions distinguish progress from no-ops.
+Native enforcement assertions preserve interrupted export state. Acquisition
+fixtures use synthetic Cargo scripts; effect gates do not establish sandbox
+isolation, and large timeout selections do not prove multi-day execution.
+
+The observer identified a pre-existing out-of-scope fixture limitation:
+`dogfood_boundary/support.rs` accepts explicit model URL overrides by substring,
+not parsed URL authority. A non-loopback authority containing loopback-looking
+path/query text can pass that opt-in check. Default fixtures use owned loopback
+servers; this repair does not change override selection or certify that helper.
+
+Separate source-blind `repair-intent-comparator` found correspondence for
+caller grants, payload caps/private tmpfs, retained unpublishable exports and
+shared correction accounting. Its observation-only inputs did not independently
+establish the fixture's exact 120-second budget or generation counts. It retained
+the older `DESIGN.md` "Planned dogfooding execution boundary" prose specifying
+unlocked fetch/generation verification as a conflict with current locked native
+intent, for explicit human arbitration rather than automatic intent rewriting.
+
+Implementer-attributed full-workspace nextest
+`30302134-5ac4-45b4-8399-46f1963980d2` passed all 2727 executed tests with
+20 skipped, including all repaired boundary cases, exact long-loop completion
+and correction assertions, and queue schema validation. Affected strict
+all-target Clippy and workspace formatting passed. Review completion and
+finite validation are not human acceptance or whole-system certification.
+Final all-feature workspace nextest
+`92a39f59-3d6e-47bd-983e-566fcac6a64c` passed all 2748 executed tests with
+20 skipped; final affected strict Clippy and formatting also passed.
+
 ## Scoped source-only diagnostic and acquisition observation
 
 Derived by clean-slate `diagnostic-source-observer`; the comparison below came

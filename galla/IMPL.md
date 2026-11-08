@@ -1,6 +1,35 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Independent output-lock repair observations - 2026-11-08
+
+Clean-slate `repair-source-observer` inspected current source and executable
+assertions without intent, queues, prior records/reviews or history, running no
+tests. Separate stdout/stderr threads read 4096-byte chunks with shared atomic
+output accounting. Each acquires its host output lock after reading and releases
+it before the next pipe read; neither holds that lock waiting for child output.
+Boundary assertions require prompt timeout/output/process-limit failures and no
+delayed descendant effects.
+
+The observer retained a pre-existing out-of-scope limitation: host `write_all`
+and `flush` can block on an undrained output sink, and unconditional forwarding
+thread joins are not deadline-bounded (`src/enforcement.rs`). Killing the
+payload does not unblock a blocked host write. Current boundary fixtures drain
+captured output; they do not cover stalled host sinks. This scoped lock repair
+does not establish a general nonblocking-output or whole-runner certification.
+
+Separate source-blind `repair-intent-comparator` found chunk-scoped locking
+consistent with the design, while retaining stalled-host-sink termination as
+an unresolved broader limitation for human arbitration. It read intent and
+fresh observations, not source. Implementer-attributed full-workspace nextest
+`30302134-5ac4-45b4-8399-46f1963980d2` passed all 2727 executed tests with
+20 skipped; affected strict all-target Clippy and formatting passed. The
+real-runner denial now reaches the payload's explicit exit-73 path; finite
+drained-output tests do not establish general output-sink deadlines.
+Final all-feature workspace nextest
+`92a39f59-3d6e-47bd-983e-566fcac6a64c` passed all 2748 executed tests with
+20 skipped; final affected strict Clippy and formatting also passed.
+
 ## Scoped nesting regression repair - 2026-10-25
 
 Independent clean-slate `nesting-source-observer` inspected only the current

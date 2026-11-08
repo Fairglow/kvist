@@ -1,13 +1,10 @@
 //! Dogfood boundary evidence for mediated Cargo acquisition and verification.
 //!
 //! The first group exercises the *real* sandbox runner end to end (argv, source
-//! policy, source-aware network guard, safe cache promotion, and offline locked
-//! verification) with real filesystem assertions. Because the runner is still
-//! fail-closed until OS Bubblewrap integration lands, the cases that require
-//! actual execution, network transport, or descriptor-relative cache promotion
-//! remain intentionally red; they must not be weakened into passing planning
-//! checks. The rejection cases that the strict parser enforces (build-script
-//! subcommands and source-policy violations) pass today.
+//! policy, source-aware network guard, explicit promotion refusal, and offline
+//! locked verification) with real filesystem assertions. The CLI cannot publish
+//! portable exports without a provider-owned generation-parent capability;
+//! Galla's generation primitive separately tests bounded cache validation.
 //!
 //! The second group is host-independent planning coverage that runs directly
 //! against the maerg's acquisition plan builder and the runner's independent
@@ -258,9 +255,7 @@ fn write_fake_cargo(root: &std::path::Path, body: &str) {
     fs::set_permissions(&cargo, fs::Permissions::from_mode(0o755)).expect("make fake Cargo exec");
 }
 
-/// Enables pre-execution promotion intent. The post-fetch manifest, checksums,
-/// and lockfile-after identity are derived by the runner integration and are not
-/// part of the request.
+/// Requests export promotion without supplying a provider publication capability.
 fn enable_cache_promotion(request: &mut Value) {
     request["cache"]["promotion"]["enabled"] = json!(true);
 }
@@ -313,7 +308,10 @@ fn assert_no_cache_promotion(fixture: &std::path::Path, sentinel: &[u8]) {
 #[test]
 fn acquisition_request_separates_attempt_cache_from_project_promotion_destination() {
     let fixture = cargo_fixture();
-    let request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     let grants = request["grants"].as_array().expect("cache grants");
     let writable = grants
         .iter()
@@ -342,7 +340,10 @@ fn acquisition_request_separates_attempt_cache_from_project_promotion_destinatio
 #[test]
 fn acquisition_allows_only_fetch_metadata_with_attempt_local_cargo_directories() {
     let fixture = cargo_fixture();
-    let request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
 
     let output = run_runner_request(&request);
 
@@ -353,7 +354,7 @@ fn acquisition_allows_only_fetch_metadata_with_attempt_local_cargo_directories()
     );
     assert_eq!(
         fs::read_to_string(fixture.path().join("scratch/cargo-argv")).expect("read Cargo argv"),
-        "fetch\n"
+        "fetch\n--locked\n"
     );
     assert_eq!(
         fs::read_to_string(fixture.path().join("scratch/cargo-home")).expect("read CARGO_HOME"),
@@ -389,7 +390,10 @@ fn acquisition_rejects_commands_that_can_execute_build_scripts() {
 #[test]
 fn source_policy_accepts_canonical_crates_io_and_exact_additional_sources_only() {
     let fixture = cargo_fixture();
-    let valid = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let valid = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     let mut cases = Vec::new();
 
     let mut substituted_crates_io = valid.clone();
@@ -456,7 +460,10 @@ fn source_policy_accepts_canonical_crates_io_and_exact_additional_sources_only()
 #[test]
 fn immutable_git_source_requires_exact_url_and_revision() {
     let fixture = cargo_fixture();
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let mut request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     request["network"]["allowed_sources"] = json!([{
         "kind": "cargo-git",
         "repository": "https://git.example.invalid/dependency.git",
@@ -510,7 +517,10 @@ exit 73
     );
     let index_origin = format!("http://127.0.0.1:{allowed_port}/index/");
     let download_origin = format!("http://127.0.0.1:{allowed_port}/crates/");
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let mut request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     request["network"]["allowed_sources"] = json!([{
         "kind": "cargo-registry",
         "name": "controlled-local-registry",
@@ -529,6 +539,7 @@ exit 73
         !output.status.success(),
         "the undeclared origin attempt must fail the acquisition"
     );
+    assert_eq!(output.status.code(), Some(73), "{}", output_text(&output));
     assert_eq!(
         fs::read_to_string(fixture.path().join("scratch/source-guard-started"))
             .expect("read source guard started marker"),
@@ -571,7 +582,7 @@ exit 73
 }
 
 #[test]
-fn cache_symlink_is_rejected_without_promotion() {
+fn promotion_without_capability_preserves_cache_symlinks() {
     use std::os::unix::fs::symlink;
 
     let fixture = cargo_fixture();
@@ -582,24 +593,30 @@ fn cache_symlink_is_rejected_without_promotion() {
         fixture.path().join("cargo-home/link"),
     )
     .expect("create cache link");
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let mut request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     enable_cache_promotion(&mut request);
 
     let output = run_runner_request(&request);
 
     assert!(!output.status.success());
     assert!(
-        output_text(&output).contains("link")
-            || output_text(&output).contains("file")
-            || output_text(&output).contains("bound"),
-        "cache rejection must identify the unsafe or oversized input: {}",
+        output_text(&output).contains("promotion")
+            && output_text(&output).contains("not performed"),
+        "cache promotion refusal must be explicit: {}",
         output_text(&output)
+    );
+    assert_eq!(
+        fs::read_link(fixture.path().join("cargo-home/link")).expect("read retained cache link"),
+        fixture.path().join("lockfile/Cargo.lock")
     );
     assert_no_cache_promotion(fixture.path(), &sentinel);
 }
 
 #[test]
-fn cache_hard_link_is_rejected_without_promotion() {
+fn promotion_without_capability_preserves_cache_hard_links() {
     let fixture = cargo_fixture();
     let sentinel = create_promotion_sentinel(fixture.path());
     fs::write(fixture.path().join("cargo-home/one"), "one").expect("write cache file");
@@ -608,24 +625,31 @@ fn cache_hard_link_is_rejected_without_promotion() {
         fixture.path().join("cargo-home/hard-link"),
     )
     .expect("create cache hard link");
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let mut request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     enable_cache_promotion(&mut request);
 
     let output = run_runner_request(&request);
 
     assert!(!output.status.success());
     assert!(
-        output_text(&output).contains("link")
-            || output_text(&output).contains("multiple")
-            || output_text(&output).contains("file"),
-        "cache hard-link rejection must be explicit: {}",
+        output_text(&output).contains("promotion")
+            && output_text(&output).contains("not performed"),
+        "cache promotion refusal must be explicit: {}",
         output_text(&output)
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("cargo-home/hard-link"))
+            .expect("read retained cache hard link"),
+        b"one"
     );
     assert_no_cache_promotion(fixture.path(), &sentinel);
 }
 
 #[test]
-fn cache_non_regular_file_is_rejected_without_promotion() {
+fn promotion_without_capability_preserves_cache_sockets() {
     use std::os::unix::net::UnixListener;
 
     let fixture = cargo_fixture();
@@ -633,79 +657,102 @@ fn cache_non_regular_file_is_rejected_without_promotion() {
     fs::write(fixture.path().join("cargo-home/one"), "one").expect("write cache file");
     let _socket =
         UnixListener::bind(fixture.path().join("cargo-home/socket")).expect("create cache socket");
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let mut request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     enable_cache_promotion(&mut request);
 
     let output = run_runner_request(&request);
 
     assert!(!output.status.success());
     assert!(
-        output_text(&output).contains("regular")
-            || output_text(&output).contains("special")
-            || output_text(&output).contains("file"),
-        "cache special-file rejection must be explicit: {}",
+        output_text(&output).contains("promotion")
+            && output_text(&output).contains("not performed"),
+        "cache promotion refusal must be explicit: {}",
         output_text(&output)
+    );
+    use std::os::unix::fs::FileTypeExt;
+    assert!(
+        fs::symlink_metadata(fixture.path().join("cargo-home/socket"))
+            .expect("inspect retained socket")
+            .file_type()
+            .is_socket()
     );
     assert_no_cache_promotion(fixture.path(), &sentinel);
 }
 
 #[test]
-fn cache_file_count_bound_is_rejected_without_promotion() {
+fn promotion_without_capability_preserves_all_attempt_files() {
     let fixture = cargo_fixture();
     let sentinel = create_promotion_sentinel(fixture.path());
     for name in ["one", "two", "three"] {
         fs::write(fixture.path().join("cargo-home").join(name), name)
             .expect("write bounded cache file");
     }
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let mut request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     enable_cache_promotion(&mut request);
-    request["resources"]["max_files"] = json!(2);
 
     let output = run_runner_request(&request);
 
     assert!(!output.status.success());
     assert!(
-        output_text(&output).contains("file")
-            && (output_text(&output).contains("count")
-                || output_text(&output).contains("bound")
-                || output_text(&output).contains("limit")),
-        "cache file-count rejection must identify the exceeded bound: {}",
+        output_text(&output).contains("promotion")
+            && output_text(&output).contains("not performed"),
+        "cache promotion refusal must be explicit: {}",
         output_text(&output)
     );
+    for name in ["one", "two", "three"] {
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("cargo-home").join(name))
+                .expect("read retained cache file"),
+            name
+        );
+    }
     assert_no_cache_promotion(fixture.path(), &sentinel);
 }
 
 #[test]
-fn cache_file_size_bound_is_rejected_without_promotion() {
+fn promotion_without_capability_preserves_attempt_file_bytes() {
     let fixture = cargo_fixture();
     let sentinel = create_promotion_sentinel(fixture.path());
     fs::write(fixture.path().join("cargo-home/crate"), b"oversized")
         .expect("write oversized cache file");
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let mut request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     enable_cache_promotion(&mut request);
-    request["resources"]["max_file_bytes"] = json!(4);
 
     let output = run_runner_request(&request);
 
     assert!(!output.status.success());
     assert!(
-        output_text(&output).contains("file")
-            && (output_text(&output).contains("size")
-                || output_text(&output).contains("bound")
-                || output_text(&output).contains("limit")),
-        "cache file-size rejection must identify the exceeded bound: {}",
+        output_text(&output).contains("promotion")
+            && output_text(&output).contains("not performed"),
+        "cache promotion refusal must be explicit: {}",
         output_text(&output)
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("cargo-home/crate")).expect("read retained cache bytes"),
+        b"oversized"
     );
     assert_no_cache_promotion(fixture.path(), &sentinel);
 }
 
 #[test]
-fn aggregate_cache_size_bound_is_rejected_without_promotion() {
+fn promotion_without_capability_does_not_delete_over_budget_attempt_data() {
     let fixture = cargo_fixture();
     let sentinel = create_promotion_sentinel(fixture.path());
     fs::write(fixture.path().join("cargo-home/one"), b"1234").expect("write first cache file");
     fs::write(fixture.path().join("cargo-home/two"), b"5678").expect("write second cache file");
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let mut request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     enable_cache_promotion(&mut request);
     request["resources"]["max_cache_bytes"] = json!(6);
 
@@ -713,39 +760,18 @@ fn aggregate_cache_size_bound_is_rejected_without_promotion() {
 
     assert!(!output.status.success());
     assert!(
-        output_text(&output).contains("cache")
-            && (output_text(&output).contains("size")
-                || output_text(&output).contains("bound")
-                || output_text(&output).contains("limit")),
-        "aggregate cache-size rejection must identify the exceeded bound: {}",
+        output_text(&output).contains("promotion")
+            && output_text(&output).contains("not performed"),
+        "cache promotion refusal must be explicit: {}",
         output_text(&output)
     );
-    assert_no_cache_promotion(fixture.path(), &sentinel);
-}
-
-#[test]
-fn cache_checksum_mismatch_is_rejected_without_promotion() {
-    let fixture = cargo_fixture();
-    let sentinel = create_promotion_sentinel(fixture.path());
-    fs::write(fixture.path().join("cargo-home/crate"), b"downloaded crate")
-        .expect("write cache file");
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
-    enable_cache_promotion(&mut request);
-    // The runner derives and verifies the promotion manifest checksums after the
-    // fetch; a mismatch between the derived digest and the staged bytes must
-    // prevent promotion. This path requires OS integration.
-    request["cache"]["writable"]["identity"] =
-        serde_json::Value::String(sha256_bytes(b"attempt-cargo-home"));
-
-    let output = run_runner_request(&request);
-
-    assert!(!output.status.success());
-    assert!(
-        output_text(&output).contains("checksum")
-            || output_text(&output).contains("digest")
-            || output_text(&output).contains("identity"),
-        "cache checksum rejection must be explicit: {}",
-        output_text(&output)
+    assert_eq!(
+        fs::read(fixture.path().join("cargo-home/one")).expect("read retained first file"),
+        b"1234"
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("cargo-home/two")).expect("read retained second file"),
+        b"5678"
     );
     assert_no_cache_promotion(fixture.path(), &sentinel);
 }
@@ -765,7 +791,10 @@ printf 'downloaded crate' > /workspace/cargo-home/crate
     );
     fs::write(fixture.path().join("cargo-home/crate"), b"downloaded crate")
         .expect("write expected promotion input");
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let mut request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
     enable_cache_promotion(&mut request);
     let request_thread = thread::spawn(move || run_runner_request(&request));
     let started = fixture.path().join("scratch/acquisition-started");
@@ -793,10 +822,9 @@ printf 'downloaded crate' > /workspace/cargo-home/crate
 
     assert!(!output.status.success());
     assert!(
-        output_text(&output).contains("concurrent")
-            || output_text(&output).contains("precondition")
-            || output_text(&output).contains("identity"),
-        "concurrent project-cache refusal must be explicit: {}",
+        output_text(&output).contains("promotion")
+            && output_text(&output).contains("not performed"),
+        "cache promotion refusal must be explicit: {}",
         output_text(&output)
     );
     assert_ne!(original, concurrent);
@@ -812,30 +840,35 @@ printf 'downloaded crate' > /workspace/cargo-home/crate
 }
 
 #[test]
-fn valid_cache_promotion_preserves_existing_project_entries_and_adds_manifest_content() {
+fn valid_attempt_data_cannot_authorize_cache_publication() {
     let fixture = cargo_fixture();
     let sentinel = create_promotion_sentinel(fixture.path());
     fs::write(fixture.path().join("cargo-home/crate"), b"validated crate")
         .expect("write valid cache file");
-    let mut request = acquisition_request(fixture.path(), &["/workspace/toolchain/cargo", "fetch"]);
+    let mut request = acquisition_request(
+        fixture.path(),
+        &["/workspace/toolchain/cargo", "fetch", "--locked"],
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("cargo-home/crate")).expect("read retained valid input"),
+        b"validated crate"
+    );
     enable_cache_promotion(&mut request);
 
     let output = run_runner_request(&request);
 
     assert!(
-        output.status.success(),
-        "valid cache promotion failed: {}",
+        !output.status.success(),
+        "promotion without a provider-owned generation-parent capability must fail: {}",
         output_text(&output)
     );
-    assert_eq!(
-        fs::read(fixture.path().join("project-cache/sentinel"))
-            .expect("read preserved project-cache sentinel"),
-        sentinel
+    assert!(
+        output_text(&output).contains("promotion")
+            && output_text(&output).contains("not performed"),
+        "cache promotion refusal must be explicit: {}",
+        output_text(&output)
     );
-    assert_eq!(
-        fs::read(fixture.path().join("project-cache/crate")).expect("read promoted cache content"),
-        b"validated crate"
-    );
+    assert_no_cache_promotion(fixture.path(), &sentinel);
 }
 
 #[test]
@@ -849,14 +882,20 @@ fn verification_is_network_denied_locked_and_uses_a_read_only_cache() {
 set -eu
 test "${CARGO_NET_OFFLINE-unset}" = "true"
 test "$1" = "test"
-test "$2" = "--locked"
+test "$2" = "--offline"
+test "$3" = "--locked"
 ! printf changed > /workspace/cargo-home/crate
 printf verified > /workspace/scratch/verification
 "#,
     );
     let request = verification_request(
         fixture.path(),
-        &["/workspace/toolchain/cargo", "test", "--locked"],
+        &[
+            "/workspace/toolchain/cargo",
+            "test",
+            "--offline",
+            "--locked",
+        ],
     );
 
     let output = run_runner_request(&request);

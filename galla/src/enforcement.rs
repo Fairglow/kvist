@@ -450,7 +450,6 @@ pub fn run(request: SandboxRequest) -> ExitCode {
                 let mut buf = [0u8; 4096];
                 use std::io::{Read, Write};
                 let host_stdout = std::io::stdout();
-                let mut host_stdout = host_stdout.lock();
                 while let Ok(n) = stdout_pipe.read(&mut buf) {
                     if n == 0 {
                         break;
@@ -463,10 +462,11 @@ pub fn run(request: SandboxRequest) -> ExitCode {
                         let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
                         break;
                     }
-                    if host_stdout.write_all(&buf[..n]).is_err() {
+                    let mut output = host_stdout.lock();
+                    if output.write_all(&buf[..n]).is_err() {
                         break;
                     }
-                    let _ = host_stdout.flush();
+                    let _ = output.flush();
                 }
             }))
         }
@@ -483,7 +483,6 @@ pub fn run(request: SandboxRequest) -> ExitCode {
                 let mut buf = [0u8; 4096];
                 use std::io::{Read, Write};
                 let host_stderr = std::io::stderr();
-                let mut host_stderr = host_stderr.lock();
                 while let Ok(n) = stderr_pipe.read(&mut buf) {
                     if n == 0 {
                         break;
@@ -496,10 +495,11 @@ pub fn run(request: SandboxRequest) -> ExitCode {
                         let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
                         break;
                     }
-                    if host_stderr.write_all(&buf[..n]).is_err() {
+                    let mut output = host_stderr.lock();
+                    if output.write_all(&buf[..n]).is_err() {
                         break;
                     }
-                    let _ = host_stderr.flush();
+                    let _ = output.flush();
                 }
             }))
         }

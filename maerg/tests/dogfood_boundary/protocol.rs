@@ -296,7 +296,7 @@ fn runner_rejects_aliases_links_overlaps_and_paths_outside_approved_roots() {
 }
 
 #[test]
-fn authoring_rejects_path_escape_writable_symlink_and_unapproved_root_grants() {
+fn authoring_denies_path_escape_and_follows_only_explicit_disjoint_grants() {
     use std::os::unix::fs::symlink;
 
     let fixture = sandbox_fixture();
@@ -336,7 +336,7 @@ printf started > tests/path-escape-started
     let symlink_output = run_runner_request(&symlink_request);
     assert!(
         !symlink_output.status.success(),
-        "a writable grant containing a link to protected intent must be rejected"
+        "a link inside a writable grant must not permit a protected intent write"
     );
     assert!(
         output_text(&symlink_output).contains("link")
@@ -347,30 +347,37 @@ printf started > tests/path-escape-started
     );
     assert_protected_bytes_unchanged(&before);
 
-    let unapproved = temporary_directory("unapproved-authoring-root-");
-    fs::write(unapproved.path().join("outside"), "outside\n").expect("write unapproved root");
-    let mut unapproved_request = base_request(fixture.path(), "authoring", &["/usr/bin/true"]);
-    unapproved_request["grants"]
+    fs::remove_file(fixture.path().join("tests/intent-link")).expect("remove escape probe link");
+    let approved = temporary_directory("explicit-authoring-root-");
+    fs::write(approved.path().join("outside"), "outside\n").expect("write explicit root");
+    let mut explicit_request = base_request(
+        fixture.path(),
+        "authoring",
+        &[
+            "/usr/bin/bash",
+            "-c",
+            "printf granted > /workspace/component/extra/outside",
+        ],
+    );
+    explicit_request["grants"]
         .as_array_mut()
         .expect("grants")
         .push(json!({
-            "source": unapproved.path().canonicalize().expect("unapproved root"),
-            "destination": "/workspace/component/unapproved",
+            "source": approved.path().canonicalize().expect("explicit root"),
+            "destination": "/workspace/component/extra",
             "access": "read-write",
             "purpose": "authoring",
-            "identity": sha256_bytes(b"not-approved-by-project-policy")
+            "identity": sha256_bytes(b"caller-approved-extra-root")
         }));
-    let unapproved_output = run_runner_request(&unapproved_request);
+    let explicit_output = run_runner_request(&explicit_request);
     assert!(
-        !unapproved_output.status.success(),
-        "a repository request must not grant an unapproved host root"
+        explicit_output.status.success(),
+        "the runner must enforce the caller's explicit disjoint origin: {}",
+        output_text(&explicit_output)
     );
-    assert!(
-        output_text(&unapproved_output).contains("approved root")
-            || output_text(&unapproved_output).contains("grant")
-            || output_text(&unapproved_output).contains("source"),
-        "unapproved-root refusal must be explicit: {}",
-        output_text(&unapproved_output)
+    assert_eq!(
+        fs::read_to_string(approved.path().join("outside")).expect("read granted output"),
+        "granted"
     );
     assert_protected_bytes_unchanged(&before);
 }
@@ -501,11 +508,15 @@ fn assert_bounded_resource_failure(
     resource_names: &[&str],
     max_diagnostic_bytes: usize,
 ) {
-    let text = output_text(output);
+    let text = output_text(output).to_ascii_lowercase();
     assert!(!output.status.success(), "resource breach must fail");
     assert!(
         resource_names.iter().any(|name| text.contains(name))
-            && (text.contains("limit") || text.contains("bound") || text.contains("exceed")),
+            && (text.contains("limit")
+                || text.contains("bound")
+                || text.contains("exceed")
+                || text.contains("too large")
+                || text.contains("no space left on device")),
         "resource failure must identify its specific bound: {text}"
     );
     assert!(
@@ -589,11 +600,12 @@ wait
 }
 
 #[test]
-fn writable_file_size_limit_stops_the_tree_without_late_effects() {
+fn writable_file_size_cap_rejects_payload_write_without_late_effects() {
     let fixture = sandbox_fixture();
     let oversized = fixture.path().join("tests/oversized-output.bin");
     let marker = fixture.path().join("tests/file-limit-late-write");
-    let script = r#"printf started > tests/file-limit-started
+    let script = r#"set -eu
+printf started > tests/file-limit-started
 (sleep 1; printf late > tests/file-limit-late-write) &
 /usr/bin/head -c 4096 /dev/zero > tests/oversized-output.bin
 sleep 30
@@ -609,6 +621,7 @@ sleep 30
     let output = run_runner_request(&request);
 
     assert_bounded_resource_failure(&output, &["file", "size"], 4096);
+    assert!(fixture.path().join("tests/file-limit-started").is_file());
     assert!(
         started.elapsed() < Duration::from_secs(3),
         "runner did not terminate promptly after file-size overflow"
@@ -629,13 +642,16 @@ sleep 30
 }
 
 #[test]
-fn scratch_size_limit_stops_the_tree_without_late_effects() {
+fn scratch_tmpfs_limit_rejects_payload_write_without_touching_host_scratch() {
     let fixture = sandbox_fixture();
-    let oversized = fixture.path().join("scratch/oversized-scratch.bin");
+    let oversized = fixture.path().join("scratch/operator-data.bin");
+    let operator_bytes = vec![7; 8192];
+    fs::write(&oversized, &operator_bytes).expect("write operator scratch data");
     let marker = fixture.path().join("tests/scratch-limit-late-write");
-    let script = r#"printf started > tests/scratch-limit-started
+    let script = r#"set -eu
+printf started > tests/scratch-limit-started
 (sleep 1; printf late > tests/scratch-limit-late-write) &
-/usr/bin/head -c 4096 /dev/zero > /workspace/scratch/oversized-scratch.bin
+/usr/bin/head -c 8192 /dev/zero > /tmp/oversized-scratch.bin
 sleep 30
 "#;
     let mut request = base_request(
@@ -643,23 +659,22 @@ sleep 30
         "authoring",
         &["/usr/bin/bash", "-c", script],
     );
-    request["resources"]["max_scratch_bytes"] = json!(256);
+    request["resources"]["max_scratch_bytes"] = json!(4096);
+    request["resources"]["max_file_bytes"] = Value::Null;
     let started = Instant::now();
 
     let output = run_runner_request(&request);
 
-    assert_bounded_resource_failure(&output, &["scratch", "storage"], 4096);
+    assert_bounded_resource_failure(&output, &["space"], 4096);
+    assert!(fixture.path().join("tests/scratch-limit-started").is_file());
     assert!(
         started.elapsed() < Duration::from_secs(3),
         "runner did not terminate promptly after scratch-size overflow"
     );
-    assert!(
-        !oversized.exists()
-            || fs::metadata(&oversized)
-                .expect("inspect bounded scratch file")
-                .len()
-                <= 256,
-        "runner left over-limit scratch data behind"
+    assert_eq!(
+        fs::read(&oversized).expect("read unchanged operator scratch"),
+        operator_bytes,
+        "tmpfs limits must not scan or delete host-mounted scratch data"
     );
     thread::sleep(Duration::from_millis(1200));
     assert!(

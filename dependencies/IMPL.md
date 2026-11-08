@@ -1,6 +1,40 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Independent native root repair observations - 2026-11-08
+
+Clean-slate `repair-source-observer` read current source and executable
+assertions only, excluding intent, queues, prior records/reviews and history.
+It executed no tests and made no compliance judgment.
+
+Cargo home comes from explicit `CARGO_HOME`, otherwise `HOME/.cargo`; invalid
+explicit selection fails without fallback. Only `registry`/`git` selectors are
+canonicalized. Filesystem root, Cargo home and its ancestors are rejected as
+targets; subsequent descriptor-relative traversal rejects links. Returned data
+paths are canonical directories. Native admission accepts exact home-selector
+or resolved-root manifest prefixes on the host; configured admission accepts
+only fixed sandbox prefixes. It checks exact locked identities, duplicates,
+all external locked packages and regular host manifests.
+
+Observed assertions cover canonical linked roots, unsafe targets/deeper links,
+configured endpoint mapping, real cached Git resolution through a linked root,
+acquisition reuse, lock drift and receipts that cannot establish present
+readiness. Paths are bounded to 32 KiB and segments to 255 bytes; graph policy
+bounds package/output/depth inspection. Catalogue checks are not source/archive
+integrity attestations; metadata admission checks manifest existence/type, not
+contents. The observer found no high-confidence scoped defect.
+
+Separate source-blind `repair-intent-comparator` found correspondence for
+root-only canonicalization, unsafe/deeper-link refusal and exact locked-source
+admission, with no concrete scoped discrepancy. It inspected intent and this
+fresh record, not source. Neither review is acceptance or integrity attestation.
+Implementer-attributed workspace nextest
+`30302134-5ac4-45b4-8399-46f1963980d2` passed all 2727 executed tests with
+20 skipped; affected strict all-target Clippy and workspace formatting passed.
+Final all-feature workspace nextest
+`92a39f59-3d6e-47bd-983e-566fcac6a64c` passed all 2748 executed tests with
+20 skipped; final affected strict Clippy and formatting also passed.
+
 ## Final Rust readiness repairs - 2026-11-06
 
 `final-rust-impl-observer` derived these observations from current source and

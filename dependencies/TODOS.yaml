@@ -14,6 +14,50 @@ component:
         expected_revision: sha256:b4faacbb8b257350cddba894cbc3383c914600bcf7fa6e9cad6d8ff5eb2877f3
         observed_revision: sha256:599801ba008e862798464d6511ac9236a4a87fc6764d507cb83aaefe6386cd38
 tasks:
+  - id: cache-root-repair-write-tests
+    title: "write_tests: canonical native root selectors"
+    description: "Reproduce unresolved linked mount paths and native admission failures; retain deeper-link and broad-root refusal."
+    context: "User-requested review of unfinished native root fixes; explicit scoped advisory exception."
+    purpose: "Prevent unresolved mount paths and broad native data grants."
+    expected_outcome: "Linked warm roots and configured admission pass; unsafe selectors and deeper links fail."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#DEP-REQ-NATIVE-ADMISSION", "REQUIREMENTS.md#DEP-REQ-NATIVE-CACHE"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:44:02Z", completed_at: "2026-11-08T18:44:02Z"}
+  - id: cache-root-repair-implement-code
+    title: "implement_code: resolve native data selectors"
+    description: "Resolve only registry/git roots to safe canonical directories across catalogue, provisioning and metadata admission."
+    context: "Operator-selected roots only; no general link-following filesystem API."
+    purpose: "Reuse native shared stores without relaxing source traversal."
+    expected_outcome: "Catalogue, configured metadata and actual host Git resolution use canonical data paths."
+    kind: implementation
+    status: completed
+    depends_on: [cache-root-repair-write-tests]
+    requirements: ["REQUIREMENTS.md#DEP-REQ-NATIVE-ADMISSION", "REQUIREMENTS.md#DEP-REQ-NATIVE-CACHE"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
+  - id: cache-root-repair-security-audit
+    title: "security_audit: native selector boundaries"
+    description: "Independently observe root selection, no-follow metadata and mount path safety without intent."
+    context: "Fresh source-only context excludes intent, queues, prior records and history."
+    purpose: "Expose scoped authority and recovery defects independently."
+    expected_outcome: "Independent source observations and concrete limits are retained in IMPL."
+    kind: security-audit
+    status: completed
+    depends_on: [cache-root-repair-implement-code]
+    requirements: ["REQUIREMENTS.md#DEP-REQ-NATIVE-CACHE"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
+  - id: cache-root-repair-compliance-review
+    title: "compliance_review: native selector evidence"
+    description: "Compare local intent with fresh source-only observations and attributed test evidence without source access."
+    context: "A separate source-blind reviewer compares only intent and independent evidence."
+    purpose: "Keep correspondence judgments separate from implementation."
+    expected_outcome: "Scoped comparison and remaining limitations are persisted without acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: [cache-root-repair-security-audit]
+    requirements: ["REQUIREMENTS.md#DEP-REQ-NATIVE-ADMISSION", "REQUIREMENTS.md#DEP-REQ-NATIVE-CACHE"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
   - id: native-cache-write-tests
     title: "write_tests: native Cargo cache reuse"
     description: "Pin cold/partial registry/Git acquisition classification, request-bound private-home metadata aliases, native admission and zero-copy warm reuse."

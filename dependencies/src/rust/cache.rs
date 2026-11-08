@@ -79,6 +79,32 @@ fn optional(directory: &Dir, name: &str) -> Result<Option<Dir>> {
     }
 }
 
+/// Resolve only the operator's native data selectors, not links beneath them.
+fn optional_root(home: &Dir, name: &str) -> Result<Option<Dir>> {
+    if !matches!(name, "registry" | "git") {
+        return Err(unavailable(&home.display, "invalid native data selector"));
+    }
+    if !home.exists(name)? {
+        return Ok(None);
+    }
+    let path = std::fs::canonicalize(home.path().join(name))
+        .map_err(|e| io_error("resolve native data root", &home.display.join(name), e))?;
+    if home.display.starts_with(&path) {
+        return Err(unavailable(
+            &path,
+            "native data root must not be the filesystem root, Cargo home or its ancestor",
+        ));
+    }
+    Dir::open(&path).map(Some)
+}
+
+fn ensure_root(home: &Dir, name: &str) -> Result<Dir> {
+    match optional_root(home, name)? {
+        Some(root) => Ok(root),
+        None => home.ensure_child(name),
+    }
+}
+
 fn ensure_home(home: &Path) -> Result<Dir> {
     let home = selected(home)?;
     let parent = home
@@ -92,8 +118,8 @@ fn ensure_home(home: &Path) -> Result<Dir> {
 }
 
 fn roots(graph: &LockedGraph, home: &Dir) -> Result<CacheView> {
-    let registry = optional(home, "registry")?.map(|d| d.display);
-    let git = optional(home, "git")?.map(|d| d.display);
+    let registry = optional_root(home, "registry")?.map(|d| d.display);
+    let git = optional_root(home, "git")?.map(|d| d.display);
     Ok(CacheView {
         cargo_home: home.display.clone(),
         registry,
@@ -131,7 +157,7 @@ fn inspect(graph: &LockedGraph, home: &Dir, token: &CancellationToken) -> Result
             "alternate registry/Git identities require native Cargo offline validation; name/version alone is insufficient",
         ));
     }
-    let registry = optional(home, "registry")?;
+    let registry = optional_root(home, "registry")?;
     let mut indexes = Vec::new();
     if let Some(registry) = &registry
         && let Some(index) = optional(registry, "index")?
@@ -539,8 +565,8 @@ fn provision_using(
     let matching = receipt_matches(&state, &graph)?;
     let mut view = complete(&project, &graph, &home, cancellation, &mut validate)?;
     if !view.report.ready() {
-        home.ensure_child("registry")?;
-        home.ensure_child("git")?;
+        ensure_root(&home, "registry")?;
+        ensure_root(&home, "git")?;
         operation.intact()?;
         graph.unchanged(&project, cancellation)?;
         acquire(&home.display)?;
@@ -619,8 +645,8 @@ pub fn provision_with_validation(
         force,
         acquire,
         |project, graph, home| {
-            home.ensure_child("registry")?;
-            home.ensure_child("git")?;
+            ensure_root(home, "registry")?;
+            ensure_root(home, "git")?;
             graph.unchanged(project, cancellation)?;
             match validate(&home.display) {
                 Ok(bytes) => {
@@ -645,8 +671,8 @@ pub fn populate(
     let project = Dir::open(project)?;
     let graph = LockedGraph::read_native(&project, cancellation)?;
     let home = ensure_home(home)?;
-    home.ensure_child("registry")?;
-    home.ensure_child("git")?;
+    ensure_root(&home, "registry")?;
+    ensure_root(&home, "git")?;
     let mut argv = vec!["fetch".into(), "--locked".into()];
     if options.offline {
         argv.push("--offline".into());

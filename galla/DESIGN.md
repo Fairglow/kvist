@@ -143,6 +143,10 @@ request validation changes, or cache publication changes are needed.
 At most 16 transport diagnostics are emitted per guard, followed by a suppressed
 count on teardown if needed; each failed client is still explicitly rejected or
 closed. Client input is never included in diagnostic text.
+Payload output forwarding acquires host stdout/stderr locks only while writing
+an observed chunk, never while waiting for payload pipe input. Otherwise a proxy
+worker's denial diagnostic can wait on stderr while the payload waits for that
+worker's response. The 2026-11-08 repair uses the scoped advisory exception.
 
 Scoped intent and the four ordered transport task definitions use the explicit
 human-approved advisory exception; no acceptance/review receipt is emitted.

@@ -123,7 +123,7 @@ fn run_controlled(
     thread::scope(|scope| {
         let provider = scope.spawn(|| {
             let mut calls = 0;
-            let deadline = Instant::now() + Duration::from_secs(15);
+            let deadline = Instant::now() + Duration::from_secs(SCRIPTED_TIMEOUT_SECONDS);
             while !stopped.load(Ordering::SeqCst) {
                 assert!(Instant::now() < deadline, "missing inference");
                 match listener.accept() {
@@ -143,7 +143,7 @@ fn run_controlled(
             calls
         });
         let mut selected = shared_profile(&endpoint, 32768);
-        selected.timeout_seconds = 10;
+        selected.timeout_seconds = SCRIPTED_TIMEOUT_SECONDS;
         selected.max_output_bytes = 1024 * 1024;
         selected.token_limit = limit;
         let result = kvist::agent::execute_agent_controlled(

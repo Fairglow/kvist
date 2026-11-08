@@ -20,6 +20,12 @@ bounded, process/write/network-free native catalogue inspection.
 `CacheView` exposes `cargo_home: PathBuf`, `registry: Option<PathBuf>`,
 `git: Option<PathBuf>` and `report: VendoringReport`. Registry/Git paths are only
 the selected home's native subdirectories, not a whole-home mount instruction.
+The `registry` and `git` selectors may be symbolic links to shared native data.
+Returned data paths are canonical directories suitable for no-follow mounts,
+never the unresolved selectors. Filesystem root, the selected Cargo home and
+its ancestors are refused as data targets. Inspection beneath a selected data
+root still rejects links; native metadata may use either the exact home selector
+prefix or its resolved data-root prefix, never an unrelated source location.
 Absent data roots, or an absent home below a safe existing parent, are valid
 catalogue observations: external entries are missing and local-only graphs need
 no external cache. Inspection does not create those paths.

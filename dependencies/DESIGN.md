@@ -55,6 +55,13 @@ lock stability and nonfollowing actual host manifest paths. Never infer an
 administrative path from metadata, scan sources, or rewrite native JSON in Galla.
 
 Anchor project/home and metadata with existing nonfollowing descriptor operations.
+Resolve only existing native `registry`/`git` root selectors relative to the
+anchored home, then reopen their canonical targets with ordinary no-follow
+directory traversal. Reject root/home/ancestor targets. Return those canonical
+paths for consumers, and use them for both cheap catalogue and native manifest
+validation; retain nonfollowing inspection beneath each data root. Missing roots
+are created as ordinary directories, never replaced. This is live root selection,
+not a cache snapshot or authorization for links inside source metadata.
 Open a retained bounded regular native operation lock file with no truncation or
 links, and use process-held advisory locking. Recheck its path and the exact lock
 identity across callback/validation and before a small atomic native receipt write.

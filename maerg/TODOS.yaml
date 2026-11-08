@@ -10,6 +10,50 @@ component:
     stale_since: "2026-11-06T06:54:17Z"
     causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:1339c23f9bfbeacaf136e951c4f62ecec394c932101691fdc241a19402cc62c5", "observed_revision": "sha256:91d5b83ce9c19639c2d381062413d6e60c4e6f06a3e889589e2d6661cf4dddd5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:2bceb93227d8669a775839cc66a3551913d53273c8917973b2fe447399bbd300", "observed_revision": "sha256:f9c3f0229bc4968cc099e3a139ea7dd8fc75933cd7ac6465a01596ff4a3a0029"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:e18eae35428b3e86a5aed9f4feaff20b3d7aff10c1bdb652f5d23b25f0fe4206", "observed_revision": "sha256:0ca9db51d23c506aad7f648c9ceca5784d613846b1d109ea618f6a2dfac64c2c"}]
 tasks:
+  - id: boundary-fixture-repair-write-tests
+    title: "write_tests: reproduce seven reported failures"
+    description: "Retain executed failures and align assertions with current grant, native-cache and payload resource contracts."
+    context: "Five failures reproduced in nextest 3d718dbe-6d0d-4591-8a8f-707d2b305ddf; two long loops passed near their fixture deadline. Explicit scoped advisory exception."
+    purpose: "Test current approved behavior rather than retired boundaries."
+    expected_outcome: "Specific grant/resource assertions and completion/correction counts remain enforced."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:44:02Z", completed_at: "2026-11-08T18:44:02Z"}
+  - id: boundary-fixture-repair-implement-code
+    title: "implement_code: current boundary fixtures"
+    description: "Repair retired export/resource/approval assumptions and long-loop fixture budgets without changing production limits."
+    context: "Current contracts distinguish native reuse, caller approval, process-local file caps and private tmpfs budgets."
+    purpose: "Make integration evidence faithful and load-tolerant."
+    expected_outcome: "Affected boundary/live suites pass with exact effects, denial and correction checks."
+    kind: implementation
+    status: completed
+    depends_on: [boundary-fixture-repair-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
+  - id: boundary-fixture-repair-security-audit
+    title: "security_audit: fixture authority and evidence"
+    description: "Independently observe that assertions exercise current authority boundaries and do not claim unavailable publication."
+    context: "Fresh source-only context excludes intent and prior records."
+    purpose: "Keep boundary evidence honest."
+    expected_outcome: "Independent observations and evidence limits are retained."
+    kind: security-audit
+    status: completed
+    depends_on: [boundary-fixture-repair-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
+  - id: boundary-fixture-repair-compliance-review
+    title: "compliance_review: reported failure repair"
+    description: "Compare local intended behavior with independent source observations and executed tests, retaining limitations."
+    context: "Separate source-blind context does not inspect test implementations."
+    purpose: "Separate implemented behavior from compliance judgments."
+    expected_outcome: "Scoped correspondence and discrepancies are persisted without acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: [boundary-fixture-repair-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
+    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
   - id: native-package-write-tests
     title: "write_tests: bounded incremental native package acquisition"
     description: "Pin actual manager error/timeout causes, optional absence and direct pnpm store selection without global copies."

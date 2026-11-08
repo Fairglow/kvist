@@ -185,6 +185,14 @@ adds Sav's stream detector/recovery state, progress-aware tool recurrence and
 typed operator diagnostics. Keep protected authorization and independent review
 contexts local. A loop is never a completion shortcut, and new read-only
 observations cannot be penalized by a fixed inspection counter.
+Scripted long-loop fixtures use one shared 120-second provider/task budget to
+allow filesystem journaling under concurrent test load; production deadlines and
+the asserted generation/correction counts remain unchanged. Boundary fixtures
+exercise caller-supplied disjoint grants, process-local file-write caps and private
+tmpfs scratch bounds, not retired host-tree scans or runner-owned approval.
+Portable-export fixtures retain fetched data and explicitly refuse publication
+without a provider capability; immutable-generation validation is tested in Galla.
+This user-requested repair uses the scoped advisory exception, not acceptance.
 Use the shared 128-entry, 32-action-cycle tracker with actual broker outcomes
 and validated component revision changes. Record refused proposals as failures,
 inspect unchanged observations after reads, and stop the remaining batch with
