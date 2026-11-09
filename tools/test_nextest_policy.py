@@ -91,7 +91,7 @@ class NextestPolicyTests(unittest.TestCase):
         # A higher-priority broad override must not shadow the fixture policy.
         self.assertEqual(
             [rule["filter"] for rule in rules[:rules.index(matches[0])]],
-            ["package(=skott) & binary(=rust_build_environment) & "
+            ["package(=kvist-skott) & binary(=rust_build_environment) & "
              "test(=native_repository_tests_execute_inside_the_workspace_sandbox)"],
         )
 
@@ -111,8 +111,8 @@ class NextestPolicyTests(unittest.TestCase):
         self.assertEqual(len(inventories), 1)
         self.assertEqual(
             normalized(inventories[0]["filter"]),
-            normalized("""(package(=skott) & binary(=rustup_inventory)) |
-                (package(=kvist) & binary(=sandbox_toolchain) &
+            normalized("""(package(=kvist-skott) & binary(=rustup_inventory)) |
+                (package(=kvist-maerg) & binary(=sandbox_toolchain) &
                  test(=rust_authoring_has_host_inventory_private_defaults_and_offline_builds))"""),
         )
         self.assertNotIn("threads-required", inventories[0])

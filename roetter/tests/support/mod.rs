@@ -2,7 +2,36 @@ use roetter::{Error, ProcessFailure, rust::cache};
 use sav::{
     CancellationToken, CommandSpec, OutputStream, SupervisionPolicy, run_supervised_observed,
 };
-use std::{fs, path::Path, time::Duration};
+use std::{env, fs, path::Path, time::Duration};
+
+/// The absolute path of the cargo binary the test process should drive.
+///
+/// Cargo sets `CARGO` to the active toolchain's cargo while running tests, so
+/// this is the portable handle that works on a local dev box (Debian,
+/// `/usr/bin/cargo`), a GitHub runner (Ubuntu, `~/.cargo/bin/cargo`), and the
+/// Galla sandbox (which inherits the host toolchain). When `CARGO` is a bare
+/// program name it is resolved against `PATH`; a missing or unresolvable value
+/// falls back to the conventional `/usr/bin/cargo`.
+pub fn cargo_path() -> String {
+    let raw = env::var_os("CARGO").map(|value| value.to_string_lossy().into_owned());
+    let Some(raw) = raw.filter(|value| !value.is_empty()) else {
+        return "/usr/bin/cargo".to_owned();
+    };
+    if Path::new(&raw).is_absolute() {
+        return raw;
+    }
+    if let Some(paths) = env::var_os("PATH") {
+        for dir in env::split_paths(&paths) {
+            if dir.is_absolute() {
+                let candidate = dir.join(&raw);
+                if candidate.is_file() {
+                    return candidate.to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+    "/usr/bin/cargo".to_owned()
+}
 
 pub fn assert_actual_missing_metadata(project: &Path, home: &Path) {
     for root in [
@@ -19,7 +48,7 @@ pub fn assert_actual_missing_metadata(project: &Path, home: &Path) {
         "/usr/bin/env",
         vec![
             format!("CARGO_HOME={}", home.display()),
-            "/usr/bin/cargo".into(),
+            cargo_path(),
             "metadata".into(),
             "--offline".into(),
             "--locked".into(),

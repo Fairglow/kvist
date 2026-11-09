@@ -45,11 +45,52 @@ fn writable(path: &Path) -> (Vec<Grant>, Vec<Option<OwnedFd>>) {
     )
 }
 
+/// Resolve the real on-disk path of a shared-library dependency of `executable`
+/// by its soname. The dynamic linker's own resolution is authoritative, so this
+/// works for both flat (`/usr/lib`) and multiarch (`/usr/lib/<multiarch>`)
+/// layouts without hardcoding either.
+fn resolve_dependency_path(executable: &Path, soname: &str) -> PathBuf {
+    // The sandbox pins PATH to the runtime bin directory, so resolve ldd by its
+    // absolute system path (bound read-only into the sandbox) rather than via PATH.
+    let output = Command::new("/usr/bin/ldd")
+        .arg(executable)
+        .output()
+        .unwrap_or_else(|error| panic!("cannot run ldd on {}: {error}", executable.display()));
+    assert!(
+        output.status.success(),
+        "ldd failed for {}: {}",
+        executable.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let trimmed = line.trim_start();
+        let Some(rest) = trimmed.strip_prefix(soname) else {
+            continue;
+        };
+        // `rest` looks like ` => /usr/lib/libcap.so.2 (0x7f...)` or
+        // ` => not found`. The resolved path is the token after `=>`.
+        let (_, resolved) = rest
+            .split_once(" => ")
+            .unwrap_or_else(|| panic!("ldd has no resolution for {soname}: {line}"));
+        let path = resolved
+            .split_once(" (")
+            .map_or(resolved, |(path, _)| path)
+            .trim();
+        if path == "not found" {
+            panic!("{soname} is not resolved for {}", executable.display());
+        }
+        return Path::new(path)
+            .canonicalize()
+            .unwrap_or_else(|error| panic!("cannot canonicalize {path}: {error}"));
+    }
+    panic!("ldd did not report {soname} for {}", executable.display());
+}
+
 fn dependency_alias_is_rejected(executable: &Path, library: &str) {
     let mut guard = Guard::default();
     guard.installed(executable).unwrap();
     guard.dependencies(executable).unwrap();
-    let library = Path::new("/usr/lib").join(library).canonicalize().unwrap();
+    let library = resolve_dependency_path(executable, library);
     let (grants, sources) = writable(&library);
     let error = guard
         .check(&grants, &sources)
