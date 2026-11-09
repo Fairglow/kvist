@@ -44,19 +44,19 @@ fn runner() -> PathBuf {
         executable
             .parent()
             .and_then(std::path::Path::parent)
-            .map(|directory| directory.join("galla-runner"))
+            .map(|directory| directory.join("galla"))
     }) && path.is_file()
     {
         return path;
     }
     // Check standard installation locations first
     if let Some(path) = std::env::var_os("HOME") {
-        let user_runner = PathBuf::from(path).join(".kvist/bin/galla-runner");
+        let user_runner = PathBuf::from(path).join(".kvist/bin/galla");
         if user_runner.is_file() {
             return user_runner;
         }
     }
-    let system_runner = PathBuf::from("/usr/local/bin/galla-runner");
+    let system_runner = PathBuf::from("/usr/local/bin/galla");
     if system_runner.is_file() {
         return system_runner;
     }
@@ -69,11 +69,9 @@ fn runner() -> PathBuf {
     roots.push(PathBuf::from("/opt/target"));
     roots
         .iter()
-        .flat_map(|root| {
-            ["debug", "release"].map(|profile| root.join(profile).join("galla-runner"))
-        })
+        .flat_map(|root| ["debug", "release"].map(|profile| root.join(profile).join("galla")))
         .find(|path| path.is_file())
-        .expect("build galla-runner first or set KVIST_GALLA; native coverage must not skip")
+        .expect("build galla first or set KVIST_GALLA; native coverage must not skip")
 }
 
 /// Whether the trusted system rustup that `RustEnvironment::resolve` requires is
@@ -605,7 +603,7 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
     let _guard = tracing::subscriber::set_default(subscriber);
     let workdir = manifest_dir().parent().unwrap().canonicalize().unwrap();
     assert!(
-        kvist_dependencies::rust::cache::home()
+        roetter::rust::cache::home()
             .unwrap()
             .join("registry")
             .is_dir(),
@@ -614,7 +612,7 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
     let executor = SandboxExecutor::new(
         resolve(&workdir)
             .unwrap()
-            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne")),
         SandboxPaths {
             runner: runner(),
             backend: "/usr/bin/bwrap".into(),
@@ -648,7 +646,7 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
         &format!(
             "stage metadata {} >/dev/null\nstage repository-tests {}",
             repository_cargo("metadata --format-version=1 --no-deps"),
-            repository_cargo("test -p galla --lib -- --test-threads=2"),
+            repository_cargo("test -p kvist-galla --lib -- --test-threads=2"),
         ),
     );
     assert!(result.output_text(16384).contains("test result: ok"));
@@ -662,7 +660,7 @@ fn repository_trial_requires_global_nextest_exclusivity() {
     let overrides = config["profile"]["default"]["overrides"]
         .as_array()
         .expect("default-profile nextest overrides");
-    let filter = "package(=skott) & binary(=rust_build_environment) & test(=native_repository_tests_execute_inside_the_workspace_sandbox)";
+    let filter = "package(=kvist-skott) & binary(=rust_build_environment) & test(=native_repository_tests_execute_inside_the_workspace_sandbox)";
     let rule = overrides
         .iter()
         .find(|rule| rule.get("filter").and_then(toml::Value::as_str) == Some(filter))
@@ -775,9 +773,8 @@ fn native_registry_compiles_without_copying_sources_or_writing_host_administrati
         "#[test] fn native_source() { assert_eq!(itoa::Buffer::new().format(42), \"42\"); }\n",
     )
     .unwrap();
-    let home = kvist_dependencies::rust::cache::home().unwrap();
-    let view =
-        kvist_dependencies::rust::cache::view(&workdir, &home, &CancellationToken::new()).unwrap();
+    let home = roetter::rust::cache::home().unwrap();
+    let view = roetter::rust::cache::view(&workdir, &home, &CancellationToken::new()).unwrap();
     assert!(
         view.report.ready(),
         "native registry fixture prerequisite: {}",
@@ -1155,7 +1152,7 @@ fn unavailable_live_rust_diagnostic_preserves_native_write_progress() {
     fs::write(workdir.join("rust-toolchain"), "stable\n").unwrap();
     let registry = resolve(&workdir)
         .unwrap()
-        .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool"));
+        .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne"));
     assert!(registry.profiles().contains(&"rust"));
     fs::write(workdir.join("rust-toolchain"), "9.99.99\n").unwrap();
     let executor = SandboxExecutor::new(
