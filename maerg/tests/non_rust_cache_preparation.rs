@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
-use kvist::language_vendoring::{detect_language_strategy, lockfile_digest};
+use maerg::language_vendoring::{detect_language_strategy, lockfile_digest};
 
 fn project(lock: &str) -> tempfile::TempDir {
     let project = tempfile::Builder::new()
@@ -69,8 +69,8 @@ fn offline_verification_missing_store_child() {
     let Some(project) = std::env::var_os("KVIST_MISSING_STORE_PROJECT") else {
         return;
     };
-    use kvist::config::{AcquisitionConfig, SandboxConfig, VcsSelection};
-    use kvist::sandbox::{BackendIdentity, ExecutionOptions, SandboxProbe};
+    use maerg::config::{AcquisitionConfig, SandboxConfig, VcsSelection};
+    use maerg::sandbox::{BackendIdentity, ExecutionOptions, SandboxProbe};
     let config = SandboxConfig {
         runner: "/missing/native-runner".into(),
         backend: "/usr/bin/bwrap".into(),
@@ -87,7 +87,7 @@ fn offline_verification_missing_store_child() {
         },
     };
     let project = PathBuf::from(project);
-    let error = kvist::language_verification::run_offline_language_verification(
+    let error = maerg::language_verification::run_offline_language_verification(
         &config,
         &project,
         VcsSelection::Git,
@@ -100,7 +100,7 @@ fn offline_verification_missing_store_child() {
     .err()
     .expect("unprepared offline verification must fail");
     assert!(
-        matches!(error, kvist::KvistError::VendoringIncomplete { .. }),
+        matches!(error, maerg::KvistError::VendoringIncomplete { .. }),
         "{error}"
     );
     assert!(error.to_string().contains("kvist vendor"), "{error}");

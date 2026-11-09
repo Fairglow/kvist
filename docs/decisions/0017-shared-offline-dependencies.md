@@ -11,7 +11,7 @@ Private-copy/content-attestation choices are superseded by
 ## Decision
 
 Extract package-management mechanics from maerg into the headless
-`kvist-dependencies` library at `dependencies/`. Kvist and Skott are consumers,
+`kvist-roetter` library at `roetter/`. Kvist and Skott are consumers,
 not subprocess wrappers around one another. Sav supplies bounded process
 supervision; Galla remains the isolation boundary. This separate component keeps
 dependency provisioning distinct from model/provider mechanisms and task policy.

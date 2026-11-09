@@ -1,5 +1,5 @@
 [package]
-name = "skott"
+name = "kvist-skott"
 version = "0.3.2"
 edition = "2024"
 rust-version = "1.95"
@@ -18,14 +18,14 @@ name = "skott"
 path = "src/main.rs"
 
 [[bin]]
-name = "skott-file-tool"
+name = "skott-toerne"
 path = "src/bin/file_tool.rs"
 
 [dependencies]
-kvist-dependencies = { version = "0.3", path = "../dependencies" }
+roetter = { package = "kvist-roetter", version = "0.3", path = "../roetter" }
 blad = { package = "kvist-blad", version = "0.3", path = "../blad" }
-sav = { version = "0.3", path = "../sav" }
-galla = { version = "0.3", path = "../galla" }
+sav = { package = "kvist-sav", version = "0.3", path = "../sav" }
+galla = { package = "kvist-galla", version = "0.3", path = "../galla" }
 clap = { version = "4.6", features = ["derive"] }
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 crossterm = "0.29"

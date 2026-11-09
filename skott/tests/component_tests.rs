@@ -38,7 +38,7 @@ base_url = "http://127.0.0.1:11434"
 model = "qwen2.5"
 deadline_secs = 120
 [sandbox]
-runner = "/usr/local/bin/galla-runner"
+runner = "/usr/local/bin/galla"
 backend = "/usr/bin/bwrap"
 [tool_policy]
 shell_deny_substrings = []

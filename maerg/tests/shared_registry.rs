@@ -1,6 +1,6 @@
 use std::fs;
 
-use kvist::config::{self, Role};
+use maerg::config::{self, Role};
 
 #[test]
 fn role_profile_is_shared_structured_pinned_and_digest_bound() {

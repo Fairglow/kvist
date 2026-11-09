@@ -921,7 +921,7 @@ printf verified > /workspace/scratch/verification
 
 mod planning {
     use galla::validation;
-    use kvist::{
+    use maerg::{
         acquisition::{
             ContentIdentity, HostPath, build_acquisition_plan, build_verification_plan,
             git_identity, registry_identity,

@@ -6,7 +6,7 @@
 2. **Direct Local Model Transport:** Zero-dependency HTTP streaming against local inference backends (`llama-server`, `Ollama`) with slot-allocation, time-to-first-token (TTFT), and inter-token cadence watchdogs.
 3. **Structured Grammar-Constrained Sampling:** Dynamic compilation of JSON Schemas and tool definitions into native GBNF (GGML BNF) grammars passed directly to `llama-server`.
 4. **Multi-Tier Loop Detection Engine:** Turn-level Action Hash Ring (Tier 1), environment observation invariant tracker (Tier 2), and N-gram reasoning similarity detector (Tier 3) with progressive soft corrections and temperature jitter.
-5. **Deterministic Session Trajectory Journaling & Replay:** Structured `.jsonl` event stream recording and turn-by-turn trajectory inspection (`sav-run replay`).
+5. **Deterministic Session Trajectory Journaling & Replay:** Structured `.jsonl` event stream recording and turn-by-turn trajectory inspection (`sav replay`).
 
 ---
 
@@ -14,15 +14,15 @@
 
 ### 1.1 Building and Installing
 
-`sav` is built as both a library crate and a standalone CLI binary named `sav-run`.
+`sav` is built as both a library crate and a standalone CLI binary named `sav`.
 
 To build the executable in release mode:
 
 ```bash
-cargo build --release -p sav
+cargo build --release -p kvist-sav
 ```
 
-The resulting binary will be located at `target/release/sav-run`. You can install it into your `$PATH` via:
+The resulting binary will be located at `target/release/sav`. You can install it into your `$PATH` via:
 
 ```bash
 cargo install --path sav
@@ -31,8 +31,8 @@ cargo install --path sav
 Verify the installation:
 
 ```bash
-sav-run --version
-sav-run --help
+sav --version
+sav --help
 ```
 
 ---
@@ -42,7 +42,7 @@ sav-run --help
 The quickest way to configure your local or CLI providers is via the interactive setup wizard:
 
 ```bash
-sav-run setup
+sav setup
 ```
 
 The wizard will:
@@ -59,7 +59,7 @@ The registry distinguishes native transports from external coding agents.
 Copilot/Gemini discovery does not expose them as native inference providers.
 Skott uses shared native runtime mechanisms for interactive/headless work;
 maerg retains its protected broker, approved context and canonical evidence.
-`sav-run` remains a setup, inference and supervision client, not a second
+`sav` remains a setup, inference and supervision client, not a second
 native agent engine.
 
 ### Live inspection and steering
@@ -98,7 +98,7 @@ Send a prompt directly to a running `llama-server` or `Ollama` instance:
 
 ```bash
 # Query Ollama with streaming output
-sav-run model 
+sav model 
   --provider ollama 
   --endpoint http://127.0.0.1:11434 
   --model qwen2.5-coder:7b 
@@ -108,7 +108,7 @@ sav-run model
 
 ```bash
 # Query llama-server with reasoning display
-sav-run model 
+sav model 
   --provider llama-server 
   --endpoint http://127.0.0.1:8080 
   --model deepseek-r1 
@@ -125,7 +125,7 @@ Execute any agent script or command line under supervision, ensuring it cannot h
 
 ```bash
 # Supervise an agent run with automatic loop detection and restart policy
-sav-run run 
+sav run 
   --command "python3 run_agent.py --prompt {prompt}" 
   --detect-loops 
   --idle-timeout 60 
@@ -142,10 +142,10 @@ Step through and inspect an agent trajectory journal (`.jsonl`) generated during
 
 ```bash
 # Inspect the entire trajectory
-sav-run replay session_run.jsonl
+sav replay session_run.jsonl
 
 # Inspect up to turn 3 in machine-readable JSON format
-sav-run replay --max-turns 3 --json session_run.jsonl
+sav replay --max-turns 3 --json session_run.jsonl
 ```
 
 ---
@@ -154,7 +154,7 @@ sav-run replay --max-turns 3 --json session_run.jsonl
 
 ### 2.1 Configuration File Location
 
-`sav-run` reads profile configurations from the following location in order of precedence:
+`sav` reads profile configurations from the following location in order of precedence:
 1. Explicit path supplied via `--registry <PATH>`.
 2. Project `.kvist/providers.toml`.
 3. `$XDG_CONFIG_HOME/sav/registry.toml` or `$HOME/.config/sav/registry.toml`.
@@ -219,7 +219,7 @@ values are never interpreted as more placeholders or shell syntax.
 
 ### 2.4 Supervision Policy Settings
 
-When running supervised processes (`sav-run run`), the harness applies strict bounds:
+When running supervised processes (`sav run`), the harness applies strict bounds:
 
 * **Idle Timeout (`--idle-timeout <SECONDS>`):** Maximum duration (default: 900s) allowed to elapse without bytes emitted on standard output or standard error. Prevents hanging processes waiting on unmonitored stdin.
 * **Attempt Timeout:** Optional maximum wall-clock duration permitted for a single attempt.
@@ -228,7 +228,7 @@ When running supervised processes (`sav-run run`), the harness applies strict bo
 * **Loop Detection (`--detect-loops`):** Enables sliding stream cycle analysis and repetition detection.
 * **Host Execution Acknowledgement (`--allow-host-execution`):** Required security flag acknowledging that commands are executed directly on the host rather than inside a container or sandbox namespace.
 
-Native `sav-run model --profile NAME` honors the stricter configured and CLI
+Native `sav model --profile NAME` honors the stricter configured and CLI
 timeout/output bounds. Explicit profile-mode slot/first-token watchdog
 overrides are rejected instead of silently ignored.
 
@@ -255,7 +255,7 @@ Local inference engines running on consumer GPUs or CPUs frequently suffer from 
 
 #### Example: CLI Invocation
 ```bash
-sav-run model 
+sav model 
   --provider llama-server 
   --endpoint http://127.0.0.1:8080 
   --model default 
@@ -264,7 +264,7 @@ sav-run model
   "Refactor the error handling module in src/error.rs."
 ```
 
-If the server stalls while allocating context slots, `sav-run` detects the freeze, drops the socket connection immediately (releasing server resources), and reports:
+If the server stalls while allocating context slots, `sav` detects the freeze, drops the socket connection immediately (releasing server resources), and reports:
 ```
 error: slot allocation timed out after 15s
 ```
@@ -297,7 +297,7 @@ To guarantee that a local model never generates invalid syntax, unclosed quotes,
 
 #### Step 2: Query with Sampler-Level Enforcement
 ```bash
-sav-run model 
+sav model 
   --provider llama-server 
   --endpoint http://127.0.0.1:8080 
   --model default 
@@ -321,13 +321,13 @@ The model's logits are constrained during sampling; generating responses that vi
 
 When running external coding agents (such as Aider, Cline, Goose, or custom Python agents), unsupervised processes can enter infinite retry loops, emit endless error cascades, or hang waiting for terminal input.
 
-`sav-run run` supervises the process:
+`sav run` supervises the process:
 * Spawns the process in its own detached process group (`setsid`).
 * Monopolizes child process reaping: on timeout or termination, sends `SIGTERM`, waits a drain period, and enforces cleanup with `SIGKILL` across the entire process group (`kill -9 -<pgid>`).
 * Emits supervisor retry context warning the next attempt about prior side effects.
 
 ```bash
-sav-run run 
+sav run 
   --command "aider --message {prompt}" 
   --idle-timeout 30 
   --max-retries 2 
@@ -367,7 +367,7 @@ You can replay and inspect historical trajectories for regression testing or off
 
 ```bash
 # Human-readable step-through
-sav-run replay run_482.trajectory.jsonl
+sav replay run_482.trajectory.jsonl
 
 # Output:
 # Replaying session `run_482` for task `refactor-auth`:
@@ -546,6 +546,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 5. Security & Isolation Considerations
 
-* **Host Process Authority:** `sav-run` operates on the host machine. While it enforces strict process group reaping (`setsid` + `SIGKILL`), CPU quotas, and output size caps, it does not create container or filesystem namespaces on its own. For root filesystem isolation or network containment, use Kvist's `galla` boundary or bubblewrap (`bwrap`).
+* **Host Process Authority:** `sav` operates on the host machine. While it enforces strict process group reaping (`setsid` + `SIGKILL`), CPU quotas, and output size caps, it does not create container or filesystem namespaces on its own. For root filesystem isolation or network containment, use Kvist's `galla` boundary or bubblewrap (`bwrap`).
 * **Environment Redaction:** Secret environment variables and sensitive API tokens should not be embedded directly into command lines; use credential files or stdin streaming where feasible.
 * **Bounded Staging:** Always configure `--max-output-bytes` and `--idle-timeout` on long-running commands to avoid filling disk partitions with runaway log generation.

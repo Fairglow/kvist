@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use kvist::{
+use maerg::{
     agent::{AgentExecutionRequest, execute_agent},
     config::{AgentProfile, Role, SandboxConfig, VcsSelection},
 };
@@ -106,7 +106,7 @@ fn execute(
     directory: &Path,
     profile: &AgentProfile,
     paths: &[std::path::PathBuf],
-) -> kvist::Result<kvist::agent::AgentRunResult> {
+) -> maerg::Result<maerg::agent::AgentRunResult> {
     execute_agent(
         profile,
         &SandboxConfig {

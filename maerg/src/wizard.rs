@@ -166,7 +166,7 @@ fn run_wizard_inner<R: BufRead, W: Write>(
         if registry.profiles().next().is_none() {
             return Err(KvistError::AgentSetupFailed {
                 reason: format!(
-                    "no shared profiles exist in `{}`; run `sav-run setup` first",
+                    "no shared profiles exist in `{}`; run `sav setup` first",
                     registry_path.display()
                 ),
             });

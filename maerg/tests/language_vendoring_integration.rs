@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use kvist::language_vendoring::{detect_language_strategy, enforce_vendoring, lockfile_digest};
+use maerg::language_vendoring::{detect_language_strategy, enforce_vendoring, lockfile_digest};
 
 fn project() -> tempfile::TempDir {
     let project = tempfile::Builder::new()
@@ -246,7 +246,7 @@ fn native_language_child() {
             );
         }
         "configured-context" => {
-            let sandbox = kvist::config::SandboxConfig {
+            let sandbox = maerg::config::SandboxConfig {
                 runner: root
                     .join("missing-native-runner")
                     .to_string_lossy()

@@ -70,7 +70,7 @@ fn native_sandbox_discovers_exact_workspace_root_in_an_ordinary_project() {
     fs::write(root.join("note.txt"), "needle").unwrap();
     let executor = SandboxExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum()).with_file_helper(
-            Path::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+            Path::new(env!("CARGO_BIN_EXE_skott-toerne"))
                 .canonicalize()
                 .unwrap(),
         ),
@@ -124,7 +124,7 @@ fn live_large_files_use_the_actual_sandbox_mutation_and_observation_route() {
     fs::set_permissions(root.join("text"), fs::Permissions::from_mode(0o640)).unwrap();
     let executor = SandboxExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum()).with_file_helper(
-            Path::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+            Path::new(env!("CARGO_BIN_EXE_skott-toerne"))
                 .canonicalize()
                 .unwrap(),
         ),
@@ -219,7 +219,7 @@ fn live_sparse_read_hashes_a_large_source_under_a_bounded_address_space() {
     .unwrap();
     let out = std::process::Command::new("/usr/bin/bash")
         .args(["-c", "ulimit -v 65536; exec \"$1\" \"$2\"", "bounded-read"])
-        .arg(env!("CARGO_BIN_EXE_skott-file-tool"))
+        .arg(env!("CARGO_BIN_EXE_skott-toerne"))
         .arg(payload)
         .output()
         .unwrap();
@@ -272,7 +272,7 @@ fn sparse_terabyte_head_and_tail_pages_return_promptly_without_full_file_preflig
         )
         .unwrap();
         let started = Instant::now();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_skott-toerne"))
             .arg(&payload)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -584,7 +584,7 @@ fn render_is_effect_free_even_with_hostile_ids_and_workspace_staging_links() {
 fn executor_rejects_invalid_sandbox_without_writes_and_cancels_before_staging() {
     let dir = fixture();
     let root = dir.path().canonicalize().unwrap();
-    let helper = Path::new(env!("CARGO_BIN_EXE_skott-file-tool"));
+    let helper = Path::new(env!("CARGO_BIN_EXE_skott-toerne"));
     let executor = SandboxExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum()).with_file_helper(helper),
         SandboxPaths {
@@ -622,7 +622,7 @@ fn helper_binary_rejects_unknown_fields_and_oversized_payloads() {
     let root = dir.path().canonicalize().unwrap();
     let payload = root.join("payload.json");
     fs::write(&payload, r#"{"write_root":"/workspace","operation":{"tool":"read_file","arguments":{"path":"/workspace/a","extra":true}}}"#).unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_skott-toerne"))
         .arg(&payload)
         .output()
         .unwrap();
@@ -630,7 +630,7 @@ fn helper_binary_rejects_unknown_fields_and_oversized_payloads() {
     assert!(output.stdout.is_empty());
     assert!(!output.stderr.is_empty());
     fs::write(&payload, vec![b' '; 256 * 1024 + 1]).unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_skott-toerne"))
         .arg(&payload)
         .output()
         .unwrap();
@@ -721,7 +721,7 @@ fn explicit_host_executor_uses_same_helper_without_workspace_staging() {
     let root = dir.path().canonicalize().unwrap();
     let executor = HostExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum())
-            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne")),
         root.clone(),
     );
     let intent = ToolIntent {
@@ -746,7 +746,7 @@ fn phase3_host_progress_observes_all_native_mutations_and_rejects_noops() {
     let root = dir.path().canonicalize().unwrap();
     let executor = HostExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum())
-            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne")),
         root.clone(),
     );
     let calls = [
@@ -839,7 +839,7 @@ fn phase3_failed_native_edit_has_no_progress_and_preserves_error_and_bytes() {
     fs::write(root.join("text"), "original").unwrap();
     let executor = HostExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum())
-            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne")),
         root.clone(),
     );
     let intent = ToolIntent {
@@ -868,7 +868,7 @@ fn followup_ambiguous_public_host_executions_report_no_progress_without_certifyi
     let root = dir.path().canonicalize().unwrap();
     let executor = HostExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum())
-            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne")),
         root.clone(),
     );
     let intent = ToolIntent {
@@ -902,7 +902,7 @@ fn helper_must_be_regular_nonlink_and_outside_write_scope() {
     let dir = fixture();
     let root = dir.path().canonicalize().unwrap();
     fs::write(root.join("helper"), b"fake").unwrap();
-    symlink(env!("CARGO_BIN_EXE_skott-file-tool"), root.join("link")).unwrap();
+    symlink(env!("CARGO_BIN_EXE_skott-toerne"), root.join("link")).unwrap();
     let intent = ToolIntent {
         id: "test".to_owned(),
         provider_id: None,
@@ -990,7 +990,7 @@ fn sandbox_build_failure_drops_private_payload_and_rejects_unsupported_read_root
     // staging. RAII must clean the payload even along this error path.
     symlink(&infra, root.join(".agent-writes")).unwrap();
     let executor = SandboxExecutor::new(
-        ToolRegistry::new(policy).with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+        ToolRegistry::new(policy).with_file_helper(env!("CARGO_BIN_EXE_skott-toerne")),
         sandbox,
         root.clone(),
     );
@@ -1023,7 +1023,7 @@ fn private_payload_and_helper_are_readonly_hashed_context_files_and_cleaned_afte
     fs::write(&runner, "#!/usr/bin/bash\ncat\nexit 7\n").unwrap();
     fs::set_permissions(&runner, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(&backend, b"backend").unwrap();
-    let helper = Path::new(env!("CARGO_BIN_EXE_skott-file-tool"));
+    let helper = Path::new(env!("CARGO_BIN_EXE_skott-toerne"));
     let executor = SandboxExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum()).with_file_helper(helper),
         SandboxPaths { runner, backend },
@@ -1074,7 +1074,7 @@ fn failed_spawn_also_removes_private_payload() {
     fs::write(infra.join("backend"), b"backend").unwrap();
     let executor = SandboxExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum())
-            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne")),
         SandboxPaths {
             runner: infra.join("runner"),
             backend: infra.join("backend"),
@@ -1600,7 +1600,7 @@ fn partial_search_retains_pages_and_narrowed_sandbox_search_recovers() {
 
     let executor = SandboxExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum()).with_file_helper(
-            Path::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+            Path::new(env!("CARGO_BIN_EXE_skott-toerne"))
                 .canonicalize()
                 .unwrap(),
         ),
@@ -1768,7 +1768,7 @@ fn escaped_control_and_cjk_read_pages_are_complete_json_with_lossless_progress()
             .unwrap(),
         )
         .unwrap();
-        let out = std::process::Command::new(env!("CARGO_BIN_EXE_skott-file-tool"))
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_skott-toerne"))
             .arg(payload)
             .output()
             .unwrap();
@@ -2011,7 +2011,7 @@ fn bare_registry_defers_helper_location_but_production_resolution_supplies_it() 
             .unwrap()
             .parent()
             .unwrap()
-            .join("skott-file-tool")
+            .join("skott-toerne")
     );
     assert_eq!(
         bare.tool_definitions()

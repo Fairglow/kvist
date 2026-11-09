@@ -1,4 +1,4 @@
-use kvist_dependencies::{
+use roetter::{
     Error, ProcessFailure,
     rust::{self, ProvisionOptions},
 };
@@ -28,7 +28,7 @@ fn lock(name: &str, checksum: &str) -> String {
         "version=4\n[[package]]\nname='{name}'\nversion='1.0.0'\nsource='{SOURCE}'\nchecksum='{checksum}'\n"
     )
 }
-fn populate(vendor: &Path) -> kvist_dependencies::Result<String> {
+fn populate(vendor: &Path) -> roetter::Result<String> {
     fs::create_dir_all(vendor.join("demo")).unwrap();
     let text = "[package]\nname='demo'\nversion='1.0.0'\nedition='2024'\n";
     fs::write(vendor.join("demo/Cargo.toml"), text).unwrap();
@@ -75,7 +75,7 @@ fn published(dir: &Path) -> Vec<Vec<u8>> {
 fn shared_receipt_records_only_version_and_lock_binding() {
     let dir = project();
     provision(dir.path());
-    let receipt = kvist_dependencies::vendoring::VendorManifest::load(dir.path())
+    let receipt = roetter::vendoring::VendorManifest::load(dir.path())
         .unwrap()
         .unwrap();
     let value = serde_json::to_value(receipt).unwrap();
@@ -315,7 +315,7 @@ fn manifest_assertion_rejects_publication_fences() {
     for failure in ["vendor-operation.lock", "vendor-publication"] {
         let dir = project();
         provision(dir.path());
-        let manifest = kvist_dependencies::vendoring::VendorManifest::load(dir.path())
+        let manifest = roetter::vendoring::VendorManifest::load(dir.path())
             .unwrap()
             .unwrap();
         assert!(manifest.assert_ready(dir.path()).unwrap().ready());

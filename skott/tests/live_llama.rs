@@ -24,13 +24,13 @@ fn real_sandbox_confines_native_files_and_denies_host_network() {
     let outside = root.path().join("outside.txt");
     std::fs::write(&outside, "outside-sentinel").unwrap();
     let registry = ToolRegistry::new(ToolPolicy::minimum())
-        .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool"));
+        .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne"));
     let executor = SandboxExecutor::new(
         registry,
         SandboxPaths {
             runner: std::env::var_os("KVIST_LIVE_GALLA_RUNNER")
                 .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/usr/local/bin/galla-runner")),
+                .unwrap_or_else(|| PathBuf::from("/usr/local/bin/galla")),
             backend: PathBuf::from("/usr/bin/bwrap"),
         },
         workspace.clone(),
@@ -173,7 +173,7 @@ fn live_llama_reads_edits_and_verifies_inside_the_real_sandbox() {
     let sandbox = SandboxPaths {
         runner: std::env::var_os("KVIST_LIVE_GALLA_RUNNER")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/usr/local/bin/galla-runner")),
+            .unwrap_or_else(|| PathBuf::from("/usr/local/bin/galla")),
         backend: PathBuf::from("/usr/bin/bwrap"),
     };
     let registry = ToolRegistry::resolve(
@@ -183,7 +183,7 @@ fn live_llama_reads_edits_and_verifies_inside_the_real_sandbox() {
         None,
     )
     .unwrap()
-    .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool"));
+    .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne"));
     let definitions = registry.tool_definitions();
     let executor = SandboxExecutor::new(registry, sandbox, workspace.clone());
     let model = model();

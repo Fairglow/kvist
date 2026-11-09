@@ -95,7 +95,7 @@ impl Topology {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .ok_or_else(|| failure("HOME is required to discover live Rust resources"))?;
-        let cargo_home = kvist_dependencies::rust::cache::home().ok();
+        let cargo_home = roetter::rust::cache::home().ok();
         let mut paths = vec![
             PathBuf::from("/usr/bin/rustup"),
             PathBuf::from("/usr/bin/cargo"),

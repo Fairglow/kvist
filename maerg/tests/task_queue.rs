@@ -1,4 +1,4 @@
-use kvist::task_queue::{TaskStatus, parse, serialize};
+use maerg::task_queue::{TaskStatus, parse, serialize};
 
 const VALID_QUEUE: &str = r#"schema_version: 1
 component:
@@ -59,7 +59,7 @@ fn parses_and_serializes_a_canonical_queue_deterministically() {
 
 #[test]
 fn serialization_preserves_finalization_disposition_and_acceptance_identity() {
-    use kvist::task_queue::FinalizeDispositionArgument;
+    use maerg::task_queue::FinalizeDispositionArgument;
     for disposition in [
         FinalizeDispositionArgument::Accept,
         FinalizeDispositionArgument::Block,

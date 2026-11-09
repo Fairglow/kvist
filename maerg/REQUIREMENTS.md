@@ -79,7 +79,7 @@ General shared-library consolidation of non-Rust backends remains deferred.
 ## REQ-NATIVE-RUST-LANGUAGE-CACHE
 
 The default Rust language strategy MUST obtain its native source selection from
-`dependencies/CONTRACT.md`'s `rust::cache::home` and `sources` APIs. It MUST NOT
+`roetter/CONTRACT.md`'s `rust::cache::home` and `sources` APIs. It MUST NOT
 require or inspect legacy directory-export receipts, configuration or fences.
 Its report MUST retain the native view's lock identity and counts. Read-only
 mounts MUST expose only present native registry/Git data roots at the fixed

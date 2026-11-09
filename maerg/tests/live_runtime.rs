@@ -7,8 +7,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use kvist::agent::{AgentExecutionRequest, execute_agent};
-use kvist::config::{AgentProfile, Model, Role, SandboxConfig, VcsSelection};
+use maerg::agent::{AgentExecutionRequest, execute_agent};
+use maerg::config::{AgentProfile, Model, Role, SandboxConfig, VcsSelection};
 use sav::observation::JournalFollower;
 
 const SCRIPTED_TIMEOUT_SECONDS: u64 = 120;
@@ -240,7 +240,7 @@ fn protected_guidance_interrupts_a_quiet_generation_without_replacing_the_task()
     });
     let workdir = dir.path().to_owned();
     let worker = thread::spawn(move || {
-        kvist::agent::execute_agent_controlled(
+        maerg::agent::execute_agent_controlled(
             &profile(&endpoint),
             &SandboxConfig {
                 runner: "/usr/bin/true".into(),
@@ -433,8 +433,8 @@ struct EffectGate {
     _directory: tempfile::TempDir,
     listener: TcpListener,
     config: SandboxConfig,
-    identity: kvist::sandbox::RunnerIdentity,
-    probe: kvist::sandbox::SandboxProbe,
+    identity: maerg::sandbox::RunnerIdentity,
+    probe: maerg::sandbox::SandboxProbe,
 }
 
 impl EffectGate {
@@ -487,12 +487,12 @@ IFS= read -r -t 10 release <&3
             environment_allowlist: vec![],
             acquisition: Default::default(),
         };
-        let identity = kvist::sandbox::runner_identity(&config, workdir, VcsSelection::Git)
+        let identity = maerg::sandbox::runner_identity(&config, workdir, VcsSelection::Git)
             .expect("runner identity");
-        let probe = kvist::sandbox::SandboxProbe {
+        let probe = maerg::sandbox::SandboxProbe {
             runner_path: identity.canonical_path.clone(),
             runner_digest: identity.digest.clone(),
-            backend: kvist::sandbox::backend_identity(&config, workdir, VcsSelection::Git)
+            backend: maerg::sandbox::backend_identity(&config, workdir, VcsSelection::Git)
                 .expect("backend identity"),
         };
         Self {
@@ -548,7 +548,7 @@ fn shared_profile(endpoint: &str, context_limit: usize) -> AgentProfile {
 fn resilience_run(
     workdir: &Path,
     answer: impl FnMut(usize, &serde_json::Value) -> serde_json::Value + Send,
-) -> (kvist::agent::AgentRunResult, usize) {
+) -> (maerg::agent::AgentRunResult, usize) {
     resilience_run_with_text(workdir, "observed answer", answer)
 }
 
@@ -556,7 +556,7 @@ fn resilience_run_with_text(
     workdir: &Path,
     text: &str,
     answer: impl FnMut(usize, &serde_json::Value) -> serde_json::Value + Send,
-) -> (kvist::agent::AgentRunResult, usize) {
+) -> (maerg::agent::AgentRunResult, usize) {
     resilience_run_with_authority(workdir, text, answer, None)
 }
 
@@ -565,7 +565,7 @@ fn resilience_run_with_authority(
     text: &str,
     mut answer: impl FnMut(usize, &serde_json::Value) -> serde_json::Value + Send,
     gate: Option<&EffectGate>,
-) -> (kvist::agent::AgentRunResult, usize) {
+) -> (maerg::agent::AgentRunResult, usize) {
     resilience_run_scripted(
         workdir,
         |index, request| (answer(index, request), text.to_owned()),
@@ -577,7 +577,7 @@ fn resilience_run_scripted(
     workdir: &Path,
     mut answer: impl FnMut(usize, &serde_json::Value) -> (serde_json::Value, String) + Send,
     gate: Option<&EffectGate>,
-) -> (kvist::agent::AgentRunResult, usize) {
+) -> (maerg::agent::AgentRunResult, usize) {
     use std::sync::atomic::{AtomicBool, Ordering};
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
     listener.set_nonblocking(true).expect("nonblocking");
@@ -1137,7 +1137,7 @@ fn protected_run_continues_beyond_64_generations() {
                                             .is_some_and(|extension| extension == "json")
                                     })
                                     .expect("staged effect");
-                                kvist::authoring::apply::apply_intent(dir.path(), &staged)
+                                maerg::authoring::apply::apply_intent(dir.path(), &staged)
                                     .expect("actual authorized revision");
                             });
                         } else {
@@ -1224,7 +1224,7 @@ fn multi_day_explicit_endpoint_run_accepts_repeated_human_guidance() {
         });
         let mut selected = profile(&endpoint);
         selected.timeout_seconds = 604_800;
-        let result = kvist::agent::execute_agent_controlled(
+        let result = maerg::agent::execute_agent_controlled(
             &selected,
             &SandboxConfig {
                 runner: "/usr/bin/true".into(),
@@ -1299,11 +1299,11 @@ fn approved_context_reaches_native_and_explicit_endpoint_requests() {
             "/workspace/context/PARENT_CONTRACT.md".into(),
         ];
         let mounts = [
-            kvist::sandbox::ReadOnlyMount::file(
+            maerg::sandbox::ReadOnlyMount::file(
                 root.join("ROOT_CONTRACT.md"),
                 "/workspace/context/ROOT_CONTRACT.md",
             ),
-            kvist::sandbox::ReadOnlyMount::file(
+            maerg::sandbox::ReadOnlyMount::file(
                 root.join("PARENT_CONTRACT.md"),
                 "/workspace/context/PARENT_CONTRACT.md",
             ),
@@ -1371,7 +1371,7 @@ fn steering_retains_whole_run_usage_and_cumulative_token_limit() {
             // This tests accounting, not durable-recording latency under parallel load.
             selected.timeout_seconds = 60;
             selected.token_limit = limited.then_some(7000);
-            let result = kvist::agent::execute_agent_controlled(
+            let result = maerg::agent::execute_agent_controlled(
                 &selected,
                 &gate.config,
                 Some(&gate.identity),
@@ -1434,7 +1434,7 @@ fn steering_before_usage_is_reported_keeps_unknown_attempt_separate() {
     let mut selected = shared_profile(&endpoint, 8192);
     selected.timeout_seconds = 60;
     selected.token_limit = Some(7000);
-    let result = kvist::agent::execute_agent_controlled(
+    let result = maerg::agent::execute_agent_controlled(
         &selected,
         &SandboxConfig {
             runner: "/usr/bin/true".into(),
@@ -1534,7 +1534,7 @@ fn cancelled_generation_keeps_earlier_turn_evidence_and_usage() {
         });
         let mut selected = shared_profile(&endpoint, 8192);
         selected.timeout_seconds = 60;
-        let error = kvist::agent::execute_agent_controlled(
+        let error = maerg::agent::execute_agent_controlled(
             &selected,
             &gate.config,
             Some(&gate.identity),

@@ -319,24 +319,24 @@ enum RustAdmission<'a> {
 }
 
 impl RustStrategy {
-    fn native_sources(project_dir: &Path) -> Result<kvist_dependencies::rust::cache::SourceView> {
-        let home = kvist_dependencies::rust::cache::home().map_err(|source| {
-            KvistError::VendoringUnavailable {
+    fn native_sources(project_dir: &Path) -> Result<roetter::rust::cache::SourceView> {
+        let home =
+            roetter::rust::cache::home().map_err(|source| KvistError::VendoringUnavailable {
                 path: project_dir.to_string_lossy().into_owned(),
                 reason: format!(
                     "cannot resolve native Cargo home (CARGO_HOME or HOME/.cargo): {source}"
                 ),
-            }
-        })?;
-        kvist_dependencies::rust::cache::sources(project_dir, &home, &sav::CancellationToken::new())
-            .map_err(|source| KvistError::VendoringUnavailable {
+            })?;
+        roetter::rust::cache::sources(project_dir, &home, &sav::CancellationToken::new()).map_err(
+            |source| KvistError::VendoringUnavailable {
                 path: project_dir.to_string_lossy().into_owned(),
                 reason: format!("cannot inspect native Cargo cache: {source}"),
-            })
+            },
+        )
     }
 
     fn report(project_dir: &Path, context: RustAdmission<'_>) -> Result<VendoringReport> {
-        use kvist_dependencies::rust::cache::SourceAdmission;
+        use roetter::rust::cache::SourceAdmission;
 
         let sources = Self::native_sources(project_dir)?;
         let report = match sources.admission {

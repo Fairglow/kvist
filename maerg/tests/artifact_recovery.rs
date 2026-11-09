@@ -1,6 +1,6 @@
 use std::{fs, path::Path, process::Command};
 
-use kvist::{init::initialize, task_queue};
+use maerg::{init::initialize, task_queue};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -85,8 +85,8 @@ fn markdown_salvage_preserves_prose_and_repairs_required_structure_before_reset(
     }
     assert!(contents.contains("Recovery draft"));
     assert!(
-        kvist::component_documents::validate(
-            kvist::component_documents::DocumentKind::Requirements,
+        maerg::component_documents::validate(
+            maerg::component_documents::DocumentKind::Requirements,
             &contents
         )
         .is_valid()
@@ -928,7 +928,7 @@ fn reset_configuration_can_select_a_component_root_without_manual_toml_edits() {
     let (ok, report) = approve(project.path(), &options, &preview);
     assert!(ok, "{report}");
     assert_eq!(
-        kvist::config::load(project.path())
+        maerg::config::load(project.path())
             .expect("config")
             .component_root,
         Path::new("src")

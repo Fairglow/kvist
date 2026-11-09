@@ -17,12 +17,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use kvist::config::{AcquisitionConfig, SandboxConfig, VcsSelection};
-use kvist::sandbox::{
+use maerg::config::{AcquisitionConfig, SandboxConfig, VcsSelection};
+use maerg::sandbox::{
     ExecutionOptions, SandboxProbe, backend_identity, ensure_available,
     run_offline_cargo_verification, runner_identity,
 };
-use kvist::vendor_command::{VendorOptions, vendor_project};
+use maerg::vendor_command::{VendorOptions, vendor_project};
 
 /// A well-formed policy identity (sha256 digest). The live test carries no
 /// authenticated execution approval, so a valid-format digest stands in for the
@@ -89,7 +89,7 @@ fn locate_runner() -> Option<PathBuf> {
     }
     for root in candidate_target_roots() {
         for profile in ["debug", "release"] {
-            let candidate = root.join(profile).join("galla-runner");
+            let candidate = root.join(profile).join("galla");
             if candidate.is_file() && outside_worktree(&candidate) {
                 return Some(candidate);
             }
@@ -404,7 +404,7 @@ fn active_rustup_channel() -> Option<String> {
         .strip_suffix("-x86_64-unknown-linux-gnu")
         .or_else(|| token.strip_suffix("-aarch64-unknown-linux-gnu"))?
         .to_owned();
-    kvist::toolchain::validate_channel(&channel, "e2e active toolchain").ok()?;
+    maerg::toolchain::validate_channel(&channel, "e2e active toolchain").ok()?;
     Some(channel)
 }
 
@@ -477,7 +477,7 @@ fn offline_cargo_verification_uses_pinned_toolchain() {
     );
 
     // The host-authorized provisioning step records the durable manifest.
-    let manifest = kvist::toolchain::ensure_toolchain(project.path(), "e2e pinned")
+    let manifest = maerg::toolchain::ensure_toolchain(project.path(), "e2e pinned")
         .expect("toolchain ensure records the pinned manifest");
     assert_eq!(manifest.channel, channel);
 
@@ -653,7 +653,7 @@ fn offline_cargo_verification_uses_pinned_nightly_toolchain() {
 
     // The host-authorized provisioning step records the durable manifest for
     // the pinned nightly channel.
-    let manifest = kvist::toolchain::ensure_toolchain(project.path(), "e2e nightly")
+    let manifest = maerg::toolchain::ensure_toolchain(project.path(), "e2e nightly")
         .expect("toolchain ensure records the pinned nightly manifest");
     assert_eq!(manifest.channel, "nightly");
 

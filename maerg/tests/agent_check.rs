@@ -9,7 +9,7 @@ use std::{
 
 use tempfile::TempDir;
 
-use kvist::init::initialize;
+use maerg::init::initialize;
 
 fn run_kvist(project: &TempDir, arguments: &[&str]) -> Output {
     run_kvist_with_stdin(project, arguments, "")

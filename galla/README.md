@@ -15,7 +15,7 @@ evidence. It never falls back to unconstrained host execution and never reports
 an unconstrained request as enforced; whenever verified enforcement
 prerequisites are unavailable, every otherwise valid request fails closed.
 
-`galla` is a standalone binary (`galla-runner`) that is independent of the
+`galla` is a standalone binary (`galla`) that is independent of the
 `kvist` CLI. It is consumed by the `kvist` CLI (`maerg`) and by `skott` as the
 enforcement boundary, and it can be probed and exercised on its own. Nothing
 imports its types as a Rust library; the maerg mirrors the protocol
@@ -87,7 +87,7 @@ proves cached Git-index resolution, not production HTTPS acquisition.
 ## Building
 
 `galla` is a Rust 2024 package with MSRV Rust **1.95**. It builds a library
-crate (`galla`) and the `galla-runner` executable:
+crate (`galla`) and the `galla` executable:
 
 ```bash
 # Build the runner
@@ -105,18 +105,18 @@ enforcement path requires a verified Bubblewrap executable and Linux namespace
 support at run time; the probe reports availability honestly and fails closed
 when those prerequisites are absent.
 
-## Running `galla-runner`
+## Running `galla`
 
-`galla-runner` accepts exactly one protocol mode argument:
+`galla` accepts exactly one protocol mode argument:
 
 ```bash
 # Confirm production enforcement capabilities (verified Bubblewrap backend and
 # namespace enforcement). Emits a confirmed probe response, or fails closed.
-galla-runner --kvist-sandbox-probe-v1
+galla --kvist-sandbox-probe-v1
 
 # Read one bounded JSON request from standard input, validate it, and enforce
 # it via Bubblewrap-backed Linux isolation.
-galla-runner --kvist-sandbox-request-v1
+galla --kvist-sandbox-request-v1
 ```
 
 The accepted target interface is the redefined `kvist-sandbox-probe-v1` and

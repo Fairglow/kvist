@@ -1,6 +1,6 @@
 use std::{fs, path::Path, process::Command};
 
-use kvist::{
+use maerg::{
     component_documents::{self, DocumentKind},
     init::initialize,
     project_state, task_commands, task_queue,
@@ -292,7 +292,7 @@ fn malformed_timestamp_history_requires_approved_blocked_recovery() {
             &(task("retain", "", &timestamps) + &task("dependant", "retain", TIMESTAMPS)),
         );
         let path = project.path().join("src/TODOS.yaml");
-        let guidance = kvist::repair::repair(project.path(), false)
+        let guidance = maerg::repair::repair(project.path(), false)
             .expect("default proposal")
             .to_string();
         assert!(!guidance.contains("use --salvage"), "{guidance}");

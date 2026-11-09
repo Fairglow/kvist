@@ -675,13 +675,13 @@ pub enum KvistError {
     },
 }
 
-impl From<kvist_dependencies::Error> for KvistError {
-    fn from(error: kvist_dependencies::Error) -> Self {
+impl From<roetter::Error> for KvistError {
+    fn from(error: roetter::Error) -> Self {
         match error {
-            kvist_dependencies::Error::VendoringUnavailable { path, reason } => {
+            roetter::Error::VendoringUnavailable { path, reason } => {
                 Self::VendoringUnavailable { path, reason }
             }
-            kvist_dependencies::Error::VendoringIncomplete {
+            roetter::Error::VendoringIncomplete {
                 path,
                 count,
                 missing,
@@ -690,7 +690,7 @@ impl From<kvist_dependencies::Error> for KvistError {
                 count,
                 missing,
             },
-            kvist_dependencies::Error::VendoringStale {
+            roetter::Error::VendoringStale {
                 path,
                 current,
                 expected,
@@ -699,7 +699,7 @@ impl From<kvist_dependencies::Error> for KvistError {
                 current,
                 expected,
             },
-            kvist_dependencies::Error::Io {
+            roetter::Error::Io {
                 operation,
                 path,
                 source,
@@ -708,7 +708,7 @@ impl From<kvist_dependencies::Error> for KvistError {
                 path,
                 source,
             },
-            kvist_dependencies::Error::Cancelled => Self::Sav(sav::Error::Cancelled),
+            roetter::Error::Cancelled => Self::Sav(sav::Error::Cancelled),
             error => Self::VendoringUnavailable {
                 path: "<dependencies>".into(),
                 reason: error.to_string(),

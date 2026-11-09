@@ -19,19 +19,19 @@ fn digest(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
-/// Locate the built `galla-runner` executable for the native e2e trials.
+/// Locate the built `galla` executable for the native e2e trials.
 ///
 /// `KVIST_GALLA` points at an installed runner outside the worktree in CI.
 /// When it is unset (for example a plain `cargo test` in the verification
 /// sandbox), fall back to the freshly built binary. Cargo sets
-/// `CARGO_BIN_EXE_galla-runner` for integration tests, pointing at the exact
+/// `CARGO_BIN_EXE_galla` for integration tests, pointing at the exact
 /// artifact it just built; that is preferred because it does not depend on the
 /// target directory layout. The runner must live outside the repository.
 fn resolve_runner() -> PathBuf {
     if let Some(explicit) = std::env::var_os("KVIST_GALLA") {
         return PathBuf::from(explicit).canonicalize().unwrap();
     }
-    if let Some(cargo_path) = std::env::var_os("CARGO_BIN_EXE_galla-runner") {
+    if let Some(cargo_path) = std::env::var_os("CARGO_BIN_EXE_galla") {
         return PathBuf::from(cargo_path).canonicalize().unwrap();
     }
     let manifest = std::env::var("CARGO_MANIFEST_DIR")
@@ -41,10 +41,10 @@ fn resolve_runner() -> PathBuf {
         .unwrap()
         .join("target")
         .join(env!("CARGO_PKG_NAME"))
-        .join("galla-runner");
+        .join("galla");
     assert!(
         candidate.is_file(),
-        "KVIST_GALLA is unset and the built galla-runner is absent at {}; \
+        "KVIST_GALLA is unset and the built galla is absent at {}; \
          build it first (e.g. `cargo build`) or set KVIST_GALLA to its path",
         candidate.display()
     );

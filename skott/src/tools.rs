@@ -43,7 +43,7 @@ pub(crate) fn default_file_helper_path() -> crate::error::Result<PathBuf> {
     std::env::current_exe()
         .map_err(|e| crate::error::io_error("locate executable for native helper", None, e))?
         .parent()
-        .map(|parent| parent.join("skott-file-tool"))
+        .map(|parent| parent.join("skott-toerne"))
         .ok_or_else(|| crate::error::Error::SandboxBuild {
             reason: "cannot find executable directory for native helper".to_owned(),
         })

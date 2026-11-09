@@ -119,7 +119,7 @@ made inert before that excerpt is bounded; truncation is explicitly marked.
 
 ## Shared Rust dependency mechanics
 
-The common provider is `dependencies/CONTRACT.md` (ADR 0017). The public maerg
+The common provider is `roetter/CONTRACT.md` (ADR 0017). The public maerg
 catalogue module adapts/reexports its existing types and error domains; Rust
 operator provisioning uses the same native cache backend as Skott (ADR 0020).
 Configured acquisition failure is explicit and does not fall back to host
@@ -1189,7 +1189,7 @@ All current formats are version 1 and independently versioned:
 - Rust native cache receipt (`.kvist/cargo-cache.json`): only `schema_version: 1` and
   `lockfile_digest`; host paths, timestamps and file inventories are absent;
 - optional shared vendor policy (`.kvist/vendor.toml`): native TOML 1.1,
-  `[limits]` fields/defaults defined by `kvist_dependencies::VendorLimits`;
+  `[limits]` fields/defaults defined by `roetter::VendorLimits`;
 - toolchain manifest (`.kvist/rust-toolchain.json`): `schema_version: 1` with
   the pinned channel, toolchain root, cargo path, cargo content digest, and
   provisioning timestamp.

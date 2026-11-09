@@ -495,7 +495,7 @@ fn native_helper_near_7000_byte_output_is_usable_through_host_executor() {
     std::fs::write(work.join("large"), "x".repeat(16_384)).unwrap();
     let executor = HostExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum())
-            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne")),
         work,
     );
     let outcome = executor

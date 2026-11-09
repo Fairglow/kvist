@@ -12,7 +12,7 @@
 
 use std::path::PathBuf;
 
-use kvist::config;
+use maerg::config;
 
 /// Placeholder echo binaries that can never execute component tests.
 const PLACEHOLDER_PROGRAMS: [&str; 3] = ["echo", "/bin/echo", "/usr/bin/echo"];
@@ -95,8 +95,8 @@ fn project_test_policy_digest_covers_command_set() {
     if let Some(entry) = altered.commands.first_mut() {
         entry.command.push_str(" --extra");
     }
-    let digest = kvist::config::compute_policy_hash(policy);
-    let altered_digest = kvist::config::compute_policy_hash(&altered);
+    let digest = maerg::config::compute_policy_hash(policy);
+    let altered_digest = maerg::config::compute_policy_hash(&altered);
     assert_ne!(
         digest, altered_digest,
         "policy digest must change when the command set changes"

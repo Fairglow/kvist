@@ -4,8 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use kvist::language_vendoring::{detect_language_strategy, enforce_vendoring};
-use kvist::vendor_command::{VendorOptions, vendor_project};
+use maerg::language_vendoring::{detect_language_strategy, enforce_vendoring};
+use maerg::vendor_command::{VendorOptions, vendor_project};
 
 fn project() -> tempfile::TempDir {
     let project = tempfile::Builder::new()

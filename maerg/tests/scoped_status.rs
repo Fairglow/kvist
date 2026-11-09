@@ -14,10 +14,10 @@ fn run(directory: &Path, arguments: &[&str]) -> Output {
 
 fn project() -> tempfile::TempDir {
     let project = tempfile::tempdir().unwrap();
-    kvist::init::initialize(project.path()).unwrap();
+    maerg::init::initialize(project.path()).unwrap();
     let root = project.path().join("src");
     let source = fs::read_to_string(root.join("TODOS.yaml")).unwrap();
-    let queue = kvist::task_queue::parse(&source).unwrap();
+    let queue = maerg::task_queue::parse(&source).unwrap();
     let child_queue = source.replace(
         "parent_contract: null",
         &format!(
@@ -179,12 +179,12 @@ fn dot_component_roots_do_not_leak_peer_artifact_or_vcs_details() {
 
 #[test]
 fn compact_task_progress_counts_states_and_only_suggests_ready_current_work() {
-    use kvist::task_queue::{Task, TaskKind, TaskStatus, TaskTimestamps};
+    use maerg::task_queue::{Task, TaskKind, TaskStatus, TaskTimestamps};
     let project = tempfile::tempdir().unwrap();
-    kvist::init::initialize(project.path()).unwrap();
+    maerg::init::initialize(project.path()).unwrap();
     let path = project.path().join("src/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
-    let timestamp: kvist::task_queue::Timestamp =
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    let timestamp: maerg::task_queue::Timestamp =
         serde_json::from_str("\"2026-11-04T08:54:29Z\"").unwrap();
     let template = Task {
         id: "pending-work".into(),
@@ -227,7 +227,7 @@ fn compact_task_progress_counts_states_and_only_suggests_ready_current_work() {
         }
         queue.tasks.push(task);
     }
-    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let overview = text(run(project.path(), &["status"]));
     assert!(
         overview.contains("1/5 completed; 1 in-progress; 1 blocked; 1 awaiting-decision"),
@@ -245,7 +245,7 @@ fn compact_task_progress_counts_states_and_only_suggests_ready_current_work() {
     );
     assert!(!details.contains("kvist task run"), "{details}");
     queue.tasks = vec![template];
-    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let ready = text(run(project.path(), &["status"]));
     assert!(ready.contains("kvist task run . pending-work"), "{ready}");
     fs::write(project.path().join("VISION.md"), "# Invalid vision\n").unwrap();
@@ -350,7 +350,7 @@ fn artifact_filters_imply_details_and_do_not_expand_component_scope() {
         );
     }
     let project = tempfile::tempdir().unwrap();
-    kvist::init::initialize(project.path()).unwrap();
+    maerg::init::initialize(project.path()).unwrap();
     let output = text(run(project.path(), &["status", "--unfinished"]));
     assert!(output.contains("No components match"), "{output}");
 }

@@ -1,5 +1,5 @@
 [package]
-name = "kvist"
+name = "kvist-maerg"
 version = "0.3.1"
 edition = "2024"
 rust-version = "1.95"
@@ -10,8 +10,15 @@ repository = "https://github.com/Fairglow/kvist"
 homepage = "https://github.com/Fairglow/kvist"
 readme = "README.md"
 
+[lib]
+name = "maerg"
+
+[[bin]]
+name = "kvist"
+path = "src/main.rs"
+
 [dependencies]
-kvist-dependencies = { version = "0.3", path = "../dependencies" }
+roetter = { package = "kvist-roetter", version = "0.3", path = "../roetter" }
 chrono = "0.4"
 clap = { version = "4.6", features = ["derive"] }
 clap_complete = "4.6"
@@ -29,7 +36,7 @@ toml = "1.2"
 toml_edit = "0.25"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
-sav = { version = "0.3", path = "../sav" }
+sav = { package = "kvist-sav", version = "0.3", path = "../sav" }
 reedline = "0.52"
 terminal_size = "0.4"
 blad = { package = "kvist-blad", version = "0.3", path = "../blad" }
@@ -40,4 +47,4 @@ vte = "0.15"
 pulldown-cmark = "0.13"
 
 [dev-dependencies]
-galla = { version = "0.3", path = "../galla" }
+galla = { package = "kvist-galla", version = "0.3", path = "../galla" }

@@ -12,7 +12,7 @@ fn status_is_honest_about_enforcement() {
 
 #[test]
 fn probe_invocation_succeeds() {
-    let output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let output = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()

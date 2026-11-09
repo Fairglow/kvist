@@ -231,7 +231,7 @@ fn stale_prepared_attempt_can_be_abandoned_before_acceptance_and_then_returned_t
     let journal_before = retain_prepared_attempt(project.path());
     stale_requirements(project.path());
     let queue_path = project.path().join("maerg/TODOS.yaml");
-    let queue_before = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    let queue_before = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
 
     for args in [
         vec!["component", "accept", "."],
@@ -289,14 +289,14 @@ fn stale_prepared_attempt_can_be_abandoned_before_acceptance_and_then_returned_t
         message.contains(&format!("kvist task transition . {TASK_ID} pending")),
         "{message}"
     );
-    let queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    let queue = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
     assert_eq!(
         queue.component, queue_before.component,
         "rejection cannot accept intent"
     );
     assert_eq!(
         queue.tasks[1].status,
-        kvist::task_queue::TaskStatus::Blocked
+        maerg::task_queue::TaskStatus::Blocked
     );
     assert!(queue.tasks[1].timestamps.completed_at.is_none());
     assert!(queue.tasks[1].acceptance_id.is_none());
@@ -384,10 +384,10 @@ fn another_blocked_task_does_not_prevent_explicit_attempt_rejection() {
     write_finalizable_attempt(project.path(), true);
     add_independent_ready_implementation_task(project.path());
     let path = project.path().join("maerg/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
-    queue.tasks[2].status = kvist::task_queue::TaskStatus::Blocked;
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    queue.tasks[2].status = maerg::task_queue::TaskStatus::Blocked;
     queue.tasks[2].blocked_reason = Some("Unrelated blocker remains unresolved.".into());
-    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let other = queue.tasks[2].clone();
     let output = run_kvist(
         project.path(),
@@ -406,7 +406,7 @@ fn another_blocked_task_does_not_prevent_explicit_attempt_rejection() {
     assert_success(&output, "reject attempt while another task is blocked");
     let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["disposition"], "block");
-    let after = kvist::task_queue::parse(&fs::read_to_string(path).unwrap()).unwrap();
+    let after = maerg::task_queue::parse(&fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(after.tasks[2], other);
 }
 
@@ -417,11 +417,11 @@ fn rejection_can_finish_its_interrupted_recording_without_accepting_stale_intent
     let prefix = retain_prepared_attempt(project.path());
     stale_requirements(project.path());
     let path = project.path().join("maerg/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
-    queue.tasks[1].status = kvist::task_queue::TaskStatus::Blocked;
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    queue.tasks[1].status = maerg::task_queue::TaskStatus::Blocked;
     queue.tasks[1].blocked_reason = Some("Abandon interrupted attempt.".into());
-    queue.tasks[1].disposition = Some(kvist::task_queue::FinalizeDispositionArgument::Block);
-    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    queue.tasks[1].disposition = Some(maerg::task_queue::FinalizeDispositionArgument::Block);
+    fs::write(&path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let before = fs::read(&path).unwrap();
     let wrong = run_kvist(
         project.path(),
@@ -515,13 +515,13 @@ fn stale_rejection_preserves_identity_artifact_and_explicit_recovery_guards() {
             "recovery-fence" => {
                 let path = project.path().join("maerg/TODOS.yaml");
                 let mut queue =
-                    kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
-                queue.tasks[1].recovery_state = Some(kvist::task_queue::RecoveryState {
-                    state: kvist::task_queue::RecoveryStateKind::Fenced,
+                    maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+                queue.tasks[1].recovery_state = Some(maerg::task_queue::RecoveryState {
+                    state: maerg::task_queue::RecoveryStateKind::Fenced,
                     attempt_id: ATTEMPT_ID.into(),
                     reason: "evidence-tampered".into(),
                 });
-                fs::write(path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+                fs::write(path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
             }
             "wrong-event-task" => {
                 let path = attempt_journal(project.path());
@@ -533,14 +533,14 @@ fn stale_rejection_preserves_identity_artifact_and_explicit_recovery_guards() {
                 add_independent_ready_implementation_task(project.path());
                 let path = project.path().join("maerg/TODOS.yaml");
                 let mut queue =
-                    kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
-                queue.tasks[2].status = kvist::task_queue::TaskStatus::InProgress;
-                queue.tasks[2].recovery_state = Some(kvist::task_queue::RecoveryState {
-                    state: kvist::task_queue::RecoveryStateKind::Fenced,
+                    maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+                queue.tasks[2].status = maerg::task_queue::TaskStatus::InProgress;
+                queue.tasks[2].recovery_state = Some(maerg::task_queue::RecoveryState {
+                    state: maerg::task_queue::RecoveryStateKind::Fenced,
                     attempt_id: ATTEMPT_ID.into(),
                     reason: "unrelated-unresolved-attempt".into(),
                 });
-                fs::write(path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+                fs::write(path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
             }
             "untracked" => assert_success(
                 &git(project.path(), &["rm", "--cached", "maerg/DESIGN.md"]),
@@ -687,12 +687,8 @@ fn recovery_can_use_independent_durable_pre_spawn_failure_evidence() {
         "controlled policy approval failed: {}",
         output_text(&approval)
     );
-    fs::remove_file(
-        project
-            .external_tools_path()
-            .join("controlled-galla-runner"),
-    )
-    .expect("remove approved runner before descriptor launch");
+    fs::remove_file(project.external_tools_path().join("controlled-galla"))
+        .expect("remove approved runner before descriptor launch");
     let execution = run_kvist(project.path(), &["task", "run", ".", TASK_ID]);
     assert!(
         !execution.status.success(),
@@ -804,12 +800,8 @@ fn forged_recovered_evidence_cannot_enable_transition_unlock_or_run() {
             .status
             .success()
     );
-    fs::remove_file(
-        project
-            .external_tools_path()
-            .join("controlled-galla-runner"),
-    )
-    .expect("remove runner before descriptor validation");
+    fs::remove_file(project.external_tools_path().join("controlled-galla"))
+        .expect("remove runner before descriptor validation");
     assert!(
         !run_kvist(project.path(), &["task", "run", ".", TASK_ID])
             .status
@@ -906,12 +898,8 @@ fn unresolved_attempt_fences_every_component_queue_writer() {
         &run_kvist(project.path(), &["task", "approve-policy"]),
         "approve task policy",
     );
-    fs::remove_file(
-        project
-            .external_tools_path()
-            .join("controlled-galla-runner"),
-    )
-    .expect("remove runner before independent automatic selection");
+    fs::remove_file(project.external_tools_path().join("controlled-galla"))
+        .expect("remove runner before independent automatic selection");
     let run = run_kvist(
         project.path(),
         &["task", "run", ".", "independent-implementation"],
@@ -937,12 +925,8 @@ fn recovery_resumes_durable_partial_states_and_restores_the_pre_attempt_status()
             .status
             .success()
     );
-    fs::remove_file(
-        project
-            .external_tools_path()
-            .join("controlled-galla-runner"),
-    )
-    .expect("remove runner before descriptor validation");
+    fs::remove_file(project.external_tools_path().join("controlled-galla"))
+        .expect("remove runner before descriptor validation");
     assert!(
         !run_kvist(project.path(), &["task", "run", ".", TASK_ID])
             .status

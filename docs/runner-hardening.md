@@ -37,11 +37,11 @@ Install both runner binaries together:
 cargo install --locked --path skott --bins
 ```
 
-The main executable needs `skott-file-tool` beside it. The helper is a
+The main executable needs `skott-toerne` beside it. The helper is a
 small filesystem primitive, not a sandbox when invoked directly. Do not place
 either it or the installed enforcement runner inside the writable workspace.
 Configure `[sandbox].runner` and `.backend` for the independently installed
-`galla-runner` and Bubblewrap. Writable workspace parents are required
+`galla` and Bubblewrap. Writable workspace parents are required
 for private temporary payload staging; filesystem-root workspaces are rejected.
 
 Configuration discovery uses `./skott.toml`, then the per-user
@@ -231,8 +231,8 @@ A separate model-free trial verified confined native writes/reads, unavailable
 host-private files and denied access to a host-local TCP listener.
 
 ```sh
-KVIST_LIVE_GALLA_RUNNER=/path/to/installed/galla-runner \
-  cargo test --locked -p skott --test live_llama \
+KVIST_LIVE_GALLA_RUNNER=/path/to/installed/galla \
+  cargo test --locked -p kvist-skott --test live_llama \
   -- --ignored --test-threads=1
 ```
 

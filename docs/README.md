@@ -32,7 +32,7 @@ The analysis and design for the reusable agent runtime that `sav` provides and
 | [Architecture](architecture.md) | The layered agent architecture organized by authority: which layer owns what, and why the stable abstraction is a set of backend roles rather than "provider." |
 | [Runtime Selection](runtime-selection.md) | Selection guidance for native, Rig-run, containerized Rig-agent, and external agent drivers. |
 | [Runner Hardening](runner-hardening.md) | The security-first workspace agent: implemented improvements, native-helper installation, headless llama-server usage, authority limits, and the independent qualification record. |
-| [User Guide](user-guide.md) | Standalone agent runtime user guide: building, configuring, and running `sav-run`. |
+| [User Guide](user-guide.md) | Standalone agent runtime user guide: building, configuring, and running `sav`. |
 
 ## Decisions (`decisions/`)
 

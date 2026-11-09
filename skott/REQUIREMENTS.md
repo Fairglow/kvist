@@ -725,7 +725,7 @@ Successful use produces:
   advisingly. Explicit System `on` availability errors remain; unavailable
   workspace Rust is diagnostic/unadvertised without blocking independent tools.
 - Construction and execution of a version-one Authoring-phase sandbox request
-  against the installed `galla-runner`, reusing its closed protocol and
+  against the installed `galla`, reusing its closed protocol and
   Bubblewrap enforcement.
 - A first-class terminal UI: scrollable transcript, model/thinking selectors,
   input line, status bar, and an help overlay, with responsive cancellation.

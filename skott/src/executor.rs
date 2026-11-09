@@ -326,7 +326,7 @@ pub(crate) fn resolve_file_helper(configured: Option<&Path>, workdir: &Path) -> 
         .map_err(|e| io_error("inspect native file helper", Some(display), e))?;
     if !metadata.is_file() {
         return Err(Error::SandboxBuild {
-            reason: "install skott-file-tool as a regular non-link file".to_owned(),
+            reason: "install skott-toerne as a regular non-link file".to_owned(),
         });
     }
     let workdir = workdir

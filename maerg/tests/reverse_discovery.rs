@@ -1,7 +1,7 @@
 use std::fs;
 use tempfile::TempDir;
 
-use kvist::{
+use maerg::{
     component_documents::{self, DocumentKind},
     reverse_discovery::{ReverseDiscoverOutcome, reverse_discover},
     task_queue,

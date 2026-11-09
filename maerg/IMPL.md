@@ -131,7 +131,7 @@ HTTPS admission is not total backend egress/DNS/redirect proof.
 
 Subsequent production-runner nextest
 `5c1a5560-129c-461a-b27b-4c29eac74ef1` passed all 389 affected cases with
-`KVIST_GALLA=/opt/target/release/galla-runner` after final code/queue updates.
+`KVIST_GALLA=/opt/target/release/galla` after final code/queue updates.
 The release Kvist binary was atomically installed and byte/version verified;
 running processes were not stopped.
 

@@ -3,7 +3,7 @@ use std::{
     process::{Command, Output},
 };
 
-use kvist::init::initialize;
+use maerg::init::initialize;
 use tempfile::TempDir;
 
 #[cfg(target_os = "linux")]
@@ -49,7 +49,7 @@ fn fake_galla_path(project: &TempDir) -> std::path::PathBuf {
         .parent()
         .expect("temporary project parent")
         .join(format!(
-            "fake-galla-runner-{}",
+            "fake-galla-{}",
             project
                 .path()
                 .file_name()
@@ -60,7 +60,7 @@ fn fake_galla_path(project: &TempDir) -> std::path::PathBuf {
 
 #[cfg(target_os = "linux")]
 fn configure_fake_sandbox(project: &TempDir) {
-    kvist::init_test_logging();
+    maerg::init_test_logging();
     use std::os::unix::fs::PermissionsExt;
 
     let runner = fake_galla_path(project);
@@ -1633,7 +1633,7 @@ fn task_run_refuses_a_project_local_galla_before_transition() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
-    let runner = project.path().join("fake-galla-runner");
+    let runner = project.path().join("fake-galla");
     fs::write(
         &runner,
         "#!/bin/sh\nprintf 'kvist-sandbox-probe-v1: network=deny; mount=component\\n'\n",
@@ -1686,7 +1686,7 @@ fn task_run_refuses_a_sibling_runner_in_the_selected_worktree() {
     let project = checkout.path().join("nested-project");
     initialize(&project).expect("initialize nested project");
     fs::write(project.join("src/TODOS.yaml"), queue()).expect("write queue");
-    let runner = checkout.path().join("sibling-galla-runner");
+    let runner = checkout.path().join("sibling-galla");
     fs::write(
         &runner,
         "#!/bin/sh\nprintf 'kvist-sandbox-probe-v1: network=deny; mount=component\\n'\n",
@@ -1893,10 +1893,10 @@ fn shared_task_project(endpoint: &str) -> TempDir {
 
 #[cfg(target_os = "linux")]
 fn continuous_project(endpoint: &str, frequency: &str) -> TempDir {
-    use kvist::task_queue::{TaskKind, TaskStatus};
+    use maerg::task_queue::{TaskKind, TaskStatus};
     let project = shared_task_project(endpoint);
     let path = project.path().join("src/TODOS.yaml");
-    let mut tasks = kvist::task_queue::parse(&queue()).unwrap();
+    let mut tasks = maerg::task_queue::parse(&queue()).unwrap();
     let template = tasks.tasks[0].clone();
     tasks.tasks.clear();
     let mut previous = None;
@@ -1917,7 +1917,7 @@ fn continuous_project(endpoint: &str, frequency: &str) -> TempDir {
             tasks.tasks.push(task);
         }
     }
-    fs::write(path, kvist::task_queue::serialize(&tasks).unwrap()).unwrap();
+    fs::write(path, maerg::task_queue::serialize(&tasks).unwrap()).unwrap();
     let config_path = project.path().join("kvist.toml");
     let config = fs::read_to_string(&config_path).unwrap();
     let task_run = if frequency == "default" {
@@ -1998,10 +1998,10 @@ fn decision_agent_options_discussion_and_plan_never_apply_unseen_effects() {
     );
     let project = continuous_project(&gateway.endpoint, "manual");
     let queue_path = project.path().join("src/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
-    queue.tasks[0].status = kvist::task_queue::TaskStatus::AwaitingDecision;
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = maerg::task_queue::TaskStatus::AwaitingDecision;
     queue.tasks[0].blocked_reason = Some("Choose whether investigation is needed.".into());
-    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&queue_path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let before = fs::read(&queue_path).unwrap();
     for args in [
         vec!["decision", ".", "options"],
@@ -2053,10 +2053,10 @@ fn decision_agent_options_discussion_and_plan_never_apply_unseen_effects() {
         count,
         "application must invoke no model"
     );
-    let queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    let queue = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
     assert_eq!(
         queue.tasks[0].status,
-        kvist::task_queue::TaskStatus::Pending
+        maerg::task_queue::TaskStatus::Pending
     );
     let requests = requests.lock().unwrap();
     let discussion = requests
@@ -2107,10 +2107,10 @@ fn decision_unknown_capacity_keeps_large_intent_instead_of_asserting_32k_limit()
     );
     let project = continuous_project(&gateway.endpoint, "manual");
     let queue_path = project.path().join("src/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
-    queue.tasks[0].status = kvist::task_queue::TaskStatus::AwaitingDecision;
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = maerg::task_queue::TaskStatus::AwaitingDecision;
     queue.tasks[0].blocked_reason = Some("Discuss the large local intent.".into());
-    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&queue_path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let before = fs::read(&queue_path).unwrap();
     let design_path = project.path().join("src/DESIGN.md");
     let design = format!(
@@ -2158,10 +2158,10 @@ fn decision_unknown_capacity_keeps_large_intent_instead_of_asserting_32k_limit()
 fn manual_decision_plan_and_inspection_need_no_model_and_bind_exact_approval() {
     let project = continuous_project("http://127.0.0.1:1", "manual");
     let queue_path = project.path().join("src/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
-    queue.tasks[0].status = kvist::task_queue::TaskStatus::Blocked;
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = maerg::task_queue::TaskStatus::Blocked;
     queue.tasks[0].blocked_reason = Some("Environment repaired; authorize retry.".into());
-    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&queue_path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let inspected = run_kvist(&project, &["decision", "."]);
     assert!(
         inspected.status.success(),
@@ -2224,10 +2224,10 @@ fn manual_decision_plan_and_inspection_need_no_model_and_bind_exact_approval() {
 fn numbered_decision_responses_keep_exact_plans_without_hash_copying() {
     let project = continuous_project("http://127.0.0.1:1", "manual");
     let queue_path = project.path().join("src/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
-    queue.tasks[0].status = kvist::task_queue::TaskStatus::Blocked;
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = maerg::task_queue::TaskStatus::Blocked;
     queue.tasks[0].blocked_reason = Some("Authorize an unchanged retry.".into());
-    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&queue_path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let before = fs::read(&queue_path).unwrap();
     let draft = project.path().join("draft.json");
     let mut plans = Vec::new();
@@ -2359,10 +2359,10 @@ fn numbered_options_refuse_retargeting_and_prepare_the_exact_selected_choice() {
     );
     let project = continuous_project(&gateway.endpoint, "manual");
     let queue_path = project.path().join("src/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
-    queue.tasks[0].status = kvist::task_queue::TaskStatus::AwaitingDecision;
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = maerg::task_queue::TaskStatus::AwaitingDecision;
     queue.tasks[0].blocked_reason = Some("Choose an investigated direction.".into());
-    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&queue_path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let before = fs::read(&queue_path).unwrap();
     let mut first_command = String::new();
     for number in [1, 2] {
@@ -2449,10 +2449,10 @@ fn numbered_options_refuse_retargeting_and_prepare_the_exact_selected_choice() {
 fn actions_discovers_preexisting_authenticated_plans_without_inference() {
     let project = continuous_project("http://127.0.0.1:1", "manual");
     let queue_path = project.path().join("src/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
-    queue.tasks[0].status = kvist::task_queue::TaskStatus::Blocked;
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    queue.tasks[0].status = maerg::task_queue::TaskStatus::Blocked;
     queue.tasks[0].blocked_reason = Some("Authorize a retry.".into());
-    fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&queue_path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let draft = project.path().join("draft.json");
     fs::write(&draft, r#"{"schema_version":1,"rationale":"Human reviewed retry.","documents":{},"tasks":[],"disposition":"resolve"}"#).unwrap();
     let prepared = run_kvist(
@@ -2501,7 +2501,7 @@ fn actions_discovers_preexisting_authenticated_plans_without_inference() {
 #[test]
 #[cfg(target_os = "linux")]
 fn applied_decision_continues_prerequisites_before_retrying_a_real_paused_review() {
-    use kvist::task_queue::{TaskKind, TaskStatus};
+    use maerg::task_queue::{TaskKind, TaskStatus};
     let pause = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let state = pause.clone();
     let gateway = MockGateway::serve(
@@ -2526,7 +2526,7 @@ fn applied_decision_continues_prerequisites_before_retrying_a_real_paused_review
         String::from_utf8_lossy(&paused.stderr)
     );
     let queue_path = project.path().join("src/TODOS.yaml");
-    let queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    let queue = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
     assert_eq!(queue.tasks[3].status, TaskStatus::AwaitingDecision);
     let mut edits = Vec::new();
     let mut previous = None;
@@ -2585,7 +2585,7 @@ fn applied_decision_continues_prerequisites_before_retrying_a_real_paused_review
         "{}",
         String::from_utf8_lossy(&applied.stdout)
     );
-    let queue = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    let queue = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
     assert_eq!(queue.tasks.len(), 12);
     assert!(
         queue
@@ -2657,7 +2657,7 @@ fn continuous_run_completes_two_items_with_separate_unaccepted_checkpoints() {
         "{stdout}"
     );
     assert!(!stdout.contains("Run suggested"));
-    let tasks = kvist::task_queue::parse(
+    let tasks = maerg::task_queue::parse(
         &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
     )
     .unwrap();
@@ -2665,7 +2665,7 @@ fn continuous_run_completes_two_items_with_separate_unaccepted_checkpoints() {
         tasks
             .tasks
             .iter()
-            .all(|task| task.status == kvist::task_queue::TaskStatus::Completed)
+            .all(|task| task.status == maerg::task_queue::TaskStatus::Completed)
     );
     assert!(tasks.tasks.iter().all(|task| task.acceptance_id.is_none()));
     let log = Command::new("git")
@@ -2766,18 +2766,18 @@ fn continuous_run_new_work_uses_a_fresh_baseline_and_approved_commit_policy() {
     );
     let before = calls.load(std::sync::atomic::Ordering::SeqCst);
     let path = project.path().join("src/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
     let mut previous = queue.tasks.last().unwrap().id.clone();
     let template_tasks = queue.tasks[..4].to_vec();
     for mut task in template_tasks {
         task.id = task.id.replacen("one-", "three-", 1);
-        task.status = kvist::task_queue::TaskStatus::Pending;
+        task.status = maerg::task_queue::TaskStatus::Pending;
         task.timestamps.completed_at = None;
         task.depends_on = vec![previous];
         previous = task.id.clone();
         queue.tasks.push(task);
     }
-    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let config = project.path().join("kvist.toml");
     fs::write(
         &config,
@@ -2812,12 +2812,12 @@ fn continuous_run_new_work_uses_a_fresh_baseline_and_approved_commit_policy() {
         String::from_utf8_lossy(&next.stderr)
     );
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst) - before, 5);
-    let queue = kvist::task_queue::parse(&fs::read_to_string(path).unwrap()).unwrap();
+    let queue = maerg::task_queue::parse(&fs::read_to_string(path).unwrap()).unwrap();
     assert!(
         queue
             .tasks
             .iter()
-            .all(|task| task.status == kvist::task_queue::TaskStatus::Completed)
+            .all(|task| task.status == maerg::task_queue::TaskStatus::Completed)
     );
     assert!(queue.tasks.iter().all(|task| task.acceptance_id.is_none()));
     let ledger: serde_json::Value = serde_json::from_slice(
@@ -2898,18 +2898,18 @@ fn continuous_run_pauses_on_review_decision_without_running_later_items() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let tasks = kvist::task_queue::parse(
+    let tasks = maerg::task_queue::parse(
         &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
     )
     .unwrap();
     assert_eq!(
         tasks.tasks[3].status,
-        kvist::task_queue::TaskStatus::AwaitingDecision
+        maerg::task_queue::TaskStatus::AwaitingDecision
     );
     assert!(
         tasks.tasks[4..]
             .iter()
-            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+            .all(|task| task.status == maerg::task_queue::TaskStatus::Pending)
     );
     let brief = project
         .path()
@@ -3004,13 +3004,13 @@ fn tool_only_authoring_decision_has_agent_markdown_and_response_steps() {
         path.extension()
             .is_some_and(|extension| extension == "json")
     }));
-    let queue = kvist::task_queue::parse(
+    let queue = maerg::task_queue::parse(
         &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
     )
     .unwrap();
     assert_eq!(
         queue.tasks[0].status,
-        kvist::task_queue::TaskStatus::AwaitingDecision
+        maerg::task_queue::TaskStatus::AwaitingDecision
     );
     assert!(!project.path().join("sandbox-request.json").exists());
 }
@@ -3108,19 +3108,19 @@ fn continuous_run_retries_failed_checkpoint_without_replaying_completed_tasks() 
     assert!(brief.contains("Host diagnostic"));
     assert!(brief.contains("signing"));
     assert!(brief.contains("without rerunning completed tasks"));
-    let tasks = kvist::task_queue::parse(
+    let tasks = maerg::task_queue::parse(
         &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
     )
     .unwrap();
     assert!(
         tasks.tasks[..4]
             .iter()
-            .all(|task| task.status == kvist::task_queue::TaskStatus::Completed)
+            .all(|task| task.status == maerg::task_queue::TaskStatus::Completed)
     );
     assert!(
         tasks.tasks[4..]
             .iter()
-            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+            .all(|task| task.status == maerg::task_queue::TaskStatus::Pending)
     );
     let before = calls.load(std::sync::atomic::Ordering::SeqCst);
     assert!(before >= 5);
@@ -3162,15 +3162,15 @@ fn continuous_run_explicit_selection_is_single_and_prerequisite_checked() {
     );
     let path = project.path().join("src/TODOS.yaml");
     let before = fs::read(&path).unwrap();
-    let tasks = kvist::task_queue::parse(std::str::from_utf8(&before).unwrap()).unwrap();
+    let tasks = maerg::task_queue::parse(std::str::from_utf8(&before).unwrap()).unwrap();
     assert_eq!(
         tasks.tasks[0].status,
-        kvist::task_queue::TaskStatus::Completed
+        maerg::task_queue::TaskStatus::Completed
     );
     assert!(
         tasks.tasks[1..]
             .iter()
-            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+            .all(|task| task.status == maerg::task_queue::TaskStatus::Pending)
     );
     let denied = run_kvist(&project, &["task", "run", ".", "one-security-audit"]);
     assert!(!denied.status.success());
@@ -3268,15 +3268,15 @@ fn continuous_run_rejects_malformed_reviews_and_forged_ledger_state() {
     assert!(brief.contains("invalid report JSON"));
     assert!(brief.contains("task transition . one-security-audit pending"));
     let path = project.path().join("src/TODOS.yaml");
-    let tasks = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    let tasks = maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(
         tasks.tasks[2].status,
-        kvist::task_queue::TaskStatus::Blocked
+        maerg::task_queue::TaskStatus::Blocked
     );
     assert!(
         tasks.tasks[3..]
             .iter()
-            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+            .all(|task| task.status == maerg::task_queue::TaskStatus::Pending)
     );
     let transitioned = run_kvist(
         &project,
@@ -3344,12 +3344,12 @@ fn independent_review_redacts_escaped_secrets_from_stream_logs_and_reports() {
     );
     let project = continuous_project(&gateway.endpoint, "manual");
     let path = project.path().join("src/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
     for task in &mut queue.tasks[..2] {
-        task.status = kvist::task_queue::TaskStatus::Completed;
+        task.status = maerg::task_queue::TaskStatus::Completed;
         task.timestamps.completed_at = Some(task.timestamps.updated_at.clone());
     }
-    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let config = project.path().join("kvist.toml");
     let configured = fs::read_to_string(&config).unwrap().replace(
         "[agent.roles.security_reviewer]\nprofile = \"fixture\"",
@@ -3411,12 +3411,12 @@ fn independent_review_controls_reject_guidance_and_cancel_quiet_inference() {
     );
     let project = continuous_project(&gateway.endpoint, "manual");
     let path = project.path().join("src/TODOS.yaml");
-    let mut queue = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
     for task in &mut queue.tasks[..2] {
-        task.status = kvist::task_queue::TaskStatus::Completed;
+        task.status = maerg::task_queue::TaskStatus::Completed;
         task.timestamps.completed_at = Some(task.timestamps.updated_at.clone());
     }
-    fs::write(&path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    fs::write(&path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .args(["task", "run", ".", "one-security-audit", "--allow-control"])
         .current_dir(project.path())
@@ -3464,15 +3464,15 @@ fn independent_review_controls_reject_guidance_and_cancel_quiet_inference() {
         .collect::<String>();
     assert!(journals.contains("review_control"));
     assert!(!journals.contains("DO_NOT_INJECT_REVIEW_GUIDANCE"));
-    let queue = kvist::task_queue::parse(&fs::read_to_string(path).unwrap()).unwrap();
+    let queue = maerg::task_queue::parse(&fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(
         queue.tasks[2].status,
-        kvist::task_queue::TaskStatus::Blocked
+        maerg::task_queue::TaskStatus::Blocked
     );
     assert!(
         queue.tasks[3..]
             .iter()
-            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+            .all(|task| task.status == maerg::task_queue::TaskStatus::Pending)
     );
 }
 
@@ -3507,18 +3507,18 @@ fn continuous_run_interrupt_cancels_quiet_inference_without_scheduling_later_tas
     )
     .unwrap();
     assert!(!wait_cancelled_task(&mut child).success());
-    let queue = kvist::task_queue::parse(
+    let queue = maerg::task_queue::parse(
         &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
     )
     .unwrap();
     assert_eq!(
         queue.tasks[0].status,
-        kvist::task_queue::TaskStatus::Blocked
+        maerg::task_queue::TaskStatus::Blocked
     );
     assert!(
         queue.tasks[1..]
             .iter()
-            .all(|task| task.status == kvist::task_queue::TaskStatus::Pending)
+            .all(|task| task.status == maerg::task_queue::TaskStatus::Pending)
     );
 }
 
@@ -3857,10 +3857,10 @@ fn human_can_explicitly_abandon_a_historical_prepared_attempt_without_certifying
         .join("\n");
     fs::write(&attempt_path, format!("{prepared}\n")).unwrap();
     let queue_path = project.path().join("src/TODOS.yaml");
-    let mut tasks = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
-    tasks.tasks[1].status = kvist::task_queue::TaskStatus::InProgress;
+    let mut tasks = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    tasks.tasks[1].status = maerg::task_queue::TaskStatus::InProgress;
     tasks.tasks[1].blocked_reason = None;
-    fs::write(&queue_path, kvist::task_queue::serialize(&tasks).unwrap()).unwrap();
+    fs::write(&queue_path, maerg::task_queue::serialize(&tasks).unwrap()).unwrap();
     let next = run_kvist(&project, &["task", "next", "."]);
     assert!(
         !next.status.success(),
@@ -3932,13 +3932,13 @@ fn failure_disposition_errors_retain_the_original_model_cause() {
         !diagnostic.contains("transitioned to blocked"),
         "{diagnostic}"
     );
-    let tasks = kvist::task_queue::parse(
+    let tasks = maerg::task_queue::parse(
         &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
     )
     .unwrap();
     assert_eq!(
         tasks.tasks[1].status,
-        kvist::task_queue::TaskStatus::InProgress
+        maerg::task_queue::TaskStatus::InProgress
     );
 }
 
@@ -3963,10 +3963,10 @@ fn execution_evidence_without_durable_disposition_does_not_release_the_attempt_f
     assert!(interrupted.contains("\"phase\":\"agent-execution\""));
     fs::write(&path, format!("{interrupted}\n")).unwrap();
     let queue_path = project.path().join("src/TODOS.yaml");
-    let mut tasks = kvist::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
-    tasks.tasks[1].status = kvist::task_queue::TaskStatus::InProgress;
+    let mut tasks = maerg::task_queue::parse(&fs::read_to_string(&queue_path).unwrap()).unwrap();
+    tasks.tasks[1].status = maerg::task_queue::TaskStatus::InProgress;
     tasks.tasks[1].blocked_reason = None;
-    fs::write(&queue_path, kvist::task_queue::serialize(&tasks).unwrap()).unwrap();
+    fs::write(&queue_path, maerg::task_queue::serialize(&tasks).unwrap()).unwrap();
     for args in [
         vec!["task", "next", "."],
         vec!["task", "run", ".", "implement-code"],
@@ -4030,11 +4030,11 @@ fn explicit_task_stops_for_finalization_without_running_followups() {
     );
     let project = shared_task_project(&gateway.endpoint);
     let path = project.path().join("src/TODOS.yaml");
-    let mut tasks = kvist::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut tasks = maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
     let mut followup = tasks.tasks[1].clone();
     followup.id = "followup".into();
     tasks.tasks.push(followup);
-    fs::write(path, kvist::task_queue::serialize(&tasks).unwrap()).unwrap();
+    fs::write(path, maerg::task_queue::serialize(&tasks).unwrap()).unwrap();
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
     assert!(
         output.status.success(),
@@ -4048,13 +4048,13 @@ fn explicit_task_stops_for_finalization_without_running_followups() {
     );
     assert!(stdout.contains("kvist task finalize . implement-code attempt-0001 accept"));
     assert!(!stdout.contains("completed successfully"));
-    let tasks = kvist::task_queue::parse(
+    let tasks = maerg::task_queue::parse(
         &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
     )
     .unwrap();
     assert_eq!(
         tasks.tasks[2].status,
-        kvist::task_queue::TaskStatus::Pending
+        maerg::task_queue::TaskStatus::Pending
     );
 }
 
@@ -5145,8 +5145,8 @@ command_template = "my-special-security-agent-cmd {{prompt}}"
     );
 
     // Verify the policy using check_execution_approved
-    let config = kvist::config::load(project.path()).expect("load config");
-    let verified_runner = kvist::task_commands::check_execution_approved(project.path(), &config)
+    let config = maerg::config::load(project.path()).expect("load config");
+    let verified_runner = maerg::task_commands::check_execution_approved(project.path(), &config)
         .expect("check_execution_approved failed");
 
     // Assert that the verified runner matches our configured runner

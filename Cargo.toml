@@ -5,7 +5,7 @@ members = [
     "galla",
     "skott",
     "blad",
-    "dependencies",
+    "roetter",
 ]
 default-members = ["maerg"]
 resolver = "3"

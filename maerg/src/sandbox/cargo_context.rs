@@ -1085,7 +1085,7 @@ fn stage_native_workspace(
     let project = project
         .canonicalize()
         .map_err(|e| sandbox_path_error(config, "resolve acquisition project", project, e))?;
-    let limits = kvist_dependencies::VendorLimits::load(&project).map_err(|e| {
+    let limits = roetter::VendorLimits::load(&project).map_err(|e| {
         failure(
             config,
             format!("cannot load native Cargo snapshot limits: {e}"),

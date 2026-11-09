@@ -96,7 +96,7 @@ acceptance or an advisory receipt.
 
 ### Current observed behavior
 
-Carried forward from earlier source reads: the library separates cheap catalogue/manifest observations from full lock/content checks and transactional acquisition. `check_snapshot` validates a supplied private vendor copy together with managed fences, manifest/lock binding, resolver/source binding, and control re-observation; unmanaged implicit resolution is restricted to crates.io/local graphs. Checksums establish consistency against supplied metadata and lock labels, **not cryptographic origin attestation**. The corrected duplicate-key fixture now explicitly establishes its mutation before asserting rejection. Sources: `/opt/proj/kvist/dependencies/src/rust.rs:60–180,219–251`; `/opt/proj/kvist/dependencies/src/integrity.rs:404–504`; `/opt/proj/kvist/dependencies/tests/rust.rs:393–411`.
+Carried forward from earlier source reads: the library separates cheap catalogue/manifest observations from full lock/content checks and transactional acquisition. `check_snapshot` validates a supplied private vendor copy together with managed fences, manifest/lock binding, resolver/source binding, and control re-observation; unmanaged implicit resolution is restricted to crates.io/local graphs. Checksums establish consistency against supplied metadata and lock labels, **not cryptographic origin attestation**. The corrected duplicate-key fixture now explicitly establishes its mutation before asserting rejection. Sources: `/opt/proj/kvist/roetter/src/rust.rs:60–180,219–251`; `/opt/proj/kvist/roetter/src/integrity.rs:404–504`; `/opt/proj/kvist/roetter/tests/rust.rs:393–411`.
 
 ### Earlier detailed source observations, carried forward
 

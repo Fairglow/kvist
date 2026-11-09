@@ -21,11 +21,11 @@ const REQUEST_ARGUMENT: &str = "--kvist-sandbox-request-v1";
 fn main() -> ExitCode {
     let mut arguments = std::env::args_os().skip(1);
     let Some(mode) = arguments.next() else {
-        eprintln!("galla-runner: a protocol mode argument is required");
+        eprintln!("galla: a protocol mode argument is required");
         return ExitCode::from(2);
     };
     if arguments.next().is_some() {
-        eprintln!("galla-runner: exactly one protocol mode argument is accepted");
+        eprintln!("galla: exactly one protocol mode argument is accepted");
         return ExitCode::from(2);
     }
 
@@ -34,9 +34,7 @@ fn main() -> ExitCode {
     } else if mode == REQUEST_ARGUMENT {
         run_request()
     } else {
-        eprintln!(
-            "galla-runner: unknown argument; expected `{PROBE_ARGUMENT}` or `{REQUEST_ARGUMENT}`"
-        );
+        eprintln!("galla: unknown argument; expected `{PROBE_ARGUMENT}` or `{REQUEST_ARGUMENT}`");
         ExitCode::from(2)
     }
 }
@@ -49,12 +47,12 @@ fn run_probe() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(error) => {
-                eprintln!("galla-runner: cannot serialize probe response: {error}");
+                eprintln!("galla: cannot serialize probe response: {error}");
                 ExitCode::from(2)
             }
         },
         ProbeOutcome::Unavailable { reason } => {
-            eprintln!("galla-runner: {reason}");
+            eprintln!("galla: {reason}");
             ExitCode::from(3)
         }
     }
@@ -62,21 +60,21 @@ fn run_probe() -> ExitCode {
 
 fn run_request() -> ExitCode {
     if let Err(reason) = context::require_host() {
-        eprintln!("galla-runner: {reason}");
+        eprintln!("galla: {reason}");
         return ExitCode::from(3);
     }
 
     let mut buffer = Vec::new();
     let mut handle = io::stdin().lock().take((MAX_REQUEST_BYTES as u64) + 1);
     if let Err(error) = handle.read_to_end(&mut buffer) {
-        eprintln!("galla-runner: cannot read the request from standard input: {error}");
+        eprintln!("galla: cannot read the request from standard input: {error}");
         return ExitCode::from(2);
     }
 
     match validation::parse_and_validate(&buffer) {
         Ok(request) => galla::enforcement::run(request),
         Err(error) => {
-            eprintln!("galla-runner: {error}");
+            eprintln!("galla: {error}");
             ExitCode::from(2)
         }
     }

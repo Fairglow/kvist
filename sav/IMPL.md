@@ -434,7 +434,7 @@ Unrelated observations and limits below were not re-audited in this follow-up.
 
 ### Package, CLI, and authority
 
-Sav is a Rust edition-2024 library and `sav-run` binary, version 0.3.0, with
+Sav is a Rust edition-2024 library and `sav` binary, version 0.3.0, with
 Rust 1.95 declared in its package manifest. The crate rejects non-Linux builds.
 Its exported interfaces include prompt acquisition, shell-free command rendering,
 provider catalogs, direct local HTTP model transports, provider/profile setup,

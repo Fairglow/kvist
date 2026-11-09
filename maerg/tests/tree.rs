@@ -4,7 +4,7 @@ use std::{
     process::{Command, Output},
 };
 
-use kvist::{discovery::ComponentArtifact, init::initialize, tree::render_project};
+use maerg::{discovery::ComponentArtifact, init::initialize, tree::render_project};
 use tempfile::TempDir;
 
 fn create_component(path: &Path, artifacts: &[ComponentArtifact]) {

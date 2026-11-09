@@ -280,7 +280,7 @@ fn native_cli_executes_the_selected_structured_profile_and_inspection_is_read_on
     )
     .unwrap();
     let original = fs::read_to_string(&registry).unwrap();
-    let inspected = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let inspected = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args(["registry", "--registry"])
         .arg(&registry)
         .output()
@@ -321,7 +321,7 @@ fn native_cli_executes_the_selected_structured_profile_and_inspection_is_read_on
         )
         .unwrap();
     });
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args(["model", "--profile", "coder", "--registry"])
         .arg(&registry)
         .arg("hello")

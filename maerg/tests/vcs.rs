@@ -6,9 +6,9 @@ use std::{
     process::{Command, Output},
 };
 
-use kvist::init::initialize;
+use maerg::init::initialize;
 #[cfg(target_os = "linux")]
-use kvist::{project_state::inspect, vcs::VcsArtifactState};
+use maerg::{project_state::inspect, vcs::VcsArtifactState};
 use tempfile::TempDir;
 
 fn run_kvist(arguments: &[&str]) -> Output {

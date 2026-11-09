@@ -97,7 +97,7 @@ fn run(
     limit: Option<usize>,
     token: &sav::CancellationToken,
     answer: impl FnMut(usize, &serde_json::Value, &mut TcpStream) + Send,
-) -> (kvist::Result<kvist::agent::AgentRunResult>, usize) {
+) -> (maerg::Result<maerg::agent::AgentRunResult>, usize) {
     run_controlled(
         dir,
         streamed,
@@ -115,7 +115,7 @@ fn run_controlled(
     token: &sav::CancellationToken,
     controls: &sav::runtime::ControlMailbox,
     mut answer: impl FnMut(usize, &serde_json::Value, &mut TcpStream) + Send,
-) -> (kvist::Result<kvist::agent::AgentRunResult>, usize) {
+) -> (maerg::Result<maerg::agent::AgentRunResult>, usize) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
@@ -146,7 +146,7 @@ fn run_controlled(
         selected.timeout_seconds = SCRIPTED_TIMEOUT_SECONDS;
         selected.max_output_bytes = 1024 * 1024;
         selected.token_limit = limit;
-        let result = kvist::agent::execute_agent_controlled(
+        let result = maerg::agent::execute_agent_controlled(
             &selected,
             &SandboxConfig {
                 runner: "/usr/bin/true".into(),
@@ -404,7 +404,7 @@ fn generation_parent_cancellation_on_correction_wins_over_repetition() {
     assert!(
         matches!(
             result,
-            Err(kvist::KvistError::Sav(
+            Err(maerg::KvistError::Sav(
                 sav::Error::Cancelled | sav::Error::ModelTransportCancelled
             ))
         ),

@@ -30,15 +30,12 @@ fn both_operator_frontends_honor_the_same_vendor_policy() {
 #[test]
 fn changed_component_queues_conform_to_the_native_schema() {
     for (component, queue) in [
-        (
-            "dependencies",
-            include_str!("../../dependencies/TODOS.yaml"),
-        ),
+        ("dependencies", include_str!("../../roetter/TODOS.yaml")),
         ("maerg", include_str!("../TODOS.yaml")),
         ("sav", include_str!("../../sav/TODOS.yaml")),
         ("skott", include_str!("../../skott/TODOS.yaml")),
     ] {
-        kvist::task_queue::parse(queue).unwrap_or_else(|error| panic!("{component}: {error}"));
+        maerg::task_queue::parse(queue).unwrap_or_else(|error| panic!("{component}: {error}"));
     }
 }
 
@@ -114,7 +111,7 @@ fn native_rust_enforcement_probe() {
         return;
     };
     let enforcement =
-        kvist::language_vendoring::enforce_vendoring(std::path::Path::new(&project), false, None)
+        maerg::language_vendoring::enforce_vendoring(std::path::Path::new(&project), false, None)
             .unwrap();
     assert_eq!(enforcement.language, "rust");
     assert_eq!(

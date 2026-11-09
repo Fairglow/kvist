@@ -3,7 +3,7 @@ use std::{
     process::{Command, Output},
 };
 
-use kvist::{
+use maerg::{
     artifacts::{
         ARCHITECTURE_VERSION, CONFIGURATION_VERSION, IMPLEMENTATION_RECORD_VERSION,
         ROOT_CONTRACT_VERSION, TODO_QUEUE_VERSION, VISION_VERSION,

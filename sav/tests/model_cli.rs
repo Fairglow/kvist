@@ -59,7 +59,7 @@ fn model_command_prompts_a_local_ollama_endpoint() {
         .expect("write response");
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args([
             "model",
             "--provider",
@@ -118,7 +118,7 @@ fn streaming_model_command_preserves_provider_content_exactly() {
         .expect("write response");
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args([
             "model",
             "--provider",

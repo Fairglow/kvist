@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match kvist::run() {
+    match maerg::run() {
         Ok(output) => {
             if !output.is_empty() {
                 println!("{output}");

@@ -1,5 +1,5 @@
 [package]
-name = "kvist-dependencies"
+name = "kvist-roetter"
 version = "0.3.0"
 edition = "2024"
 rust-version = "1.95"
@@ -7,8 +7,11 @@ description = "Shared locked Rust dependency acquisition and offline readiness"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/Fairglow/kvist"
 
+[lib]
+name = "roetter"
+
 [dependencies]
-sav = { version = "0.3", path = "../sav" }
+sav = { package = "kvist-sav", version = "0.3", path = "../sav" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11"

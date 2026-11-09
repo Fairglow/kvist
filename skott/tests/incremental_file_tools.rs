@@ -407,7 +407,7 @@ fn new_tools_render_without_effects_and_use_the_installed_host_helper() {
     let root = dir.path().canonicalize().unwrap();
     fs::write(root.join("text"), b"a\n").unwrap();
     let registry = ToolRegistry::new(ToolPolicy::minimum())
-        .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool"));
+        .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne"));
     let definitions = registry.tool_definitions();
     for name in ["append_file", "apply_patch"] {
         let definition = definitions.iter().find(|d| d.name == name).unwrap();

@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use kvist::{config, config::Role, wizard};
+use maerg::{config, config::Role, wizard};
 use sav::registry::{Backend, ExternalAgent, ExternalProvider, Profile, Registry};
 
 fn project() -> tempfile::TempDir {
@@ -359,7 +359,7 @@ fn cancelled_binding_and_declined_check_have_no_effects() {
             project.path(),
             &registry,
         ),
-        Err(kvist::KvistError::AgentSetupCancelled)
+        Err(maerg::KvistError::AgentSetupCancelled)
     ));
     assert!(!project.path().join("kvist.toml").exists());
     bind(project.path());

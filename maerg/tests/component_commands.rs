@@ -3,11 +3,11 @@ use std::{
     process::{Command, Output},
 };
 
-use kvist::component_documents::{
+use maerg::component_documents::{
     COMPONENT_CONTRACT_TEMPLATE, COMPONENT_DESIGN_TEMPLATE, COMPONENT_REQUIREMENTS_TEMPLATE,
     DocumentKind, validate_file,
 };
-use kvist::init::initialize;
+use maerg::init::initialize;
 use tempfile::TempDir;
 
 fn run_component(arguments: &[&str]) -> Output {

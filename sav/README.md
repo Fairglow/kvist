@@ -11,7 +11,7 @@ interfaces.
 
 `sav` is a workspace peer component. It is consumed by the `kvist` CLI
 (`maerg`) and by `skott` as the `sav` Rust library, and it is also usable on
-its own through the `sav-run` binary. It does not require the `kvist` CLI and
+its own through the `sav` binary. It does not require the `kvist` CLI and
 is not a sandbox: it supervises host processes and local model transports,
 and it is the caller's responsibility to place it behind an enforcement
 boundary when isolation is required.
@@ -46,7 +46,7 @@ boundary when isolation is required.
 ## Building
 
 `sav` is a Rust 2024 package with MSRV Rust **1.95**. It builds as both a
-library crate (`sav`) and a standalone CLI binary (`sav-run`):
+library crate (`sav`) and a standalone CLI binary (`sav`):
 
 ```bash
 # Build the library and the CLI
@@ -65,34 +65,34 @@ services are required to build or test `sav` itself; model transport and
 provider discovery are exercised against loopback endpoints only when a
 provider is actually configured.
 
-## Running `sav-run`
+## Running `sav`
 
-`sav-run` is the standalone CLI. The commands below are the authoritative
+`sav` is the standalone CLI. The commands below are the authoritative
 interface; see the [User Guide](../docs/user-guide.md) for full
 usage.
 
 ```bash
 # Create a reusable provider profile interactively (probes, qualifies, saves)
-sav-run setup
+sav setup
 
 # List provider-advertised model IDs without running inference
-sav-run models --provider ollama
-sav-run models --provider llama-server --endpoint http://127.0.0.1:9931
+sav models --provider ollama
+sav models --provider llama-server --endpoint http://127.0.0.1:9931
 
 # Run a supervised provider command from a prompt source
-sav-run run --allow-host-execution --command "local-agent --prompt '{prompt}' {context_files}" --file prompt.md
+sav run --allow-host-execution --command "local-agent --prompt '{prompt}' {context_files}" --file prompt.md
 
 # Inspect shared configuration without probing a provider
-sav-run registry
+sav registry
 
 # Resolve native and external profiles without copying provider facts
-sav-run model --profile local-coder "Review this change"
-sav-run run --allow-host-execution --profile copilot-coder "Review this change"
-sav-run models --profile local-coder
+sav model --profile local-coder "Review this change"
+sav run --allow-host-execution --profile copilot-coder "Review this change"
+sav models --profile local-coder
 
 # Send a text-only request through the local model transport
-sav-run model --provider ollama --endpoint http://127.0.0.1:11434 --model qwen3-coder --stream --file prompt.md
-sav-run model --provider llama-server --endpoint http://127.0.0.1:9931 --model Qwen3.8-9B-Q4_K_M "Summarize the supplied prompt"
+sav model --provider ollama --endpoint http://127.0.0.1:11434 --model qwen3-coder --stream --file prompt.md
+sav model --provider llama-server --endpoint http://127.0.0.1:9931 --model Qwen3.8-9B-Q4_K_M "Summarize the supplied prompt"
 ```
 
 `run` requires exactly one command template or stored profile and an explicit

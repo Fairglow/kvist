@@ -104,7 +104,7 @@ Missing sources or unsafe mappings fail explicitly.
 No automatic fallback/retry,
 toolchain installation, lock resolution or model-requested acquisition occurs.
 
-The common provider is `dependencies/CONTRACT.md`. Dependency data remains in the
+The common provider is `roetter/CONTRACT.md`. Dependency data remains in the
 operator-selected native Cargo registry/Git roots. Complete material is reused;
 explicit missing-only provisioning does not overwrite project `.cargo/config.toml`.
 The shared provider retains only small native operation/lock-bound receipt metadata
@@ -409,7 +409,7 @@ and next-offset metadata. `list_dir`, search and discovery return bounded,
 deterministically sorted pages. `edit_file` requires `path`, `old_text`,
 `new_text` and `expected_sha256`; it performs one exact replacement only when
 the file's digest matches. A stale/no-match/multiple-match result changes
-nothing. File tools use the separately installed `skott-file-tool`
+nothing. File tools use the separately installed `skott-toerne`
 Rust helper, mounted read-only outside the writable scope, and private
 read-only payload grants. No model-selected path or call ID is used for host
 staging. Mutation paths are canonical, confined, and non-link. External
@@ -655,7 +655,7 @@ ReviewFailurePolicy }` — every field is optional in the file; an absent table
   `[review]` keys fail at load like other unknown keys. See "Independent review
   extension".
 - `SandboxPaths { runner: PathBuf, backend: PathBuf }` — absolute paths to the
-  `galla-runner` executable and the Bubblewrap backend. Either may point
+  `galla` executable and the Bubblewrap backend. Either may point
   at a binary on disk; both are hashed at request construction and the backend
   is re-verified at runtime by the runner.
 - `ReasoningEffort` mirrors `sav::ReasoningEffort`
@@ -714,7 +714,7 @@ file_helper: Option<PathBuf>, shell_script: Option<String> }` —
   host working directory and a descriptive per-call id. IDs never select
   staging paths.
 - `ToolRegistry::with_file_helper(path)` explicitly selects the installed helper.
-  Production resolution defaults to `skott-file-tool` adjacent to the
+  Production resolution defaults to `skott-toerne` adjacent to the
   calling executable. The executor rejects absent, nonregular, linked or
   workspace-contained helpers; it never falls back to host execution.
 - `ToolProfile` (ids `generic`, `python`, `rust`, `javascript`, `go`, `c`)
@@ -1019,7 +1019,7 @@ argv and passes it here. It:
 
 `skott::sandbox::execute(sandbox: &SandboxPaths, request: &SandboxRequest,
 cancellation: &CancellationToken) -> Result<ToolOutcome>` — spawns
-`galla-runner --kvist-sandbox-request-v1`, writes the request to its
+`galla --kvist-sandbox-request-v1`, writes the request to its
 stdin, supervises stdout/stderr (bounded, timeout, cancellation), kills the
 process group on interrupt, and returns the captured output as a `ToolOutcome`.
 Captured stdout plus stderr and intermediate buffering are bounded; final
@@ -1271,7 +1271,7 @@ Result<Option<Compaction>>` is the authoritative pre-I/O path. It estimates
   executor renders argv/payloads and supervises execution. Loop policy is unit-testable with a
   recording executor and never perform blocking subprocess I/O themselves.
 - **Sandbox runner.** Tool execution is delegated to the externally installed
-  `galla-runner` subprocess (`--kvist-sandbox-request-v1`); `skott`
+  `galla` subprocess (`--kvist-sandbox-request-v1`); `skott`
   writes a version-one `SandboxRequest` to its stdin and supervises bounded,
   timed, cancellable output.
 - **Events and recording.** The loop emits typed `Event`s over a bounded channel to
@@ -1309,7 +1309,7 @@ deadline_secs = 300
 cadence_timeout_secs = 30
 
 [sandbox]
-runner = "/usr/local/bin/galla-runner"
+runner = "/usr/local/bin/galla"
 backend = "/usr/bin/bwrap"
 
 [tool_policy]

@@ -1,5 +1,5 @@
 use clap::Parser;
-use kvist::cli::{Cli, Command, TaskCommand};
+use maerg::cli::{Cli, Command, TaskCommand};
 
 #[test]
 fn task_controls_are_an_explicit_opt_in_in_both_output_modes() {

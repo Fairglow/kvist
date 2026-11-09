@@ -1,5 +1,5 @@
 [package]
-name = "sav"
+name = "kvist-sav"
 version = "0.3.1"
 edition = "2024"
 rust-version = "1.95"
@@ -16,7 +16,7 @@ default = []
 name = "sav"
 
 [[bin]]
-name = "sav-run"
+name = "sav"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,4 +1,4 @@
-use kvist_dependencies::{
+use roetter::{
     Error, Result,
     rust::{ProvisionOptions, cache},
 };

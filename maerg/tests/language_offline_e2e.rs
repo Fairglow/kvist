@@ -13,12 +13,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use kvist::config::{AcquisitionConfig, SandboxConfig, VcsSelection};
-use kvist::language_verification::run_offline_language_verification;
-use kvist::sandbox::{
+use maerg::config::{AcquisitionConfig, SandboxConfig, VcsSelection};
+use maerg::language_verification::run_offline_language_verification;
+use maerg::sandbox::{
     ExecutionOptions, SandboxProbe, backend_identity, ensure_available, runner_identity,
 };
-use kvist::vendor_command::{VendorOptions, vendor_project};
+use maerg::vendor_command::{VendorOptions, vendor_project};
 
 /// A well-formed policy identity (sha256 digest). The live tests carry no
 /// authenticated execution approval, so a valid-format digest stands in for
@@ -83,7 +83,7 @@ fn locate_runner() -> Option<PathBuf> {
     }
     for root in candidate_target_roots() {
         for profile in ["debug", "release"] {
-            let candidate = root.join(profile).join("galla-runner");
+            let candidate = root.join(profile).join("galla");
             if candidate.is_file() && outside_worktree(&candidate) {
                 return Some(candidate);
             }

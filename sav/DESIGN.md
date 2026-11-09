@@ -485,7 +485,7 @@ permission flags are defense in depth rather than proof of isolation.
 
 Under ADR 0015, the native runtime delegates effects only to the executor
 injected by its embedding host; Sav neither selects a runner nor owns grants.
-Protected hosts must bind the installed `galla-runner` and its verified
+Protected hosts must bind the installed `galla` and its verified
 capabilities before dispatch, failing closed when prerequisites are absent.
 An explicitly acknowledged opaque host command is a distinct authority mode,
 not a protected-runtime fallback. Sav constructs no isolation namespaces and

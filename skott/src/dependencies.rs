@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use kvist_dependencies::{rust, vendoring::VendoringReport};
+use roetter::{rust, vendoring::VendoringReport};
 use sav::CancellationToken;
 
 use crate::error::{Error, Result};
@@ -29,7 +29,7 @@ pub fn run(
         )
     })?;
     let project = project.as_path();
-    let limits = kvist_dependencies::VendorLimits::load(project).map_err(from_error)?;
+    let limits = roetter::VendorLimits::load(project).map_err(from_error)?;
     if check {
         let home = rust::cache::home().map_err(from_error)?;
         let sources = rust::cache::sources(project, &home, cancellation).map_err(from_error)?;
@@ -95,9 +95,9 @@ pub fn run(
     .map_err(from_error)
 }
 
-pub(crate) fn from_error(error: kvist_dependencies::Error) -> Error {
+pub(crate) fn from_error(error: roetter::Error) -> Error {
     match error {
-        kvist_dependencies::Error::Cancelled => Error::Cancelled,
+        roetter::Error::Cancelled => Error::Cancelled,
         error => failure(&error),
     }
 }

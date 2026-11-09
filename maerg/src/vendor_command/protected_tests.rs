@@ -245,7 +245,7 @@ fn acquisition_failure_diagnostics_retain_status_and_captured_cause() {
     let error = check_acquisition_result(
         project.path(),
         &result,
-        &kvist_dependencies::VendorLimits::default(),
+        &roetter::VendorLimits::default(),
         &[],
     )
     .unwrap_err()
@@ -273,7 +273,7 @@ fn acquisition_failure_diagnostics_name_each_limit_and_bound_redacted_output() {
         output_limit_exceeded: true,
         cancelled: true,
     };
-    let limits = kvist_dependencies::VendorLimits::default();
+    let limits = roetter::VendorLimits::default();
     let error =
         check_acquisition_result(project.path(), &result, &limits, &["private-value".into()])
             .unwrap_err()
@@ -465,7 +465,7 @@ fn native_acquisition_fetches_a_locked_workspace_without_building_or_downloading
                 .unwrap()
                 .parent()
                 .unwrap()
-                .join("galla-runner")
+                .join("galla")
         });
     assert!(runner.is_file(), "build the native Galla runner first");
     fixture.sandbox.runner = runner
@@ -547,7 +547,7 @@ fn native_configured_metadata_admits_cached_git_without_building_or_host_fallbac
                 .unwrap()
                 .parent()
                 .unwrap()
-                .join("galla-runner")
+                .join("galla")
         });
     assert!(runner.is_file(), "build the native Galla runner first");
     fixture.sandbox.runner = runner
@@ -662,7 +662,7 @@ fn native_configured_fetch_downloads_missing_crate_over_https() {
                 .unwrap()
                 .parent()
                 .unwrap()
-                .join("galla-runner")
+                .join("galla")
         });
     fixture.sandbox.runner = runner
         .canonicalize()
@@ -696,14 +696,14 @@ fn native_configured_fetch_downloads_missing_crate_over_https() {
     fs::create_dir_all(home.join("registry")).unwrap();
     let cancellation = sav::CancellationToken::new();
     assert!(
-        !kvist_dependencies::rust::cache::view(&fixture.project, &home, &cancellation)
+        !roetter::rust::cache::view(&fixture.project, &home, &cancellation)
             .unwrap()
             .report
             .ready()
     );
     provision_rust_via_acquisition_sandbox(&fixture.project, &fixture.sandbox, &home).unwrap();
     assert!(
-        kvist_dependencies::rust::cache::view(&fixture.project, &home, &cancellation)
+        roetter::rust::cache::view(&fixture.project, &home, &cancellation)
             .unwrap()
             .report
             .ready()

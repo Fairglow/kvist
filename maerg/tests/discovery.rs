@@ -1,6 +1,6 @@
 use std::fs;
 
-use kvist::{
+use maerg::{
     discovery::{
         ArtifactStatus, ComponentArtifact, ComponentStatus, InvalidArtifactKind,
         MAX_COMPONENT_DEPTH, discover,
@@ -226,7 +226,7 @@ fn discovers_top_level_peer_components_when_root_is_dot() {
         ],
     );
 
-    let discovery = kvist::discovery::discover_with_limits(workspace.path(), Default::default())
+    let discovery = maerg::discovery::discover_with_limits(workspace.path(), Default::default())
         .expect("discover peer components");
 
     assert_eq!(

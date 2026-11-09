@@ -123,7 +123,7 @@ fn execute_request(value: &Value) -> std::process::Output {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    let mut runner = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let mut runner = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-request-v1")
         .env_clear()
         .stdin(Stdio::piped())
@@ -517,7 +517,7 @@ fn native_runner_resolves_cached_registry_with_private_admin_and_no_network() {
     for name in ["cc", "ar", "as", "ld"] {
         symlink(format!("/usr/bin/{name}"), runtime.join(name)).unwrap();
     }
-    let probe = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let probe = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
@@ -719,7 +719,7 @@ fn native_runner_fetches_locked_local_graph_without_endpoints_or_promotion() {
         .unwrap();
     symlink("/workspace/toolchain/bin/cargo", runtime.join("cargo")).unwrap();
     symlink("/workspace/toolchain/bin/rustc", runtime.join("rustc")).unwrap();
-    let probe = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let probe = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()

@@ -43,12 +43,12 @@ fn runner() -> PathBuf {
     }
     // Check standard installation locations first
     if let Some(path) = std::env::var_os("HOME") {
-        let user_runner = PathBuf::from(path).join(".kvist/bin/galla-runner");
+        let user_runner = PathBuf::from(path).join(".kvist/bin/galla");
         if user_runner.is_file() {
             return user_runner;
         }
     }
-    let system_runner = PathBuf::from("/usr/local/bin/galla-runner");
+    let system_runner = PathBuf::from("/usr/local/bin/galla");
     if system_runner.is_file() {
         return system_runner;
     }
@@ -61,11 +61,9 @@ fn runner() -> PathBuf {
     roots.push(PathBuf::from("/opt/target"));
     roots
         .iter()
-        .flat_map(|root| {
-            ["debug", "release"].map(|profile| root.join(profile).join("galla-runner"))
-        })
+        .flat_map(|root| ["debug", "release"].map(|profile| root.join(profile).join("galla")))
         .find(|path| path.is_file())
-        .expect("build galla-runner first or set KVIST_GALLA; native coverage must not skip")
+        .expect("build galla first or set KVIST_GALLA; native coverage must not skip")
 }
 
 fn shell(executor: &SandboxExecutor, command: &str) -> skott::ToolOutcome {

@@ -1,6 +1,6 @@
 use std::{fs, path::Path, process::Command};
 
-use kvist::{
+use maerg::{
     config::{self, DiscoveryLimits, MAX_DISCOVERY_LIMITS, VcsSelection},
     discovery::{ComponentArtifact, discover_with_limits},
     init::initialize,
@@ -352,7 +352,7 @@ fn sandbox_configuration_requires_explicit_deny_network_component_mount_and_envi
     let base = "schema_version = 1\ncomponent_root = \"src\"\n";
     let runner = project
         .path()
-        .join("trusted-galla-runner")
+        .join("trusted-galla")
         .to_string_lossy()
         .replace('\\', "\\\\");
     let valid = format!(
@@ -389,14 +389,14 @@ fn sandbox_configuration_requires_explicit_deny_network_component_mount_and_envi
 
 #[test]
 fn sandbox_acquisition_policy_defaults_and_validates_sources_and_bounds() {
-    use kvist::config::PackageSource;
+    use maerg::config::PackageSource;
 
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     let base = "schema_version = 1\ncomponent_root = \"src\"\n";
     let runner = project
         .path()
-        .join("trusted-galla-runner")
+        .join("trusted-galla")
         .to_string_lossy()
         .replace('\\', "\\\\");
     let sandbox = |extra: &str| {

@@ -155,7 +155,7 @@ fn recoveries(workdir: &Path) -> Vec<serde_json::Value> {
 fn scripted_loop(
     workdir: &Path,
     mut tools: impl FnMut(usize) -> serde_json::Value + Send,
-) -> (kvist::agent::AgentRunResult, usize) {
+) -> (maerg::agent::AgentRunResult, usize) {
     resilience_run_scripted(
         workdir,
         |index, _| {
@@ -330,7 +330,7 @@ fn with_effects(
     workdir: &Path,
     answer: impl FnMut(usize, &serde_json::Value) -> (serde_json::Value, String) + Send,
     mut execute: impl FnMut() + Send,
-) -> (kvist::agent::AgentRunResult, usize, usize) {
+) -> (maerg::agent::AgentRunResult, usize, usize) {
     use std::sync::atomic::{AtomicBool, Ordering};
     let gate = EffectGate::new(workdir);
     let stopped = AtomicBool::new(false);
@@ -422,7 +422,7 @@ fn phase3_actual_changed_state_allows_verification_of_the_same_effect_intent() {
                         .is_some_and(|extension| extension == "json")
                 })
                 .expect("staged effect");
-            kvist::authoring::apply::apply_intent(dir.path(), &staged)
+            maerg::authoring::apply::apply_intent(dir.path(), &staged)
                 .expect("actual bound effect");
         },
     );

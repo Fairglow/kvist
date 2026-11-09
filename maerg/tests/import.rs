@@ -2,10 +2,10 @@ use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
-use kvist::component_documents::{
+use maerg::component_documents::{
     COMPONENT_CONTRACT_TEMPLATE, COMPONENT_DESIGN_TEMPLATE, COMPONENT_REQUIREMENTS_TEMPLATE,
 };
-use kvist::import::{ImportOutcome, import};
+use maerg::import::{ImportOutcome, import};
 
 fn create_local_git_repo(with_artifacts: bool, is_rust_project: bool) -> (TempDir, String) {
     let repo_dir = TempDir::new().expect("create local repo dir");

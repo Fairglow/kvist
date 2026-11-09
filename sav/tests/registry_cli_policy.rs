@@ -73,7 +73,7 @@ impl Fixture {
     }
 
     fn command(&self, subcommand: &str) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_sav-run"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_sav"));
         command
             .current_dir(self.directory.path())
             .args([subcommand, "--profile", "selected", "--registry"])
@@ -153,7 +153,7 @@ fn explicit_command_preserves_default_and_explicit_retry_policy() {
     for json in [false, true] {
         for (retries, expected_attempts) in [(None, 4), (Some("1"), 2), (Some("0"), 1)] {
             let fixture = Fixture::external(true);
-            let mut command = Command::new(env!("CARGO_BIN_EXE_sav-run"));
+            let mut command = Command::new(env!("CARGO_BIN_EXE_sav"));
             command.args(["run", "--command"]);
             command.arg(format!(
                 "/bin/sh \"{}\" \"{}\"",

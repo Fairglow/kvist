@@ -10,7 +10,7 @@ use std::{
 
 use tempfile::TempDir;
 
-use kvist::prompt_input::MAX_PROMPT_BYTES;
+use maerg::prompt_input::MAX_PROMPT_BYTES;
 
 fn configured_project() -> TempDir {
     let project = TempDir::new().expect("create project");

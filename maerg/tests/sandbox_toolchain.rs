@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use kvist::config::{AcquisitionConfig, SandboxConfig, VcsSelection};
-use kvist::sandbox::{
+use maerg::config::{AcquisitionConfig, SandboxConfig, VcsSelection};
+use maerg::sandbox::{
     ExecutionOptions, ExecutionPhase, ExecutionRequest, backend_identity, ensure_available,
     execute_with_timeout, runner_identity,
 };
@@ -76,7 +76,7 @@ fn locate_runner() -> Option<PathBuf> {
     }
     for root in candidate_target_roots() {
         for profile in ["debug", "release"] {
-            let candidate = root.join(profile).join("galla-runner");
+            let candidate = root.join(profile).join("galla");
             if candidate.is_file() && outside_worktree(&candidate) {
                 return Some(candidate);
             }
@@ -91,7 +91,7 @@ fn locate_runner() -> Option<PathBuf> {
     }
     for root in candidate_target_roots() {
         for profile in ["debug", "release"] {
-            let candidate = root.join(profile).join("galla-runner");
+            let candidate = root.join(profile).join("galla");
             if candidate.is_file() {
                 return Some(candidate);
             }
@@ -160,9 +160,9 @@ fn run_sandboxed(
     worktree: &Path,
     program: &str,
     arguments: &[String],
-    expected_runner: &kvist::sandbox::RunnerIdentity,
-    expected_backend: &kvist::sandbox::BackendIdentity,
-) -> Option<kvist::sandbox::ExecutionResult> {
+    expected_runner: &maerg::sandbox::RunnerIdentity,
+    expected_backend: &maerg::sandbox::BackendIdentity,
+) -> Option<maerg::sandbox::ExecutionResult> {
     let selected = Command::new("/usr/bin/rustup")
         .args(["which", program])
         .current_dir("/")
@@ -177,7 +177,7 @@ fn run_sandboxed(
     let concrete = String::from_utf8(selected.stdout).unwrap();
     let concrete = concrete.trim();
     let bin = Path::new(concrete).parent().unwrap();
-    let mut env = kvist::sandbox::allowed_environment(config, None);
+    let mut env = maerg::sandbox::allowed_environment(config, None);
     env.insert("PATH".into(), format!("{}:/usr/bin:/bin", bin.display()));
     env.insert("HOME".into(), "/tmp".into());
     env.insert("CARGO_HOME".into(), "/tmp/cargo-home".into());
@@ -247,7 +247,7 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
         return;
     }
 
-    let runner = runner.expect("build galla-runner outside the worktree");
+    let runner = runner.expect("build galla outside the worktree");
     let backend = backend.expect("install Bubblewrap on the host");
     let worktree = worktree.expect("run inside a worktree");
 
@@ -471,7 +471,7 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
             program: "/usr/bin/bash",
             arguments: &["/workspace/context/rust-proof.sh".into()],
             environment: [("PATH".into(), "/usr/bin:/bin".into())].into(),
-            read_only_mounts: &[kvist::sandbox::ReadOnlyMount::file(
+            read_only_mounts: &[maerg::sandbox::ReadOnlyMount::file(
                 &script,
                 "/workspace/context/rust-proof.sh",
             )],
@@ -573,7 +573,7 @@ fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
 #[test]
 fn rust_authoring_builds_workspace_members_with_readonly_provider_context() {
     use std::fs;
-    let runner = locate_runner().expect("build galla-runner outside the worktree");
+    let runner = locate_runner().expect("build galla outside the worktree");
     let backend = locate_backend().expect("install Bubblewrap on the host");
     let worktree = git_worktree_root().unwrap();
     let project = tempfile::tempdir_in(&worktree).unwrap();
@@ -669,7 +669,7 @@ fn rust_authoring_builds_workspace_members_with_readonly_provider_context() {
 
 #[test]
 fn generic_authoring_preserves_environment_without_rustup_state() {
-    let runner = locate_runner().expect("install galla-runner outside the worktree");
+    let runner = locate_runner().expect("install galla outside the worktree");
     let backend = locate_backend().expect("install Bubblewrap");
     let worktree = git_worktree_root().expect("run inside a git worktree");
     let container = tempfile::tempdir_in(&worktree).unwrap();

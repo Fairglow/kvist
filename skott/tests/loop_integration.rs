@@ -1852,7 +1852,7 @@ fn reliability_successful_distinct_effect_resets_repeat_stalls() {
     ]);
     let executor = skott::HostExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum())
-            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne")),
         root.clone(),
     );
     let mut session = make_session();

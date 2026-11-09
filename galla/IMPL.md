@@ -94,7 +94,7 @@ The selected observations below are transcribed from those source-only reports.
   marker using slash-delimited path containment, not arbitrary string prefixes.
   After grants, enforcement adds `--perms 0555 --tmpfs /.galla-sandbox
   --remount-ro /.galla-sandbox` to Bubblewrap.
-- The native conformance test grants the runner at `/tooling/galla-runner`
+- The native conformance test grants the runner at `/tooling/galla`
   and runs Python inside the outer sandbox. Its script loops over probe and
   request, uses `env={}` and `stdin=subprocess.PIPE`, and waits two seconds
   before writing/closing stdin. It asserts inner status 3, empty stdout and
@@ -261,7 +261,7 @@ permission-denied inspection handling.
 
 ## Observed component status
 
-The Rust package builds a library and an executable named `galla-runner`.
+The Rust package builds a library and an executable named `galla`.
 The runner strictly parses and validates the version-one sandbox protocol and
 enforces isolated execution via Bubblewrap.
 

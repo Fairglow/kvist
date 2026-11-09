@@ -135,7 +135,7 @@ fn file_write_limit_can_be_omitted_or_null() {
 
 #[test]
 fn native_existing_host_files_are_not_payload_size_violations() {
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
@@ -190,7 +190,7 @@ fn native_existing_host_files_are_not_payload_size_violations() {
 
 #[test]
 fn native_host_updates_are_live_and_do_not_block_unrelated_tools() {
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
@@ -248,7 +248,7 @@ fn native_host_updates_are_live_and_do_not_block_unrelated_tools() {
 
 #[test]
 fn native_source_ancestor_links_cannot_expand_host_grants() {
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
@@ -281,7 +281,7 @@ fn native_source_ancestor_links_cannot_expand_host_grants() {
 
 #[test]
 fn native_enforcers_cannot_be_regranted_through_a_writable_alias() {
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
@@ -319,7 +319,7 @@ fn authoring_path_can_select_workspace_scripts_and_system_sbin() {
 
 #[test]
 fn authoring_loader_environment_does_not_run_in_host_enforcers() {
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
@@ -1414,7 +1414,7 @@ fn executable_executes_successfully_on_valid_request() {
     if std::path::Path::new("/.galla-sandbox").exists() {
         return;
     }
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
@@ -1484,8 +1484,8 @@ fn executable_executes_successfully_on_valid_request() {
     request["grants"][1]["purpose"] = json!("authoring");
     request["grants"][1]["access"] = json!("read-write");
     request["grants"].as_array_mut().unwrap().push(json!({
-        "source": std::fs::canonicalize(env!("CARGO_BIN_EXE_galla-runner")).unwrap(),
-        "destination": "/tooling/galla-runner",
+        "source": std::fs::canonicalize(env!("CARGO_BIN_EXE_galla")).unwrap(),
+        "destination": "/tooling/galla",
         "access": "read-only",
         "purpose": "toolchain",
         "identity": digest(b"nested-runner")
@@ -1497,7 +1497,7 @@ fn executable_executes_successfully_on_valid_request() {
             "/usr/bin/python3",
             "-c",
             format!(
-                "import subprocess\np = subprocess.Popen(['/tooling/galla-runner', '--kvist-sandbox-{mode}-v1'], env={{}}, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)\ntry:\n p.wait(timeout=2)\nexcept subprocess.TimeoutExpired:\n p.kill(); p.wait(); raise\nassert p.returncode == 3, p.returncode\nassert p.stdout.read() == b''\nmessage = p.stderr.read()\nassert b'already inside a Galla sandbox' in message, message\nassert b'unnecessary' in message, message\n"
+                "import subprocess\np = subprocess.Popen(['/tooling/galla', '--kvist-sandbox-{mode}-v1'], env={{}}, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)\ntry:\n p.wait(timeout=2)\nexcept subprocess.TimeoutExpired:\n p.kill(); p.wait(); raise\nassert p.returncode == 3, p.returncode\nassert p.stdout.read() == b''\nmessage = p.stderr.read()\nassert b'already inside a Galla sandbox' in message, message\nassert b'unnecessary' in message, message\n"
             )
         ]);
         let output = run_runner(&encode(&request));
@@ -1513,7 +1513,7 @@ fn executable_executes_successfully_on_valid_request() {
 
 #[test]
 fn executable_probe_succeeds_with_enforcement() {
-    let output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let output = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
@@ -1698,7 +1698,7 @@ fn run_runner(request: &[u8]) -> std::process::Output {
 }
 
 fn run_runner_from(request: &[u8], directory: Option<&std::path::Path>) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_galla-runner"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_galla"));
     if let Some(directory) = directory {
         command.current_dir(directory);
     }

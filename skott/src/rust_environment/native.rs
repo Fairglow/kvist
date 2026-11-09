@@ -10,7 +10,7 @@ pub(super) fn roots(
     cancellation: &CancellationToken,
     issues: &mut Vec<String>,
 ) -> Result<(Option<PathBuf>, Option<PathBuf>)> {
-    let home = match kvist_dependencies::rust::cache::home() {
+    let home = match roetter::rust::cache::home() {
         Ok(home) => home,
         Err(error) => {
             issues.push(format!("native Cargo cache selection unavailable: {error}; installed/local tools remain usable"));
@@ -28,9 +28,9 @@ pub(super) fn roots(
             return Ok((None, None));
         }
     }
-    let candidates = match kvist_dependencies::rust::cache::view(workspace, &home, cancellation) {
+    let candidates = match roetter::rust::cache::view(workspace, &home, cancellation) {
         Ok(view) => (view.registry, view.git),
-        Err(kvist_dependencies::Error::Cancelled) => return Err(Error::Cancelled),
+        Err(roetter::Error::Cancelled) => return Err(Error::Cancelled),
         Err(error) => {
             issues.push(format!("native Cargo source catalogue unavailable: {error}; missing sources are diagnosed by offline Cargo, not acquired automatically. Run `skott --vendor --cwd DIR` explicitly on the host when needed"));
             // A lock/catalogue error is not a reason to hide installed tools or

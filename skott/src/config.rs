@@ -231,7 +231,7 @@ fn default_cadence_timeout_secs() -> u64 {
 /// Paths to the independent sandbox enforcement boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxPaths {
-    /// Path to the `galla-runner` executable.
+    /// Path to the `galla` executable.
     pub runner: PathBuf,
     /// Path to the Bubblewrap backend executable.
     pub backend: PathBuf,
@@ -252,13 +252,13 @@ impl SandboxPaths {
     pub fn default_runner() -> PathBuf {
         // User-specific Kvist installation location
         if let Some(home) = std::env::var_os("HOME") {
-            let user_runner = PathBuf::from(home).join(".kvist/bin/galla-runner");
+            let user_runner = PathBuf::from(home).join(".kvist/bin/galla");
             if user_runner.is_file() {
                 return user_runner;
             }
         }
         // System-wide installation location
-        PathBuf::from("/usr/local/bin/galla-runner")
+        PathBuf::from("/usr/local/bin/galla")
     }
 
     /// The default Bubblewrap backend path when not configured.

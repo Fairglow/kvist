@@ -1,6 +1,6 @@
 use std::fs;
 
-use kvist::{
+use maerg::{
     component_documents::{
         COMPONENT_CONTRACT_TEMPLATE, COMPONENT_DESIGN_TEMPLATE, COMPONENT_REQUIREMENTS_TEMPLATE,
         DocumentDiagnosticKind, DocumentKind, MAX_COMPONENT_DOCUMENT_BYTES, validate,

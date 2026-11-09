@@ -4,7 +4,7 @@ The approved architecture is [ADR 0015](decisions/0015-shared-runtime-and-run-in
 Sav is the shared headless runtime library. Skott is its interactive/headless
 workspace client and independent run inspector. Kvist/maerg owns protected task
 authority, workflow and canonical evidence; Galla enforces approved effects.
-Skott links Sav, not the `sav-run` executable.
+Skott links Sav, not the `sav` executable.
 Its native workspace tools and deliberately separate dependency-acquisition
 boundary are described in [Native agent toolkit](agent-toolkit.md).
 
@@ -51,7 +51,7 @@ Skott headless workspace execution retains its required private journals and
 does not acquire an unconfined host fallback. Maerg retains its protected broker,
 dependency phases, verification and human finalization.
 
-`sav-run` remains a small diagnostic/setup/supervision client. Its continued
+`sav` remains a small diagnostic/setup/supervision client. Its continued
 existence does not imply a second first-party native engine.
 
 ## Protected task retries and failure recovery

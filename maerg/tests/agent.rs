@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use kvist::agent::split_command;
+use maerg::agent::split_command;
 
 #[cfg(target_os = "linux")]
-use kvist::config::{AgentProfile, Model, Role};
+use maerg::config::{AgentProfile, Model, Role};
 
 #[cfg(target_os = "linux")]
-use kvist::{
+use maerg::{
     agent::execute_agent,
     config::{SandboxConfig, VcsSelection},
 };
@@ -171,7 +171,7 @@ fn serve_local_ollama_tool_call(content: &str, tool_calls: &str) -> String {
 #[test]
 #[cfg(target_os = "linux")]
 fn execute_agent_runs_the_model_turn_on_the_host_and_captures_the_response() {
-    kvist::init_test_logging();
+    maerg::init_test_logging();
     let target_dir = TempDir::new().expect("workspace");
 
     // A local Ollama-style provider stands in for the host model service.
@@ -208,7 +208,7 @@ fn execute_agent_runs_the_model_turn_on_the_host_and_captures_the_response() {
         runner: "/usr/bin/true".to_owned(),
         backend: "/usr/bin/true".to_owned(),
         environment_allowlist: vec![],
-        acquisition: kvist::config::AcquisitionConfig::default(),
+        acquisition: maerg::config::AcquisitionConfig::default(),
     };
 
     let result = execute_agent(
@@ -218,7 +218,7 @@ fn execute_agent_runs_the_model_turn_on_the_host_and_captures_the_response() {
         // probe are None so no authoring request is ever dispatched.
         None,
         None,
-        kvist::agent::AgentExecutionRequest {
+        maerg::agent::AgentExecutionRequest {
             project_root: target_dir.path(),
             vcs_selection: VcsSelection::Git,
             prompt,
@@ -251,7 +251,7 @@ fn execute_agent_runs_the_model_turn_on_the_host_and_captures_the_response() {
 #[test]
 #[cfg(target_os = "linux")]
 fn execute_agent_surfaces_a_proposed_decision_and_pauses() {
-    kvist::init_test_logging();
+    maerg::init_test_logging();
     let target_dir = TempDir::new().expect("workspace");
 
     // The provider returns a single propose_decision tool call; the loop must
@@ -297,7 +297,7 @@ fn execute_agent_surfaces_a_proposed_decision_and_pauses() {
         runner: "/usr/bin/true".to_owned(),
         backend: "/usr/bin/true".to_owned(),
         environment_allowlist: vec![],
-        acquisition: kvist::config::AcquisitionConfig::default(),
+        acquisition: maerg::config::AcquisitionConfig::default(),
     };
 
     let result = execute_agent(
@@ -307,7 +307,7 @@ fn execute_agent_surfaces_a_proposed_decision_and_pauses() {
         // so no runner or probe is required.
         None,
         None,
-        kvist::agent::AgentExecutionRequest {
+        maerg::agent::AgentExecutionRequest {
             project_root: target_dir.path(),
             vcs_selection: VcsSelection::Git,
             prompt,
@@ -373,7 +373,7 @@ fn execute_agent_surfaces_a_proposed_decision_and_pauses() {
 
 #[cfg(target_os = "linux")]
 fn probe_test_workspace(probe_body: &str) -> (TempDir, TempDir, SandboxConfig) {
-    kvist::init_test_logging();
+    maerg::init_test_logging();
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 
@@ -395,7 +395,7 @@ fn probe_test_workspace(probe_body: &str) -> (TempDir, TempDir, SandboxConfig) {
         runner: runner.to_string_lossy().into_owned(),
         backend: "/usr/bin/true".to_owned(),
         environment_allowlist: vec![],
-        acquisition: kvist::config::AcquisitionConfig::default(),
+        acquisition: maerg::config::AcquisitionConfig::default(),
     };
     (workspace, runner_workspace, sandbox)
 }
@@ -422,10 +422,10 @@ exit 3
     );
     let target = workspace.path();
     let runner_identity =
-        kvist::sandbox::runner_identity(&sandbox, target, VcsSelection::Git).expect("runner id");
+        maerg::sandbox::runner_identity(&sandbox, target, VcsSelection::Git).expect("runner id");
     let backend_identity =
-        kvist::sandbox::backend_identity(&sandbox, target, VcsSelection::Git).expect("backend id");
-    let error = kvist::sandbox::ensure_available(
+        maerg::sandbox::backend_identity(&sandbox, target, VcsSelection::Git).expect("backend id");
+    let error = maerg::sandbox::ensure_available(
         &sandbox,
         target,
         VcsSelection::Git,
@@ -459,10 +459,10 @@ exit 3
     );
     let target = workspace.path();
     let runner_identity =
-        kvist::sandbox::runner_identity(&sandbox, target, VcsSelection::Git).expect("runner id");
+        maerg::sandbox::runner_identity(&sandbox, target, VcsSelection::Git).expect("runner id");
     let backend_identity =
-        kvist::sandbox::backend_identity(&sandbox, target, VcsSelection::Git).expect("backend id");
-    let error = kvist::sandbox::ensure_available(
+        maerg::sandbox::backend_identity(&sandbox, target, VcsSelection::Git).expect("backend id");
+    let error = maerg::sandbox::ensure_available(
         &sandbox,
         target,
         VcsSelection::Git,

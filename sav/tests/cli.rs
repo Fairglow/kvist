@@ -18,7 +18,7 @@ use tempfile::TempDir;
 
 #[test]
 fn host_execution_requires_explicit_acknowledgement() {
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args(["run", "--command", "/bin/echo '{prompt}'", "hello"])
         .output()
         .expect("run standalone CLI");
@@ -55,7 +55,7 @@ fn models_http_text_and_json_outputs_are_deterministic() {
         }
     });
 
-    let text = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let text = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args([
             "models",
             "--provider",
@@ -75,7 +75,7 @@ fn models_http_text_and_json_outputs_are_deterministic() {
         "b\na\n"
     );
 
-    let json = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let json = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args([
             "models",
             "--provider",
@@ -116,7 +116,7 @@ fn models_reports_manual_providers_as_unsupported_without_spawning() {
         .expect("make provider executable");
 
     for provider in ["llama-cli", "custom-script"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+        let output = Command::new(env!("CARGO_BIN_EXE_sav"))
             .args(["models", "--provider", provider, "--executable"])
             .arg(&executable)
             .output()
@@ -145,7 +145,7 @@ fn models_acp_requires_host_discovery_acknowledgement_before_spawn() {
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args(["models", "--provider", "copilot", "--executable"])
         .arg(provider)
         .output()
@@ -178,7 +178,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"models":{"availableModels":[{"
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
         .expect("make ACP provider executable");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .args([
             "models",
@@ -212,7 +212,7 @@ fn invalid_xdg_config_home_falls_back_to_absolute_home() {
     fs::write(&expected, "schema_version = 1\n[profiles.selected.backend]\nkind = \"external-agent\"\nprovider = \"custom-script\"\nexecutable = \"/bin/echo\"\narguments = [\"{prompt}\"]\n").unwrap();
 
     for xdg in ["", "relative-config"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+        let output = Command::new(env!("CARGO_BIN_EXE_sav"))
             .current_dir(workspace.path())
             .env("XDG_CONFIG_HOME", xdg)
             .env("HOME", workspace.path())
@@ -250,7 +250,7 @@ fn retired_profile_store_is_not_read_when_registry_is_absent() {
     )
     .expect("write legacy profiles");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .env("XDG_CONFIG_HOME", workspace.path())
         .env_remove("HOME")
@@ -291,7 +291,7 @@ fn canonical_profile_store_takes_precedence_over_legacy_store() {
     )
     .expect("write canonical profiles");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .env("XDG_CONFIG_HOME", workspace.path())
         .env_remove("HOME")
@@ -319,7 +319,7 @@ fn standalone_cli_runs_a_prompt_from_a_file() {
     let prompt = workspace.path().join("prompt.md");
     fs::write(&prompt, "standalone prompt").expect("write prompt");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .args([
             "run",
@@ -342,7 +342,7 @@ fn standalone_cli_runs_a_prompt_from_a_file() {
 
 #[test]
 fn standalone_json_run_emits_only_captured_content() {
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args([
             "run",
             "--json",
@@ -368,7 +368,7 @@ fn standalone_json_run_emits_only_captured_content() {
 
 #[test]
 fn standalone_json_run_replaces_invalid_utf8_content() {
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args([
             "run",
             "--json",
@@ -403,7 +403,7 @@ fn standalone_run_selects_reasoning_effort_per_prompt() {
     )
     .expect("write profile");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args([
             "run",
             "--allow-host-execution",
@@ -425,7 +425,7 @@ fn standalone_run_selects_reasoning_effort_per_prompt() {
 
 #[test]
 fn model_json_rejects_separate_reasoning_presentation() {
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args([
             "model",
             "--provider",
@@ -466,7 +466,7 @@ fn setup_uses_fixed_prompt_and_refuses_failed_qualification() {
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .args(["setup", "--registry"])
         .arg(&configuration)
@@ -503,7 +503,7 @@ fn setup_force_persists_profile_after_failed_qualification() {
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .args(["setup", "--force", "--registry"])
         .arg(&configuration)
@@ -539,7 +539,7 @@ fn setup_force_persists_profile_after_failed_qualification() {
 
 #[test]
 fn supervised_provider_cannot_consume_caller_stdin() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args([
             "run",
             "--allow-host-execution",
@@ -571,7 +571,7 @@ fn setup_persists_a_profile_and_run_can_select_it() {
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .args(["setup", "--registry", "profiles.toml"])
         .stdin(Stdio::piped())
@@ -592,7 +592,7 @@ fn setup_persists_a_profile_and_run_can_select_it() {
     );
 
     let execution_directory = TempDir::new().expect("execution directory");
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(execution_directory.path())
         .args([
             "run",
@@ -631,7 +631,7 @@ fn llama_cli_fallback_preserves_provider_and_uses_supported_flags() {
     let empty_path = workspace.path().join("empty-path");
     fs::create_dir(&empty_path).expect("create empty PATH");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .env("PATH", &empty_path)
         .args(["setup", "--force", "--registry"])
@@ -692,7 +692,7 @@ fn installed_gemini_and_copilot_use_noninteractive_templates() {
         ("5\n1\ngemini-auto\n\n", "gemini-auto"),
         ("4\n2\ngpt-5.4\ncopilot-pro\n\n", "copilot-pro"),
     ] {
-        let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+        let mut setup = Command::new(env!("CARGO_BIN_EXE_sav"))
             .current_dir(workspace.path())
             .env("PATH", &bin)
             .args(["setup", "--force", "--registry"])
@@ -775,7 +775,7 @@ exit 0
         .expect("make Gemini executable");
     let configuration = workspace.path().join("profiles.toml");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .env("PATH", &bin)
         .args(["setup", "--registry"])
@@ -823,7 +823,7 @@ fn unusable_provider_fallback_is_rejected_before_persistence() {
     let empty_path = workspace.path().join("empty-path");
     fs::create_dir(&empty_path).expect("create empty PATH");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .env("PATH", &empty_path)
         .args(["setup", "--registry"])
@@ -868,7 +868,7 @@ fn cancelling_conventional_probe_does_not_request_a_fallback() {
     .expect("write executable");
     fs::set_permissions(&gemini, fs::Permissions::from_mode(0o700)).expect("make executable");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_sav"))
         .current_dir(workspace.path())
         .env("PATH", &bin)
         .args(["setup", "--registry", "profiles.toml"])
@@ -923,7 +923,7 @@ fn interrupt_terminates_the_supervised_process_group() {
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mut supervisor = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let mut supervisor = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args([
             "run",
             "--allow-host-execution",
@@ -978,10 +978,10 @@ fn standalone_cli_replays_trajectory_journal() {
 "#;
     fs::write(&file, content).expect("write session file");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args(["replay", file.to_str().unwrap()])
         .output()
-        .expect("run sav-run replay");
+        .expect("run sav replay");
 
     assert!(
         output.status.success(),
@@ -1003,10 +1003,10 @@ fn standalone_cli_replays_trajectory_json() {
 "#;
     fs::write(&file, content).expect("write session file");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sav"))
         .args(["replay", "--json", file.to_str().unwrap()])
         .output()
-        .expect("run sav-run replay json");
+        .expect("run sav replay json");
 
     assert!(
         output.status.success(),

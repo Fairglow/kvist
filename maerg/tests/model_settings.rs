@@ -4,7 +4,7 @@ use std::{
     process::{Command, Output},
 };
 
-use kvist::{
+use maerg::{
     config::Role,
     model_settings::{self, RegistryChange, Scope},
 };

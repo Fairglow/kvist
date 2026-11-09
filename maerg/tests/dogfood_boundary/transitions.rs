@@ -4,7 +4,7 @@ use std::{
     process::{Command, Output, Stdio},
 };
 
-use kvist::task_queue::{TaskQueue, TaskStatus, parse, serialize};
+use maerg::task_queue::{TaskQueue, TaskStatus, parse, serialize};
 use sha2::{Digest, Sha256};
 
 use super::support::*;
@@ -344,12 +344,7 @@ fn authenticated_no_launch_recovery_precedes_acceptance_when_intent_is_stale() {
             &run_kvist(project.path(), &["task", "approve-policy"]),
             "approve no-launch fixture",
         );
-        fs::remove_file(
-            project
-                .external_tools_path()
-                .join("controlled-galla-runner"),
-        )
-        .unwrap();
+        fs::remove_file(project.external_tools_path().join("controlled-galla")).unwrap();
         let failed = run_kvist(project.path(), &["task", "run", ".", TASK_ID]);
         assert!(
             !failed.status.success(),
@@ -631,12 +626,7 @@ fn accepting_one_task_cannot_destroy_another_tasks_authenticated_recovery_pre_st
         &run_kvist(project.path(), &["task", "run", ".", TASK_ID]),
         "leave first task awaiting disposition",
     );
-    fs::remove_file(
-        project
-            .external_tools_path()
-            .join("controlled-galla-runner"),
-    )
-    .unwrap();
+    fs::remove_file(project.external_tools_path().join("controlled-galla")).unwrap();
     let failed = run_kvist(
         project.path(),
         &["task", "run", ".", "independent-implementation"],

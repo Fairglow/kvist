@@ -128,11 +128,11 @@ fn count_processes_in_pgid(child_pid: u32) -> u64 {
 /// and reaps the child process.
 pub fn run(request: SandboxRequest) -> ExitCode {
     if let Err(reason) = crate::context::require_host() {
-        eprintln!("galla-runner: {reason}");
+        eprintln!("galla: {reason}");
         return ExitCode::from(3);
     }
     let Some(bwrap_path) = locate_backend() else {
-        eprintln!("galla-runner: no Bubblewrap backend found on PATH or standard locations");
+        eprintln!("galla: no Bubblewrap backend found on PATH or standard locations");
         return ExitCode::from(3);
     };
 
@@ -140,7 +140,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         Ok(digest) => digest,
         Err(error) => {
             eprintln!(
-                "galla-runner: cannot inspect installed backend `{}`: {error}; repair its host installation and retry the affected command",
+                "galla: cannot inspect installed backend `{}`: {error}; repair its host installation and retry the affected command",
                 bwrap_path.display()
             );
             return ExitCode::from(3);
@@ -148,7 +148,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     };
     if request.identities.backend.digest != actual_backend_digest {
         eprintln!(
-            "galla-runner: backend identity / digest mismatch before execution: expected `{}`, observed `{}`. No payload ran. Refresh the request's enforcer identity against the installed backend and retry only this command; a host upgrade is not a workspace contract violation",
+            "galla: backend identity / digest mismatch before execution: expected `{}`, observed `{}`. No payload ran. Refresh the request's enforcer identity against the installed backend and retry only this command; a host upgrade is not a workspace contract violation",
             request.identities.backend.digest, actual_backend_digest
         );
         return ExitCode::from(3);
@@ -186,7 +186,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
 
     // 5. Mount standard host system layout
     if let Err(error) = system_layout::add_host_system_layout(&mut bwrap_args) {
-        eprintln!("galla-runner: {error}");
+        eprintln!("galla: {error}");
         return ExitCode::from(3);
     }
 
@@ -229,7 +229,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
                 Some(guard)
             }
             Err(error) => {
-                eprintln!("galla-runner: required package-source proxy unavailable: {error}");
+                eprintln!("galla: required package-source proxy unavailable: {error}");
                 return ExitCode::from(3);
             }
         }
@@ -245,14 +245,14 @@ pub fn run(request: SandboxRequest) -> ExitCode {
                 Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
                 Ok(_) => {
                     eprintln!(
-                        "galla-runner: System grant `{}` requires a non-link directory",
+                        "galla: System grant `{}` requires a non-link directory",
                         grant.source
                     );
                     return ExitCode::from(3);
                 }
                 Err(error) => {
                     eprintln!(
-                        "galla-runner: cannot inspect System grant `{}`: {error}",
+                        "galla: cannot inspect System grant `{}`: {error}",
                         grant.source
                     );
                     return ExitCode::from(3);
@@ -298,14 +298,14 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     {
         Ok(sources) => sources,
         Err(error) => {
-            eprintln!("galla-runner: {error}");
+            eprintln!("galla: {error}");
             return ExitCode::from(3);
         }
     };
     let _host_code_guard = match host_code::protect(&bwrap_path, &request.grants, &sources) {
         Ok(guard) => guard,
         Err(error) => {
-            eprintln!("galla-runner: {error}");
+            eprintln!("galla: {error}");
             return ExitCode::from(3);
         }
     };
@@ -314,7 +314,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
             source,
             nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
         ) {
-            eprintln!("galla-runner: cannot pass authorized mount origin to backend: {error}");
+            eprintln!("galla: cannot pass authorized mount origin to backend: {error}");
             return ExitCode::from(3);
         }
     }
@@ -324,7 +324,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
             continue;
         }
         let Some(source) = source else {
-            eprintln!("galla-runner: non-system grant has no authorized source descriptor");
+            eprintln!("galla: non-system grant has no authorized source descriptor");
             return ExitCode::from(3);
         };
         match grant.access {
@@ -341,7 +341,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     let _native_configuration = match native_cache::add(&mut bwrap_args, &request, &sources) {
         Ok(configuration) => configuration,
         Err(error) => {
-            eprintln!("galla-runner: {error}");
+            eprintln!("galla: {error}");
             return ExitCode::from(3);
         }
     };
@@ -353,7 +353,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     ) {
         Ok(origin) => origin,
         Err(error) => {
-            eprintln!("galla-runner: {error}");
+            eprintln!("galla: {error}");
             return ExitCode::from(3);
         }
     };
@@ -363,7 +363,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
             nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
         )
     {
-        eprintln!("galla-runner: cannot pass read-only vendor origin to backend: {error}");
+        eprintln!("galla: cannot pass read-only vendor origin to backend: {error}");
         return ExitCode::from(3);
     }
     bwrap_args.extend(
@@ -426,7 +426,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
             }
             Err(error) => {
                 eprintln!(
-                    "galla-runner: cannot start process-local limits and Bubblewrap: {error}; install /usr/bin/prlimit and the configured backend on the host"
+                    "galla: cannot start process-local limits and Bubblewrap: {error}; install /usr/bin/prlimit and the configured backend on the host"
                 );
                 return ExitCode::from(3);
             }
@@ -551,17 +551,17 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     }
 
     if let Some(reason) = specific_breach {
-        eprintln!("galla-runner: {reason}");
+        eprintln!("galla: {reason}");
         return ExitCode::from(3);
     }
 
     if timeout_breached {
-        eprintln!("galla-runner: wall time limit exceeded");
+        eprintln!("galla: wall time limit exceeded");
         return ExitCode::from(3);
     }
 
     if limit_exceeded.load(Ordering::SeqCst) {
-        eprintln!("galla-runner: output limit exceeded");
+        eprintln!("galla: output limit exceeded");
         return ExitCode::from(3);
     }
 
@@ -579,7 +579,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     if exit_code == 0
         && let Err(promotion_error) = inspect_and_promote_cache(&request)
     {
-        eprintln!("galla-runner: {promotion_error}");
+        eprintln!("galla: {promotion_error}");
         exit_code = 3;
     }
 

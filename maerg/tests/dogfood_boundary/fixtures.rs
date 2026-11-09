@@ -1,6 +1,6 @@
 use std::{fs, path::Path, process::Command};
 
-use kvist::{artifacts::root_artifacts, task_queue};
+use maerg::{artifacts::root_artifacts, task_queue};
 
 use super::support::*;
 

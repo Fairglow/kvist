@@ -204,12 +204,9 @@ impl RustEnvironment {
         component: &Path,
     ) -> Result<Self> {
         let started = Instant::now();
-        let cache_home = kvist_dependencies::rust::cache::home()?;
-        let native_sources = kvist_dependencies::rust::cache::sources(
-            project,
-            &cache_home,
-            &sav::CancellationToken::new(),
-        )?;
+        let cache_home = roetter::rust::cache::home()?;
+        let native_sources =
+            roetter::rust::cache::sources(project, &cache_home, &sav::CancellationToken::new())?;
         check_budget(config, started)?;
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)

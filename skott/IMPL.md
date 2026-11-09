@@ -81,7 +81,7 @@ Native `component validate skott` and `doctor` validate this component's intent
 and queue. `task next skott` remains blocked by pre-existing missing structural
 sections in the separate dependencies component, not by this recovery change.
 Release binaries were rebuilt at `/opt/target/release/skott` and
-`/opt/target/release/skott-file-tool`; the separate user-installed launchers and
+`/opt/target/release/skott-toerne`; the separate user-installed launchers and
 running sessions were not replaced or stopped.
 
 ## Final native Rust support observations - 2026-11-06
@@ -220,7 +220,7 @@ reproduced or proven; no global cache flushing or host authority expansion was
 used.
 
 Nextest run `27d66dd7-3ae1-4054-95f5-37ca97ee2bb0` repeated the actual repository
-trial five times with the configured `/opt/target/release/galla-runner`; all five
+trial five times with the configured `/opt/target/release/galla`; all five
 iterations passed. At 2026-11-06T22:16:55Z the parent atomically replaced only the
 installed `/home/stefan/.kvist/bin/skott` from the repaired release build,
 verified byte equality and ran its version command successfully. Running
@@ -1109,7 +1109,7 @@ Fresh native verification was performed rather than relaxing the requirement.
 The complete `rust_build_environment` integration binary passed all 16 tests
 under both the default profile with four threads and the inherited CI profile
 with three threads. Both runs used the tracked configuration, all features,
-offline locked builds and `KVIST_GALLA=/opt/target/debug/galla-runner`.
+offline locked builds and `KVIST_GALLA=/opt/target/debug/galla`.
 Structured events were captured using
 `--message-format libtest-json-plus --message-format-version 0.1` and
 `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1` for independent examination. The nextest run
@@ -1142,7 +1142,7 @@ acceptance or blanket certification.
 ### Scope and entry points
 
 - `skott/Cargo.toml` declares version 0.3.0, edition 2024, Rust 1.95, a
-  `skott` library, the `skott` executable and `skott-file-tool`. The library
+  `skott` library, the `skott` executable and `skott-toerne`. The library
   forbids unsafe code but uses Unix/Linux filesystem and process facilities.
 - This is a workspace agent frontend, not a protected task broker. Generated
   system prompts disclaim acceptance, approval, canonical evidence and output
@@ -1282,7 +1282,7 @@ derived from intent documents.
   Paths are absolute, bounded to 4096 bytes and lexically canonical without
   empty/dot/parent components. Mutations must be strictly below the write root;
   read authority instead comes from the process filesystem namespace.
-  `skott-file-tool` is not itself a sandbox.
+  `skott-toerne` is not itself a sandbox.
 - Reads hash the complete file, accept UTF-8 byte offsets and return adaptive
   pages with actual `next_offset`. Complete files are bounded to 1 MiB;
   read pages have default 4096 and maximum 16384 requested bytes. List/search/
@@ -1959,7 +1959,7 @@ lint correction and queue updates. Both release frontends reported the same read
 root tree. This does not accept stale intent, fabricate receipts or certify an SLA.
 
 At `2026-11-07T01:11:50Z`, the implementing context atomically installed
-byte-identical release `kvist`, `skott` and `skott-file-tool` binaries without
+byte-identical release `kvist`, `skott` and `skott-toerne` binaries without
 stopping existing sessions. Installed CLI versions were Kvist 0.3.0 and Skott
 0.3.1; both installed frontends reported the same ready vendor tree. The retired
 root receipt was removed, generated state/staging ignore rules were checked, and

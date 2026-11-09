@@ -14,25 +14,41 @@ one is which*.
 The new names keep that one-to-one correspondence (each name still maps to exactly
 one component) while giving each component an identity. The theme is a growing
 plant: the workspace resolves to a single stem built from a **tip, a medium, a
-core, a shell, and a leaf.**
+core, a shell, a leaf, and the roots that feed it.**
 
 ## The naming convention
 
-- One word, all lowercase.
-- The name is a plant part (bud, sap, pith, gall, blade).
-- The plant part is chosen to mirror the component's responsibility.
-- The name is memorable rather than self-documenting, so this document is the
-  source of truth and must be kept in sync with the code.
+Every component is identified by a plant part, and that single word drives all
+four naming surfaces:
+
+- **Directory** — the bare plant part: `maerg/`, `sav/`, `galla/`, `skott/`,
+  `blad/`, `roetter/`.
+- **Package** (Cargo `name`) — `kvist-<part>`: `kvist-maerg`, `kvist-sav`,
+  `kvist-galla`, `kvist-skott`, `kvist-blad`, `kvist-roetter`. The `kvist-`
+  prefix keeps every published crate in the product namespace.
+- **Library** (crate name used in `use` paths) — the bare plant part: `maerg`,
+  `sav`, `galla`, `skott`, `blad`, `roetter`. Consumers write
+  `use sav::…` / `use roetter::…`; the manifest maps the package to the lib via
+  `[lib] name = "…"`.
+- **Binary** — the bare plant part (`sav`, `galla`, `skott`, `blad`), with one
+  deliberate exception: the root component's binary is the **product name**
+  `kvist`, not `maerg`. No binary carries a `-run` / `-runner` / `-tool`
+  suffix; the plant part alone is the executable name.
+
+The plant part is chosen to mirror the component's responsibility. The name is
+memorable rather than self-documenting, so this document is the source of truth
+and must be kept in sync with the code.
 
 ## The components
 
-| Component (old → new) | Filesystem | Plant part | Role |
-| --- | --- | --- | --- |
-| `agent_runner` → **skott** | `agent_runner/` → `skott/` | bud / sprout / shoot | the active growth tip |
-| `agent_runtime` → **sav** | `agent_runtime/` → `sav/` | sap / resin | the fluid runtime medium |
-| `engine` → **maerg** | `engine/` → `maerg/` | pith / marrow | the vital core channel |
-| `sandbox_runner` → **galla** | `sandbox_runner/` → `galla/` | gall | the protective quarantine shell |
-| *(new) Markdown viewer → **blad*** | *(none yet) → `blad/` | blade / leaf | the visual surface you read |
+| Component (old → new) | Directory | Package | Library | Binary | Plant part | Role |
+| --- | --- | --- | --- | --- | --- | --- |
+| `agent_runner` → **skott** | `skott/` | `kvist-skott` | `skott` | `skott` | bud / sprout / shoot | the active growth tip |
+| `agent_runtime` → **sav** | `sav/` | `kvist-sav` | `sav` | `sav` | sap / resin | the fluid runtime medium |
+| `engine` → **maerg** | `maerg/` | `kvist-maerg` | `maerg` | `kvist` *(product name)* | pith / marrow | the vital core channel |
+| `sandbox_runner` → **galla** | `galla/` | `kvist-galla` | `galla` | `galla` | gall | the protective quarantine shell |
+| *(new) Markdown viewer → **blad*** | `blad/` | `kvist-blad` | `blad` | `blad` | blade / leaf | the visual surface you read |
+| *(new) shared deps → **roetter*** | `roetter/` | `kvist-roetter` | `roetter` | *(library)* | root / roots | the part that draws in what the stem needs |
 
 ## Each component
 
@@ -68,12 +84,22 @@ core, a shell, and a leaf.**
   sandbox runner is exactly that: a sealed, hardened boundary that quarantines
   untrusted execution so it can't reach the tree.
 
-### blad — blade / leaf *(upcoming Markdown viewer)*
-- **Will be:** the Markdown-viewer TUI (not yet created; name reserved).
-- **Role:** the terminal UI for reading and navigating rendered Markdown.
+### blad — blade / leaf
+- **Role:** the Markdown-viewer TUI — the terminal UI for reading and navigating
+  rendered Markdown.
 - **Why the name:** a blade is the outer, formatted surface of a stem that you
   actually see and read — the right name for a viewer that turns structured content
   into something legible.
+
+### roetter — root / roots
+- **Role:** the shared, headless library that owns locked dependency acquisition
+  and offline readiness — it reaches down into the native Cargo registry and Git
+  caches and draws the material the rest of the stem needs.
+- **Why the name:** roots are the part of a plant that reaches into the soil and
+  takes in what the stem needs, feeding the sap (`sav`) that carries it upward.
+  The name is the Swedish plural *rötter* with the umlaut stripped to `roetter`,
+  matching the `maerg` spelling of *märg*; the doubled vowel keeps it reading as a
+  foreign plural and sidesteps the English "rot" (decay) association.
 
 ## Subdirectory-level renames
 
@@ -108,6 +134,9 @@ directory inside a component — and they live under that component's subtree:
 - **Name vs. path vs. ID.** A component still maps to a directory, a crate, and (for
   the root) a stable ID. Decide which of each a rename touches so nothing is left
   inconsistent.
-- **A deliberate touch:** `skott`, `galla`, and `blad` are genuine Swedish words for
-  the plant parts they name — fitting for an author named Lindblad (blad = leaf,
-  lind = linden/birch). This makes the set read as chosen rather than random.
+- **A deliberate touch:** `skott`, `galla`, `blad`, and `roetter` are genuine Swedish
+  words for the plant parts they name — fitting for an author named Lindblad
+  (blad = leaf, lind = linden/birch). `maerg` is the umlaut-stripped spelling of
+  *märg* (marrow) and `roetter` of *rötter* (roots); the doubled vowels keep them
+  reading as foreign rather than as English "marg" or "rot". This makes the set
+  read as chosen rather than random.

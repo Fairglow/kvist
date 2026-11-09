@@ -3,7 +3,7 @@ use std::{
     process::{Command, Output},
 };
 
-use kvist::{
+use maerg::{
     artifacts::root_artifacts,
     init::{InitOutcome, initialize},
 };

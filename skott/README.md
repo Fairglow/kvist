@@ -9,7 +9,7 @@ declared once, in configuration.
 
 It is a standalone binary (`skott`) that is independent of the `kvist` CLI:
 it is driven by its own TOML configuration and needs no Kvist project. It
-shares the `sav` bounded mechanisms and the `galla-runner` enforcement
+shares the `sav` bounded mechanisms and the `galla` enforcement
 boundary, so it can also be launched from Kvist (`kvist prompt` runs the same
 shell). Its Markdown rendering is provided by the `blad` library, so the
 transcript you see in skott is the same rendering `blad` uses to display
@@ -19,13 +19,13 @@ sessions afterwards.
 
 **Building.** Rust **1.95** (MSRV) on Linux. `skott` is a workspace member, so
 `cargo build -p skott` at the repository root builds it together with its
-dependencies (`kvist-dependencies`, `sav`, `galla`, `blad`). No other tools are needed to build or
+dependencies (`kvist-roetter`, `sav`, `galla`, `blad`). No other tools are needed to build or
 run the test suite.
 
 **Running.** An interactive terminal and a TOML configuration (see
 [Configuration](#configuration)). At least one reachable model provider — a
 `llama-server` or `Ollama` endpoint — must be configured. For sandboxed work
-(the default) a verified `galla-runner` and a Bubblewrap backend must be
+(the default) a verified `galla` and a Bubblewrap backend must be
 installed; skott fails closed rather than falling back to host execution.
 Rust builds use available native Cargo registry/Git data from explicit
 `CARGO_HOME`, otherwise `HOME/.cargo`. Missing external sources must be
@@ -67,7 +67,7 @@ does not promise OS network isolation of the host command. Toolchain/component
 installation, lock resolution and sandbox networking are not enabled by this
 command. Package-manager failure stops without automatic retries or fallback.
 
-Skott uses the headless `kvist-dependencies::rust::cache` backend. Complete
+Skott uses the headless `kvist-roetter::rust::cache` backend. Complete
 native material is reused without project vendor trees, source copies or file
 inventories. Canonical `--check` is a cheap process-free catalogue observation,
 not source integrity or origin attestation. Git/alternate-source mappings use
@@ -236,7 +236,7 @@ complete, commented example. Key points:
   (including an unloaded Ollama model). `response_reserve` controls the initial
   generation budget; by default it is up to 8192 tokens or a quarter of a small
   window. CLI budget overrides take precedence.
-- `sandbox.runner` and `sandbox.backend` point at the `galla-runner`
+- `sandbox.runner` and `sandbox.backend` point at the `galla`
   executable and the Bubblewrap backend; they default to resolved system paths.
 - `tool_policy` exposes the shell denylist and the sandbox write root; the safe
   minimum denylist is always enforced.

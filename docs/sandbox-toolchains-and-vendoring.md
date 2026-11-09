@@ -13,7 +13,7 @@ graphs use filesystem metadata; Git/alternate graphs disclose bounded offline
 host Cargo admission, which may write private administration or extract cached
 material.
 `skott --vendor --offline` uses Cargo's existing host cache only.
-Both Skott and `kvist vendor` share `kvist-dependencies` and the selected native
+Both Skott and `kvist vendor` share `kvist-roetter` and the selected native
 Cargo cache: absolute `CARGO_HOME`, otherwise `HOME/.cargo`. Already downloaded
 registry/Git data is reused directly; default preparation does not run
 `cargo vendor`, duplicate dependencies, or scan every source file.
@@ -347,7 +347,7 @@ For a one-off isolated run:
 
 ```bash
 cargo nextest run --offline --locked \
-  -p skott --test rust_build_environment \
+  -p kvist-maerg-skott --test rust_build_environment \
   -E 'test(=native_repository_tests_execute_inside_the_workspace_sandbox)'
 ```
 
@@ -471,9 +471,9 @@ If the toolchain manifest is missing or stale, the doctor will report:
 Run the self-contained native chain with a runner built outside the worktree:
 
 ```bash
-cargo build --locked -p galla --bin galla-runner
-KVIST_GALLA=/opt/target/debug/galla-runner \
-  cargo test --locked -p skott --test rust_build_environment -- \
+cargo build --locked -p kvist-maerg-galla --bin galla
+KVIST_GALLA=/opt/target/debug/galla \
+  cargo test --locked -p kvist-maerg-skott --test rust_build_environment -- \
   --test-threads=1 --nocapture
 ```
 
@@ -487,7 +487,7 @@ No provider, network acquisition or pre-existing directory-export tree is needed
 self-contained fixture tests.
 
 Run every maerg native toolchain trial with
-`KVIST_GALLA=/opt/target/debug/galla-runner cargo test --locked -p kvist --test sandbox_toolchain -- --include-ignored --test-threads=1 --nocapture`.
+`KVIST_GALLA=/opt/target/debug/galla cargo test --locked -p kvist-maerg --test sandbox_toolchain -- --include-ignored --test-threads=1 --nocapture`.
 Its generic verification trials explicitly grant concrete installed executables,
 and the build trial compiles a real isolated locked fixture. The separate
 `offline_cargo_verification_e2e` covers native offline sources and pinned
@@ -544,14 +544,14 @@ multi-version/cross-target prerequisites. This inventory test and maerg's
 **non-ignored**: ordinary `cargo test` runs them and missing runner/backend/
 Rust prerequisites fail rather than skip. Both compare the host default and
 inventory, exercise offline selection/builds, and snapshot host content and
-metadata excluding access times. Build `galla-runner` outside the worktree first,
+metadata excluding access times. Build `galla` outside the worktree first,
 then run:
 
 ```bash
-KVIST_GALLA=/opt/target/debug/galla-runner \
-  cargo test --offline --locked -p skott --test rustup_inventory
-KVIST_GALLA=/opt/target/debug/galla-runner \
-  cargo test --offline --locked -p kvist --test sandbox_toolchain
+KVIST_GALLA=/opt/target/debug/galla \
+  cargo test --offline --locked -p kvist-maerg-skott --test rustup_inventory
+KVIST_GALLA=/opt/target/debug/galla \
+  cargo test --offline --locked -p kvist-maerg --test sandbox_toolchain
 ```
 
 Quality and MSRV CI provision these prerequisites on the host before ordinary

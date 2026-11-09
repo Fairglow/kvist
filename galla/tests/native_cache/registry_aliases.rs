@@ -256,7 +256,7 @@ fn native_named_registry_metadata_uses_only_declared_private_alias_config() {
         )
         .unwrap();
     }
-    let probe = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let probe = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()

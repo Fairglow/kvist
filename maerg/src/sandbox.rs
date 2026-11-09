@@ -2081,7 +2081,7 @@ fn execute_offline_cargo_request(
             registry,
             config: source_config,
         } => {
-            vendor_read = Some(kvist_dependencies::rust::read_lease(
+            vendor_read = Some(roetter::rust::read_lease(
                 registry,
                 &sav::CancellationToken::new(),
             )?);
@@ -2366,7 +2366,7 @@ pub fn run_offline_cargo_verification(
         path: PathBuf::from("."),
         source,
     })?;
-    let native_home = kvist_dependencies::rust::cache::home()?;
+    let native_home = roetter::rust::cache::home()?;
     let staged_component = prepare_native_component_verification_workspace(
         project_root,
         component_dir,
@@ -2480,7 +2480,7 @@ fn prepare_native_component_verification_workspace(
         "--no-deps".into(),
         "--format-version=1".into(),
     ];
-    let limits = kvist_dependencies::VendorLimits::load(project_root)?;
+    let limits = roetter::VendorLimits::load(project_root)?;
     let policy = sav::SupervisionPolicy {
         idle_timeout: Duration::from_secs(30),
         attempt_timeout: Some(Duration::from_secs(30)),

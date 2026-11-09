@@ -70,13 +70,14 @@ five-artifact intent set (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`,
 `TODOS.yaml`, `IMPL.md`) and its own README. The approved decomposition is
 the canonical component table in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-| Component | Directory | Binary         | Role                                                                                                         | Status                    |
-| --------- | --------- | -------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------- |
-| **maerg** | `maerg/`  | `kvist`        | The CLI and workflow engine: project artifacts, discovery, status, queues, task lifecycle, policy, evidence. | In progress (alpha state) |
-| **sav**   | `sav/`    | `sav-run`      | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport.      | In progress (beta state) |
-| **galla** | `galla/`  | `galla-runner` | Independent Linux enforcement boundary: request validation and Bubblewrap isolation.                         | In progress (beta state)  |
-| **skott** | `skott/`  | `skott`        | Interactive/headless sandboxed workspace agent shell.                                                        | In progress (beta state)  |
-| **blad**  | `blad/`   | `blad`         | Terminal Markdown viewer and streaming pager for skott session transcripts and standalone files.             | Released (`kvist-blad`)   |
+| Component | Directory  | Package        | Binary         | Role                                                                                                         | Status                    |
+| --------- | ---------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| **maerg** | `maerg/`   | `kvist-maerg`  | `kvist`        | The CLI and workflow engine: project artifacts, discovery, status, queues, task lifecycle, policy, evidence. | In progress (alpha state) |
+| **sav**   | `sav/`     | `kvist-sav`    | `sav`          | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport.      | In progress (beta state) |
+| **galla** | `galla/`   | `kvist-galla`  | `galla`        | Independent Linux enforcement boundary: request validation and Bubblewrap isolation.                         | In progress (beta state)  |
+| **skott** | `skott/`   | `kvist-skott`  | `skott`        | Interactive/headless sandboxed workspace agent shell.                                                        | In progress (beta state)  |
+| **blad**  | `blad/`    | `kvist-blad`   | `blad`         | Terminal Markdown viewer and streaming pager for skott session transcripts and standalone files.             | Released (`kvist-blad`)   |
+| **roetter** | `roetter/` | `kvist-roetter` | *(library)*    | Shared locked dependency acquisition and offline readiness.                                                  | In progress (beta state)  |
 
 **Dependency direction.** `maerg` (the `kvist` CLI) depends on `sav` as a
 library and speaks to `galla` only through the versioned sandbox protocol.
@@ -93,8 +94,9 @@ own TOML configuration; `blad` opens Markdown files directly, with an opt-in
 `sessions` Cargo feature for skott transcript commands. Kvist's all-feature
 build recipes include that feature. Both can also be launched from Kvist
 (`kvist prompt` runs `skott`; `blad` views the resulting transcripts). `sav` and `galla` are
-reusable libraries with their own CLIs (`sav-run`, `galla-runner`) and are
-usable independently of the `kvist` CLI.
+reusable libraries with their own CLIs (`sav`, `galla`) and are
+usable independently of the `kvist` CLI. `roetter` is a shared library that
+owns locked dependency acquisition and offline readiness; it has no binary.
 
 Component specifics — what each is, its purpose, and how to build and run it —
 live in the component READMEs:

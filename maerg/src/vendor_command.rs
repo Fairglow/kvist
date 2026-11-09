@@ -190,7 +190,7 @@ pub fn check_protected_vendor_readiness(
             strategy.id()
         )));
     }
-    let home = kvist_dependencies::rust::cache::home()?;
+    let home = roetter::rust::cache::home()?;
     let view = native_cargo_admission_controlled(
         &project_dir,
         &home,
@@ -302,13 +302,13 @@ fn vendor_rust_project(
     options: VendorOptions,
 ) -> Result<crate::vendoring::VendoringReport> {
     let cancellation = sav::CancellationToken::new();
-    let limits = kvist_dependencies::VendorLimits::load(project_dir)?;
+    let limits = roetter::VendorLimits::load(project_dir)?;
     if options.vendored_dir.is_none() {
-        let home = kvist_dependencies::rust::cache::home()?;
+        let home = roetter::rust::cache::home()?;
         tracing::info!(project = %project_dir.display(), cache = %home.display(), "checking native locked Cargo cache");
         let acquire = |home: &Path| {
             if !options.populate {
-                return Err(kvist_dependencies::Error::VendoringUnavailable {
+                return Err(roetter::Error::VendoringUnavailable {
                     path: project_dir.to_string_lossy().into_owned(),
                     reason: "locked native dependencies are missing; acquisition was not authorized; run explicit `kvist vendor`".into(),
                 });
@@ -316,7 +316,7 @@ fn vendor_rust_project(
             tracing::info!(project = %project_dir.display(), "acquiring missing locked Cargo dependencies; completed downloads will be retained");
             if let Some(sandbox) = &options.sandbox {
                 provision_rust_via_acquisition_sandbox(project_dir, sandbox, home).map_err(
-                    |error| kvist_dependencies::Error::VendoringUnavailable {
+                    |error| roetter::Error::VendoringUnavailable {
                         path: project_dir.to_string_lossy().into_owned(),
                         reason: format!("{error}; configured acquisition stopped; cached downloads retained; no host fallback"),
                     },
@@ -326,15 +326,15 @@ fn vendor_rust_project(
                     project_dir,
                     "explicit native Cargo acquisition",
                 )
-                .map_err(|error| kvist_dependencies::Error::VendoringUnavailable {
+                .map_err(|error| roetter::Error::VendoringUnavailable {
                     path: project_dir.to_string_lossy().into_owned(),
                     reason: error.to_string(),
                 })?
                 .cargo;
-                kvist_dependencies::rust::cache::populate(
+                roetter::rust::cache::populate(
                     project_dir,
                     home,
-                    &kvist_dependencies::rust::ProvisionOptions {
+                    &roetter::rust::ProvisionOptions {
                         cargo,
                         offline: false,
                         vendored_dir: None,
@@ -346,7 +346,7 @@ fn vendor_rust_project(
             }
         };
         let view = if let Some(sandbox) = &options.sandbox {
-            kvist_dependencies::rust::cache::provision_with_validation(
+            roetter::rust::cache::provision_with_validation(
                 project_dir,
                 &home,
                 &cancellation,
@@ -355,7 +355,7 @@ fn vendor_rust_project(
                 |home| native_metadata(project_dir, home, sandbox, &cancellation, None),
             )?
         } else {
-            kvist_dependencies::rust::cache::provision_with(
+            roetter::rust::cache::provision_with(
                 project_dir,
                 &home,
                 &cancellation,
@@ -367,33 +367,33 @@ fn vendor_rust_project(
         return Ok(view.report);
     }
     if !options.populate {
-        return kvist_dependencies::rust::provision_with(
+        return roetter::rust::provision_with(
             project_dir,
             options.vendored_dir.as_deref(),
             &cancellation,
             options.force,
-            |_| Err(kvist_dependencies::Error::VendoringUnavailable {
+            |_| Err(roetter::Error::VendoringUnavailable {
                 path: project_dir.to_string_lossy().into_owned(),
                 reason: "locked dependency acquisition is required but population was not authorized; run the explicit operator vendor command".into(),
             }),
         ).map_err(Into::into);
     }
     if let Some(sandbox) = &options.sandbox {
-        return kvist_dependencies::rust::provision_with(
+        return roetter::rust::provision_with(
             project_dir,
             options.vendored_dir.as_deref(),
             &cancellation,
             options.force,
             |staged| {
-                let home = kvist_dependencies::rust::cache::home()?;
-                kvist_dependencies::rust::cache::provision_with_validation(
+                let home = roetter::rust::cache::home()?;
+                roetter::rust::cache::provision_with_validation(
                     project_dir,
                     &home,
                     &cancellation,
                     false,
                     |home| {
                         provision_rust_via_acquisition_sandbox(project_dir, sandbox, home).map_err(
-                            |error| kvist_dependencies::Error::VendoringUnavailable {
+                            |error| roetter::Error::VendoringUnavailable {
                                 path: project_dir.to_string_lossy().into_owned(),
                                 reason: format!(
                                     "{error}; configured acquisition stopped; no host fallback"
@@ -407,15 +407,15 @@ fn vendor_rust_project(
                     project_dir,
                     "explicit portable Cargo export",
                 )
-                .map_err(|error| kvist_dependencies::Error::VendoringUnavailable {
+                .map_err(|error| roetter::Error::VendoringUnavailable {
                     path: project_dir.to_string_lossy().into_owned(),
                     reason: error.to_string(),
                 })?
                 .cargo;
-                kvist_dependencies::rust::populate(
+                roetter::rust::populate(
                     project_dir,
                     staged,
-                    &kvist_dependencies::rust::ProvisionOptions {
+                    &roetter::rust::ProvisionOptions {
                         cargo,
                         offline: true,
                         vendored_dir: None,
@@ -431,9 +431,9 @@ fn vendor_rust_project(
     }
     let cargo =
         crate::toolchain::resolve_pinned_toolchain(project_dir, "explicit Rust vendoring")?.cargo;
-    kvist_dependencies::rust::provision(
+    roetter::rust::provision(
         project_dir,
-        kvist_dependencies::rust::ProvisionOptions {
+        roetter::rust::ProvisionOptions {
             cargo,
             offline: false,
             vendored_dir: options.vendored_dir,
@@ -461,7 +461,7 @@ fn provision_rust_via_acquisition_sandbox(
         &sav::CancellationToken::new(),
         None,
     )?;
-    let limits = kvist_dependencies::VendorLimits::load(project_dir)?;
+    let limits = roetter::VendorLimits::load(project_dir)?;
     check_acquisition_result(
         project_dir,
         &result,
@@ -481,19 +481,19 @@ pub(crate) fn native_cargo_admission(
     home: &Path,
     sandbox: Option<&crate::config::SandboxConfig>,
     cancellation: &sav::CancellationToken,
-) -> Result<kvist_dependencies::rust::cache::CacheView> {
+) -> Result<roetter::rust::cache::CacheView> {
     if let Some(sandbox) = sandbox {
         native_cargo_admission_controlled(project, home, sandbox, cancellation, None)
     } else {
-        let limits = kvist_dependencies::VendorLimits::load(project)?;
+        let limits = roetter::VendorLimits::load(project)?;
         let toolchain = crate::toolchain::resolve_pinned_toolchain(
             project,
             "explicit host native Cargo admission",
         )?;
-        kvist_dependencies::rust::cache::admit(
+        roetter::rust::cache::admit(
             project,
             home,
-            &kvist_dependencies::rust::ProvisionOptions {
+            &roetter::rust::ProvisionOptions {
                 cargo: toolchain.cargo,
                 offline: true,
                 vendored_dir: None,
@@ -512,8 +512,8 @@ fn native_cargo_admission_controlled(
     sandbox: &crate::config::SandboxConfig,
     cancellation: &sav::CancellationToken,
     remaining: Option<std::time::Duration>,
-) -> Result<kvist_dependencies::rust::cache::CacheView> {
-    kvist_dependencies::rust::cache::admit_with(project, home, cancellation, |home| {
+) -> Result<roetter::rust::cache::CacheView> {
+    roetter::rust::cache::admit_with(project, home, cancellation, |home| {
         native_metadata(project, home, sandbox, cancellation, remaining)
     })
     .map_err(Into::into)
@@ -525,7 +525,7 @@ fn native_metadata(
     sandbox: &crate::config::SandboxConfig,
     cancellation: &sav::CancellationToken,
     remaining: Option<std::time::Duration>,
-) -> kvist_dependencies::Result<Vec<u8>> {
+) -> roetter::Result<Vec<u8>> {
     let result = run_native_cargo_preparation(
         project,
         sandbox,
@@ -534,24 +534,24 @@ fn native_metadata(
         cancellation,
         remaining,
     )
-    .map_err(|error| kvist_dependencies::Error::VendoringUnavailable {
+    .map_err(|error| roetter::Error::VendoringUnavailable {
         path: project.to_string_lossy().into_owned(),
         reason: format!("{error}; configured native admission stopped; no host fallback"),
     })?;
     if result.cancelled || cancellation.is_cancelled() {
-        return Err(kvist_dependencies::Error::Cancelled);
+        return Err(roetter::Error::Cancelled);
     }
     let failure = if result.timed_out {
-        Some(kvist_dependencies::ProcessFailure::Timeout)
+        Some(roetter::ProcessFailure::Timeout)
     } else if result.output_limit_exceeded {
-        Some(kvist_dependencies::ProcessFailure::OutputLimit)
+        Some(roetter::ProcessFailure::OutputLimit)
     } else if !result.output.status.success() {
-        Some(kvist_dependencies::ProcessFailure::Exit)
+        Some(roetter::ProcessFailure::Exit)
     } else {
         None
     };
     if let Some(failure) = failure {
-        let error = kvist_dependencies::rust::cache::classify_metadata_failure(
+        let error = roetter::rust::cache::classify_metadata_failure(
             project,
             failure,
             result.output.status.code(),
@@ -560,12 +560,11 @@ fn native_metadata(
         );
         if matches!(
             error,
-            kvist_dependencies::Error::VendoringIncomplete { .. }
-                | kvist_dependencies::Error::Cancelled
+            roetter::Error::VendoringIncomplete { .. } | roetter::Error::Cancelled
         ) {
             return Err(error);
         }
-        return Err(kvist_dependencies::Error::VendoringUnavailable {
+        return Err(roetter::Error::VendoringUnavailable {
             path: project.to_string_lossy().into_owned(),
             reason: format!(
                 "{error}; configured native Cargo metadata failed ({}); no host fallback\n{}",
@@ -578,7 +577,7 @@ fn native_metadata(
             ),
         });
     }
-    kvist_dependencies::rust::cache::normalize_metadata_paths(
+    roetter::rust::cache::normalize_metadata_paths(
         project,
         Path::new(crate::sandbox::NATIVE_CARGO_HOME),
         &result.output.stdout,
@@ -610,7 +609,7 @@ fn run_native_cargo_preparation(
     if cancellation.is_cancelled() {
         return Err(KvistError::Sav(sav::Error::Cancelled));
     }
-    let limits = kvist_dependencies::VendorLimits::load(project_dir)?;
+    let limits = roetter::VendorLimits::load(project_dir)?;
 
     // Explicit standalone paths may not have project configuration.
     let vcs = match crate::config::load(project_dir) {
@@ -789,7 +788,7 @@ fn run_native_cargo_preparation(
 fn check_acquisition_result(
     project: &Path,
     result: &crate::sandbox::ExecutionResult,
-    limits: &kvist_dependencies::VendorLimits,
+    limits: &roetter::VendorLimits,
     redactions: &[String],
 ) -> Result<()> {
     let mut causes = Vec::new();
@@ -897,7 +896,7 @@ fn run_host_tool_capture(
     context: &str,
     env: &[(&str, &str)],
 ) -> Result<Vec<u8>> {
-    let limits = kvist_dependencies::VendorLimits::load(project_dir)?;
+    let limits = roetter::VendorLimits::load(project_dir)?;
     let command = if env.is_empty() {
         sav::CommandSpec::new(program, args.iter().copied())
     } else {
@@ -1368,7 +1367,7 @@ mod tests {
             std::fs::write(project.path().join("Cargo.lock"), format!(
             "version=4\n[[package]]\nname=\"offline-fixture\"\nversion=\"0.1.0\"\nsource=\"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum=\"{checksum}\"\n"
         )).unwrap();
-            let report = kvist_dependencies::rust::provision_with(
+            let report = roetter::rust::provision_with(
             project.path(), destination.as_deref(), &sav::CancellationToken::new(), false,
             |vendor| with_acquisition_scratch(project.path(), |scratch| {
                 std::fs::write(scratch.join("observed-fetch"), b"owned cache").unwrap();
@@ -1385,19 +1384,15 @@ mod tests {
                         "lib.rs":hex::encode(Sha256::digest(library.as_bytes())),
                     }})
                 ).unwrap()).unwrap();
-                Ok(kvist_dependencies::vendoring::offline_cargo_config("/workspace/vendored"))
-            }).map_err(|error| kvist_dependencies::Error::VendoringUnavailable {
+                Ok(roetter::vendoring::offline_cargo_config("/workspace/vendored"))
+            }).map_err(|error| roetter::Error::VendoringUnavailable {
                 path: project.path().to_string_lossy().into_owned(), reason:error.to_string(),
             }),
         ).expect("scratch cleanup must leave a publishable vendor-only candidate");
             assert!(report.ready());
             let vendor = destination.unwrap_or_else(|| project.path().join(".kvist/vendored"));
-            kvist_dependencies::rust::check_view(
-                project.path(),
-                &vendor,
-                &sav::CancellationToken::new(),
-            )
-            .unwrap();
+            roetter::rust::check_view(project.path(), &vendor, &sav::CancellationToken::new())
+                .unwrap();
         }
     }
 
@@ -1561,12 +1556,8 @@ mod tests {
         write_vendored_package(&vendored, "stale-pkg", "2.0.0");
 
         let stale = find_stale_vendored_packages(project.path(), &vendored).expect("find stale");
-        remove_stale_vendored_packages(
-            &vendored,
-            &stale,
-            &kvist_dependencies::VendorLimits::default(),
-        )
-        .expect("remove stale");
+        remove_stale_vendored_packages(&vendored, &stale, &roetter::VendorLimits::default())
+            .expect("remove stale");
 
         assert!(
             !vendored.join("stale-pkg").exists(),

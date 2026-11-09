@@ -139,3 +139,69 @@ failure and a recognized offline missing-source diagnostic tied to the locked
 graph; arbitrary nonzero exits, timeout, I/O, configuration and lock failures
 MUST NOT be reclassified as missing. Request-bound private-home path aliases MAY
 be normalized to fixed native endpoints, never inferred from subprocess output.
+
+
+## Purpose and scope
+
+`kvist-roetter` is a shared, headless Rust library that owns reusable
+dependency catalogue, provisioning and offline-readiness mechanics. It lets
+Kvist and Skott reuse one Rust offline preparation and export implementation
+instead of each duplicating authority. It is a library, not a CLI: it grants no
+subprocess, sandbox, model-tool, human-approval or canonical-evidence authority
+of its own. Its scope is the Rust backend first; it does not claim all-language
+runtime support, and it does not attest per-file content integrity or source
+origin.
+
+## Stakeholders and concerns
+
+- Kvist (`maerg`) and Skott are the consumers; they require one shared
+  Rust provisioning and offline-readiness implementation with no duplicated
+  authority.
+- The operator owns the selected Cargo home and native cache roots; the library
+  must never grant or infer host cache paths from receipts or configuration.
+- Reviewers require bounded, deterministic, process-free inspection and explicit
+  failure semantics so that catalogue presence is never mistaken for readiness.
+
+## Functional requirements
+
+- `DEP-REQ-RUST`: consume an existing bounded regular non-link Cargo.lock,
+  retain its exact identity, and invoke Cargo with `--locked`; never resolve a
+  new lockfile.
+- `DEP-REQ-NATIVE-CACHE`: reuse the operator-selected native Cargo home's
+  registry and Git state without vendoring, copying, inventorying, hashing or
+  synchronizing package contents; resolve only the `registry` and `git` root
+  selectors to safe canonical directories.
+- `DEP-REQ-NATIVE-PROVISION`: hold a process-owned project advisory lock,
+  acquire at most once for absent/incomplete sources, and persist only a small
+  schema/version-and-lock-digest receipt.
+- `DEP-REQ-NATIVE-ADMISSION`: support every valid locked source through actual
+  bounded offline/locked Cargo resolution when cheap catalogue mapping is
+  unavailable; represent deferred resolution explicitly.
+- `DEP-REQ-PUBLICATION`: stage, validate, recheck the lock and publish explicit
+  directory export without exposing partial material as ready.
+- `DEP-REQ-VALIDATION`, `DEP-REQ-SHARED-AREA`, `DEP-REQ-LIMITS`,
+  `DEP-REQ-EXECUTION`, `DEP-REQ-CONSUMERS`: treat input as untrusted, enforce
+  configurable bounds, exclude concurrent writers, and keep host provisioning
+  an explicitly authorized acquisition capability.
+
+## Quality requirements and constraints
+
+Inspection MUST be bounded, deterministic and process/write/network-free, and
+MUST fail explicitly rather than fall back. Traversal and symbolic links MUST
+not be followed during provisioning or metadata inspection. The library MUST NOT
+traverse or hash package contents or attest all file checksums. Vendor
+package/tree/byte/path/depth/metadata limits and acquisition output/time budgets
+MUST be configurable through one optional shared project policy with defaults.
+The receipt MUST contain only schema version and lock digest, not host paths,
+timestamps, per-file checksums or a full-verification claim.
+
+## Acceptance and traceability
+
+Acceptance is judged by the component's test suite and by offline readiness
+evidence: a warm native cache is reused without acquisition, a missing source
+triggers at most one acquisition, lock drift and unsafe roots fail explicitly,
+and a real offline Cargo consumer resolves from the prepared cache. Each
+requirement ID above links to the corresponding contract interface and design
+decision in this component, and to the native-offline-cache ADR. Independent
+security and compliance observations are recorded in `IMPL.md` and are not
+acceptance in themselves.

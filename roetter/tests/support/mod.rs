@@ -1,4 +1,4 @@
-use kvist_dependencies::{Error, ProcessFailure, rust::cache};
+use roetter::{Error, ProcessFailure, rust::cache};
 use sav::{
     CancellationToken, CommandSpec, OutputStream, SupervisionPolicy, run_supervised_observed,
 };

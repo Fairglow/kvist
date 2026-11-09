@@ -34,21 +34,21 @@ struct EditorQueues {
 fn add_editor_task(dir: &tempfile::TempDir) -> EditorQueues {
     let queue_path = dir.path().join("src/TODOS.yaml");
     let mut queue =
-        kvist::task_queue::parse(&std::fs::read_to_string(&queue_path).unwrap()).unwrap();
-    let timestamp: kvist::task_queue::Timestamp =
+        maerg::task_queue::parse(&std::fs::read_to_string(&queue_path).unwrap()).unwrap();
+    let timestamp: maerg::task_queue::Timestamp =
         serde_json::from_str("\"2026-10-28T23:00:00Z\"").unwrap();
-    queue.tasks.push(kvist::task_queue::Task {
+    queue.tasks.push(maerg::task_queue::Task {
         id: "prefill-test".into(),
         title: "Test editor prefill".into(),
         description: "Never execute this task in the terminal fixture.".into(),
         context: "The terminal fixture has no execution policy.".into(),
         purpose: "Keep terminal input visible.".into(),
         expected_outcome: "Policy refusal has no durable effects.".into(),
-        kind: kvist::task_queue::TaskKind::Test,
-        status: kvist::task_queue::TaskStatus::Pending,
+        kind: maerg::task_queue::TaskKind::Test,
+        status: maerg::task_queue::TaskStatus::Pending,
         depends_on: vec![],
         requirements: vec!["REQUIREMENTS.md#Task-selection-and-state-updates".into()],
-        timestamps: kvist::task_queue::TaskTimestamps {
+        timestamps: maerg::task_queue::TaskTimestamps {
             created_at: timestamp.clone(),
             updated_at: timestamp,
             completed_at: None,
@@ -65,7 +65,7 @@ fn add_editor_task(dir: &tempfile::TempDir) -> EditorQueues {
             .iter()
             .all(|task| task.id != "dash-prefill-test")
     );
-    std::fs::write(&queue_path, kvist::task_queue::serialize(&queue).unwrap()).unwrap();
+    std::fs::write(&queue_path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
     for path in ["src/other folder", "src/-component"] {
         assert!(
             Command::new(env!("CARGO_BIN_EXE_kvist"))
@@ -96,7 +96,7 @@ fn add_editor_task(dir: &tempfile::TempDir) -> EditorQueues {
         }
         std::fs::write(
             dir.path().join(path).join("TODOS.yaml"),
-            kvist::task_queue::serialize(&child_queue).unwrap(),
+            maerg::task_queue::serialize(&child_queue).unwrap(),
         )
         .unwrap();
         std::fs::copy(
@@ -161,16 +161,16 @@ fn add_editor_task(dir: &tempfile::TempDir) -> EditorQueues {
             .unwrap()
             .success()
     );
-    let inspection = kvist::project_state::inspect(dir.path()).unwrap();
+    let inspection = maerg::project_state::inspect(dir.path()).unwrap();
     assert_eq!(
         inspection.state,
-        kvist::project_state::ProjectState::Current
+        maerg::project_state::ProjectState::Current
     );
     assert!(
         inspection
             .components
             .iter()
-            .all(|component| component.state == kvist::project_state::ComponentState::Current)
+            .all(|component| component.state == maerg::project_state::ComponentState::Current)
     );
     let child_path = dir.path().join("src/-component/TODOS.yaml");
     EditorQueues {
@@ -391,12 +391,12 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
     std::fs::create_dir_all(&config_home).expect("create config home");
     let state_home = state_home.canonicalize().unwrap();
     let config_home = config_home.canonicalize().unwrap();
-    let mut paused = kvist::task_queue::parse(&queues.child_before).unwrap();
-    paused.tasks[0].status = kvist::task_queue::TaskStatus::Blocked;
+    let mut paused = maerg::task_queue::parse(&queues.child_before).unwrap();
+    paused.tasks[0].status = maerg::task_queue::TaskStatus::Blocked;
     paused.tasks[0].blocked_reason = Some("Review this fixture retry.".into());
     std::fs::write(
         &queues.child_path,
-        kvist::task_queue::serialize(&paused).unwrap(),
+        maerg::task_queue::serialize(&paused).unwrap(),
     )
     .unwrap();
     let draft = dir.path().join("fixture-decision.json");

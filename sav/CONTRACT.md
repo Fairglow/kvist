@@ -402,7 +402,7 @@ rendering, typed supervision policy and attempt context, supervised host
 execution, named profile storage and setup operations, provider-neutral model
 messages/turns, and local direct transports.
 
-The standalone `sav-run` CLI provides:
+The standalone `sav` CLI provides:
 
 - `setup [--registry PATH] [--force]` for shared profile qualification and update;
 - `registry [--registry PATH] [--profile NAME]` for filesystem-only JSON inspection;

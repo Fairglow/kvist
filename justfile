@@ -11,7 +11,7 @@ all: audit format lint build test
 # fetched material is repacked into .kvist/vendored offline. A no-op when the
 # registry already satisfies the lock.
 vendor:
-    cargo run --locked -p kvist -- vendor .
+    cargo run --locked -p kvist-maerg -- vendor .
 
 build:
     cargo build --locked --workspace --all-features \

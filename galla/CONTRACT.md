@@ -21,7 +21,7 @@ or mint Kvist evidence.
 
 ## Provided interfaces
 
-The executable is named `galla-runner`. It accepts exactly one protocol
+The executable is named `galla`. It accepts exactly one protocol
 mode argument:
 
 - `--kvist-sandbox-request-v1` reads one bounded JSON request from standard

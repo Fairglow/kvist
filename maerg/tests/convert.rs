@@ -3,7 +3,7 @@ use std::{
     process::{Command, Output},
 };
 
-use kvist::{
+use maerg::{
     component_documents::{self, DocumentKind},
     convert::{ConvertOutcome, convert},
     init::{InitOutcome, initialize},

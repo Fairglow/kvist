@@ -28,7 +28,7 @@ Executable releases currently support Linux (`x86_64`). macOS and Windows suppor
 Kvist is built from source using standard Cargo:
 
 ```bash
-cargo build --release -p kvist -p galla-runner -p sav
+cargo build --release -p kvist-maerg -p kvist-galla -p kvist-sav
 ```
 
 Install the binaries into your `$PATH`:
@@ -397,7 +397,7 @@ Kvist never executes unconstrained coding agents directly on your host. Agent ex
 +--------------------------------------------------------------------------+
 | HOST SYSTEM                                                              |
 |                                                                          |
-|   kvist maerg  ──(request json)──►  galla-runner                |
+|   kvist maerg  ──(request json)──►  galla                |
 |                                             │                            |
 |                                             ▼ (Linux Namespaces)         |
 |   +------------------------------------------------------------------+   |

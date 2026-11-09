@@ -2,7 +2,7 @@
 
 # Shared Dependencies Contract
 
-`kvist-dependencies` is a Linux headless Rust library. It imports no maerg or
+`kvist-roetter` is a Linux headless Rust library. It imports no maerg or
 Skott types. Sav's process supervisor is an explicitly declared provider
 (`sav/CONTRACT.md`); the caller owns execution authority. No command is exposed
 as a model tool.
@@ -245,3 +245,86 @@ integrity or origin attestation. Cargo reports source/checksum failures when
 consumed. Directory-export `force` explicitly rebuilds otherwise reusable
 material. Native `force` refreshes the small receipt; it does not guarantee
 reacquisition or repair of apparently complete damaged native material.
+
+
+## Boundary and ownership
+
+`kvist-roetter` is a Linux headless Rust library. It imports no maerg or
+Skott types. Sav's process supervisor is an explicitly declared provider
+(`sav/CONTRACT.md`); the caller owns execution authority. No command is exposed
+as a model tool. The library owns dependency catalogue, provisioning and
+offline-readiness mechanics; it owns no human approval, model tool, canonical
+evidence or sandbox grant. It owns the `.kvist` vendored/cargo-cache state it
+publishes and the small receipts it writes, and it reads the operator-selected
+Cargo home and Cargo.lock.
+
+## Provided interfaces
+
+The Rust API is the provided interface. The native offline cache is the default
+preparation path: `rust::cache::home`, `view`, `admit`, `sources`, `admit_with`,
+`provision_with_validation`, `classify_metadata_failure`,
+`normalize_metadata_paths`, `provision_with`, `populate`, `provision` and
+`acquisition_lease`. The explicit directory export path provides `rust::check`,
+`check_catalogue`, `check_view`, `read_lease`, `provision`, `provision_with`
+and `populate`, plus the shared `vendoring` catalogue/report/manifest types.
+These operations are consumed by Kvist and Skott to obtain a coherent offline
+readiness gate and to publish a reusable vendor tree.
+
+## Required interfaces
+
+Sav (`sav/CONTRACT.md`) provides the process supervisor used for bounded host
+Cargo execution; the caller owns execution authority and the library never
+grants it to agent execution. No other cross-component interface is required.
+The library requires no maerg or Skott types.
+
+## Data and schemas
+
+The published receipt (`VendorManifest`) contains only `schema_version` and
+`lockfile_digest`; it has no producer paths, timestamp, file inventory or
+full-verification flag. The native receipt at `.kvist/cargo-cache.json` contains
+only `schema_version` and `lockfile_digest`. The optional shared policy at
+`.kvist/vendor.toml` is a single `[limits]` table matching `VendorLimits`. The
+published resolver content permits source-replacement tables only. No
+machine-readable IDL file is authoritative; this document is authoritative for
+semantics.
+
+## Behavioral guarantees
+
+Inspection is bounded, deterministic and process/write/network-free. Catalogue
+presence is not content integrity, immutable readiness or source provenance
+attestation. Missing locks, malformed or unsupported metadata, unsafe paths,
+lock drift, occupied operation locks and failed processes are explicit errors,
+never a successful empty registry. Publication errors identify whether new
+material was published and require inspection rather than replay. Readiness is
+bound to the locked graph, not a promise that arbitrary build scripts, system
+libraries, tools or a different language can execute offline.
+
+## Errors and failure semantics
+
+The `Error` type retains unavailable/incomplete/stale/I/O domains for frontend
+adaptation. `UnsupportedCacheSource` is returned for sources whose native
+identity cannot be established cheaply. `VendoringIncomplete` is the classified
+offline missing-source diagnostic that permits the once-only acquisition
+callback. Cancellation remains `Error::Cancelled`. Unknown exits, timeout, I/O,
+configuration and lock failures are never reclassified as missing source.
+
+## Security and authority
+
+Model and filesystem input is treated as untrusted. Catalogue identities,
+package names/versions, metadata paths and regular files are validated with
+explicit bounds; traversal, symbolic links and special files fail without being
+followed during provisioning and metadata inspection. Filesystem root, the
+selected Cargo home and its ancestors are refused as data targets. The library
+does not grant host configuration or source authority to agent execution; the
+caller/Galla owns sandbox command authority.
+
+## Compatibility and verification
+
+The library boundary supports future language-specific offline backends without
+duplicating authority or introducing speculative provisioning support. Contract
+versioning is carried by the `kvist-contract-version` marker; this is version 1.
+Verification is the component's Rust test suite, which covers failed
+publication, concurrent writers, malicious inputs, metadata failures,
+configurable bounds, reader/writer exclusion, lock drift, process failures and
+native offline consumption, plus the native cache root, admission and
+provisioning tests described in `IMPL.md`.

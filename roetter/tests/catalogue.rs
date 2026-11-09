@@ -1,4 +1,4 @@
-use kvist_dependencies::{Error, vendoring::*};
+use roetter::{Error, vendoring::*};
 use std::{fs, path::Path};
 
 // The extracted maerg fixtures intentionally contain a short checksum. Catalogue
@@ -138,17 +138,12 @@ fn stale_package_helpers_match_name_version_but_refuse_traversal() {
         remove_stale_vendored_packages(
             &vendor,
             &["../outside".into()],
-            &kvist_dependencies::VendorLimits::default()
+            &roetter::VendorLimits::default()
         )
         .is_err()
     );
     assert_eq!(
-        remove_stale_vendored_packages(
-            &vendor,
-            &stale,
-            &kvist_dependencies::VendorLimits::default()
-        )
-        .unwrap(),
+        remove_stale_vendored_packages(&vendor, &stale, &roetter::VendorLimits::default()).unwrap(),
         1
     );
 }

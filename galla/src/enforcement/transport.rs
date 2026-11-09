@@ -149,7 +149,7 @@ impl Drop for Guard {
         if let Some(listener) = self.listener.take()
             && listener.join().is_err()
         {
-            eprintln!("galla-runner: package proxy listener panicked during shutdown");
+            eprintln!("galla: package proxy listener panicked during shutdown");
         }
     }
 }
@@ -479,7 +479,7 @@ fn serve(
     let total = diagnostics.load(Ordering::Relaxed);
     if total > DIAGNOSTIC_LIMIT {
         eprintln!(
-            "galla-runner: package proxy: {} additional diagnostics suppressed; failed clients were rejected or closed",
+            "galla: package proxy: {} additional diagnostics suppressed; failed clients were rejected or closed",
             total - DIAGNOSTIC_LIMIT
         );
     }
@@ -487,7 +487,7 @@ fn serve(
 
 fn report(count: &AtomicU64, detail: fmt::Arguments<'_>) {
     if count.fetch_add(1, Ordering::Relaxed) < DIAGNOSTIC_LIMIT {
-        eprintln!("galla-runner: package proxy: {detail}");
+        eprintln!("galla: package proxy: {detail}");
     }
 }
 

@@ -226,7 +226,7 @@ enforcement readiness.
 ### SR-REQ-PROTOCOL-BOUNDARY
 
 The component MUST build as a Rust 2024 package, expose one
-`galla-runner` executable, and keep its source, schemas, and tests
+`galla` executable, and keep its source, schemas, and tests
 adjacent to local intent. It MUST strictly parse and independently validate the
 redefined bounded version-one `kvist-sandbox-request-v1` request: exact
 protocol identifier and version, typed phase (`authoring`, `verification`, or

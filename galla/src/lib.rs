@@ -28,7 +28,7 @@
 //! types and never trust maerg-side validation as a substitute for their own.
 
 #[cfg(not(target_os = "linux"))]
-compile_error!("galla-runner currently supports Linux only");
+compile_error!("galla currently supports Linux only");
 
 pub mod cache;
 pub mod context;
@@ -39,7 +39,7 @@ pub mod protocol;
 pub mod validation;
 
 /// Honest status describing the current protocol-and-acquisition-capable, OS-enforcement-available runner.
-pub const IMPLEMENTATION_STATUS: &str = "galla-runner is fully implemented and validates/enforces the version-one protocol and mediated Cargo semantics with secure Bubblewrap mount, process, cgroup, network namespace, and resource limit enforcement";
+pub const IMPLEMENTATION_STATUS: &str = "galla is fully implemented and validates/enforces the version-one protocol and mediated Cargo semantics with secure Bubblewrap mount, process, cgroup, network namespace, and resource limit enforcement";
 
 /// Concise, non-secret reason a fully valid request cannot be enforced yet.
 pub const ENFORCEMENT_UNAVAILABLE: &str =

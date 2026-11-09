@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use kvist::{init::initialize, task_queue};
+use maerg::{init::initialize, task_queue};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 

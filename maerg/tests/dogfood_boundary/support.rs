@@ -8,13 +8,13 @@ use std::{
     time::Duration,
 };
 
-/// Locate the galla-runner executable for integration tests.
+/// Locate the galla executable for integration tests.
 ///
 /// Priority order:
 /// 1. KVIST_GALLA_TEST_BIN environment variable (explicit override)
-/// 2. target/debug/galla-runner (local debug build, preferred)
-/// 3. target/release/galla-runner (local release build)
-/// 4. galla-runner on PATH (system-installed)
+/// 2. target/debug/galla (local debug build, preferred)
+/// 3. target/release/galla (local release build)
+/// 4. galla on PATH (system-installed)
 #[allow(dead_code)]
 pub fn find_galla_runner() -> Result<PathBuf, String> {
     // 1. Explicit override via environment variable
@@ -39,13 +39,13 @@ pub fn find_galla_runner() -> Result<PathBuf, String> {
     };
 
     // 2. Local debug build (preferred for testing - version-consistent)
-    let debug_path = workspace_root.join("target/debug/galla-runner");
+    let debug_path = workspace_root.join("target/debug/galla");
     if debug_path.is_file() {
         return Ok(debug_path);
     }
 
     // 3. Local release build
-    let release_path = workspace_root.join("target/release/galla-runner");
+    let release_path = workspace_root.join("target/release/galla");
     if release_path.is_file() {
         return Ok(release_path);
     }
@@ -57,7 +57,7 @@ pub fn find_galla_runner() -> Result<PathBuf, String> {
         .unwrap_or_default();
 
     for dir in &path_dirs {
-        let candidate = dir.join("galla-runner");
+        let candidate = dir.join("galla");
         if candidate.is_file() {
             return Ok(candidate);
         }
@@ -65,15 +65,15 @@ pub fn find_galla_runner() -> Result<PathBuf, String> {
 
     // Not found anywhere
     Err(format!(
-        "galla-runner not found in any of the following locations:\n\
+        "galla not found in any of the following locations:\n\
          - KVIST_GALLA_TEST_BIN (not set)\n\
          - {} (local debug build)\n\
          - {} (local release build)\n\
          - PATH: {:?}\n\n\
          Please either:\n\
-         1. Build it locally: cd /workspace && cargo build -p galla --bin galla-runner\n\
-         2. Install it: sudo install -D -m 755 target/release/galla-runner /usr/local/bin/galla-runner\n\
-         3. Set KVIST_GALLA_TEST_BIN=/path/to/galla-runner",
+         1. Build it locally: cd /workspace && cargo build -p galla --bin galla\n\
+         2. Install it: sudo install -D -m 755 target/release/galla /usr/local/bin/galla\n\
+         3. Set KVIST_GALLA_TEST_BIN=/path/to/galla",
         debug_path.display(),
         release_path.display(),
         path_dirs
@@ -366,7 +366,7 @@ pub fn sha256_file(path: &Path) -> String {
 }
 
 fn write_artifact_template(directory: &Path, template_path: &str) {
-    let template = kvist::artifacts::root_artifacts()
+    let template = maerg::artifacts::root_artifacts()
         .iter()
         .find(|artifact| artifact.relative_path == template_path)
         .expect("native fixture artifact template");
@@ -523,7 +523,7 @@ tasks: []
 /// This script simulates probe and effect results for workflow assertions.
 /// Real sandbox enforcement is exercised separately by the protocol tests.
 fn write_controlled_runner(project: &Path, external_tools: &Path) -> PathBuf {
-    let runner = external_tools.join("controlled-galla-runner");
+    let runner = external_tools.join("controlled-galla");
     let request_log = external_tools.join("runner-request.json");
     let backend = Path::new("/usr/bin/true");
     let script = format!(
@@ -580,7 +580,7 @@ resolver = "3"
     fs::write(maerg.join("Cargo.lock"), "version = 4\n").expect("write lockfile");
     fs::write(maerg.join("src/lib.rs"), "pub fn existing() {}\n").expect("write maerg source");
     create_child(&maerg, "sav", "fixture-sav");
-    create_child(&maerg, "galla", "fixture-galla-runner");
+    create_child(&maerg, "galla", "fixture-galla");
     let runner = write_controlled_runner(project.path(), external_tools.path());
     let (model_endpoint, local_model) = resolve_local_test_model();
     let base_url = model_endpoint
@@ -803,28 +803,28 @@ fn resolve_runner_path() -> PathBuf {
     if let Some(path) = std::env::var_os("KVIST_GALLA_TEST_BIN") {
         candidates.push(PathBuf::from(path));
     }
-    if let Some(path) = option_env!("CARGO_BIN_EXE_galla-runner") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_galla") {
         candidates.push(PathBuf::from(path));
     }
-    if let Some(path) = option_env!("CARGO_BIN_EXE_galla-runner") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_galla") {
         candidates.push(PathBuf::from(path));
     }
     let root = repository_root();
     if let Ok(executable) = std::env::current_exe()
         && let Some(debug_directory) = executable.parent().and_then(Path::parent)
     {
-        candidates.push(debug_directory.join("galla-runner"));
-        candidates.push(debug_directory.join("galla-runner"));
+        candidates.push(debug_directory.join("galla"));
+        candidates.push(debug_directory.join("galla"));
     }
     if let Some(target) = std::env::var_os("CARGO_TARGET_DIR") {
-        candidates.push(PathBuf::from(&target).join("debug/galla-runner"));
-        candidates.push(PathBuf::from(target).join("debug/galla-runner"));
+        candidates.push(PathBuf::from(&target).join("debug/galla"));
+        candidates.push(PathBuf::from(target).join("debug/galla"));
     }
     for relative in [
-        "maerg/target/debug/galla-runner",
-        "maerg/target/debug/galla-runner",
-        "target/debug/galla-runner",
-        "target/debug/galla-runner",
+        "maerg/target/debug/galla",
+        "maerg/target/debug/galla",
+        "target/debug/galla",
+        "target/debug/galla",
     ] {
         candidates.push(root.join(relative));
     }
@@ -851,7 +851,7 @@ fn resolve_runner_path() -> PathBuf {
     // build it automatically so the boundary test can stage and execute it.
     if !candidates.iter().any(|p| p.is_file()) {
         let _ = Command::new("cargo")
-            .args(["build", "-p", "galla-runner", "--bin", "galla-runner"])
+            .args(["build", "-p", "galla", "--bin", "galla"])
             .current_dir(repository_root())
             .status();
     }
@@ -869,7 +869,7 @@ fn resolve_runner_path() -> PathBuf {
             let staged_dir =
                 std::env::temp_dir().join(format!("kvist-test-sandbox-bin-{}", std::process::id()));
             let _ = fs::create_dir_all(&staged_dir);
-            let staged_runner = staged_dir.join("galla-runner");
+            let staged_runner = staged_dir.join("galla");
             let tmp_staged = staged_dir.join(format!("tmp-runner-{}", std::process::id()));
             if let Ok(bytes) = fs::read(path)
                 && fs::write(&tmp_staged, &bytes).is_ok()

@@ -4,7 +4,7 @@ use std::{
     process::{Command, Output},
 };
 
-use kvist::init::initialize;
+use maerg::init::initialize;
 use tempfile::TempDir;
 
 const GENERATED_REQUIREMENTS_REVISION: &str =

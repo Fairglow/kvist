@@ -4,7 +4,7 @@ use skott::HostExecutor;
 fn native_host(root: &std::path::Path) -> HostExecutor {
     HostExecutor::new(
         ToolRegistry::new(ToolPolicy::minimum())
-            .with_file_helper(env!("CARGO_BIN_EXE_skott-file-tool")),
+            .with_file_helper(env!("CARGO_BIN_EXE_skott-toerne")),
         root.to_owned(),
     )
 }

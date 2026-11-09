@@ -19,7 +19,7 @@ use sav::{
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "sav-run",
+    name = "sav",
     version,
     about = "Run an AI prompt under bounded Linux host-process supervision"
 )]
@@ -668,27 +668,28 @@ fn run(arguments: RunArguments) -> sav::Result<()> {
         arguments.file.as_deref(),
         arguments.editor,
     )?;
-    let (command_template, external) = match (arguments.command, arguments.profile) {
-        (Some(command), None) => (Some(command), None),
-        (None, Some(profile)) => {
-            let profile = registry_paths(arguments.registry)?
-                .load()?
-                .resolve(&profile)?;
-            match profile.profile.backend {
-                sav::registry::Backend::ExternalAgent(agent) => (None, Some(agent)),
-                sav::registry::Backend::Native(_) => return Err(Error::ProfileSetup {
-                    reason:
-                        "native profiles use `sav-run model --profile NAME`, not process execution"
-                            .into(),
-                }),
+    let (command_template, external) =
+        match (arguments.command, arguments.profile) {
+            (Some(command), None) => (Some(command), None),
+            (None, Some(profile)) => {
+                let profile = registry_paths(arguments.registry)?
+                    .load()?
+                    .resolve(&profile)?;
+                match profile.profile.backend {
+                    sav::registry::Backend::ExternalAgent(agent) => (None, Some(agent)),
+                    sav::registry::Backend::Native(_) => return Err(Error::ProfileSetup {
+                        reason:
+                            "native profiles use `sav model --profile NAME`, not process execution"
+                                .into(),
+                    }),
+                }
             }
-        }
-        _ => {
-            return Err(Error::ProfileSetup {
-                reason: "exactly one of --command or --profile is required".to_owned(),
-            });
-        }
-    };
+            _ => {
+                return Err(Error::ProfileSetup {
+                    reason: "exactly one of --command or --profile is required".to_owned(),
+                });
+            }
+        };
     let max_retries = if external.is_some() {
         if arguments.max_retries.is_some_and(|retries| retries > 0) {
             return Err(Error::InvalidPolicy {

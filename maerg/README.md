@@ -40,7 +40,7 @@ cargo test -p kvist
 The package is the workspace default member, so a plain `cargo build` at the
 repository root builds `kvist`. No external services are required to build or
 test the read-only workflow commands; the supervised `task run` and `prompt`
-paths additionally require a separately installed `galla-runner` and a
+paths additionally require a separately installed `galla` and a
 Bubblewrap backend (see the sandboxed task execution section below).
 
 ## Running
@@ -319,7 +319,7 @@ Prompt acquisition, command rendering, and host-process supervision are
 provided by the independently usable `sav` workspace package:
 
 ```bash
-cargo run --locked -p sav --bin sav-run -- run \
+cargo run --locked -p kvist-sav --bin sav -- run \
   --allow-host-execution \
   --command "local-agent --prompt '{prompt}' {context_files}" \
   --file review-prompt.md
@@ -328,8 +328,8 @@ cargo run --locked -p sav --bin sav-run -- run \
 Create a reusable provider profile interactively, then use it by name:
 
 ```bash
-cargo run --locked -p sav --bin sav-run -- setup
-cargo run --locked -p sav --bin sav-run -- run \
+cargo run --locked -p kvist-sav --bin sav -- setup
+cargo run --locked -p kvist-sav --bin sav -- run \
   --allow-host-execution \
   --profile copilot-coder \
   "Review this change"
@@ -339,14 +339,14 @@ Send a text-only request through the shared direct Ollama or llama-server
 transport:
 
 ```bash
-cargo run --locked -p sav --bin sav-run -- model \
+cargo run --locked -p kvist-sav --bin sav -- model \
   --provider ollama \
   --endpoint http://127.0.0.1:11434 \
   --model qwen3-coder \
   --stream \
   --file prompt.md
 
-cargo run --locked -p sav --bin sav-run -- model \
+cargo run --locked -p kvist-sav --bin sav -- model \
   --provider llama-server \
   --endpoint http://127.0.0.1:9931 \
   --model Qwen3.8-9B-Q4_K_M \
@@ -359,7 +359,7 @@ additionally supports canonical tool descriptors and returns tool calls as
 untrusted `ToolIntent` values; it never executes them.
 
 ```bash
-cargo run --locked -p sav --bin sav-run -- model \
+cargo run --locked -p kvist-sav --bin sav -- model \
   --provider ollama \
   --endpoint http://127.0.0.1:11434 \
   --model qwen3-coder \
@@ -374,12 +374,12 @@ or automatic transport fallback.
 List provider-advertised model IDs without running inference:
 
 ```bash
-cargo run --locked -p sav --bin sav-run -- models \
+cargo run --locked -p kvist-sav --bin sav -- models \
   --provider ollama
-cargo run --locked -p sav --bin sav-run -- models \
+cargo run --locked -p kvist-sav --bin sav -- models \
   --provider copilot \
   --allow-host-discovery
-cargo run --locked -p sav --bin sav-run -- models \
+cargo run --locked -p kvist-sav --bin sav -- models \
   --provider gemini \
   --allow-host-discovery \
   --json
@@ -394,7 +394,7 @@ returns the ordered descriptors and advertised current model.
 `llama-cli` and custom wrappers have no provider inventory; `models` reports
 that capability as unsupported and their setup paths remain manual.
 
-During `sav-run setup`, each catalog-capable provider presents numbered
+During `sav setup`, each catalog-capable provider presents numbered
 choices and uses its advertised current model, or first model, as the default.
 Manual entry is available only through the final `Other model ID...` choice.
 If discovery fails visibly, setup offers the provider fallback (`auto` for
@@ -486,7 +486,7 @@ project must opt in with this versioned, project-local configuration:
 ```toml
 [sandbox]
 schema_version = 1
-runner = "/absolute/path/to/separately-installed-galla-runner"
+runner = "/absolute/path/to/separately-installed-galla"
 backend = "/absolute/path/to/bubblewrap-executable"
 network = "deny"
 environment_allowlist = ["PATH"]

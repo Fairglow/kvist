@@ -322,7 +322,7 @@ fn native_git_registry_metadata_resolves_cargo_populated_index_without_network()
         )
         .unwrap();
     }
-    let probe = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
+    let probe = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
