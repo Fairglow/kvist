@@ -172,6 +172,18 @@ pub(super) fn failure(
             .collect::<String>(),
         Err(recording) => format!("Current queue inspection is unavailable: {recording}"),
     };
+    let task_id = task.unwrap_or("continuous-run");
+    let component = context.component_path.to_string_lossy();
+    
+    // Structured action list with shortcuts for the user
+    let actions = format!(
+        "## Available actions\n\n\
+         1. **[R] Review logs** → `kvist task log {component} {task_id}`\n\
+         2. **[T] Transition to pending** → `kvist task transition {component} {task_id} pending`\n\
+         3. **[R] Re-run** → `kvist task run {component} {task_id}`\n\n\
+         Replace `{component}` with the component path and `{task_id}` with the task ID.\n\n"
+    );
+
     let text = format!(
         "# Work stopped\n\n\
          Scope: {}. This is a historical stop diagnostic; inspect current task state \
@@ -189,8 +201,9 @@ pub(super) fn failure(
          ## Recommendation and rationale\n\n\
          Inspect the original cause and retained logs/attempts before retrying. \
          Lifecycle instructions and diagnostics are host-written; any available \
-         agent explanation is labelled above. No extra inference or automatic replay was attempted.\n\n{}",
+         agent explanation is labelled above. No extra inference or automatic replay was attempted.\n\n{}\n\n{}",
         task.unwrap_or("continuous component run"),
+        actions,
         resolution(&context.component_path, task, false)
     );
     let reason = match persist(&context, task, &text, &redactions, inherited_lock) {
