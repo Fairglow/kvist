@@ -16,10 +16,9 @@ use crossterm::event::{KeyEvent, KeyModifiers, KeyCode};
 use skott::{
     config::Config,
     session::{AgentSession, RunSummary},
-    start_session,
 };
-// Re-export RunLimits from the session module
-pub use skott::session::RunLimits;
+// Re-export necessary types from skott
+pub use skott::run::{start_session, RunLimits};
 
 /// Represents the embedded Skott instance within Kvist.
 pub struct EmbeddedSkott {
