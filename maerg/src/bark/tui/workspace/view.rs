@@ -141,12 +141,12 @@ impl Workspace {
             .border_style(border);
         let input_area = input.inner(footer);
         frame.render_widget(input, footer);
-        let display = if self.running.is_some() {
+        let display = if self.running.is_some() && self.mask_answers {
             "*".repeat(self.input.text[..self.input.cursor].graphemes(true).count())
         } else {
             self.input.text.clone()
         };
-        let cursor = if self.running.is_some() {
+        let cursor = if self.running.is_some() && self.mask_answers {
             display.len()
         } else {
             self.input.cursor

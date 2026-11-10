@@ -74,6 +74,7 @@ pub(super) enum Action {
     Theme(String),
     Segment(u64),
     Follow,
+    MaskAnswers(bool),
     Help,
     Quit,
     Cancel,
@@ -207,10 +208,24 @@ impl Workspace {
                     entries,
                 ));
             }
-            Page::Appearance => vec![Entry::new(
-                format!("Theme: {}", self.theme.name()),
-                Action::Open(Page::Theme),
-            )],
+            Page::Appearance => {
+                let mut entries = vec![Entry::new(
+                    format!("Theme: {}", self.theme.name()),
+                    Action::Open(Page::Theme),
+                )];
+                entries.push(
+                    Entry::new(
+                        if self.mask_answers {
+                            "Mask command answers: on"
+                        } else {
+                            "Mask command answers: off"
+                        },
+                        Action::MaskAnswers(!self.mask_answers),
+                    )
+                    .current(self.mask_answers),
+                );
+                entries
+            }
             Page::Theme => crate::bark::theme::registered()
                 .into_iter()
                 .map(|(name, _, _)| {
@@ -550,6 +565,10 @@ impl Workspace {
             Action::Follow => {
                 self.follow = true;
                 self.load_segment(self.transcript.latest(), true)?;
+                self.back();
+            }
+            Action::MaskAnswers(mask) => {
+                self.mask_answers = mask;
                 self.back();
             }
             Action::Help => {
