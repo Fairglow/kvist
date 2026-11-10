@@ -98,6 +98,18 @@ pub enum KvistError {
         /// Actionable explanation of the terminal condition.
         reason: String,
     },
+    /// Skott session launch failed.
+    #[error("Skott session launch failed: {reason}")]
+    SkottLaunchFailed {
+        /// Explanation of the launch failure.
+        reason: String,
+    },
+    /// Skott session attach failed.
+    #[error("Skott session attach failed: {reason}")]
+    SkottAttachFailed {
+        /// Explanation of the attach failure.
+        reason: String,
+    },
     /// A theme spec file failed validation.
     #[error("theme spec is invalid: {reason}")]
     ThemeSpecInvalid {

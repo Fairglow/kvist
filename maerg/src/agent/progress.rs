@@ -59,15 +59,24 @@ pub(super) fn correct(
     redactions: &[String],
 ) -> Result<Option<TurnFailure>> {
     let Some(step) = recovery.take() else {
+        // Budget exhausted: provide guidance but DON'T stop the agent
+        // This allows the agent to continue with human guidance
         live.record(
             &serde_json::json!({"type":"tool_stalled","data":{
                 "kind":report.kind,"period":report.period,"copies":report.copies
             }}),
             true,
         )?;
+        
+        // Return a TurnFailure that indicates guidance is needed but work remains
         return Ok(Some(TurnFailure {
-            stop_reason: sav::runtime::StopReason::Stalled,
-            reason: report.exhausted_message(),
+            stop_reason: sav::runtime::StopReason::GuidanceRequired,
+            reason: format!(
+                "{}. Recovery budget exhausted after {} correction attempts. {}",
+                report.exhausted_message(),
+                corrections_used,
+                "Remaining work must be completed - provide focused guidance or change approach."
+            ),
             timed_out: false,
             output_limit_exceeded: false,
             cancelled: false,

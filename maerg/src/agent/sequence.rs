@@ -165,6 +165,7 @@ pub(crate) fn is_real_blocker(stop_reason: StopReason) -> bool {
         StopReason::Limit(BudgetResource::ModelAttempts) => true,
         StopReason::Limit(BudgetResource::Context) => true,
         StopReason::Stalled => true, // Agent is stuck, needs human help
+        StopReason::GuidanceRequired => true, // Guidance needed but work remains
         
         // These are NOT blockers - the agent should continue or complete
         StopReason::Completed => false,

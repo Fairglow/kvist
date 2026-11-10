@@ -49,6 +49,7 @@ pub mod vcs_commit;
 pub mod vendor_command;
 pub mod vendoring;
 pub mod wizard;
+pub mod skott_integration;
 
 use clap::Parser;
 
@@ -59,5 +60,17 @@ pub use logging::{init_logging, init_test_logging};
 pub fn run() -> Result<cli::CommandOutput> {
     logging::init_logging();
     let cli = cli::Cli::try_parse()?;
+    
+    // Skott is now mandatory for Kvist agent execution
+    // Launch Skott session automatically for agent/task commands
+    if matches!(cli.command, Some(crate::cli::Command::Agent { .. }) | Some(crate::cli::Command::Task { .. })) {
+        // Try to launch Skott in the background
+        // If Skott fails to launch, we log a warning but continue
+        let _ = skott_integration::SkottSession::launch(
+            "kvist-agent",
+            None // model determined by Kvist
+        );
+    }
+    
     cli::execute(cli.command, cli.json)
 }

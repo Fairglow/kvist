@@ -800,6 +800,7 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
     } else {
         None
     };
+    
     let native = json
         || matches!(
             &command,

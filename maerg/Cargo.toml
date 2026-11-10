@@ -45,6 +45,8 @@ unicode-segmentation = "1.13"
 unicode-width = "0.2"
 vte = "0.15"
 pulldown-cmark = "0.13"
+uuid = { version = "1.16", features = ["v4"] }
 
 [dev-dependencies]
 galla = { package = "kvist-galla", version = "0.3", path = "../galla" }
+uuid = { version = "1.16", features = ["v4"] }

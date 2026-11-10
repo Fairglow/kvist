@@ -24,6 +24,8 @@ pub enum StopReason {
     Limit(BudgetResource),
     Stalled,
     Failed,
+    /// Guidance required: recovery budget exhausted but work remains.
+    GuidanceRequired,
 }
 
 /// Stable failure domains, separate from a process's untrusted output.
