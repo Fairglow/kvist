@@ -37,10 +37,11 @@ toml_edit = "0.25"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
 sav = { package = "kvist-sav", version = "0.3", path = "../sav" }
+skott = { package = "kvist-skott", version = "0.3", path = "../skott" }
 reedline = "0.52"
 terminal_size = "0.4"
 blad = { package = "kvist-blad", version = "0.3", path = "../blad" }
-ratatui = "0.30"
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 unicode-segmentation = "1.13"
 unicode-width = "0.2"
 vte = "0.15"

@@ -50,6 +50,7 @@ pub mod vendor_command;
 pub mod vendoring;
 pub mod wizard;
 pub mod skott_integration;
+pub mod skott_embedded;
 
 use clap::Parser;
 

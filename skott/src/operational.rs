@@ -68,6 +68,7 @@ pub(crate) fn stop_text(reason: StopReason) -> (&'static str, String) {
             "prompt limit reached [{}] — review this resource limit and inspect completed work before continuing",
             resource_label(resource))),
         StopReason::Stalled => ("stalled", "stalled — inspect completed work and revise the request; do not blindly replay uncertain effects".into()),
+        StopReason::GuidanceRequired => ("guidance", "guidance required — remaining work must be completed; provide focused guidance or change approach".into()),
         StopReason::Failed => ("error", "failed — inspect diagnostics and reconcile possible effects before continuing".into()),
     }
 }

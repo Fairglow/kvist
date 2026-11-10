@@ -9,15 +9,17 @@
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Instant;
 
-use ratatui::backend::Backend;
+// crossterm backend is re-exported through ratatui's crossterm feature
 use ratatui::Terminal;
 use crossterm::event::{KeyEvent, KeyModifiers, KeyCode};
 
 use skott::{
     config::Config,
-    session::{AgentSession, RunSummary, RunLimits},
+    session::{AgentSession, RunSummary},
     start_session,
 };
+// Re-export RunLimits from the session module
+pub use skott::session::RunLimits;
 
 /// Represents the embedded Skott instance within Kvist.
 pub struct EmbeddedSkott {
@@ -30,8 +32,8 @@ pub struct EmbeddedSkott {
     /// Communication channels
     prompt_channel: mpsc::Sender<String>,
     response_channel: mpsc::Receiver<String>,
-    /// TUI state
-    terminal: Option<Terminal<Box<dyn Backend<Error = std::io::Error>>>>,
+    /// TUI state - using crossterm backend for terminal integration
+    terminal: Option<Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>>,
     /// Active pane (0 = Kvist, 1 = Skott)
     active_pane: u8,
 }

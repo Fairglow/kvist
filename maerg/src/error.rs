@@ -110,6 +110,12 @@ pub enum KvistError {
         /// Explanation of the attach failure.
         reason: String,
     },
+    /// Skott communication failed.
+    #[error("Skott communication failed: {reason}")]
+    SkottCommunicationFailed {
+        /// Explanation of the communication failure.
+        reason: String,
+    },
     /// A theme spec file failed validation.
     #[error("theme spec is invalid: {reason}")]
     ThemeSpecInvalid {
