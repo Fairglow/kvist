@@ -1308,10 +1308,7 @@ pub(crate) fn next_command_for(
     match task.status {
         TaskStatus::Blocked => {
             let reopen = if task_queue::dependencies_completed(task, tasks) {
-                format!(
-                    "kvist task transition {component} {} pending",
-                    task.id
-                )
+                format!("kvist task transition {component} {} pending", task.id)
             } else {
                 let n = task_queue::incomplete_dependency_count(task, tasks);
                 let unit = if n == 1 { "task" } else { "tasks" };
@@ -1320,7 +1317,10 @@ pub(crate) fn next_command_for(
                     task.id, n
                 )
             };
-            Some(format!("{reopen}; or analyze options: {}", blocked_decision_command(component, &task.id)))
+            Some(format!(
+                "{reopen}; or analyze options: {}",
+                blocked_decision_command(component, &task.id)
+            ))
         }
         TaskStatus::AwaitingDecision => {
             let component = crate::task_commands::decisions::component_argument(

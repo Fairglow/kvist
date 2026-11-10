@@ -1509,7 +1509,12 @@ fn ensure_task_attempt_recovered(
         .map(|(attempt_id, _)| attempt_id.clone())
         .collect();
     if !unresolved.is_empty() {
-        return Err(unresolved_attempt_error(&path, task_id, &unresolved, status));
+        return Err(unresolved_attempt_error(
+            &path,
+            task_id,
+            &unresolved,
+            status,
+        ));
     }
     Ok(())
 }
@@ -1541,9 +1546,7 @@ fn unresolved_attempt_error(
     } else {
         format!(" One command per attempt ({attempts}).")
     };
-    let reset_command = format!(
-        "kvist task finalize {component} {task_id} {attempt_ref} reset"
-    );
+    let reset_command = format!("kvist task finalize {component} {task_id} {attempt_ref} reset");
     let block_command = format!(
         "kvist task finalize {component} {task_id} {attempt_ref} block --reason \"<why it is blocked>\""
     );
@@ -1578,10 +1581,7 @@ fn unresolved_attempt_error(
 
 /// Summarizes the on-record evidence for the unresolved attempt(s) so the
 /// human can choose a disposition without opening the journal file.
-fn summarize_unresolved_evidence(
-    path: &Path,
-    attempt_ids: &[String],
-) -> String {
+fn summarize_unresolved_evidence(path: &Path, attempt_ids: &[String]) -> String {
     let journal = match read_attempt_journal(path) {
         Ok(journal) => journal,
         Err(_) => return "  (journal could not be read; open it to inspect)".to_owned(),
@@ -1594,10 +1594,10 @@ fn summarize_unresolved_evidence(
             if event.get("attempt_id").and_then(Value::as_str) != Some(attempt_id.as_str()) {
                 continue;
             }
-            if let Some(phase) = event.get("phase").and_then(Value::as_str) {
-                if !phases.iter().any(|existing| *existing == phase) {
-                    phases.push(phase);
-                }
+            if let Some(phase) = event.get("phase").and_then(Value::as_str)
+                && !phases.contains(&phase)
+            {
+                phases.push(phase);
             }
             if event.get("phase").and_then(Value::as_str) == Some("agent-execution") {
                 execution_success = event.get("success").and_then(Value::as_bool);
@@ -1609,8 +1609,12 @@ fn summarize_unresolved_evidence(
             phases.join(", ")
         };
         let execution = match execution_success {
-            Some(true) => "agent-execution recorded as success (no terminal outcome recorded)".to_owned(),
-            Some(false) => "agent-execution recorded as failure (no terminal outcome recorded)".to_owned(),
+            Some(true) => {
+                "agent-execution recorded as success (no terminal outcome recorded)".to_owned()
+            }
+            Some(false) => {
+                "agent-execution recorded as failure (no terminal outcome recorded)".to_owned()
+            }
             None => "no agent-execution record".to_owned(),
         };
         lines.push(format!("  {attempt_id}: phases [{phases}]; {execution}"));
