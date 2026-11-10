@@ -408,6 +408,8 @@ pub enum FinalizeDispositionArgument {
     #[default]
     Accept,
     Block,
+    /// Discard the attempt's effects and return the task to pending.
+    Reset,
 }
 
 /// Role assignment operations for model profiles.
@@ -687,8 +689,8 @@ pub enum TaskCommand {
     /// Finalize a completed task attempt with explicit human disposition.
     ///
     /// Form: `kvist task finalize [COMPONENT_DIR] TASK_ID ATTEMPT_ID
-    /// accept|block` where COMPONENT_DIR defaults to the component containing
-    /// the current directory.
+    /// accept|block|reset` where COMPONENT_DIR defaults to the component
+    /// containing the current directory.
     Finalize {
         /// Optional component directory, then TASK_ID, ATTEMPT_ID, and
         /// DISPOSITION.
@@ -2123,7 +2125,7 @@ fn status_argument_from(value: String) -> Result<TaskStatusArgument> {
 fn disposition_argument_from(value: String) -> Result<FinalizeDispositionArgument> {
     FinalizeDispositionArgument::from_str(&value, true).map_err(|_| {
         usage_error(format!(
-            "invalid disposition `{value}`; expected accept or block"
+            "invalid disposition `{value}`; expected accept, block or reset"
         ))
     })
 }

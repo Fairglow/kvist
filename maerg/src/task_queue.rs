@@ -153,6 +153,8 @@ pub enum FinalizeDispositionArgument {
     Accept,
     /// The attempt failed and should be blocked.
     Block,
+    /// The attempt's effects are discarded and the task returns to pending.
+    Reset,
 }
 
 /// Durable state for an attempt whose effects cannot be inferred.
@@ -713,6 +715,7 @@ fn append_task(output: &mut String, task: &Task) {
         let name = match disposition {
             FinalizeDispositionArgument::Accept => "accept",
             FinalizeDispositionArgument::Block => "block",
+            FinalizeDispositionArgument::Reset => "reset",
         };
         line(output, 4, &format!("disposition: {name}"));
     }

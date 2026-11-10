@@ -106,7 +106,7 @@ Kvist core concepts
                approved sandbox/test policy, checkpointing complete items.
                Execution and checkpoint commits are not human acceptance.
                An exact TASK runs only that task; explicit implementation
-               attempts retain `task finalize DIR TASK ATTEMPT accept|block`.
+               attempts retain `task finalize DIR TASK ATTEMPT accept|block|reset`.
 
 More: GUIDE.md · docs/command-set.md §2 · a component's CONTRACT.md
 "
@@ -134,7 +134,7 @@ Kvist component lifecycle
   Choosing only prepares; exact application calls no model or Git commit.
   Component implementation approval has no dedicated command yet.
   An exact `task run DIR TASK` stops after one task; explicit implementation
-  attempts retain `task finalize DIR TASK ATTEMPT accept|block`.
+  attempts retain `task finalize DIR TASK ATTEMPT accept|block|reset`.
   The shell `tasks` builtin lists only ready (schedulable) tasks, numbered in
   queue order so row 1 is the next task, with the full count always shown;
   `tasks --all` (or an explicit `--status`) lists every task with its state.
@@ -144,7 +144,8 @@ Kvist component lifecycle
   Intent changed after accept -> the component is STALE:
   review the diff (git diff HEAD -- <DOC>), then `kvist component accept [DIR]`.
   If acceptance is fenced by an unresolved attempt, inspect retained effects
-  and first use `kvist task finalize [DIR] TASK ATTEMPT block --reason \"...\"`.
+  and first disposition it: `kvist task finalize [DIR] TASK ATTEMPT reset`
+  (no effects, start over) or `block --reason \"...\"` (record a real blocker).
   Rejection works while stale; it does not certify completion or roll back.
   Then accept reviewed intent before transitioning the task to pending.
 

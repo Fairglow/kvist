@@ -1445,6 +1445,7 @@ fn ensure_component_attempts_recovered_except(
                 &attempt_path,
                 &task.id,
                 std::slice::from_ref(&state.attempt_id),
+                task.status,
             ));
         }
         ensure_task_attempt_recovered(component_dir, &task.id, task.status, permitted_attempt)?;
@@ -1464,6 +1465,7 @@ fn ensure_other_task_attempts_recovered(
                 &existing_attempt_path(component_dir, &other.id),
                 &other.id,
                 std::slice::from_ref(&state.attempt_id),
+                other.status,
             ));
         }
         ensure_task_attempt_recovered(component_dir, &other.id, other.status, None)?;
@@ -1507,12 +1509,17 @@ fn ensure_task_attempt_recovered(
         .map(|(attempt_id, _)| attempt_id.clone())
         .collect();
     if !unresolved.is_empty() {
-        return Err(unresolved_attempt_error(&path, task_id, &unresolved));
+        return Err(unresolved_attempt_error(&path, task_id, &unresolved, status));
     }
     Ok(())
 }
 
-fn unresolved_attempt_error(path: &Path, task_id: &str, attempt_ids: &[String]) -> KvistError {
+fn unresolved_attempt_error(
+    path: &Path,
+    task_id: &str,
+    attempt_ids: &[String],
+    status: TaskStatus,
+) -> KvistError {
     // The journal lives at `<component>/.kvist-attempts/<task>.jsonl`, so the
     // component name is two parents up. Deriving it here keeps the suggested
     // command copy-pasteable without threading the display path through every
@@ -1524,22 +1531,91 @@ fn unresolved_attempt_error(path: &Path, task_id: &str, attempt_ids: &[String]) 
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "<component>".to_owned());
     let attempts = attempt_ids.join(", ");
-    let command = if attempt_ids.len() == 1 {
-        format!(
-            "kvist task finalize {component} {task_id} {} block --reason \"<why you are abandoning it>\"",
-            attempt_ids[0]
-        )
+    let attempt_ref = if attempt_ids.len() == 1 {
+        attempt_ids[0].clone()
     } else {
-        format!(
-            "kvist task finalize {component} {task_id} <ATTEMPT_ID> block --reason \"...\" (one command per attempt: {attempts})"
-        )
+        "<ATTEMPT_ID>".to_owned()
     };
+    let multiplicity = if attempt_ids.len() == 1 {
+        String::new()
+    } else {
+        format!(" One command per attempt ({attempts}).")
+    };
+    let reset_command = format!(
+        "kvist task finalize {component} {task_id} {attempt_ref} reset"
+    );
+    let block_command = format!(
+        "kvist task finalize {component} {task_id} {attempt_ref} block --reason \"<why it is blocked>\""
+    );
+    let recover_command = format!(
+        "kvist task recover {component} {task_id} {attempt_ref} --disposition execution-did-not-start"
+    );
+    let evidence = summarize_unresolved_evidence(path, attempt_ids);
     KvistError::TaskQueueUnavailable {
         path: path.to_path_buf(),
         reason: format!(
-            "task `{task_id}` has an unresolved authenticated attempt ({attempts}) in its journal that must be dispositioned before another transition. Abandon it with: {command}. `kvist task recover {component} {task_id} <ATTEMPT_ID> --disposition execution-did-not-start` applies only with authenticated no-launch evidence. Do not delete evidence or blindly replay the task"
+            "task `{task_id}` has an unresolved authenticated attempt ({attempts}) in its journal and cannot transition until you disposition it. The attempt is at `{status}` in the queue.\n\
+             \n\
+             Evidence on record for that attempt:\n{evidence}\n\
+             \n\
+             Choose the disposition that matches what actually happened.{multiplicity}\n\
+             \n\
+             - reset — the attempt's effects are absent or disposable and you want to start over. One step: it discards the effects, returns the task to `pending`, and keeps the journal as evidence. This is the right choice when nothing was written or the work is safe to redo.\n\
+               {reset_command}\n\
+             \n\
+             - block — the attempt hit a real blocker you want to record. It leaves the task `blocked` with your reason, then you clear it with `kvist task transition {component} {task_id} pending` once the blocker is resolved.\n\
+               {block_command}\n\
+               kvist task transition {component} {task_id} pending\n\
+             \n\
+             - recover — the process provably never launched. Requires authenticated no-launch evidence in the journal (a `pre-spawn-failure` record); it will refuse otherwise.\n\
+               {recover_command}\n\
+             \n\
+             Inspect the full evidence with `kvist task log {component} {task_id}` or by reading the journal file. Do not delete evidence or blindly replay the task.",
+            status = status_name(status),
         ),
     }
+}
+
+/// Summarizes the on-record evidence for the unresolved attempt(s) so the
+/// human can choose a disposition without opening the journal file.
+fn summarize_unresolved_evidence(
+    path: &Path,
+    attempt_ids: &[String],
+) -> String {
+    let journal = match read_attempt_journal(path) {
+        Ok(journal) => journal,
+        Err(_) => return "  (journal could not be read; open it to inspect)".to_owned(),
+    };
+    let mut lines = Vec::new();
+    for attempt_id in attempt_ids {
+        let mut phases: Vec<&str> = Vec::new();
+        let mut execution_success = None;
+        for event in &journal.events {
+            if event.get("attempt_id").and_then(Value::as_str) != Some(attempt_id.as_str()) {
+                continue;
+            }
+            if let Some(phase) = event.get("phase").and_then(Value::as_str) {
+                if !phases.iter().any(|existing| *existing == phase) {
+                    phases.push(phase);
+                }
+            }
+            if event.get("phase").and_then(Value::as_str) == Some("agent-execution") {
+                execution_success = event.get("success").and_then(Value::as_bool);
+            }
+        }
+        let phases = if phases.is_empty() {
+            "no versioned evidence".to_owned()
+        } else {
+            phases.join(", ")
+        };
+        let execution = match execution_success {
+            Some(true) => "agent-execution recorded as success (no terminal outcome recorded)".to_owned(),
+            Some(false) => "agent-execution recorded as failure (no terminal outcome recorded)".to_owned(),
+            None => "no agent-execution record".to_owned(),
+        };
+        lines.push(format!("  {attempt_id}: phases [{phases}]; {execution}"));
+    }
+    lines.join("\n")
 }
 
 #[derive(Default)]
@@ -3051,13 +3127,14 @@ pub fn finalize(
     is_json: bool,
 ) -> Result<String> {
     let blocking = matches!(disposition, crate::cli::FinalizeDispositionArgument::Block);
-    if blocking && commit {
+    let resetting = matches!(disposition, crate::cli::FinalizeDispositionArgument::Reset);
+    if (blocking || resetting) && commit {
         return Err(journal_error(
             component_dir,
-            "`--commit` is allowed only with an accept disposition; blocking never accepts or commits changes",
+            "`--commit` is allowed only with an accept disposition; blocking and reset never accept or commit changes",
         ));
     }
-    let context = if blocking {
+    let context = if blocking || resetting {
         validate_inspection_context(project_dir, component_dir)?
     } else {
         validate_context(project_dir, component_dir)?
@@ -3077,6 +3154,16 @@ pub fn finalize(
                 task_id,
                 attempt_id,
                 reason,
+                &started_at,
+                is_json,
+            );
+        }
+        if resetting {
+            return reset_attempt_locked(
+                &context,
+                &lock,
+                task_id,
+                attempt_id,
                 &started_at,
                 is_json,
             );
@@ -3662,6 +3749,144 @@ fn block_attempt_locked(
         Ok(serde_json::json!({
             "status": "success", "command": "task-finalize", "component_dir": context.component_dir,
             "task_id": task_id, "attempt_id": attempt_id, "disposition": "block", "message": message,
+        }).to_string())
+    } else {
+        Ok(message)
+    }
+}
+
+/// Discards an unresolved attempt's effects and returns the task to pending.
+///
+/// Unlike `block`, reset does not require a reason and does not leave the
+/// task behind in a blocked state: it is the one-step "start over" choice for
+/// an attempt whose effects the human has confirmed are absent or disposable.
+/// The journal is retained as the retained evidence for the discarded attempt.
+#[allow(clippy::too_many_arguments)]
+fn reset_attempt_locked(
+    context: &TaskContext,
+    lock: &TaskLock,
+    task_id: &str,
+    attempt_id: &str,
+    timestamp: &Timestamp,
+    is_json: bool,
+) -> Result<String> {
+    if !valid_attempt_id(attempt_id) {
+        return Err(journal_error(
+            &context.component_dir,
+            "attempt ID must be a bounded `attempt-` identity",
+        ));
+    }
+    let (mut queue, queue_digest) = read_queue_snapshot(&context.component_dir)?;
+    let task_index = queue
+        .tasks
+        .iter()
+        .position(|task| task.id == task_id)
+        .ok_or_else(|| KvistError::TaskNotFound {
+            component: context.component_path.clone(),
+            task_id: task_id.to_owned(),
+        })?;
+    let task = &queue.tasks[task_index];
+    if task.recovery_state.is_some() {
+        return Err(journal_error(
+            &context.component_dir,
+            "an explicit recovery fence cannot be cleared by a reset disposition; inspect its reason and authenticated recovery evidence",
+        ));
+    }
+    ensure_other_task_attempts_recovered(&context.component_dir, &queue, task_id)?;
+    let path = existing_attempt_path(&context.component_dir, task_id);
+    let journal = read_attempt_journal(&path)?;
+    validate_finalization_identity(&path, &journal, task_id, attempt_id)?;
+    let mut prepared = false;
+    let mut finalized = false;
+    for event in journal
+        .events
+        .iter()
+        .filter(|event| event.get("attempt_id").and_then(Value::as_str) == Some(attempt_id))
+    {
+        match event.get("phase").and_then(Value::as_str) {
+            Some("prepared") => prepared = true,
+            Some("human-finalized")
+                if event.get("disposition").and_then(Value::as_str) == Some("reset") =>
+            {
+                finalized = true
+            }
+            Some("human-finalized" | "recovery-prepared" | "recovered") => {
+                return Err(journal_error(
+                    &path,
+                    "attempt already has a different disposition or authenticated recovery in progress",
+                ));
+            }
+            _ => {}
+        }
+    }
+    if !prepared {
+        return Err(journal_error(
+            &path,
+            "reset disposition requires an existing prepared task attempt",
+        ));
+    }
+    let already_reset = task.status == TaskStatus::Pending
+        && task.disposition == Some(crate::task_queue::FinalizeDispositionArgument::Reset)
+        && task.blocked_reason.is_none();
+    let queue_path = context
+        .component_dir
+        .join(ComponentArtifact::TaskQueue.filename());
+    lock.revalidate()?;
+    if read_queue_snapshot(&context.component_dir)?.1 != queue_digest
+        || read_attempt_journal(&path)?.digest != journal.digest
+    {
+        return Err(journal_error(
+            &path,
+            "queue or attempt evidence changed while preparing human reset disposition",
+        ));
+    }
+    let expected_queue_digest = if !already_reset {
+        let task = &mut queue.tasks[task_index];
+        task.status = TaskStatus::Pending;
+        task.blocked_reason = None;
+        task.disposition = Some(crate::task_queue::FinalizeDispositionArgument::Reset);
+        task.timestamps.updated_at = timestamp.clone();
+        task.timestamps.completed_at = None;
+        let serialized =
+            serialize(&queue).map_err(|error| journal_error(&queue_path, &error.to_string()))?;
+        replace_file_atomically(&queue_path, &serialized)?;
+        digest(serialized.as_bytes())
+    } else {
+        queue_digest
+    };
+    if !finalized {
+        let recorded = (|| {
+            lock.revalidate()?;
+            if read_queue_snapshot(&context.component_dir)?.1 != expected_queue_digest
+                || read_attempt_journal(&path)?.digest != journal.digest
+            {
+                return Err(journal_error(
+                    &path,
+                    "queue or evidence changed before recording human reset disposition",
+                ));
+            }
+            append_json_attempt(
+                &path,
+                &serde_json::json!({
+                "schema_version": ATTEMPT_SCHEMA_VERSION, "task_id": task_id, "attempt_id": attempt_id,
+                "phase": "human-finalized", "disposition": "reset",
+                }),
+                "append human reset disposition",
+            )
+        })();
+        recorded.map_err(|error| journal_error(&path, &format!(
+            "task `{task_id}` had its reset decision stored, but disposition evidence could not be completed: {error}. Completion is not certified. Inspect retained state and repeat `kvist task finalize {} {task_id} {attempt_id} reset`; do not delete retained evidence",
+            context.component_path.display()
+        )))?;
+    }
+    let message = format!(
+        "reset task `{task_id}` (attempt `{attempt_id}`): the attempt's effects are discarded, the task is back at `pending`, and its journal is retained as evidence. Re-run the task with `kvist task run {component} {task_id}`.",
+        component = context.component_path.display(),
+    );
+    if is_json {
+        Ok(serde_json::json!({
+            "status": "success", "command": "task-finalize", "component_dir": context.component_dir,
+            "task_id": task_id, "attempt_id": attempt_id, "disposition": "reset", "message": message,
         }).to_string())
     } else {
         Ok(message)
@@ -6864,6 +7089,7 @@ mod tests {
             path,
             "decision-shortcuts-security-audit",
             &["attempt-0003".to_owned()],
+            TaskStatus::Pending,
         )
         .to_string();
         // The component is derived from the journal path (two parents up).
@@ -6880,12 +7106,29 @@ mod tests {
             message.contains("attempt-0003"),
             "attempt id must be named: {message}"
         );
-        // A copy-pasteable finalize command is provided.
+        // Every disposition option is offered as a copy-pasteable command.
+        assert!(
+            message.contains(
+                "kvist task finalize maerg decision-shortcuts-security-audit attempt-0003 reset"
+            ),
+            "reset command must be provided: {message}"
+        );
         assert!(
             message.contains(
                 "kvist task finalize maerg decision-shortcuts-security-audit attempt-0003 block --reason"
             ),
-            "exact finalize command must be provided: {message}"
+            "block command must be provided: {message}"
+        );
+        assert!(
+            message.contains(
+                "kvist task recover maerg decision-shortcuts-security-audit attempt-0003 --disposition execution-did-not-start"
+            ),
+            "recover command must be provided: {message}"
+        );
+        // The queue status is reported so the human knows the task's state.
+        assert!(
+            message.contains("`pending`"),
+            "queue status must be reported: {message}"
         );
     }
 
@@ -6896,6 +7139,7 @@ mod tests {
             path,
             "some-task",
             &["attempt-0001".to_owned(), "attempt-0002".to_owned()],
+            TaskStatus::Pending,
         )
         .to_string();
         assert!(
@@ -6903,8 +7147,13 @@ mod tests {
             "all unresolved attempts must be listed: {message}"
         );
         assert!(
-            message.contains("one command per attempt"),
+            message.contains("One command per attempt"),
             "multiple attempts must not be collapsed into one command: {message}"
+        );
+        // Every disposition option is still offered, with a per-attempt command.
+        assert!(
+            message.contains("kvist task finalize maerg some-task <ATTEMPT_ID> reset"),
+            "reset command must be provided: {message}"
         );
     }
 
