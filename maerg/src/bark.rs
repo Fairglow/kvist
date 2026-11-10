@@ -1281,6 +1281,25 @@ fn status_style(theme: Theme, status: TaskStatus) -> String {
 /// The exact next command for a non-current task row, so a blocked or paused
 /// task never appears without the step that resolves it (same command logic
 /// as the status report).
+/// Builds the `kvist decision` analysis command for a paused task. A blocked
+/// task is a decision point, not a dead end: the decision workflow offers an
+/// analysis of the blocker and options for how to deal with it.
+pub(crate) fn blocked_decision_command(component: &str, task_id: &str) -> String {
+    let component = if component
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-'))
+        && !component.starts_with('-')
+    {
+        component.to_owned()
+    } else {
+        crate::task_commands::decisions::component_argument(std::path::Path::new(component))
+    };
+    format!(
+        "kvist decision {component} show {}",
+        crate::task_commands::decisions::shell_token(task_id)
+    )
+}
+
 pub(crate) fn next_command_for(
     task: &task_queue::Task,
     tasks: &[task_queue::Task],
@@ -1288,28 +1307,20 @@ pub(crate) fn next_command_for(
 ) -> Option<String> {
     match task.status {
         TaskStatus::Blocked => {
-            let component = if component
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-'))
-                && !component.starts_with('-')
-            {
-                component.to_owned()
-            } else {
-                crate::task_commands::decisions::component_argument(std::path::Path::new(component))
-            };
-            if task_queue::dependencies_completed(task, tasks) {
-                Some(format!(
+            let reopen = if task_queue::dependencies_completed(task, tasks) {
+                format!(
                     "kvist task transition {component} {} pending",
                     task.id
-                ))
+                )
             } else {
                 let n = task_queue::incomplete_dependency_count(task, tasks);
                 let unit = if n == 1 { "task" } else { "tasks" };
-                Some(format!(
+                format!(
                     "kvist task transition {component} {} pending ({} dependency {unit} incomplete)",
                     task.id, n
-                ))
-            }
+                )
+            };
+            Some(format!("{reopen}; or analyze options: {}", blocked_decision_command(component, &task.id)))
         }
         TaskStatus::AwaitingDecision => {
             let component = crate::task_commands::decisions::component_argument(
@@ -2364,21 +2375,36 @@ mod tests {
 
     #[test]
     fn tasks_next_command_names_reopening_transition_per_dependency_chain() {
-        // Completed chain: reopen without executing.
+        // Completed chain: reopen without executing, and offer the decision
+        // analysis as the way forward (a blocked task is a decision point,
+        // not a dead end).
         let ready = ready_task("done", TaskStatus::Completed, &[]);
         let blocked = ready_task("b1", TaskStatus::Blocked, &["done"]);
         let tasks = vec![blocked.clone(), ready];
         let next = next_command_for(&blocked, &tasks, "maerg").expect("command");
-        assert_eq!(next, "kvist task transition maerg b1 pending");
+        assert!(
+            next.starts_with("kvist task transition maerg b1 pending"),
+            "reopen command must lead: {next}"
+        );
+        assert!(
+            next.contains("kvist decision maerg show b1"),
+            "decision analysis must be offered: {next}"
+        );
 
         // Incomplete chain: reopen with the incomplete-dependency count.
         let pending = ready_task("p1", TaskStatus::Pending, &[]);
         let blocked = ready_task("b2", TaskStatus::Blocked, &["p1"]);
         let tasks = vec![blocked.clone(), pending];
         let next = next_command_for(&blocked, &tasks, "maerg").expect("command");
-        assert_eq!(
-            next,
-            "kvist task transition maerg b2 pending (1 dependency task incomplete)"
+        assert!(
+            next.starts_with(
+                "kvist task transition maerg b2 pending (1 dependency task incomplete)"
+            ),
+            "reopen command with dependency count must lead: {next}"
+        );
+        assert!(
+            next.contains("kvist decision maerg show b2"),
+            "decision analysis must be offered: {next}"
         );
 
         // Awaiting-decision points at the help topic; other states have none.

@@ -199,7 +199,9 @@ pub enum TaskStatus {
     Pending,
     /// One authorized attempt is active.
     InProgress,
-    /// The task cannot progress until its recorded blocker is resolved.
+    /// The task cannot progress until its recorded blocker is resolved. It is
+    /// a decision point, not a dead end: analyze the blocker and options for
+    /// dealing with it via `kvist decision`, or clear the blocker and reopen.
     Blocked,
     /// The task is paused pending a human decision and a subsequent
     /// re-review and acceptance of the updated intent; it is a controlled

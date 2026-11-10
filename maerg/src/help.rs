@@ -163,7 +163,9 @@ Kvist task states (TODOS.yaml `status`)
 
   pending            defined; no attempt active
   in-progress        one authorized attempt active
-  blocked            cannot progress until its recorded blocked_reason is resolved
+  blocked            a decision point: cannot progress until its recorded
+                     blocked_reason is resolved; analyze options with
+                     `kvist decision` or clear the blocker and reopen
   awaiting-decision  controlled pause pending a human decision (not a failure)
   completed          execution completed; terminal, not implementation approval
 
@@ -186,6 +188,9 @@ How to achieve them
                               or the shell `tasks` builtin; e.g. add [[test_policy.commands]]
                               to kvist.toml and run `kvist task approve-policy`), then
                               kvist task transition [DIR] TASK pending
+                              A blocked task is a decision point, not a dead end:
+                              analyze the blocker and options for dealing with it via
+                              kvist decision [DIR] show TASK (options / discuss / plan)
   blocked -> in-progress      kvist task transition [DIR] TASK in-progress
                               (dependency chain completed; then explicitly run TASK)
   awaiting-decision -> ...    kvist decision DIR plan --task TASK --guidance \"...\"

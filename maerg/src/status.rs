@@ -273,6 +273,10 @@ fn guidance_entries(
                 task.id, n
             )
         };
+        let next = format!(
+            "{next}; or analyze options: {}",
+            crate::bark::blocked_decision_command(component_path, &task.id)
+        );
         blocked.push(GuidanceEntry {
             id: task.id.clone(),
             reason: first_line(task.blocked_reason.as_deref().unwrap_or("")),
