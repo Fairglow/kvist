@@ -132,6 +132,11 @@ impl SkottMetrics {
 #[derive(Debug, Clone, Default)]
 pub struct SkottEventLog {
     lines: Vec<String>,
+    /// Buffered reasoning text, accumulated until a non-reasoning event or
+    /// session end triggers a flush. This matches standalone Skott's behavior
+    /// of rendering reasoning as complete paragraphs rather than fragmented
+    /// word-by-word output.
+    pending_reasoning: String,
 }
 
 /// The maximum retained detailed-view lines; older lines are dropped.
@@ -158,6 +163,19 @@ impl SkottEventLog {
     /// Whether any events have been observed.
     pub fn is_empty(&self) -> bool {
         self.lines.is_empty()
+    }
+
+    /// Flushes any buffered reasoning text as a single paragraph.
+    /// Call this before rendering or when a non-reasoning event arrives.
+    pub fn flush_reasoning(&mut self) {
+        if !self.pending_reasoning.is_empty() {
+            let text = std::mem::take(&mut self.pending_reasoning);
+            // Remove leading/trailing whitespace and newlines
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                self.push(trimmed.to_owned());
+            }
+        }
     }
 }
 
@@ -362,15 +380,30 @@ impl EmbeddedSkott {
             self.observe(event);
             changed = true;
         }
+        // Flush any buffered reasoning so the UI can render it
+        if changed {
+            self.log.flush_reasoning();
+        }
         changed
     }
 
     /// Applies one event to the metrics, detailed log, and result.
     fn observe(&mut self, event: Event) {
         match &event {
-            Event::TurnStart { .. } => self.metrics.turns = self.metrics.turns.saturating_add(1),
+            Event::TurnStart { .. } => {
+                // Flush any buffered reasoning before starting a new turn
+                self.log.flush_reasoning();
+                self.metrics.turns = self.metrics.turns.saturating_add(1);
+            }
             Event::ToolCall { .. } => {
-                self.metrics.tools_executed = self.metrics.tools_executed.saturating_add(1)
+                self.log.flush_reasoning();
+                self.metrics.tools_executed = self.metrics.tools_executed.saturating_add(1);
+            }
+            Event::ToolResult { .. } => {
+                self.log.flush_reasoning();
+            }
+            Event::ToolFailure { .. } => {
+                self.log.flush_reasoning();
             }
             Event::Progress {
                 input_tokens,
@@ -396,33 +429,43 @@ impl EmbeddedSkott {
                 // Progress is shown in the header metrics, not the event log.
                 return;
             }
+            Event::Text(text) => {
+                // Flush reasoning before answer text, matching Skott's order
+                self.log.flush_reasoning();
+                self.log.push(text.clone());
+            }
             // `Finished` and `PromptEnd` are mutually exclusive: the runtime
             // emits `Finished` when a run ends with an answer and `PromptEnd`
             // on every other loop exit. Both are terminal, so each sets the
             // stop reason; `Finished` is an unambiguous completion.
             Event::Finished { message } => {
+                self.log.flush_reasoning();
                 self.result.answer = Some(message.clone());
                 self.result.stop_reason = Some(StopReason::Completed);
                 self.result.finished = true;
             }
             Event::PromptEnd { reason, .. } => {
+                self.log.flush_reasoning();
                 self.result.stop_reason = Some(*reason);
                 self.result.finished = true;
             }
             Event::Failed(message) => {
+                self.log.flush_reasoning();
                 self.result.failure = Some(message.clone());
                 self.result.stop_reason = Some(StopReason::Failed);
                 self.result.finished = true;
             }
-            _ => {}
+            Event::Reasoning(text) => {
+                // Buffer reasoning text; it will be flushed as a complete
+                // paragraph when the next non-reasoning event arrives.
+                self.log.pending_reasoning.push_str(text);
+                return;
+            }
+            _ => {
+                self.log.flush_reasoning();
+            }
         }
-        // Reasoning is logged without the "reasoning:" prefix, matching Skott's
-        // standalone output.
-        if let Event::Reasoning(text) = &event {
-            self.log.push(text.clone());
-        } else {
-            self.log.push(describe_event(&event));
-        }
+        self.log.push(describe_event(&event));
     }
 
     /// Submits a prompt to the running session.
@@ -883,6 +926,37 @@ mod tests {
                 "event line must stay bounded: {line}"
             );
         }
+    }
+
+    #[test]
+    fn reasoning_is_buffered_and_flushed_as_paragraph() {
+        let mut log = SkottEventLog::default();
+        // Simulate fragmented reasoning events
+        log.pending_reasoning.push_str("This is ");
+        log.pending_reasoning.push_str("a test of ");
+        log.pending_reasoning.push_str("reasoning buffering.");
+        // Flush when a non-reasoning event arrives
+        log.flush_reasoning();
+        // Should be one line, not three fragmented lines
+        assert_eq!(log.lines().len(), 1);
+        assert_eq!(
+            log.lines()[0],
+            "This is a test of reasoning buffering."
+        );
+    }
+
+    #[test]
+    fn reasoning_buffer_survives_multiple_fragments() {
+        let mut log = SkottEventLog::default();
+        log.pending_reasoning.push_str("First part.");
+        log.pending_reasoning.push_str(" Second part.");
+        log.pending_reasoning.push_str(" Third part.");
+        log.flush_reasoning();
+        assert_eq!(log.lines().len(), 1);
+        assert_eq!(
+            log.lines()[0],
+            "First part. Second part. Third part."
+        );
     }
 
     #[test]

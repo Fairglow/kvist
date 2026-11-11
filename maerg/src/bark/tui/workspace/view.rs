@@ -421,16 +421,44 @@ impl Workspace {
             .style(base);
         let inner = panel.inner(body);
         frame.render_widget(panel, body);
-        let lines: Vec<Line> = skott
-            .event_log()
-            .lines()
-            .iter()
-            .map(|line| Line::from(Span::raw(sanitize(line))))
-            .collect();
+
+        // Render the event log with markdown support for reasoning and text
+        // content, matching standalone Skott's use of Blad for rich output.
+        let log_lines = skott.event_log().lines();
+        let mut rendered: Vec<Line> = Vec::new();
+        for line in log_lines {
+            // Detect lines that are likely markdown content (reasoning, text,
+            // finished messages) and render them with Blad. Simple status lines
+            // (tool calls, results, etc.) remain plain text.
+            if line.starts_with("tool call:")
+                || line.starts_with("tool result:")
+                || line.starts_with("tool failure:")
+                || line.starts_with("turn started")
+                || line.starts_with("attempt ")
+                || line.starts_with("control:")
+                || line.starts_with("note:")
+                || line.starts_with("failed:")
+                || line.starts_with("prompt ended")
+            {
+                rendered.push(Line::from(Span::raw(sanitize(line))));
+            } else {
+                // Render as markdown through Blad for rich formatting
+                match render::markdown(line, inner.width, self.theme) {
+                    Ok(md_text) => {
+                        rendered.extend(md_text.lines);
+                    }
+                    Err(_) => {
+                        // Fall back to plain text if rendering fails
+                        rendered.push(Line::from(Span::raw(sanitize(line))));
+                    }
+                }
+            }
+        }
+
         let height = usize::from(inner.height).max(1);
-        let scroll = u16::try_from(lines.len().saturating_sub(height)).unwrap_or(u16::MAX);
+        let scroll = u16::try_from(rendered.len().saturating_sub(height)).unwrap_or(u16::MAX);
         frame.render_widget(
-            Paragraph::new(Text::from(lines))
+            Paragraph::new(Text::from(rendered))
                 .style(base)
                 .scroll((scroll, 0)),
             inner,
