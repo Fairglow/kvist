@@ -1538,7 +1538,7 @@ tasks:
     description: "Move generic provider defaults, profile validation and verification, formatting-preserving global persistence, and terminal setup into sav; keep Kvist role bindings and project policy in Kvist."
     context: "The reusable crate already owns prompting and supervision but standalone users must still configure commands manually."
     purpose: "Make the library and CLI self-contained for discovering, testing, saving, and running named model profiles."
-    expected_outcome: "sav-run setup manages reusable profiles, Kvist can bind those profiles to roles, and kvist agent setup remains a compatibility surface without duplicated setup logic."
+    expected_outcome: "sav setup manages reusable profiles, Kvist can bind those profiles to roles, and kvist agent setup remains a compatibility surface without duplicated setup logic."
     kind: implementation
     status: completed
     depends_on:
@@ -2056,7 +2056,7 @@ tasks:
     recovery_state: null
   - id: "sa-16-write-tests"
     title: "Define agent runtime rename tests"
-    description: "Update tests to require the sav package, sav library, sav-run executable, canonical sav profile path, and deterministic fallback to an existing legacy supervised-agent profile only when the canonical path is absent."
+    description: "Update tests to require the sav package, sav library, sav executable, canonical sav profile path, and deterministic fallback to an existing legacy supervised-agent profile only when the canonical path is absent."
     context: "The component now supplies a provider-neutral runtime rather than one concrete supervised agent, but existing users may already have stored standalone profiles."
     purpose: "Make the new technical identity explicit without silently losing profile configuration during the rename."
     expected_outcome: "Tests fail until all public identifiers are renamed and legacy profile discovery remains bounded, deterministic, and subordinate to the canonical path."
@@ -2078,7 +2078,7 @@ tasks:
     description: "Rename the component directory, Cargo package, Rust crate, executable, imports, user-facing commands, documentation paths, and canonical profile directory to sav, preserving deterministic legacy profile discovery when no canonical file exists."
     context: "Agent runtime is the conventional provider-neutral name for transport, supervision, retry, broker, and future isolation infrastructure; it does not define the component identity."
     purpose: "Align names with the component's layered runtime responsibility before downstream API adoption grows."
-    expected_outcome: "Kvist and standalone usage consistently expose sav, sav, and sav-run with no stale technical identifier outside deliberate migration references."
+    expected_outcome: "Kvist and standalone usage consistently expose sav, sav, and sav with no stale technical identifier outside deliberate migration references."
     kind: implementation
     status: completed
     depends_on:

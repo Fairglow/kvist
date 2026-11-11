@@ -36,7 +36,7 @@ accounting, redaction boundaries and retained partial/uncertain outcomes.
 
 ## Integration checks and delivered limits
 
-Actual release binaries `sav-run`, `skott` and `kvist` loaded the same local
+Actual release binaries `sav`, `skott` and `kvist` loaded the same local
 private catalogue without provider inference. Skott listed the external
 profile once; Kvist no longer printed misleading empty-model or unrelated
 legacy-catalogue advice in shared mode. Local `kvist.toml`, `skott.toml` and

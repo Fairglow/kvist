@@ -336,7 +336,7 @@ maerg-side one-shot host path — with its `--idle-timeout`, `--detect-loops`,
 and `--max-restarts` supervision flags — has been retired in favor of
 delegating to the shared skott loop. The underlying idle-timeout,
 loop-detection, and bounded-retry supervision remain available in the reusable
-`sav` library (used by `skott` and the `sav-run` binary) but
+`sav` library (used by `skott` and the `sav` binary) but
 are no longer surfaced on `kvist prompt`.
 
 **Acceptance criteria:**
@@ -398,7 +398,7 @@ the deferred isolation, brokering, and platform-restoration queue work remain.
 
 **Acceptance criteria:**
 
-- Create a standalone `sav` Rust library and `sav-run` CLI in its own
+- Create a standalone `sav` Rust library and `sav` CLI in its own
   component directory, consumed by Kvist as a path dependency.
 - Move bounded prompt acquisition, shell-free command rendering, idle
   supervision, loop detection, and retry context into the reusable component.
@@ -431,7 +431,7 @@ includes independent review and closure of deferred provider/bounds cases.
 - Move provider-specific collection, custom-wrapper validation, endpoint
   probing, host-acknowledged verification, and profile persistence into
   reusable library APIs.
-- Add `sav-run setup` and allow `sav-run run --profile NAME`
+- Add `sav setup` and allow `sav run --profile NAME`
   to use the Linux user profile store.
 - Make `kvist agent setup` reuse profile collection or load an existing
   standalone profile, then materialize the exact selected command into Kvist
@@ -466,7 +466,7 @@ native-loop prerequisites, and deferred hardening remain incomplete.
   lifecycle chain; child loop tests use deterministic fake host services.
 - Rust 1.95 is the supported MSRV.
 - The first private local Ollama/llama-server transport and text-only
-  `sav-run model` command are implemented; complete their independent
+  `sav model` command are implemented; complete their independent
   security audit and compliance review before the native loop depends on them.
   Keep the transport seam replaceable.
 - Record an explicit promotion decision for any future provider-transport
@@ -546,11 +546,11 @@ evidence is recorded in ADR 0009.
 
 ### TODO OBS-02 — Sandbox Runner Wire-Protocol Structured Logging & Diagnostics
 
-**Context:** The standalone Linux `galla-runner` executes in a distinct process boundary and must surface diagnostic insights consistently over `stderr` during Bubblewrap setup, mount validation, resource cap enforcement, and isolation breaches.
+**Context:** The standalone Linux `galla` executes in a distinct process boundary and must surface diagnostic insights consistently over `stderr` during Bubblewrap setup, mount validation, resource cap enforcement, and isolation breaches.
 
 **Acceptance criteria:**
 
-- Ensure `galla-runner` uses structured diagnostics adhering to the log level standards.
+- Ensure `galla` uses structured diagnostics adhering to the log level standards.
 - Provide actionable diagnostic context on exit without leaking confidential data or breaking fail-closed invariants.
 - Cover runner diagnostic outputs with integration tests.
 

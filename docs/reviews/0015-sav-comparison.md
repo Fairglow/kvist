@@ -58,7 +58,7 @@ R/C/D denote Sav requirements/contract/design; I denotes IMPL headings.
 
 1. **Executor wording reconciled:** D “Security and resource design” now agrees
    with C “Shared native runtime API” and I “Native model/runtime interfaces”:
-   Sav uses the injected executor; protected hosts bind `galla-runner`.
+   Sav uses the injected executor; protected hosts bind `galla`.
    The prior ownership contradiction is withdrawn. Protected-host binding and
    broader typed-broker targets remain unverified, not approved deferrals.
 2. **Redaction target:** R `AR-REQ-NATIVE-RUNTIME` requires redacted runtime
