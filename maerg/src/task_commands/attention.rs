@@ -174,7 +174,7 @@ pub(super) fn failure(
     };
     let task_id = task.unwrap_or("continuous-run");
     let component = context.component_path.to_string_lossy();
-    
+
     // Structured action list with shortcuts for the user
     let actions = format!(
         "## Available actions\n\n\

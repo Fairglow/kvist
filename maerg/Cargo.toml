@@ -1,6 +1,6 @@
 [package]
 name = "kvist-maerg"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 rust-version = "1.95"
 authors = ["Stefan Lindblad"]
@@ -38,7 +38,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
 sav = { package = "kvist-sav", version = "0.3", path = "../sav" }
 skott = { package = "kvist-skott", version = "0.3", path = "../skott" }
-reedline = "0.52"
+reedline = "0.53"
 terminal_size = "0.4"
 blad = { package = "kvist-blad", version = "0.3", path = "../blad" }
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
@@ -46,8 +46,8 @@ unicode-segmentation = "1.13"
 unicode-width = "0.2"
 vte = "0.15"
 pulldown-cmark = "0.13"
-uuid = { version = "1.16", features = ["v4"] }
+uuid = { version = "1.29", features = ["v4"] }
 
 [dev-dependencies]
 galla = { package = "kvist-galla", version = "0.3", path = "../galla" }
-uuid = { version = "1.16", features = ["v4"] }
+uuid = { version = "1.29", features = ["v4"] }

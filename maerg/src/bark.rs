@@ -1872,7 +1872,7 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
         };
 
         match signal {
-            Signal::CtrlC => {
+            Signal::CtrlC(_) => {
                 println!("^C");
                 // A SIGINT delivered while the prompt was displayed is the
                 // same event; the `^C` echo is the feedback, so consume the
