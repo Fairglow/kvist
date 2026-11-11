@@ -432,6 +432,7 @@ impl EmbeddedSkott {
             Event::Text(text) => {
                 // Flush reasoning before answer text, matching Skott's order
                 self.log.flush_reasoning();
+                // Answer text goes through markdown rendering in the view
                 self.log.push(text.clone());
             }
             // `Finished` and `PromptEnd` are mutually exclusive: the runtime
@@ -440,6 +441,9 @@ impl EmbeddedSkott {
             // stop reason; `Finished` is an unambiguous completion.
             Event::Finished { message } => {
                 self.log.flush_reasoning();
+                // Render the final result with markdown support, matching
+                // standalone Skott's push_markdown_block("✓ {message}").
+                self.log.push(format!("✓ {}", message));
                 self.result.answer = Some(message.clone());
                 self.result.stop_reason = Some(StopReason::Completed);
                 self.result.finished = true;
