@@ -169,6 +169,13 @@ impl Workspace {
                 let seed = bark::build_prompt_seed(task);
                 self.edit_prompt(&seed, vec!["prompt".into()], terminal)?;
             }
+            "agent" => {
+                if arguments.is_empty() {
+                    self.append("usage: agent <PROMPT…> — runs the prompt through the embedded Skott agent; Ctrl+PageDown shows detailed progress, Ctrl+PageUp the Kvist metrics view.\n")?;
+                } else {
+                    self.start_agent_session(&arguments.join(" "))?;
+                }
+            }
             _ => {
                 let mut args = vec![program];
                 args.extend(arguments);
@@ -312,6 +319,61 @@ impl Workspace {
         self.running = Some(Running::spawn(&self.project, &arguments)?);
         self.notice =
             "Running; Ctrl+C cancels. Input answers the command (answers are not retained).".into();
+        Ok(())
+    }
+
+    /// Starts an embedded Skott agent session for `prompt`.
+    ///
+    /// Loads the project's `skott.toml`, selects its default model, and drives
+    /// the Skott agent loop in-process. The session streams progress to the
+    /// Skott view and metrics to the Kvist view; Kvist keeps the task moving
+    /// until it is finished, blocked, or awaiting a decision.
+    pub(super) fn start_agent_session(&mut self, prompt: &str) -> io::Result<()> {
+        if self.skott.as_ref().is_some_and(|skott| skott.is_active()) {
+            return Err(io::Error::other(
+                "an agent session is already active; it ends when the task finishes or is cancelled",
+            ));
+        }
+        let config_path = self.project.join("skott.toml");
+        let config = skott::Config::load(&config_path).map_err(|error| {
+            io::Error::other(format!(
+                "no usable Skott configuration at {}: {}; create one with `skott init-config` or `skott setup`",
+                config_path.display(),
+                error.describe()
+            ))
+        })?;
+        let model = config
+            .models
+            .iter()
+            .find(|model| model.is_default)
+            .or_else(|| config.models.first())
+            .ok_or_else(|| {
+                io::Error::other(
+                    "the Skott configuration has no selectable model; add a [[models]] entry",
+                )
+            })?
+            .clone();
+        let effort = config.default_thinking_effort;
+        let mut session = crate::skott_embedded::EmbeddedSkott::start(
+            config,
+            &model,
+            effort,
+            None,
+            skott::RunLimits::default(),
+            None,
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        session
+            .submit(prompt.to_owned())
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        self.skott_continuations = 0;
+        self.skott_result_reported = false;
+        self.skott = Some(session);
+        self.append(&format!(
+            "\n\n## Agent session\n\nStarted Skott agent `{model}`. Ctrl+PageDown shows the detailed progress; Ctrl+PageUp returns to the Kvist metrics view.\n\n",
+            model = model.id
+        ))?;
+        self.dirty = true;
         Ok(())
     }
 

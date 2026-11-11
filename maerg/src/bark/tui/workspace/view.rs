@@ -16,6 +16,7 @@ use unicode_width::UnicodeWidthStr;
 use super::super::render;
 use super::{Overlay, Workspace};
 use crate::presentation::sanitize;
+use crate::skott_embedded::ActivePane;
 
 fn centered(area: Rect) -> Rect {
     let width = area.width.saturating_sub(4).min(100);
@@ -59,75 +60,99 @@ impl Workspace {
             .as_ref()
             .map(|run| format!(" | RUNNING {}s", run.started.elapsed().as_secs()))
             .unwrap_or_default();
+        let skott_stats = self
+            .skott
+            .as_ref()
+            .filter(|skott| skott.is_active())
+            .map(|skott| {
+                format!(
+                    " | skott: {} [{}]",
+                    skott.metrics().summary_line(),
+                    match skott.active_pane() {
+                        ActivePane::Skott => "detail",
+                        ActivePane::Kvist => "metrics",
+                    }
+                )
+            })
+            .unwrap_or_default();
         let stats = format!(
-            " {} | sandbox: {} | model: {} | locks: {} live / {} stale{}",
+            " {} | sandbox: {} | model: {} | locks: {} live / {} stale{}{}",
             self.state.branch().unwrap_or("no-vcs"),
             self.status.sandbox_backend,
             self.status.default_model,
             self.status.live_locks,
             self.status.stale_locks,
             run,
+            skott_stats,
         );
         frame.render_widget(
             Paragraph::new(sanitize(&stats)).style(raised.patch(render::secondary(self.theme))),
             parts[1],
         );
         let body = parts[2];
-        let title = format!(
-            " Transcript {}/{} | {}{} ",
-            self.segment + 1,
-            self.transcript.latest() + 1,
-            if self.follow { "following" } else { "paused" },
-            if self.last_failed {
-                " | last command failed"
-            } else {
-                ""
-            },
-        );
-        let panel = Block::default()
-            .borders(Borders::TOP)
-            .title(title)
-            .border_style(border)
-            .style(base);
-        let mut inner = panel.inner(body);
-        inner.width = inner.width.saturating_sub(1);
-        frame.render_widget(panel, body);
-        self.viewport = usize::from(inner.height).max(1);
-        let bottom = self.rendered.lines.len().saturating_sub(self.viewport);
-        if self.follow {
-            self.scroll = bottom;
+        let skott_view = self
+            .skott
+            .as_ref()
+            .is_some_and(|skott| skott.is_active() && skott.active_pane() == ActivePane::Skott);
+        if skott_view {
+            self.render_skott_body(frame, body, base, border)?;
         } else {
-            self.scroll = self.scroll.min(bottom);
+            let title = format!(
+                " Transcript {}/{} | {}{} ",
+                self.segment + 1,
+                self.transcript.latest() + 1,
+                if self.follow { "following" } else { "paused" },
+                if self.last_failed {
+                    " | last command failed"
+                } else {
+                    ""
+                },
+            );
+            let panel = Block::default()
+                .borders(Borders::TOP)
+                .title(title)
+                .border_style(border)
+                .style(base);
+            let mut inner = panel.inner(body);
+            inner.width = inner.width.saturating_sub(1);
+            frame.render_widget(panel, body);
+            self.viewport = usize::from(inner.height).max(1);
+            let bottom = self.rendered.lines.len().saturating_sub(self.viewport);
+            if self.follow {
+                self.scroll = bottom;
+            } else {
+                self.scroll = self.scroll.min(bottom);
+            }
+            let end = (self.scroll + self.viewport).min(self.rendered.lines.len());
+            let lines = self
+                .rendered
+                .lines
+                .get(self.scroll..end)
+                .unwrap_or_default()
+                .to_vec();
+            frame.render_widget(
+                Paragraph::new(Text::from(lines))
+                    .style(base)
+                    .scroll((0, self.horizontal)),
+                inner,
+            );
+            let segments = self.transcript.latest() as f64 + 1.0;
+            let lines = self.rendered.lines.len().max(self.viewport) as f64;
+            let position = (self.segment as f64 + self.scroll as f64 / lines) / segments;
+            let visible = self.viewport as f64 / lines / segments;
+            let mut scrollbar = ScrollbarState::new(65_536)
+                .position((position * 65_536.0) as usize)
+                .viewport_content_length((visible * 65_536.0).max(1.0) as usize);
+            frame.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None)
+                    .thumb_style(Style::default().fg(accent))
+                    .track_style(border),
+                body,
+                &mut scrollbar,
+            );
         }
-        let end = (self.scroll + self.viewport).min(self.rendered.lines.len());
-        let lines = self
-            .rendered
-            .lines
-            .get(self.scroll..end)
-            .unwrap_or_default()
-            .to_vec();
-        frame.render_widget(
-            Paragraph::new(Text::from(lines))
-                .style(base)
-                .scroll((0, self.horizontal)),
-            inner,
-        );
-        let segments = self.transcript.latest() as f64 + 1.0;
-        let lines = self.rendered.lines.len().max(self.viewport) as f64;
-        let position = (self.segment as f64 + self.scroll as f64 / lines) / segments;
-        let visible = self.viewport as f64 / lines / segments;
-        let mut scrollbar = ScrollbarState::new(65_536)
-            .position((position * 65_536.0) as usize)
-            .viewport_content_length((visible * 65_536.0).max(1.0) as usize);
-        frame.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(None)
-                .end_symbol(None)
-                .thumb_style(Style::default().fg(accent))
-                .track_style(border),
-            body,
-            &mut scrollbar,
-        );
         let footer = parts[3];
         let label = if self.running.is_some() {
             "answer> "
@@ -306,6 +331,49 @@ impl Workspace {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Renders the detailed Skott agent view: a live, auto-following feed of
+    /// every session event, headed by the selected model and live metrics.
+    fn render_skott_body(
+        &self,
+        frame: &mut Frame<'_>,
+        body: Rect,
+        base: Style,
+        border: Style,
+    ) -> io::Result<()> {
+        let skott = self
+            .skott
+            .as_ref()
+            .ok_or_else(|| io::Error::other("Skott view requested with no session"))?;
+        let metrics = skott.metrics();
+        let title = format!(
+            " Skott agent | {} | {} ",
+            skott.model_id().unwrap_or("unknown"),
+            metrics.summary_line(),
+        );
+        let panel = Block::default()
+            .borders(Borders::TOP)
+            .title(title)
+            .border_style(border)
+            .style(base);
+        let inner = panel.inner(body);
+        frame.render_widget(panel, body);
+        let lines: Vec<Line> = skott
+            .event_log()
+            .lines()
+            .iter()
+            .map(|line| Line::from(Span::raw(sanitize(line))))
+            .collect();
+        let height = usize::from(inner.height).max(1);
+        let scroll = u16::try_from(lines.len().saturating_sub(height)).unwrap_or(u16::MAX);
+        frame.render_widget(
+            Paragraph::new(Text::from(lines))
+                .style(base)
+                .scroll((scroll, 0)),
+            inner,
+        );
         Ok(())
     }
 }

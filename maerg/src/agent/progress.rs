@@ -67,7 +67,7 @@ pub(super) fn correct(
             }}),
             true,
         )?;
-        
+
         // Return a TurnFailure that indicates guidance is needed but work remains
         return Ok(Some(TurnFailure {
             stop_reason: sav::runtime::StopReason::GuidanceRequired,

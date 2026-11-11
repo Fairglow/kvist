@@ -1206,6 +1206,7 @@ dependencies = [
  "kvist-galla",
  "kvist-roetter",
  "kvist-sav",
+ "kvist-skott",
  "nix 0.31.3",
  "pulldown-cmark",
  "ratatui",
@@ -1223,6 +1224,7 @@ dependencies = [
  "tracing-subscriber",
  "unicode-segmentation",
  "unicode-width",
+ "uuid",
  "vte 0.15.0",
 ]
 

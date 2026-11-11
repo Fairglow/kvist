@@ -38,6 +38,11 @@ use crate::bark::{
     prefill::ComponentPrefill,
     tree::{CommandNode, build_root},
 };
+use crate::skott_embedded::{ContinuationDecision, EmbeddedSkott, SkottMetrics, SkottResult};
+
+/// The maximum automatic continuations Kvist submits for one agent session
+/// before it stops forcing progress and surfaces the result for a decision.
+const MAX_SKOTT_CONTINUATIONS: u32 = 5;
 use crate::{KvistError, Result};
 
 enum Overlay {
@@ -98,6 +103,9 @@ pub(super) struct Workspace {
     capture_failed: bool,
     quit: bool,
     prompt_file: Option<tempfile::NamedTempFile>,
+    skott: Option<EmbeddedSkott>,
+    skott_continuations: u32,
+    skott_result_reported: bool,
 }
 
 pub(crate) fn available() -> bool {
@@ -294,6 +302,9 @@ impl Workspace {
             capture_failed: false,
             quit: false,
             prompt_file: None,
+            skott: None,
+            skott_continuations: 0,
+            skott_result_reported: false,
         };
         workspace.refresh();
         workspace.append(&format!(
@@ -458,6 +469,54 @@ impl Workspace {
     }
 
     fn pump(&mut self) -> io::Result<()> {
+        // Process embedded Skott events; a new event marks the view dirty.
+        if let Some(skott) = &mut self.skott {
+            if skott.pump() {
+                self.dirty = true;
+            }
+            // Kvist owns the completion policy. When the agent returns control
+            // without finishing and without a legitimate block, resubmit a
+            // focused continuation prompt (bounded, so a stuck agent surfaces
+            // for a human decision instead of looping forever). A terminal
+            // result is reported to the Kvist view exactly once.
+            if skott.result().finished && !self.skott_result_reported {
+                match skott.result().decision() {
+                    Some(ContinuationDecision::Continue)
+                        if self.skott_continuations < MAX_SKOTT_CONTINUATIONS =>
+                    {
+                        self.skott_continuations = self.skott_continuations.saturating_add(1);
+                        let attempt = self.skott_continuations;
+                        let turns = skott.metrics().turns;
+                        match skott.submit(format!(
+                            "Continue the task. You returned control after {turns} turn(s) \
+                             without finishing and without a blocking reason. Review what \
+                             remains and keep working until the task is complete, you are \
+                             blocked for a concrete reason, or a human decision is required. \
+                             (automatic continuation {attempt}/{MAX_SKOTT_CONTINUATIONS})"
+                        )) {
+                            Ok(()) => {
+                                self.dirty = true;
+                                self.notice = format!(
+                                    "Agent stopped without finishing; Kvist continued the task (attempt {attempt})."
+                                );
+                            }
+                            Err(error) => {
+                                self.skott_result_reported = true;
+                                self.record_error(&format!("Skott continuation failed: {error}"))?;
+                            }
+                        }
+                    }
+                    _ => {
+                        // Finished, blocked, or out of continuations: surface it.
+                        self.skott_result_reported = true;
+                        let result = skott.result().clone();
+                        let metrics = skott.metrics().clone();
+                        self.report_skott_result(&result, &metrics)?;
+                    }
+                }
+            }
+        }
+
         let Some(run) = &mut self.running else {
             return Ok(());
         };
@@ -527,6 +586,31 @@ impl Workspace {
         Ok(())
     }
 
+    /// Appends a terminal Skott result to the Kvist transcript so the Kvist
+    /// view shows the answer (or failure) and the session metrics.
+    fn report_skott_result(
+        &mut self,
+        result: &SkottResult,
+        metrics: &SkottMetrics,
+    ) -> io::Result<()> {
+        let heading = match result.decision() {
+            Some(ContinuationDecision::Finished) => "Agent result",
+            Some(ContinuationDecision::Blocked) => "Agent blocked",
+            Some(ContinuationDecision::Continue) => "Agent paused",
+            None => "Agent",
+        };
+        let mut markdown = format!("\n\n## {heading}\n\n");
+        if let Some(answer) = &result.answer {
+            markdown.push_str(answer);
+            markdown.push_str("\n\n");
+        }
+        if let Some(failure) = &result.failure {
+            markdown.push_str(&format!("**Failure:** {failure}\n\n"));
+        }
+        markdown.push_str(&format!("**Metrics:** {}\n\n", metrics.summary_line()));
+        self.append(&markdown)
+    }
+
     fn key(&mut self, key: KeyEvent, terminal: &mut Screen) -> io::Result<()> {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         if control && key.code == KeyCode::Char('q') {
@@ -561,6 +645,14 @@ impl Workspace {
         }
         if self.overlay.is_some() {
             return self.overlay_key(key);
+        }
+
+        // Skott pane switching: Ctrl+PageUp/PageDown or Alt+Left/Right
+        if let Some(skott) = &mut self.skott
+            && skott.handle_key(key)
+        {
+            self.dirty = true;
+            return Ok(());
         }
         if self.running.is_some()
             && matches!(

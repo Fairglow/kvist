@@ -1,7 +1,7 @@
 use sav::{
     CancellationToken,
     loop_detection::{RecoveryBudget, StreamLoopDetector, ToolLoopTracker},
-    runtime::{StopReason, BudgetResource},
+    runtime::StopReason,
 };
 
 use super::{TokenBudget, TurnBudget, cancellation::SignalCancellation};
@@ -149,27 +149,5 @@ pub(crate) fn error_stop(error: &crate::KvistError) -> StopReason {
             _ => StopReason::Failed,
         },
         _ => StopReason::Failed,
-    }
-}
-
-/// Helper to determine if a stop reason represents a real blocker that should
-/// prevent continuation. Returns `true` if the work is genuinely blocked and
-/// cannot proceed without human intervention.
-pub(crate) fn is_real_blocker(stop_reason: StopReason) -> bool {
-    match stop_reason {
-        // These are genuine blockers - the agent cannot continue
-        StopReason::Cancelled => true,
-        StopReason::Limit(BudgetResource::WallTime) => true,
-        StopReason::Limit(BudgetResource::ModelTokens) => true,
-        StopReason::Limit(BudgetResource::Turns) => true,
-        StopReason::Limit(BudgetResource::ModelAttempts) => true,
-        StopReason::Limit(BudgetResource::Context) => true,
-        StopReason::Stalled => true, // Agent is stuck, needs human help
-        StopReason::GuidanceRequired => true, // Guidance needed but work remains
-        
-        // These are NOT blockers - the agent should continue or complete
-        StopReason::Completed => false,
-        StopReason::NoWork => false, // Nothing to do, task is done
-        StopReason::Failed => false, // Failure doesn't mean blocked; can retry or reconcile
     }
 }
