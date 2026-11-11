@@ -393,6 +393,8 @@ impl EmbeddedSkott {
                 self.metrics.average_tokens_per_sec = *average_tokens_per_sec;
                 self.metrics.total_tokens = *total_tokens;
                 self.metrics.elapsed_secs = *elapsed_secs;
+                // Progress is shown in the header metrics, not the event log.
+                return;
             }
             // `Finished` and `PromptEnd` are mutually exclusive: the runtime
             // emits `Finished` when a run ends with an answer and `PromptEnd`
@@ -414,7 +416,13 @@ impl EmbeddedSkott {
             }
             _ => {}
         }
-        self.log.push(describe_event(&event));
+        // Reasoning is logged without the "reasoning:" prefix, matching Skott's
+        // standalone output.
+        if let Event::Reasoning(text) = &event {
+            self.log.push(text.clone());
+        } else {
+            self.log.push(describe_event(&event));
+        }
     }
 
     /// Submits a prompt to the running session.
