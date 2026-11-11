@@ -78,6 +78,7 @@ pub(super) enum Action {
     Help,
     Quit,
     Cancel,
+    SwitchView(crate::skott_embedded::ActivePane),
     Command {
         arguments: Vec<String>,
         confirm: Option<String>,
@@ -166,6 +167,29 @@ impl Workspace {
                 ];
                 if self.running.is_some() {
                     entries.push(Entry::new("Cancel command", Action::Cancel));
+                }
+                if self.skott.as_ref().is_some_and(|skott| skott.is_active()) {
+                    let pane = self.skott.as_ref().unwrap().active_pane();
+                    let next = match pane {
+                        crate::skott_embedded::ActivePane::Kvist => {
+                            crate::skott_embedded::ActivePane::Skott
+                        }
+                        crate::skott_embedded::ActivePane::Skott => {
+                            crate::skott_embedded::ActivePane::Both
+                        }
+                        crate::skott_embedded::ActivePane::Both => {
+                            crate::skott_embedded::ActivePane::Kvist
+                        }
+                    };
+                    let label = format!(
+                        "Switch view (Ctrl+Tab): {}",
+                        match next {
+                            crate::skott_embedded::ActivePane::Kvist => "Kvist metrics",
+                            crate::skott_embedded::ActivePane::Skott => "Skott detail",
+                            crate::skott_embedded::ActivePane::Both => "side by side",
+                        }
+                    );
+                    entries.push(Entry::new(label, Action::SwitchView(next)));
                 }
                 entries.push(Entry::new("Quit", Action::Quit));
                 return Ok(Menu::new(page, "Workspace", entries));
@@ -541,6 +565,13 @@ impl Workspace {
                 }
             },
             Action::Back => self.back(),
+            Action::SwitchView(pane) => {
+                if let Some(skott) = &mut self.skott {
+                    skott.set_active_pane(pane);
+                    self.dirty = true;
+                }
+                self.back();
+            }
             Action::Focus(focus) => {
                 if let Err(error) = self.change_focus(focus) {
                     self.overlay = Some(Overlay::Menu(menu));

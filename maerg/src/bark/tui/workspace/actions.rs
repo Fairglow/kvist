@@ -171,7 +171,7 @@ impl Workspace {
             }
             "agent" => {
                 if arguments.is_empty() {
-                    self.append("usage: agent <PROMPT…> — runs the prompt through the embedded Skott agent; Ctrl+PageDown shows detailed progress, Ctrl+PageUp the Kvist metrics view.\n")?;
+                    self.append("usage: agent <PROMPT…> — runs the prompt through the embedded Skott agent; Ctrl+Tab switches between the Kvist metrics, the Skott detail, and a side-by-side view.\n")?;
                 } else {
                     self.start_agent_session(&arguments.join(" "))?;
                 }
@@ -272,7 +272,127 @@ impl Workspace {
             });
             return Ok(());
         }
+        // Task runs are handed to Skott: Kvist owns the task-queue setup and
+        // teardown, Skott owns all agent communication. No subprocess is
+        // spawned; the embedded Skott session drives the agent loop and
+        // reports a RunSummary back.
+        if let cli::Command::Task {
+            command:
+                cli::TaskCommand::Run {
+                    component_dir,
+                    task_id,
+                    allow_control,
+                    ..
+                },
+        } = &command
+        {
+            let component = if component_dir.as_os_str().is_empty()
+                || component_dir == std::path::Path::new(".")
+            {
+                self.focus()
+                    .map(|f| f.to_owned())
+                    .unwrap_or_else(|| ".".to_owned())
+            } else {
+                component_dir.to_string_lossy().into_owned()
+            };
+            let task_id = task_id
+                .clone()
+                .or_else(|| self.next_ready_task(&component))
+                .ok_or_else(|| {
+                    io::Error::other(
+                        "no task ID given and no ready task found; specify a task or make one ready",
+                    )
+                })?;
+            return self.start_task_run(&component, &task_id, *allow_control);
+        }
         self.start(arguments)
+    }
+
+    /// Starts a task run through the embedded Skott session. Kvist prepares
+    /// the task-queue state (lock, status, prompt, context), hands the prompt
+    /// to Skott, and awaits the result. When the session finishes, the pump
+    /// interprets the RunSummary and transitions the task.
+    fn start_task_run(
+        &mut self,
+        component: &str,
+        task_id: &str,
+        allow_control: bool,
+    ) -> io::Result<()> {
+        if self.skott.as_ref().is_some_and(|skott| skott.is_active()) {
+            return Err(io::Error::other(
+                "an agent session is already active; it ends when the task finishes or is cancelled",
+            ));
+        }
+        // Kvist owns the task-queue setup.
+        let prep = crate::task_commands::prepare_task_run(
+            &self.project,
+            std::path::Path::new(component),
+            task_id,
+            allow_control,
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        // Load the Skott configuration.
+        let config_path = self.project.join("skott.toml");
+        let config = skott::Config::load(&config_path).map_err(|error| {
+            io::Error::other(format!(
+                "no usable Skott configuration at {}: {}; create one with `skott init-config` or `skott setup`",
+                config_path.display(),
+                error.describe()
+            ))
+        })?;
+        let model = config
+            .models
+            .iter()
+            .find(|model| model.is_default)
+            .or_else(|| config.models.first())
+            .ok_or_else(|| {
+                io::Error::other(
+                    "the Skott configuration has no selectable model; add a [[models]] entry",
+                )
+            })?
+            .clone();
+        let effort = config.default_thinking_effort;
+        let mut session = crate::skott_embedded::EmbeddedSkott::start(
+            config,
+            &model,
+            effort,
+            None,
+            skott::RunLimits::default(),
+            None,
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        session
+            .submit(prep.prompt.clone())
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        self.skott_continuations = 0;
+        self.skott_result_reported = false;
+        self.task_run_prep = Some(prep);
+        self.skott = Some(session);
+        self.append(&format!(
+            "\n\n## Task run\n\nRunning task `{task_id}` via Skott agent `{model}`. Ctrl+Tab switches between the Kvist metrics, the Skott detail, and a side-by-side view.\n\n",
+            model = model.id
+        ))?;
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Finds the next ready task in the given component, if any.
+    fn next_ready_task(&self, component: &str) -> Option<String> {
+        let queue_path = self
+            .project
+            .join(component)
+            .join(".kvist")
+            .join("TODOS.yaml");
+        let text = std::fs::read_to_string(queue_path).ok()?;
+        let queue: serde_yaml::Value = serde_yaml::from_str(&text).ok()?;
+        let tasks = queue.get("tasks")?.as_sequence()?;
+        for task in tasks {
+            let status = task.get("status")?.as_str()?;
+            if status == "pending" || status == "in-progress" {
+                return task.get("id")?.as_str().map(str::to_owned);
+            }
+        }
+        None
     }
 
     fn edit_prompt(
@@ -370,7 +490,7 @@ impl Workspace {
         self.skott_result_reported = false;
         self.skott = Some(session);
         self.append(&format!(
-            "\n\n## Agent session\n\nStarted Skott agent `{model}`. Ctrl+PageDown shows the detailed progress; Ctrl+PageUp returns to the Kvist metrics view.\n\n",
+            "\n\n## Agent session\n\nStarted Skott agent `{model}`. The Skott metrics appear on their own line above the transcript; Ctrl+Tab switches between the Kvist metrics, the Skott detail, and a side-by-side view.\n\n",
             model = model.id
         ))?;
         self.dirty = true;

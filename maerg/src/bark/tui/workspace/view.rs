@@ -3,7 +3,7 @@ use std::io;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
         Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
@@ -37,13 +37,27 @@ impl Workspace {
         let selected = render::selection(self.theme);
         let border = render::border(self.theme);
         frame.render_widget(Block::default().style(base), area);
-        let parts = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(3),
-        ])
-        .split(area);
+        // When a Skott session is active, reserve a dedicated row for the
+        // in-place metrics line so it never overlaps the transcript.
+        let skott_active = self.skott.as_ref().is_some_and(|skott| skott.is_active());
+        let parts = if skott_active {
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(3),
+            ])
+            .split(area)
+        } else {
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(3),
+            ])
+            .split(area)
+        };
         let heading = format!(
             " Kvist | {} | {} | {}",
             self.focus().as_deref().unwrap_or("(project)"),
@@ -60,100 +74,44 @@ impl Workspace {
             .as_ref()
             .map(|run| format!(" | RUNNING {}s", run.started.elapsed().as_secs()))
             .unwrap_or_default();
-        let skott_stats = self
-            .skott
-            .as_ref()
-            .filter(|skott| skott.is_active())
-            .map(|skott| {
-                format!(
-                    " | skott: {} [{}]",
-                    skott.metrics().summary_line(),
-                    match skott.active_pane() {
-                        ActivePane::Skott => "detail",
-                        ActivePane::Kvist => "metrics",
-                    }
-                )
-            })
-            .unwrap_or_default();
         let stats = format!(
-            " {} | sandbox: {} | model: {} | locks: {} live / {} stale{}{}",
+            " {} | sandbox: {} | model: {} | locks: {} live / {} stale{}",
             self.state.branch().unwrap_or("no-vcs"),
             self.status.sandbox_backend,
             self.status.default_model,
             self.status.live_locks,
             self.status.stale_locks,
             run,
-            skott_stats,
         );
         frame.render_widget(
             Paragraph::new(sanitize(&stats)).style(raised.patch(render::secondary(self.theme))),
             parts[1],
         );
-        let body = parts[2];
-        let skott_view = self
-            .skott
-            .as_ref()
-            .is_some_and(|skott| skott.is_active() && skott.active_pane() == ActivePane::Skott);
-        if skott_view {
-            self.render_skott_body(frame, body, base, border)?;
-        } else {
-            let title = format!(
-                " Transcript {}/{} | {}{} ",
-                self.segment + 1,
-                self.transcript.latest() + 1,
-                if self.follow { "following" } else { "paused" },
-                if self.last_failed {
-                    " | last command failed"
-                } else {
-                    ""
-                },
-            );
-            let panel = Block::default()
-                .borders(Borders::TOP)
-                .title(title)
-                .border_style(border)
-                .style(base);
-            let mut inner = panel.inner(body);
-            inner.width = inner.width.saturating_sub(1);
-            frame.render_widget(panel, body);
-            self.viewport = usize::from(inner.height).max(1);
-            let bottom = self.rendered.lines.len().saturating_sub(self.viewport);
-            if self.follow {
-                self.scroll = bottom;
-            } else {
-                self.scroll = self.scroll.min(bottom);
-            }
-            let end = (self.scroll + self.viewport).min(self.rendered.lines.len());
-            let lines = self
-                .rendered
-                .lines
-                .get(self.scroll..end)
-                .unwrap_or_default()
-                .to_vec();
-            frame.render_widget(
-                Paragraph::new(Text::from(lines))
-                    .style(base)
-                    .scroll((0, self.horizontal)),
-                inner,
-            );
-            let segments = self.transcript.latest() as f64 + 1.0;
-            let lines = self.rendered.lines.len().max(self.viewport) as f64;
-            let position = (self.segment as f64 + self.scroll as f64 / lines) / segments;
-            let visible = self.viewport as f64 / lines / segments;
-            let mut scrollbar = ScrollbarState::new(65_536)
-                .position((position * 65_536.0) as usize)
-                .viewport_content_length((visible * 65_536.0).max(1.0) as usize);
-            frame.render_stateful_widget(
-                Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                    .begin_symbol(None)
-                    .end_symbol(None)
-                    .thumb_style(Style::default().fg(accent))
-                    .track_style(border),
-                body,
-                &mut scrollbar,
-            );
+        let body = if skott_active { parts[3] } else { parts[2] };
+        if skott_active {
+            self.render_skott_metrics_line(frame, parts[2], base, accent);
         }
-        let footer = parts[3];
+        let skott = self.skott.as_ref().filter(|skott| skott.is_active());
+        let pane = skott
+            .map(|skott| skott.active_pane())
+            .unwrap_or(ActivePane::Kvist);
+        // Wide enough for two side-by-side panes? Each pane needs at least 40
+        // columns plus the separator.
+        let side_by_side = pane == ActivePane::Both && body.width >= 83;
+        match (skott.is_some(), pane, side_by_side) {
+            (true, ActivePane::Skott, _) => {
+                self.render_skott_body(frame, body, base, border)?;
+            }
+            (true, ActivePane::Both, true) => {
+                let inner =
+                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(body);
+                self.render_kvist_body(frame, inner[0], base, border, accent)?;
+                self.render_skott_body(frame, inner[1], base, border)?;
+            }
+            _ => self.render_kvist_body(frame, body, base, border, accent)?,
+        }
+        let footer = if skott_active { parts[4] } else { parts[3] };
         let label = if self.running.is_some() {
             "answer> "
         } else {
@@ -332,6 +290,109 @@ impl Workspace {
             }
         }
         Ok(())
+    }
+
+    /// Renders the Kvist transcript view: the scrollable, disk-persisted
+    /// command history. This is the Kvist overview, reserved for task
+    /// handling; agent output never appears here except the dedicated
+    /// metrics line and the final result.
+    fn render_kvist_body(
+        &mut self,
+        frame: &mut Frame<'_>,
+        body: Rect,
+        base: Style,
+        border: Style,
+        accent: Color,
+    ) -> io::Result<()> {
+        let title = format!(
+            " Transcript {}/{} | {}{} ",
+            self.segment + 1,
+            self.transcript.latest() + 1,
+            if self.follow { "following" } else { "paused" },
+            if self.last_failed {
+                " | last command failed"
+            } else {
+                ""
+            },
+        );
+        let panel = Block::default()
+            .borders(Borders::TOP)
+            .title(title)
+            .border_style(border)
+            .style(base);
+        let mut inner = panel.inner(body);
+        inner.width = inner.width.saturating_sub(1);
+        frame.render_widget(panel, body);
+        self.viewport = usize::from(inner.height).max(1);
+        let bottom = self.rendered.lines.len().saturating_sub(self.viewport);
+        if self.follow {
+            self.scroll = bottom;
+        } else {
+            self.scroll = self.scroll.min(bottom);
+        }
+        let end = (self.scroll + self.viewport).min(self.rendered.lines.len());
+        let lines = self
+            .rendered
+            .lines
+            .get(self.scroll..end)
+            .unwrap_or_default()
+            .to_vec();
+        frame.render_widget(
+            Paragraph::new(Text::from(lines))
+                .style(base)
+                .scroll((0, self.horizontal)),
+            inner,
+        );
+        let segments = self.transcript.latest() as f64 + 1.0;
+        let lines = self.rendered.lines.len().max(self.viewport) as f64;
+        let position = (self.segment as f64 + self.scroll as f64 / lines) / segments;
+        let visible = self.viewport as f64 / lines / segments;
+        let mut scrollbar = ScrollbarState::new(65_536)
+            .position((position * 65_536.0) as usize)
+            .viewport_content_length((visible * 65_536.0).max(1.0) as usize);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .thumb_style(Style::default().fg(accent))
+                .track_style(border),
+            body,
+            &mut scrollbar,
+        );
+        Ok(())
+    }
+
+    /// Renders the dedicated, in-place Skott metrics line. It replaces any
+    /// previous such line each frame and is the only agent progress shown in
+    /// the Kvist shell. When the session ends it becomes the final stats and
+    /// result.
+    fn render_skott_metrics_line(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        base: Style,
+        accent: Color,
+    ) {
+        let skott = match &self.skott {
+            Some(skott) if skott.is_active() => skott,
+            _ => return,
+        };
+        let status = if skott.result().finished {
+            "final"
+        } else {
+            "live"
+        };
+        let line = format!(
+            " Skott {} | {} | {} ",
+            skott.model_id().unwrap_or("unknown"),
+            status,
+            skott.metrics().summary_line()
+        );
+        frame.render_widget(
+            Paragraph::new(sanitize(&line))
+                .style(base.patch(render::secondary(self.theme)).fg(accent)),
+            area,
+        );
     }
 
     /// Renders the detailed Skott agent view: a live, auto-following feed of

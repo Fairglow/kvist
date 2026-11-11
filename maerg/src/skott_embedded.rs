@@ -49,6 +49,8 @@ pub enum ActivePane {
     Kvist,
     /// The Skott agent view: the detailed, live progress feed.
     Skott,
+    /// Both views side by side (when the terminal is wide enough).
+    Both,
 }
 
 /// Kvist's completion policy for one agent run.
@@ -452,9 +454,21 @@ impl EmbeddedSkott {
 
     /// Handles keyboard events for pane switching.
     ///
-    /// Returns `true` when the event was consumed (a pane switch).
+    /// Returns `true` when the event was consumed (a pane switch). Ctrl+Tab
+    /// toggles between the two views; Ctrl+PageUp / Ctrl+PageDown and
+    /// Alt+Left / Alt+Right select a specific view. Plain PageUp/PageDown,
+    /// Left/Right and Home/End are never consumed here, so the Kvist
+    /// transcript keeps its normal scrolling.
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
+        if control && key.code == KeyCode::Tab {
+            self.active_pane = match self.active_pane {
+                ActivePane::Kvist => ActivePane::Skott,
+                ActivePane::Skott => ActivePane::Both,
+                ActivePane::Both => ActivePane::Kvist,
+            };
+            return true;
+        }
         if control && key.code == KeyCode::PageUp {
             self.active_pane = ActivePane::Kvist;
             return true;

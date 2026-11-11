@@ -266,10 +266,10 @@ fn show(project_dir: &Path, component: &Path, task_id: Option<&str>) -> Result<O
     );
     let evidence = match fs::symlink_metadata(&evidence) {
         Ok(_) => {
-            message.push_str(&format!(
-                "\nRetained human guidance: `{}`",
-                evidence.display()
-            ));
+            // Display the retained human guidance inline instead of referring
+            // to the external attention document.
+            let guidance = bounded_read(&evidence)?;
+            message.push_str(&format!("\n\n## Retained human guidance\n\n{guidance}"));
             Some(evidence)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
@@ -435,8 +435,7 @@ fn options(project: &Path, component: &Path, task: Option<&str>) -> Result<Outpu
     let actions = engine::shortcuts::options(&context, &catalog, &encode(&catalog)?)?;
     let mut output = response(
         format!(
-            "{markdown}\n\nMarkdown: `{}`{}",
-            path.display(),
+            "{markdown}\n\n{}",
             engine::shortcuts::markdown(component, &actions)
         ),
         Some(path),
@@ -512,16 +511,14 @@ fn discuss(project: &Path, component: &Path, task: Option<&str>, message: &str) 
         &markdown,
         previous.as_deref(),
     )?;
-    let latest = conversation
+    // Display the decision inline: show the full discussion document rather
+    // than only the latest answer plus a referral to an external file.
+    let _ = conversation
         .exchanges
         .last()
         .ok_or_else(|| decision_error("missing recorded discussion answer"))?;
     Ok(response(
-        format!(
-            "{}\n\nDiscussion: `{}`\nNo controlled files changed.",
-            latest.answer,
-            path.display()
-        ),
+        format!("{markdown}\n\nNo controlled files changed."),
         Some(path),
     ))
 }
@@ -636,10 +633,12 @@ fn prepare(
     let actions = engine::shortcuts::plan(&context, &plan).map_err(|error| decision_error(
         &format!("Plan retained at `{}` but numbered response publication failed: {error}. Use the exact command: kvist decision {} apply {} --approve {}",
             path.display(), component_argument(component), quote(&plan.id), quote(&plan.approval))))?;
+    // Display the decision inline: read the retained plan Markdown back so the
+    // shell shows the exact staged effects, not a referral to an external file.
+    let decision_text = bounded_read(&path)?;
     Ok(Output {
         message: format!(
-            "Staged a decision plan; no controlled files changed.\nRead the complete changes: `{}`\nUse a numbered approval response below; no hash copying is needed. Approval acknowledges the recorded intent-review findings/exception, not implementation compliance.",
-            path.display(),
+            "Staged a decision plan; no controlled files changed.\n\n{decision_text}\n\nUse a numbered approval response below; no hash copying is needed. Approval acknowledges the recorded intent-review findings/exception, not implementation compliance.",
         ) + &engine::shortcuts::markdown(component, &actions),
         markdown_path: Some(path),
         plan_id: Some(plan.id),

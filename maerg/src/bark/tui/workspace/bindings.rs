@@ -34,6 +34,11 @@ const BINDINGS: &[(&str, &str, Option<&str>)] = &[
     ),
     ("Alt+Left / Right", "Horizontal transcript scroll", None),
     (
+        "Ctrl+Tab",
+        "Switch agent view: Kvist metrics / Skott detail / side by side",
+        Some("view"),
+    ),
+    (
         "Ctrl+C",
         "Cancel owned command or clear idle input; never quit",
         Some("cancel"),

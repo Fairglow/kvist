@@ -1697,11 +1697,21 @@ fn build_editor(
         ]),
     );
 
-    // Left and Right arrow keys inside menu
+    // Left and Right arrow keys inside menu. Right also accepts the grey
+    // history-hint continuation (the whole suggestion) when no menu is open,
+    // matching the fish/zsh autosuggest convention: at the end of the line the
+    // right arrow fills in the dimmed remainder instead of doing nothing.
+    // `HistoryHintComplete` is a no-op while a menu is active or no hint is
+    // shown, so it falls through to the plain cursor move. Ctrl+F still
+    // accepts the whole hint and Alt+Right accepts one hint word.
     keybindings.add_binding(
         KeyModifiers::NONE,
         KeyCode::Right,
-        ReedlineEvent::UntilFound(vec![ReedlineEvent::MenuRight, ReedlineEvent::Right]),
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::MenuRight,
+            ReedlineEvent::HistoryHintComplete,
+            ReedlineEvent::Right,
+        ]),
     );
     keybindings.add_binding(
         KeyModifiers::NONE,

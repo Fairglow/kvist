@@ -106,6 +106,7 @@ pub(super) struct Workspace {
     skott: Option<EmbeddedSkott>,
     skott_continuations: u32,
     skott_result_reported: bool,
+    task_run_prep: Option<crate::task_commands::TaskRunPrep>,
 }
 
 pub(crate) fn available() -> bool {
@@ -305,6 +306,7 @@ impl Workspace {
             skott: None,
             skott_continuations: 0,
             skott_result_reported: false,
+            task_run_prep: None,
         };
         workspace.refresh();
         workspace.append(&format!(
@@ -480,20 +482,55 @@ impl Workspace {
             // for a human decision instead of looping forever). A terminal
             // result is reported to the Kvist view exactly once.
             if skott.result().finished && !self.skott_result_reported {
-                match skott.result().decision() {
+                // For task runs, loop detection (Stalled) is not an accepted
+                // outcome: Kvist pushes back with guidance instead of blocking.
+                // The agent must reach complete, blocked, or decision point.
+                let decision = if self.task_run_prep.is_some()
+                    && matches!(
+                        skott.result().stop_reason,
+                        Some(sav::runtime::StopReason::Stalled)
+                    ) {
+                    Some(ContinuationDecision::Continue)
+                } else {
+                    skott.result().decision()
+                };
+                match decision {
                     Some(ContinuationDecision::Continue)
                         if self.skott_continuations < MAX_SKOTT_CONTINUATIONS =>
                     {
                         self.skott_continuations = self.skott_continuations.saturating_add(1);
                         let attempt = self.skott_continuations;
                         let turns = skott.metrics().turns;
-                        match skott.submit(format!(
-                            "Continue the task. You returned control after {turns} turn(s) \
-                             without finishing and without a blocking reason. Review what \
-                             remains and keep working until the task is complete, you are \
-                             blocked for a concrete reason, or a human decision is required. \
-                             (automatic continuation {attempt}/{MAX_SKOTT_CONTINUATIONS})"
-                        )) {
+                        // For a task run, Kvist records the continuation in the
+                        // attempt journal and hands a task-aware prompt back to
+                        // Skott. The task stays InProgress; Skott keeps working.
+                        let prompt = if let Some(prep) = &self.task_run_prep {
+                            // Kvist-authored guidance: tells the agent what
+                            // happened and that it must reach an accepted
+                            // state (complete, blocked, or decision point).
+                            let stop = format!("{:?}", skott.result().stop_reason);
+                            let guidance = format!(
+                                "Kvist task-run continuation {attempt}/{MAX_SKOTT_CONTINUATIONS}. \
+                                 Task `{}` stopped with stop reason {stop} after {turns} turn(s) \
+                                 without reaching an accepted outcome. Reconcile what you have \
+                                 done, then keep working until the task is complete, you are \
+                                 blocked for a concrete reason, or a human decision is required. \
+                                 Those are the only accepted outcomes.",
+                                prep.task_id
+                            );
+                            prep.push_back(&guidance)
+                                .map_err(|error| io::Error::other(error.to_string()))?;
+                            guidance
+                        } else {
+                            format!(
+                                "Continue the task. You returned control after {turns} turn(s) \
+                                 without finishing and without a blocking reason. Review what \
+                                 remains and keep working until the task is complete, you are \
+                                 blocked for a concrete reason, or a human decision is required. \
+                                 (automatic continuation {attempt}/{MAX_SKOTT_CONTINUATIONS})"
+                            )
+                        };
+                        match skott.submit(prompt) {
                             Ok(()) => {
                                 self.dirty = true;
                                 self.notice = format!(
@@ -511,10 +548,42 @@ impl Workspace {
                         self.skott_result_reported = true;
                         let result = skott.result().clone();
                         let metrics = skott.metrics().clone();
-                        self.report_skott_result(&result, &metrics)?;
+                        // If this was a task run, Kvist performs the task-queue
+                        // teardown and displays only the resulting task
+                        // transition; the generic agent result is not shown.
+                        // Otherwise, show the agent result as before.
+                        if let Some(prep) = &self.task_run_prep {
+                            use sav::runtime::StopReason;
+                            let summary = sav::runtime::RunSummary {
+                                stop_reason: result.stop_reason,
+                                answer: result.answer.clone(),
+                                turns: metrics.turns,
+                                tools_executed: metrics.tools_executed,
+                                cancelled: matches!(
+                                    result.stop_reason,
+                                    Some(StopReason::Cancelled)
+                                ),
+                                exhausted: matches!(result.stop_reason, Some(StopReason::Limit(_))),
+                                budget_exhausted: false,
+                                failure: result.failure.clone(),
+                            };
+                            let message = prep
+                                .complete(&summary, result.answer.clone())
+                                .map_err(|error| io::Error::other(error.to_string()))?;
+                            self.append(&format!("\n\n{message}\n"))?;
+                        } else {
+                            self.report_skott_result(&result, &metrics)?;
+                        }
                     }
                 }
             }
+        }
+        // The final stats and result are now in the Kvist transcript;
+        // drop the session so the metrics line clears and a new agent
+        // session can start.
+        if self.skott_result_reported {
+            self.skott = None;
+            self.dirty = true;
         }
 
         let Some(run) = &mut self.running else {

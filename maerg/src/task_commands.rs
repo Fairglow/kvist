@@ -135,10 +135,10 @@ fn transition_locked(
     Ok(format!("transitioned {task_id} to {}", status_name(target)))
 }
 
-struct TaskContext {
-    project_dir: PathBuf,
-    component_path: PathBuf,
-    component_dir: PathBuf,
+pub(crate) struct TaskContext {
+    pub(crate) project_dir: PathBuf,
+    pub(crate) component_path: PathBuf,
+    pub(crate) component_dir: PathBuf,
 }
 
 fn untracked_durable_artifacts(inspection: &project_state::ProjectInspection) -> Option<String> {
@@ -4723,6 +4723,369 @@ pub fn run_task_with_controls(
         false,
         None,
     )
+}
+
+/// A prepared task run: the task-queue setup is complete (lock held, status
+/// transitioned to InProgress, prompt and context built, attempt journal
+/// entry written) and the agent work is ready to be handed to Skott. Kvist
+/// owns this handle; Skott is unaware of task states.
+pub(crate) struct TaskRunPrep {
+    /// The task context (project, component, directory).
+    pub(crate) context: TaskContext,
+    /// The operation lock held for the duration of the run.
+    pub(crate) lock: TaskLock,
+    /// The task ID being run.
+    pub(crate) task_id: String,
+    /// The attempt ID for this run.
+    pub(crate) attempt_id: String,
+    /// The task kind (Test, Implementation, SecurityAudit, ComplianceReview).
+    pub(crate) task_kind: TaskKind,
+    /// The interpolated prompt to hand to Skott.
+    pub(crate) prompt: String,
+    /// The context files Skott should make available to the agent.
+    pub(crate) context_files: Vec<PathBuf>,
+    /// The read-only mounts Skott should set up.
+    pub(crate) read_only_mounts: Vec<crate::sandbox::ReadOnlyMount>,
+    /// The redactions to apply to agent output.
+    pub(crate) redactions: Vec<String>,
+    /// The attempt journal path.
+    pub(crate) journal: PathBuf,
+    /// The pre-run queue digest.
+    pub(crate) pre_queue_digest: String,
+}
+
+/// Prepares a protected task run: validates the context, loads configuration,
+/// checks approval, acquires the operation lock, transitions the task to
+/// InProgress, builds the prompt and context files, and writes the prepared
+/// attempt journal entry. Returns a [`TaskRunPrep`] handle ready to be handed
+/// to Skott. Kvist owns all task-queue state; Skott is unaware of it.
+pub(crate) fn prepare_task_run(
+    project_dir: &Path,
+    component_path: &Path,
+    task_id: &str,
+    _allow_control: bool,
+) -> Result<TaskRunPrep> {
+    let context = validate_context(project_dir, component_path)?;
+    let config = crate::config::load(project_dir)?;
+    if config.sandbox.is_none() {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: "sandbox configuration is absent".to_owned(),
+        });
+    }
+    if config.test_policy.is_none() {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: "test policy is absent".to_owned(),
+        });
+    }
+    let (approved_runner, policy_identity, secret) = match task_run_approval(project_dir, &config)?
+    {
+        TaskRunApproval::Ready {
+            runner,
+            policy_identity,
+        } => {
+            let (_, secret) = load_authenticated_execution_approval(project_dir, &config)?;
+            (runner, policy_identity, secret)
+        }
+        TaskRunApproval::DescriptorUnavailable {
+            approval,
+            secret,
+            error,
+        } => {
+            fence_pre_spawn_failure(
+                component_path,
+                task_id,
+                project_dir,
+                &config,
+                &approval,
+                &secret,
+                &error,
+            )?;
+            return Err(error);
+        }
+    };
+    let sandbox_config = config
+        .sandbox
+        .as_ref()
+        .ok_or_else(|| KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: "task execution requires a project-local [sandbox] configuration".to_owned(),
+        })?;
+    let approved_backend =
+        crate::sandbox::backend_identity(sandbox_config, project_dir, config.vcs)?;
+    let _sandbox_probe = crate::sandbox::ensure_available(
+        sandbox_config,
+        project_dir,
+        config.vcs,
+        &approved_runner,
+        &approved_backend,
+    )?;
+
+    let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    let lock = TaskLock::for_context(&context, task_id, &started_at)?;
+    lock.revalidate()?;
+    ensure_component_attempts_recovered(&context.component_dir)?;
+    let mut queue = read_queue(&context.component_dir)?;
+    let task_index = queue
+        .tasks
+        .iter()
+        .position(|task| task.id == task_id)
+        .ok_or_else(|| KvistError::TaskQueueUnavailable {
+            path: context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename()),
+            reason: format!("task `{task_id}` not found in the queue"),
+        })?;
+    let task = &queue.tasks[task_index];
+    if task.status != TaskStatus::InProgress {
+        validate_transition(task, &queue.tasks, TaskStatus::InProgress, None)?;
+        let transition_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+        let _ = transition_locked(
+            &context,
+            &lock,
+            task_id,
+            TaskStatus::InProgress,
+            None,
+            &transition_at,
+            None,
+        )?;
+        queue = read_queue(&context.component_dir)?;
+    }
+    let task = &queue.tasks[task_index];
+    if !is_runnable_task(task, &queue.tasks) {
+        return Err(journal_error(
+            &context.component_dir.join("TODOS.yaml"),
+            &format!("task `{task_id}` is not ready for execution"),
+        ));
+    }
+    let (_agent_profile, _role) = match task.kind {
+        TaskKind::Test | TaskKind::Implementation => {
+            (&config.agent.developer, crate::config::Role::Developer)
+        }
+        TaskKind::SecurityAudit => (
+            &config.agent.security_reviewer,
+            crate::config::Role::SecurityReviewer,
+        ),
+        TaskKind::ComplianceReview => (&config.agent.architect, crate::config::Role::Architect),
+    };
+    let agent_attempt_path = attempt_path(&context.component_dir, task_id)?;
+    let attempt_id = next_attempt_id(&agent_attempt_path)?;
+    let write_scope = approved_write_scope(project_dir, &context, &config)?;
+    let pre_queue_digest = current_queue_digest(&context.component_dir)?;
+    let mut prepared = PreparedAttempt {
+        schema_version: ATTEMPT_SCHEMA_VERSION,
+        attempt_id: attempt_id.clone(),
+        task_id: task_id.to_owned(),
+        phase: "prepared".to_owned(),
+        pre_status: status_name(task.status).to_owned(),
+        pre_queue_digest: pre_queue_digest.clone(),
+        intended_post_queue_digest: pre_queue_digest.clone(),
+        policy_identity,
+        runner_identity: approved_runner.digest.clone(),
+        approved_write_scope: write_scope.clone(),
+        timestamp: started_at.clone(),
+        operation_lock_digest: lock.contents_digest(),
+        authentication_tag: String::new(),
+    };
+    prepared.authentication_tag = prepared_attempt_tag(&secret[..], &prepared)?;
+    append_json_attempt(
+        &agent_attempt_path,
+        &prepared,
+        "append prepared run_task attempt",
+    )?;
+    let mut context_files = vec![
+        PathBuf::from("/workspace/component/REQUIREMENTS.md"),
+        PathBuf::from("/workspace/component/CONTRACT.md"),
+        PathBuf::from("/workspace/component/DESIGN.md"),
+        PathBuf::from("/workspace/component/TODOS.yaml"),
+        PathBuf::from("/workspace/component/IMPL.md"),
+        PathBuf::from("/workspace/context/ROOT_CONTRACT.md"),
+    ];
+    let mut read_only_mounts = vec![crate::sandbox::ReadOnlyMount::file(
+        project_dir.join("ROOT_CONTRACT.md"),
+        "/workspace/context/ROOT_CONTRACT.md".to_owned(),
+    )];
+    if queue.component.parent_contract.is_some() {
+        let component_root = project_dir.join(&config.component_root);
+        let (parent_component_dir, _) =
+            discovery::find_parent_component_dir(&component_root, &context.component_path)?;
+        context_files.push(PathBuf::from("/workspace/context/PARENT_CONTRACT.md"));
+        read_only_mounts.push(crate::sandbox::ReadOnlyMount::file(
+            parent_component_dir.join(ComponentArtifact::Contract.filename()),
+            "/workspace/context/PARENT_CONTRACT.md".to_owned(),
+        ));
+    }
+    let lang = detect_language(&context.component_dir);
+    let prompt = load_and_interpolate_template(&context.component_dir, lang, task, &write_scope)?;
+    let redactions = evidence_redactions(&config);
+    Ok(TaskRunPrep {
+        context,
+        lock,
+        task_id: task_id.to_owned(),
+        attempt_id,
+        task_kind: task.kind,
+        prompt,
+        context_files,
+        read_only_mounts,
+        redactions,
+        journal: agent_attempt_path,
+        pre_queue_digest,
+    })
+}
+
+impl TaskRunPrep {
+    /// Interprets a Skott [`RunSummary`] and performs the task-queue teardown:
+    /// records the execution in the attempt journal and transitions the task
+    /// to its terminal state. Returns the result message for display.
+    ///
+    /// Allowed outcomes:
+    /// - `Completed` (with an answer) -> task completes.
+    /// - A surfaced decision -> task transitions to awaiting-decision.
+    /// - `GuidanceRequired` / `Stalled` / `Limit` / `Cancelled` / `Failed`
+    ///   -> task blocks with the failure reason.
+    /// - `NoWork` -> not an allowed outcome; the caller should push back to
+    ///   Skott with guidance via [`TaskRunPrep::push_back`].
+    pub fn complete(
+        &self,
+        summary: &sav::runtime::RunSummary,
+        answer: Option<String>,
+    ) -> Result<String> {
+        use sav::runtime::StopReason;
+        let at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+        let success = summary.success() && answer.is_some();
+        let stdout = answer.unwrap_or_default();
+        let stderr = summary.failure.clone().unwrap_or_default();
+        let surfaced_decision = matches!(summary.stop_reason, Some(StopReason::GuidanceRequired));
+        append_agent_execution(
+            &self.journal,
+            AgentExecutionRecord {
+                schema_version: ATTEMPT_SCHEMA_VERSION,
+                attempt_id: &self.attempt_id,
+                phase: "agent-execution",
+                task_id: &self.task_id,
+                timestamp: &at,
+                success,
+                timed_out: false,
+                output_limit_exceeded: false,
+                stdout: &stdout,
+                stderr: &stderr,
+                cancelled: summary.cancelled,
+                surfaced_decision,
+                model_sequence: None,
+                log_path: None,
+            },
+        )
+        .map_err(|recording| {
+            unresolved_run_error(
+                &self.context,
+                &self.task_id,
+                &self.attempt_id,
+                &stderr,
+                &recording,
+            )
+        })?;
+        if surfaced_decision {
+            let evidence_dir = self
+                .context
+                .component_dir
+                .join(".kvist/authoring/proposals");
+            let summary_path = attention::decision(
+                &self.context,
+                &self.task_id,
+                &self.attempt_id,
+                &stdout,
+                &evidence_dir,
+                &self.redactions,
+                &self.lock,
+            )?;
+            let reason = format!(
+                "one or more impactful, uncovered decisions surfaced and require a human decision before implementation continues. Human-readable summary: {}.",
+                summary_path.display()
+            );
+            transition_locked(
+                &self.context,
+                &self.lock,
+                &self.task_id,
+                TaskStatus::AwaitingDecision,
+                Some(&reason),
+                &at,
+                Some(&self.attempt_id),
+            )?;
+            let component = decisions::component_argument(&self.context.component_path);
+            Ok(format!(
+                "# Decision required\n\ntask `{}` paused and transitioned to awaiting-decision.\n\nHuman-readable summary: {}\n\nNext Step: use `kvist decision {component} show {}` to discuss and stage the complete resolution.",
+                self.task_id,
+                summary_path.display(),
+                self.task_id,
+            ))
+        } else if success {
+            transition_locked(
+                &self.context,
+                &self.lock,
+                &self.task_id,
+                TaskStatus::Completed,
+                None,
+                &at,
+                Some(&self.attempt_id),
+            )?;
+            Ok(format!(
+                "Task `{}` completed. Answer: {}",
+                self.task_id,
+                stdout.chars().take(500).collect::<String>()
+            ))
+        } else {
+            let reason = format!(
+                "agent run ended without an allowed outcome (stop: {:?}, failure: {})",
+                summary.stop_reason,
+                summary.failure.as_deref().unwrap_or("none"),
+            );
+            transition_locked(
+                &self.context,
+                &self.lock,
+                &self.task_id,
+                TaskStatus::Blocked,
+                Some(&reason),
+                &at,
+                Some(&self.attempt_id),
+            )?;
+            Ok(format!("Task `{}` blocked: {}", self.task_id, reason))
+        }
+    }
+
+    /// Records a continuation in the attempt journal without transitioning the
+    /// task. The task stays InProgress; Skott will be re-prompted with
+    /// Kvist-authored guidance.
+    pub fn push_back(&self, guidance: &str) -> Result<()> {
+        let at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+        append_agent_execution(
+            &self.journal,
+            AgentExecutionRecord {
+                schema_version: ATTEMPT_SCHEMA_VERSION,
+                attempt_id: &self.attempt_id,
+                phase: "continuation",
+                task_id: &self.task_id,
+                timestamp: &at,
+                success: false,
+                timed_out: false,
+                output_limit_exceeded: false,
+                stdout: "",
+                stderr: guidance,
+                cancelled: false,
+                surfaced_decision: false,
+                model_sequence: None,
+                log_path: None,
+            },
+        )
+        .map_err(|recording| {
+            unresolved_run_error(
+                &self.context,
+                &self.task_id,
+                &self.attempt_id,
+                guidance,
+                &recording,
+            )
+        })?;
+        Ok(())
+    }
 }
 
 fn run_task_under_lock(
