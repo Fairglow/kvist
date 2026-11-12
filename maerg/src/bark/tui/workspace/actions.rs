@@ -340,10 +340,13 @@ impl Workspace {
                 error.describe()
             ))
         })?;
+        // Use Kvist's selected model, falling back to Skott's default.
+        let kvist_model_id = &self.status.default_model;
         let model = config
             .models
             .iter()
-            .find(|model| model.is_default)
+            .find(|model| model.id == *kvist_model_id)
+            .or_else(|| config.models.iter().find(|model| model.is_default))
             .or_else(|| config.models.first())
             .ok_or_else(|| {
                 io::Error::other(

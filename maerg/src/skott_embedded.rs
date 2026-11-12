@@ -37,6 +37,7 @@ use skott::{
     start_session, system_prompt,
     toolchain::HostProbe,
     tools::ToolRegistry,
+    tui::app::App as SkottApp,
 };
 
 use crate::{KvistError, Result};
@@ -243,6 +244,8 @@ impl SkottResult {
     }
 }
 
+
+
 /// Renders one Skott event as a bounded, human-readable progress line.
 fn describe_event(event: &Event) -> String {
     match event {
@@ -310,15 +313,19 @@ fn skott_error(error: skott::Error) -> KvistError {
 /// Embedded Skott session within Kvist.
 ///
 /// Owns the Skott session lifecycle (worker thread, event channel, and prompt
-/// sender) and the Kvist-side projections of its progress: live metrics, a
-/// bounded detailed event log, and the reconstructed result. Kvist pumps the
-/// session on its UI thread and renders either the detailed Skott view or the
-/// compact Kvist view.
+/// sender) and the Kvist-side projections of its progress: live metrics, the
+/// Skott App state (for rich rendering), a plain-text event log (for tests and
+/// the compact view), and the reconstructed result. Kvist pumps the session on
+/// its UI thread and renders either the detailed Skott view or the compact
+/// Kvist view.
 pub struct EmbeddedSkott {
     handle: Option<SessionHandle>,
     receiver: Option<mpsc::Receiver<Event>>,
     prompts: Option<PromptSender>,
     metrics: SkottMetrics,
+    /// Skott's own App state, used for rich rendering of the detailed view.
+    pub app: SkottApp,
+    /// Plain-text event log, retained for tests and the compact view.
     log: SkottEventLog,
     result: SkottResult,
     active_pane: ActivePane,
@@ -335,11 +342,13 @@ impl Default for EmbeddedSkott {
 impl EmbeddedSkott {
     /// Creates an idle embedded Skott with no active session.
     pub fn new() -> Self {
+        let app = SkottApp::new(&[], None, sav::ReasoningEffort::Medium, None, 80, 24, skott::tui::Theme::dark());
         Self {
             handle: None,
             receiver: None,
             prompts: None,
             metrics: SkottMetrics::default(),
+            app,
             log: SkottEventLog::default(),
             result: SkottResult::default(),
             active_pane: ActivePane::Kvist,
@@ -397,11 +406,21 @@ impl EmbeddedSkott {
             budgets.limits,
         )
         .map_err(skott_error)?;
+        let app = SkottApp::new(
+            &[model.id.clone()],
+            Some(&model.id),
+            effort,
+            None,
+            80,
+            24,
+            skott::tui::Theme::dark(),
+        );
         Ok(Self {
             handle: Some(handle),
             receiver: Some(receiver),
             prompts: Some(prompts),
             metrics: SkottMetrics::default(),
+            app,
             log: SkottEventLog::default(),
             result: SkottResult::default(),
             active_pane: ActivePane::Skott,
@@ -434,31 +453,19 @@ impl EmbeddedSkott {
         changed
     }
 
-    /// Applies one event to the metrics, detailed log, and result.
-    ///
-    /// Mirrors the stand-alone Skott TUI's `push_event`: reasoning and answer
-    /// text are buffered through the shared [`BlockBuffer`] and flush only
-    /// complete blocks; every other event is a state change that flushes the
-    /// incomplete remainder first, then renders its own line.
+    /// Applies one event to the metrics, Skott App state, plain-text log, and
+    /// result. Uses Skott's own `push_event` for rich rendering (reasoning
+    /// blocks, markdown, tool decorations) and maintains a plain-text log for
+    /// tests and the compact view.
     fn observe(&mut self, event: Event) {
         match &event {
             Event::Reasoning(text) => {
-                // Buffer reasoning; completed blocks flush, the remainder
-                // stays pending until a non-reasoning event arrives.
                 self.log.push_reasoning(text);
-                return;
             }
             Event::Text(text) => {
-                // Reasoning generated before this answer text is temporally
-                // older, so flush any pending reasoning first to keep the
-                // transcript in generation order.
                 self.log.flush_reasoning();
                 self.log.push_text(text);
-                return;
             }
-            // Every other event is a state change: flush any buffered
-            // reasoning and answer text so nothing is lost, then render the
-            // event's own line.
             _ => {
                 self.log.flush_pending();
             }
@@ -499,12 +506,10 @@ impl EmbeddedSkott {
             // on every other loop exit. Both are terminal, so each sets the
             // stop reason; `Finished` is an unambiguous completion.
             Event::Finished { message } => {
-                // Render the final result with markdown support, matching
-                // standalone Skott's push_markdown_block("✓ {message}").
-                self.log.push(format!("✓ {}", message));
                 self.result.answer = Some(message.clone());
                 self.result.stop_reason = Some(StopReason::Completed);
                 self.result.finished = true;
+                self.log.push(format!("✓ {}", message));
                 return;
             }
             Event::PromptEnd { reason, .. } => {
@@ -518,9 +523,10 @@ impl EmbeddedSkott {
             }
             _ => {}
         }
-        // Render the event's own progress line (Reasoning and Text are
-        // buffered above and already flushed their completed blocks).
+        // Render the event's own progress line in the plain-text log.
         self.log.push(describe_event(&event));
+        // Let Skott's own event handling do the rich rendering.
+        self.app.push_event(event);
     }
 
     /// Submits a prompt to the running session.
@@ -535,6 +541,9 @@ impl EmbeddedSkott {
                 .ok_or_else(|| KvistError::SkottCommunicationFailed {
                     reason: "no active Skott session".into(),
                 })?;
+        // Show the prompt in Skott's transcript.
+        self.app.push_event(Event::Note("You:".to_string()));
+        self.app.push_event(Event::Text(prompt.clone()));
         self.result = SkottResult::default();
         prompts
             .send(prompt)
@@ -613,6 +622,12 @@ impl EmbeddedSkott {
     /// The detailed event log.
     pub fn event_log(&self) -> &SkottEventLog {
         &self.log
+    }
+
+    /// The Skott App state, for rendering the detailed view with Skott's
+    /// own rich formatting (reasoning blocks, tool decorations, markdown).
+    pub fn app(&self) -> &SkottApp {
+        &self.app
     }
 
     /// The reconstructed session result.

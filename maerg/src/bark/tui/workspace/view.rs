@@ -100,14 +100,14 @@ impl Workspace {
         let side_by_side = pane == ActivePane::Both && body.width >= 83;
         match (skott.is_some(), pane, side_by_side) {
             (true, ActivePane::Skott, _) => {
-                self.render_skott_body(frame, body, base, border)?;
+                self.render_skott_body(frame, body, base, border, accent)?;
             }
             (true, ActivePane::Both, true) => {
                 let inner =
                     Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                         .split(body);
                 self.render_kvist_body(frame, inner[0], base, border, accent)?;
-                self.render_skott_body(frame, inner[1], base, border)?;
+                self.render_skott_body(frame, inner[1], base, border, accent)?;
             }
             _ => self.render_kvist_body(frame, body, base, border, accent)?,
         }
@@ -395,19 +395,21 @@ impl Workspace {
         );
     }
 
-    /// Renders the detailed Skott agent view: a live, auto-following feed of
-    /// every session event, headed by the selected model and live metrics.
+    /// Renders the detailed Skott agent view using Skott's own App state and
+    /// rendering, so the Kvist view matches the standalone Skott TUI exactly.
     fn render_skott_body(
         &self,
         frame: &mut Frame<'_>,
         body: Rect,
         base: Style,
         border: Style,
+        accent: Color,
     ) -> io::Result<()> {
         let skott = self
             .skott
             .as_ref()
             .ok_or_else(|| io::Error::other("Skott view requested with no session"))?;
+        let app = &skott.app;
         let metrics = skott.metrics();
         let title = format!(
             " Skott agent | {} | {} ",
@@ -422,47 +424,52 @@ impl Workspace {
         let inner = panel.inner(body);
         frame.render_widget(panel, body);
 
-        // Render the event log with markdown support for reasoning and text
-        // content, matching standalone Skott's use of Blad for rich output.
-        let log_lines = skott.event_log().lines();
-        let mut rendered: Vec<Line> = Vec::new();
-        for line in log_lines {
-            // Detect lines that are likely markdown content (reasoning, text,
-            // finished messages) and render them with Blad. Simple status lines
-            // (tool calls, results, etc.) remain plain text.
-            if line.starts_with("tool call:")
-                || line.starts_with("tool result:")
-                || line.starts_with("tool failure:")
-                || line.starts_with("turn started")
-                || line.starts_with("attempt ")
-                || line.starts_with("control:")
-                || line.starts_with("note:")
-                || line.starts_with("failed:")
-                || line.starts_with("prompt ended")
-            {
-                rendered.push(Line::from(Span::raw(sanitize(line))));
-            } else {
-                // Render as markdown through Blad for rich formatting
-                match render::markdown(line, inner.width, self.theme) {
-                    Ok(md_text) => {
-                        rendered.extend(md_text.lines);
-                    }
-                    Err(_) => {
-                        // Fall back to plain text if rendering fails
-                        rendered.push(Line::from(Span::raw(sanitize(line))));
-                    }
+        // Use Skott's own rendering: extend each line to full width with its
+        // background, then render with auto-follow scroll.
+        let inner_width = usize::from(inner.width.max(1));
+        let lines: Vec<Line> = app
+            .lines
+            .iter()
+            .map(|screen_line| {
+                let mut line = screen_line.line.clone();
+                line.style = line.style.patch(Style::default().bg(screen_line.bg));
+                let current = line.width();
+                if current < inner_width {
+                    line.spans.push(Span::styled(
+                        " ".repeat(inner_width - current),
+                        Style::default().bg(screen_line.bg),
+                    ));
                 }
-            }
-        }
+                line
+            })
+            .collect();
 
         let height = usize::from(inner.height).max(1);
-        let scroll = u16::try_from(rendered.len().saturating_sub(height)).unwrap_or(u16::MAX);
+        let total_lines = lines.len().max(height);
+        let scroll = u16::try_from(total_lines.saturating_sub(height)).unwrap_or(u16::MAX);
         frame.render_widget(
-            Paragraph::new(Text::from(rendered))
+            Paragraph::new(Text::from(lines))
                 .style(base)
                 .scroll((scroll, 0)),
             inner,
         );
+
+        // Add scrollbar, matching the Kvist view.
+        let position = scroll as f64 / total_lines.saturating_sub(height) as f64;
+        let visible = height as f64 / total_lines as f64;
+        let mut scrollbar = ScrollbarState::new(65_536)
+            .position((position * 65_536.0) as usize)
+            .viewport_content_length((visible * 65_536.0).max(1.0) as usize);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .thumb_style(Style::default().fg(accent))
+                .track_style(border),
+            body,
+            &mut scrollbar,
+        );
+
         Ok(())
     }
 }
