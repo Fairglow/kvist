@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+mod blocks;
 mod cli;
 mod host;
 mod logging;
@@ -38,6 +39,7 @@ pub mod tools;
 pub mod transcript_writer;
 pub mod tui;
 
+pub use blocks::BlockBuffer;
 pub use cli::{Cli, parse_effort, resolve_config_path};
 pub use config::{Config, DEFAULT_WRITE_ROOT, Model, ModelProvider, SandboxPaths, ToolPolicy};
 pub use context::{

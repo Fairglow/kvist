@@ -29,7 +29,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use sav::ReasoningEffort;
 
 use skott::{
-    PromptSender, SessionHandle,
+    BlockBuffer, PromptSender, SessionHandle,
     config::{Config, Model},
     context::ContextManager,
     executor::SandboxExecutor,
@@ -129,14 +129,21 @@ impl SkottMetrics {
 }
 
 /// A bounded, human-readable log of Skott events for the detailed view.
+///
+/// Reasoning and answer text are buffered through the same [`BlockBuffer`] the
+/// stand-alone Skott TUI uses, so both variants accumulate streamed fragments
+/// and flush only complete blocks (paragraphs or closed fences). The
+/// incomplete remainder stays buffered until a non-streaming event — a real
+/// state change — flushes it, so a pump that observes only reasoning never
+/// fragments it into word-by-word lines.
 #[derive(Debug, Clone, Default)]
 pub struct SkottEventLog {
     lines: Vec<String>,
     /// Buffered reasoning text, accumulated until a non-reasoning event or
-    /// session end triggers a flush. This matches standalone Skott's behavior
-    /// of rendering reasoning as complete paragraphs rather than fragmented
-    /// word-by-word output.
-    pending_reasoning: String,
+    /// session end triggers a flush of the incomplete remainder.
+    pending_reasoning: BlockBuffer,
+    /// Buffered answer text, accumulated the same way as reasoning.
+    pending_text: BlockBuffer,
 }
 
 /// The maximum retained detailed-view lines; older lines are dropped.
@@ -165,17 +172,54 @@ impl SkottEventLog {
         self.lines.is_empty()
     }
 
+    /// Appends a streamed reasoning fragment, flushing any completed blocks
+    /// (paragraphs or closed fences) immediately. The incomplete remainder
+    /// stays buffered so a pump that observes only reasoning never fragments
+    /// it into word-by-word lines.
+    pub fn push_reasoning(&mut self, text: &str) {
+        self.pending_reasoning.push(text);
+        for block in self.pending_reasoning.flush_completed() {
+            self.push(block);
+        }
+    }
+
+    /// Appends a streamed answer-text fragment, flushing any completed blocks
+    /// immediately. The incomplete remainder stays buffered until a
+    /// non-streaming event flushes it.
+    pub fn push_text(&mut self, text: &str) {
+        self.pending_text.push(text);
+        for block in self.pending_text.flush_completed() {
+            self.push(block);
+        }
+    }
+
     /// Flushes any buffered reasoning text as a single paragraph.
     /// Call this before rendering or when a non-reasoning event arrives.
     pub fn flush_reasoning(&mut self) {
-        if !self.pending_reasoning.is_empty() {
-            let text = std::mem::take(&mut self.pending_reasoning);
-            // Remove leading/trailing whitespace and newlines
-            let trimmed = text.trim();
+        if let Some(block) = self.pending_reasoning.flush_all() {
+            let trimmed = block.trim();
             if !trimmed.is_empty() {
                 self.push(trimmed.to_owned());
             }
         }
+    }
+
+    /// Flushes any buffered answer text as a single paragraph.
+    pub fn flush_text(&mut self) {
+        if let Some(block) = self.pending_text.flush_all() {
+            let trimmed = block.trim();
+            if !trimmed.is_empty() {
+                self.push(trimmed.to_owned());
+            }
+        }
+    }
+
+    /// Flushes both buffered reasoning and answer text. Called on any
+    /// non-streaming event (a real state change) so nothing is lost, matching
+    /// the stand-alone Skott TUI's `flush_pending`.
+    pub fn flush_pending(&mut self) {
+        self.flush_reasoning();
+        self.flush_text();
     }
 }
 
@@ -368,6 +412,13 @@ impl EmbeddedSkott {
 
     /// Drains pending Skott events, updating metrics, the detailed log, and the
     /// result. Returns `true` when at least one event was observed.
+    ///
+    /// The pump never flushes buffered reasoning or answer text on its own: a
+    /// pump that observes only streaming fragments must not fragment them into
+    /// word-by-word lines. Flushing happens per event in [`observe`], exactly
+    /// as the stand-alone Skott TUI does — completed blocks flush as they form,
+    /// and the incomplete remainder flushes only on a non-streaming event (a
+    /// real state change).
     pub fn pump(&mut self) -> bool {
         let Some(receiver) = &self.receiver else {
             return false;
@@ -380,30 +431,44 @@ impl EmbeddedSkott {
             self.observe(event);
             changed = true;
         }
-        // Flush any buffered reasoning so the UI can render it
-        if changed {
-            self.log.flush_reasoning();
-        }
         changed
     }
 
     /// Applies one event to the metrics, detailed log, and result.
+    ///
+    /// Mirrors the stand-alone Skott TUI's `push_event`: reasoning and answer
+    /// text are buffered through the shared [`BlockBuffer`] and flush only
+    /// complete blocks; every other event is a state change that flushes the
+    /// incomplete remainder first, then renders its own line.
     fn observe(&mut self, event: Event) {
         match &event {
-            Event::TurnStart { .. } => {
-                // Flush any buffered reasoning before starting a new turn
+            Event::Reasoning(text) => {
+                // Buffer reasoning; completed blocks flush, the remainder
+                // stays pending until a non-reasoning event arrives.
+                self.log.push_reasoning(text);
+                return;
+            }
+            Event::Text(text) => {
+                // Reasoning generated before this answer text is temporally
+                // older, so flush any pending reasoning first to keep the
+                // transcript in generation order.
                 self.log.flush_reasoning();
+                self.log.push_text(text);
+                return;
+            }
+            // Every other event is a state change: flush any buffered
+            // reasoning and answer text so nothing is lost, then render the
+            // event's own line.
+            _ => {
+                self.log.flush_pending();
+            }
+        }
+        match &event {
+            Event::TurnStart { .. } => {
                 self.metrics.turns = self.metrics.turns.saturating_add(1);
             }
             Event::ToolCall { .. } => {
-                self.log.flush_reasoning();
                 self.metrics.tools_executed = self.metrics.tools_executed.saturating_add(1);
-            }
-            Event::ToolResult { .. } => {
-                self.log.flush_reasoning();
-            }
-            Event::ToolFailure { .. } => {
-                self.log.flush_reasoning();
             }
             Event::Progress {
                 input_tokens,
@@ -429,46 +494,32 @@ impl EmbeddedSkott {
                 // Progress is shown in the header metrics, not the event log.
                 return;
             }
-            Event::Text(text) => {
-                // Flush reasoning before answer text, matching Skott's order
-                self.log.flush_reasoning();
-                // Answer text goes through markdown rendering in the view
-                self.log.push(text.clone());
-            }
             // `Finished` and `PromptEnd` are mutually exclusive: the runtime
             // emits `Finished` when a run ends with an answer and `PromptEnd`
             // on every other loop exit. Both are terminal, so each sets the
             // stop reason; `Finished` is an unambiguous completion.
             Event::Finished { message } => {
-                self.log.flush_reasoning();
                 // Render the final result with markdown support, matching
                 // standalone Skott's push_markdown_block("✓ {message}").
                 self.log.push(format!("✓ {}", message));
                 self.result.answer = Some(message.clone());
                 self.result.stop_reason = Some(StopReason::Completed);
                 self.result.finished = true;
+                return;
             }
             Event::PromptEnd { reason, .. } => {
-                self.log.flush_reasoning();
                 self.result.stop_reason = Some(*reason);
                 self.result.finished = true;
             }
             Event::Failed(message) => {
-                self.log.flush_reasoning();
                 self.result.failure = Some(message.clone());
                 self.result.stop_reason = Some(StopReason::Failed);
                 self.result.finished = true;
             }
-            Event::Reasoning(text) => {
-                // Buffer reasoning text; it will be flushed as a complete
-                // paragraph when the next non-reasoning event arrives.
-                self.log.pending_reasoning.push_str(text);
-                return;
-            }
-            _ => {
-                self.log.flush_reasoning();
-            }
+            _ => {}
         }
+        // Render the event's own progress line (Reasoning and Text are
+        // buffered above and already flushed their completed blocks).
         self.log.push(describe_event(&event));
     }
 
@@ -935,10 +986,11 @@ mod tests {
     #[test]
     fn reasoning_is_buffered_and_flushed_as_paragraph() {
         let mut log = SkottEventLog::default();
-        // Simulate fragmented reasoning events
-        log.pending_reasoning.push_str("This is ");
-        log.pending_reasoning.push_str("a test of ");
-        log.pending_reasoning.push_str("reasoning buffering.");
+        // Simulate fragmented reasoning events; none carries a blank line, so
+        // nothing completes a block and the fragments stay buffered.
+        log.push_reasoning("This is ");
+        log.push_reasoning("a test of ");
+        log.push_reasoning("reasoning buffering.");
         // Flush when a non-reasoning event arrives
         log.flush_reasoning();
         // Should be one line, not three fragmented lines
@@ -952,15 +1004,68 @@ mod tests {
     #[test]
     fn reasoning_buffer_survives_multiple_fragments() {
         let mut log = SkottEventLog::default();
-        log.pending_reasoning.push_str("First part.");
-        log.pending_reasoning.push_str(" Second part.");
-        log.pending_reasoning.push_str(" Third part.");
+        log.push_reasoning("First part.");
+        log.push_reasoning(" Second part.");
+        log.push_reasoning(" Third part.");
         log.flush_reasoning();
         assert_eq!(log.lines().len(), 1);
         assert_eq!(
             log.lines()[0],
             "First part. Second part. Third part."
         );
+    }
+
+    #[test]
+    fn reasoning_fragments_across_pumps_stay_buffered_until_a_state_change() {
+        // Regression: the pump used to flush reasoning after every cycle, so a
+        // model that streams a sentence as fragments produced one short line
+        // per pump, separated by blank lines. A pump that observes only
+        // reasoning must not end the buffering.
+        let mut log = SkottEventLog::default();
+        log.push_reasoning("The model ");
+        // A pump that sees no non-reasoning event must not flush.
+        assert!(log.lines().is_empty());
+        log.push_reasoning("is ");
+        assert!(log.lines().is_empty());
+        log.push_reasoning("thinking ");
+        assert!(log.lines().is_empty());
+        log.push_reasoning("about the task.");
+        assert!(log.lines().is_empty());
+        // A state change (e.g. a tool call) flushes the whole sentence as one
+        // line.
+        log.flush_pending();
+        assert_eq!(log.lines().len(), 1);
+        assert_eq!(log.lines()[0], "The model is thinking about the task.");
+    }
+
+    #[test]
+    fn reasoning_with_a_blank_line_flushes_the_complete_paragraph_immediately() {
+        // A paragraph terminated by a blank line is complete and flushes as
+        // soon as it forms, without waiting for a state change — matching the
+        // stand-alone Skott TUI.
+        let mut log = SkottEventLog::default();
+        log.push_reasoning("First paragraph.\n\n");
+        assert_eq!(log.lines().len(), 1);
+        assert_eq!(log.lines()[0].trim(), "First paragraph.");
+        // The second paragraph is still pending.
+        log.push_reasoning("Second paragraph.");
+        assert_eq!(log.lines().len(), 1);
+        log.flush_pending();
+        assert_eq!(log.lines().len(), 2);
+        assert_eq!(log.lines()[1].trim(), "Second paragraph.");
+    }
+
+    #[test]
+    fn answer_text_is_buffered_like_reasoning() {
+        // Answer text must not fragment one line per token either.
+        let mut log = SkottEventLog::default();
+        log.push_text("The answer ");
+        log.push_text("is ");
+        log.push_text("forty-two.");
+        assert!(log.lines().is_empty());
+        log.flush_pending();
+        assert_eq!(log.lines().len(), 1);
+        assert_eq!(log.lines()[0], "The answer is forty-two.");
     }
 
     #[test]

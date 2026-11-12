@@ -11,6 +11,7 @@ use ratatui::text::{Line, Span};
 use sav::ReasoningEffort;
 use tui_textarea::TextArea;
 
+use crate::blocks::BlockBuffer;
 use crate::error::Result;
 use crate::history::{self, SessionEntry};
 use crate::markdown::{MarkdownRenderer, split_cell_chunks};
@@ -294,10 +295,10 @@ pub struct App {
     pending_prompt: Option<String>,
     /// Streamed answer text not yet flushed to the transcript (incomplete
     /// paragraphs); flushed at paragraph boundaries and on any non-text event.
-    pending_text: String,
+    pending_text: BlockBuffer,
     /// Streamed reasoning text not yet flushed to the transcript, kept
     /// separately from the answer and tagged as reasoning on flush.
-    pending_reasoning: String,
+    pending_reasoning: BlockBuffer,
     /// The resolved configuration path, shown in the help overlay.
     pub config_path: Option<PathBuf>,
     /// Latest stats, when the loop has reported any.
@@ -378,8 +379,8 @@ impl App {
             width,
             height,
             pending_prompt: None,
-            pending_text: String::new(),
-            pending_reasoning: String::new(),
+            pending_text: BlockBuffer::new(),
+            pending_reasoning: BlockBuffer::new(),
             config_path,
             stats: None,
             last_growth: None,
@@ -596,8 +597,7 @@ impl App {
                 // older, so flush any pending reasoning first to keep the
                 // transcript in generation order.
                 self.flush_pending_reasoning();
-                let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-                self.pending_text.push_str(&normalized);
+                self.pending_text.push(&text);
                 self.flush_paragraphs();
             }
             Event::ToolCall { description, .. } => {
@@ -723,18 +723,9 @@ impl App {
     /// blank line, a fenced block ends at its matching closer, and blank lines
     /// inside a fence are code, never a boundary.
     fn stream_reasoning(&mut self, text: &str) {
-        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-        self.pending_reasoning.push_str(&normalized);
-        self.flush_reasoning_paragraphs();
-    }
-
-    /// Flushes every completed reasoning block in the pending buffer.
-    fn flush_reasoning_paragraphs(&mut self) {
-        while let Some(end) = next_block_end(&self.pending_reasoning) {
-            let block = self.pending_reasoning[..end].to_owned();
-            let tail = self.pending_reasoning[end..].to_owned();
+        self.pending_reasoning.push(text);
+        for block in self.pending_reasoning.flush_completed() {
             self.push_reasoning_block(block);
-            self.pending_reasoning = tail;
         }
     }
 
@@ -742,8 +733,7 @@ impl App {
     /// incomplete paragraph or an unclosed fence) as Markdown so it still
     /// reads with its structure.
     fn flush_pending_reasoning(&mut self) {
-        if !self.pending_reasoning.is_empty() {
-            let block = std::mem::take(&mut self.pending_reasoning);
+        if let Some(block) = self.pending_reasoning.flush_all() {
             self.push_reasoning_block(block);
         }
     }
@@ -1423,8 +1413,7 @@ impl App {
     /// (an incomplete paragraph or an unclosed fence) is rendered as Markdown so
     /// a trailing fragment still reads horizontally.
     fn flush_pending_text(&mut self) {
-        if !self.pending_text.is_empty() {
-            let block = std::mem::take(&mut self.pending_text);
+        if let Some(block) = self.pending_text.flush_all() {
             self.push_markdown_block(block);
         }
     }
@@ -1436,11 +1425,8 @@ impl App {
     /// rather than one short row per token. Fences are matched so a code block
     /// is never split across flushes even when it contains blank lines.
     fn flush_paragraphs(&mut self) {
-        while let Some(end) = next_block_end(&self.pending_text) {
-            let block = self.pending_text[..end].to_owned();
-            let tail = self.pending_text[end..].to_owned();
+        for block in self.pending_text.flush_completed() {
             self.push_markdown_block(block);
-            self.pending_text = tail;
         }
     }
 
@@ -2446,72 +2432,6 @@ pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-/// Returns the byte length of the next complete Markdown block in `pending`, or
-/// `None` when the pending buffer holds no *closed* block yet (only an open
-/// paragraph without a blank line, or an unmatched code fence). The caller
-/// removes that prefix before flushing the next block.
-///
-/// A paragraph block ends at the next blank line (`\n\n`); a fenced code block
-/// ends at a matching closer fence. Blank lines between the opening fence and
-/// its closer are part of the code, never a paragraph boundary.
-fn next_block_end(pending: &str) -> Option<usize> {
-    let stripped = pending.trim_start_matches('\n');
-    let lead = pending.len() - stripped.len();
-    if stripped.is_empty() {
-        // Only trailing newlines remain; nothing to flush.
-        return None;
-    }
-    let first_line_end = stripped.find('\n').unwrap_or(stripped.len());
-    let first_line = &stripped[..first_line_end];
-    if let Some((ch, len, _info)) = fence_split(first_line) {
-        // Scan for a matching closer fence; only fence characters, no content.
-        let mut rest = stripped.get(first_line_end + 1..)?;
-        let mut consumed = first_line_end + 1;
-        loop {
-            let line_end = rest.find('\n').unwrap_or(rest.len());
-            let line = &rest[..line_end];
-            consumed += line_end;
-            if let Some((closer, clo_len, rest_str)) = fence_split(line)
-                && closer == ch
-                && clo_len >= len
-                && rest_str.trim().is_empty()
-            {
-                return Some(lead + consumed);
-            }
-            if line_end >= rest.len() {
-                // Reached the end without a matching closer.
-                return None;
-            }
-            consumed += 1; // the newline after this line
-            rest = &rest[line_end + 1..];
-        }
-    } else {
-        // A paragraph: flush up to and including the next blank line.
-        stripped.find("\n\n").map(|pos| lead + pos + 2)
-    }
-}
-
-/// Recognises a code fence opener or closer and returns its character, run
-/// length, and the (possibly empty) info string that follows the run. Opening
-/// fences allow an info string (`rust`, `python 3`, ...); closers must contain
-/// only fence characters.
-fn fence_split(line: &str) -> Option<(char, usize, &str)> {
-    let trimmed = line.trim_start();
-    let chars: Vec<char> = trimmed.chars().collect();
-    if chars.is_empty() {
-        return None;
-    }
-    let ch = chars[0];
-    if ch != '`' && ch != '~' {
-        return None;
-    }
-    let run = chars.iter().take_while(|c| **c == ch).count();
-    if run < 3 {
-        return None;
-    }
-    Some((ch, run, &trimmed[run..]))
-}
-
 /// The dim placeholder lines shown where thinking has been collapsed.
 fn collapse_placeholder_rows(width: usize, theme: &Theme) -> Vec<ScreenLine> {
     wrap(collapse_placeholder_text(), width)
@@ -2648,8 +2568,9 @@ fn bargraph(fraction: f64, width: u16) -> String {
 mod tests {
     use super::{
         App, Color, KeyAction, LineKind, MAX_LINES, MENU_ITEMS, Overlay, REASONING_EDGE_CONT,
-        REASONING_EDGE_FIRST, ScreenLine, Style, format_number, next_block_end, wrap,
+        REASONING_EDGE_FIRST, ScreenLine, Style, format_number, wrap,
     };
+    use crate::blocks::next_block_end;
     use crate::session::Event;
     use crate::tui::theme::Theme;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
