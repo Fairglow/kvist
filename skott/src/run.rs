@@ -195,9 +195,23 @@ impl Drop for SessionHandle {
     fn drop(&mut self) {
         self.shutdown();
         if let Some(thread) = self.thread.take()
-            && thread.join().is_err()
+            && let Err(payload) = thread.join()
         {
-            tracing::error!("session worker failed");
+            let message = payload
+                .downcast_ref::<&str>()
+                .map_or_else(
+                    || {
+                        payload
+                            .downcast_ref::<String>()
+                            .cloned()
+                            .unwrap_or_else(|| "unknown panic payload".to_owned())
+                    },
+                    |value| (*value).to_owned(),
+                );
+            tracing::error!(
+                message = %message,
+                "session worker thread panicked; the agent session is dead and no further events will be delivered"
+            );
         }
     }
 }

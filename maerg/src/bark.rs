@@ -1766,8 +1766,87 @@ fn build_editor(
 /// Maximum consecutive terminal read failures before the shell exits.
 const MAX_CONSECUTIVE_READ_FAILURES: u32 = 3;
 
+/// Installs a process panic hook so a shell panic — most notably one in the
+/// task-run agent loop, which runs off the UI thread — leaves a durable
+/// backtrace under `<project>/.kvist/logs/`. A panic in the TUI prints only to
+/// the transient terminal and is otherwise gone once the process exits, which
+/// is exactly what makes such a crash un-diagnosable afterwards. The hook stays
+/// silent unless a panic actually occurs and writes a single compact file.
+pub(crate) fn install_panic_hook(project_dir: &Path) {
+    let project_dir = project_dir.to_path_buf();
+    std::panic::set_hook(Box::new(move |info| {
+        let file = write_crash_log(&project_dir, info);
+        eprintln!();
+        match file {
+            Some(path) => eprintln!(
+                "kvist: the shell panicked; a crash log with a backtrace was written to {}",
+                path.display()
+            ),
+            None => eprintln!("kvist: the shell panicked; no crash log could be written"),
+        }
+    }));
+}
+
+/// Writes a compact, durable crash record and returns its path, or `None` when
+/// the file could not be written (the record is then echoed to stderr). Never
+/// panics: a fault inside the hook would mask the original one.
+fn write_crash_log(
+    project_dir: &Path,
+    info: &std::panic::PanicHookInfo<'_>,
+) -> Option<PathBuf> {
+    let log_dir = project_dir.join(".kvist").join("logs");
+    if std::fs::create_dir_all(&log_dir).is_err() {
+        return None;
+    }
+
+    let location = info
+        .location()
+        .map(|location| format!("{}:{}", location.file(), location.line()))
+        .unwrap_or_else(|| "unknown location".to_owned());
+    let message = info
+        .payload()
+        .downcast_ref::<&str>()
+        .map_or_else(
+            || {
+                info.payload()
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .unwrap_or_else(|| "<non-string panic payload>".to_owned())
+            },
+            |value| (*value).to_owned(),
+        );
+    let thread = std::thread::current()
+        .name()
+        .map_or_else(|| "unnamed".to_owned(), str::to_owned);
+    let backtrace = std::backtrace::Backtrace::force_capture().to_string();
+
+    let now = chrono::Utc::now();
+    let path = log_dir.join(format!(
+        "kvist-panic-{}.log",
+        now.format("%Y%m%dT%H%M%SZ")
+    ));
+
+    let mut record = String::new();
+    record.push_str(&format!("timestamp: {}\n", now.format("%Y-%m-%dT%H:%M:%SZ")));
+    record.push_str(&format!("thread: {thread}\n"));
+    record.push_str(&format!("location: {location}\n"));
+    record.push_str(&format!("message: {message}\n\n"));
+    record.push_str("backtrace:\n");
+    record.push_str(&backtrace);
+
+    match std::fs::write(&path, &record) {
+        Ok(()) => Some(path),
+        Err(write_error) => {
+            eprintln!("kvist: could not write crash log ({write_error}); record follows:");
+            eprintln!("{record}");
+            None
+        }
+    }
+}
+
 /// Launches and runs the persistent interactive workspace shell (REPL).
 pub fn run_shell(project_dir: &Path) -> Result<()> {
+    install_panic_hook(project_dir);
     if tui::available() {
         return tui::run(project_dir);
     }

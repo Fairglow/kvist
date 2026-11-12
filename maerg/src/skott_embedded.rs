@@ -244,8 +244,6 @@ impl SkottResult {
     }
 }
 
-
-
 /// Renders one Skott event as a bounded, human-readable progress line.
 fn describe_event(event: &Event) -> String {
     match event {
@@ -342,7 +340,15 @@ impl Default for EmbeddedSkott {
 impl EmbeddedSkott {
     /// Creates an idle embedded Skott with no active session.
     pub fn new() -> Self {
-        let app = SkottApp::new(&[], None, sav::ReasoningEffort::Medium, None, 80, 24, skott::tui::Theme::dark());
+        let app = SkottApp::new(
+            &[],
+            None,
+            sav::ReasoningEffort::Medium,
+            None,
+            80,
+            24,
+            skott::tui::Theme::dark(),
+        );
         Self {
             handle: None,
             receiver: None,
@@ -407,7 +413,7 @@ impl EmbeddedSkott {
         )
         .map_err(skott_error)?;
         let app = SkottApp::new(
-            &[model.id.clone()],
+            std::slice::from_ref(&model.id),
             Some(&model.id),
             effort,
             None,
@@ -448,6 +454,26 @@ impl EmbeddedSkott {
         let mut changed = false;
         for event in events {
             self.observe(event);
+            changed = true;
+        }
+        // Drain first, then check: the worker sends a terminal event
+        // (Finished/PromptEnd/Failed) strictly before it exits, so once the
+        // worker thread is gone the terminal event has already been delivered
+        // and `result.finished` is set. A dead worker with no terminal result
+        // therefore means it died mid-run without a clean end (a panic in the
+        // agent loop is the known cause). Surface it once so Kvist reports the
+        // failure and tears the task down instead of hanging with the task
+        // stuck in-progress and no explanation.
+        if !self.is_running() && !self.result.finished {
+            self.log.flush_pending();
+            self.observe(Event::Failed(
+                "Kvist's agent session died unexpectedly while running the model (the \
+                 agent worker thread terminated without a clean end; this is a Kvist \
+                 failure, not a model answer). A backtrace, if any, was written to \
+                 .kvist/logs/ (kvist-panic-*.log). Report this crash with that log so \
+                 it can be fixed; the task can be resumed once Kvist is fixed."
+                    .to_owned(),
+            ));
             changed = true;
         }
         changed
@@ -1010,10 +1036,7 @@ mod tests {
         log.flush_reasoning();
         // Should be one line, not three fragmented lines
         assert_eq!(log.lines().len(), 1);
-        assert_eq!(
-            log.lines()[0],
-            "This is a test of reasoning buffering."
-        );
+        assert_eq!(log.lines()[0], "This is a test of reasoning buffering.");
     }
 
     #[test]
@@ -1024,10 +1047,7 @@ mod tests {
         log.push_reasoning(" Third part.");
         log.flush_reasoning();
         assert_eq!(log.lines().len(), 1);
-        assert_eq!(
-            log.lines()[0],
-            "First part. Second part. Third part."
-        );
+        assert_eq!(log.lines()[0], "First part. Second part. Third part.");
     }
 
     #[test]
@@ -1114,5 +1134,59 @@ mod tests {
         assert!(line.contains("100/50"));
         assert!(line.contains("150/4096"));
         assert!(line.contains("1 compactions"));
+    }
+
+    #[test]
+    fn a_dead_worker_without_a_terminal_event_is_reported_instead_of_hanging() {
+        // Regression: when the agent worker thread dies mid-run (a panic in the
+        // agent loop is the known cause), the event channel closes and pump()
+        // used to deliver nothing forever, leaving the UI frozen with the task
+        // stuck in-progress and no explanation. A dead worker with no terminal
+        // result must surface a single terminal failure so Kvist reports it and
+        // tears the task down.
+        let (mut embedded, _prompts) = start_stubbed();
+        assert!(embedded.is_active());
+
+        // Kill the worker without delivering a terminal event — the same
+        // observable state a mid-turn worker death produces (channel closed,
+        // result not finished).
+        embedded.shutdown();
+
+        // Pump until the worker death is surfaced (the thread may take a moment
+        // to exit). It must be reported exactly once and finish the session.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut reported = false;
+        loop {
+            embedded.pump();
+            if embedded.result().failure.is_some() {
+                reported = true;
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "dead worker was not reported; transcript would hang"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            reported && embedded.result().finished,
+            "a dead worker must be surfaced as a terminal failure: {:?}",
+            embedded.result()
+        );
+        let failure = embedded.result().failure.as_deref().unwrap_or("");
+        assert!(
+            failure.contains("died unexpectedly"),
+            "failure diagnostic must say the session died: {failure}"
+        );
+
+        // A second pump must not re-report the same death (the result is now
+        // finished, so the guard holds).
+        let failure_before = failure.to_owned();
+        embedded.pump();
+        assert_eq!(
+            embedded.result().failure.as_deref(),
+            Some(failure_before.as_str()),
+            "the worker-death failure must be surfaced exactly once"
+        );
     }
 }

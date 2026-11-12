@@ -168,8 +168,8 @@ impl Workspace {
                 if self.running.is_some() {
                     entries.push(Entry::new("Cancel command", Action::Cancel));
                 }
-                if self.skott.as_ref().is_some_and(|skott| skott.is_active()) {
-                    let pane = self.skott.as_ref().unwrap().active_pane();
+                if let Some(skott) = self.skott.as_ref().filter(|skott| skott.is_active()) {
+                    let pane = skott.active_pane();
                     let next = match pane {
                         crate::skott_embedded::ActivePane::Kvist => {
                             crate::skott_embedded::ActivePane::Skott
@@ -272,11 +272,17 @@ impl Workspace {
             }
             _ => return self.model_menu(page),
         };
+        // Only `Appearance`, `Theme` and `History` fall through to the title
+        // match (every other page returns above); the fallback keeps the
+        // invariant a debug build still verifies without a runtime panic.
         let title = match &page {
             Page::Appearance => "Appearance",
             Page::Theme => "Appearance / Theme",
             Page::History => "History (PageUp reaches all older segments)",
-            _ => unreachable!(),
+            other => {
+                debug_assert!(false, "unhandled menu page: {other:?}");
+                "Menu"
+            }
         };
         Ok(Menu::new(page, title, choices))
     }

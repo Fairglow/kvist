@@ -303,3 +303,78 @@ fn quitting_active_work_requires_confirmation_and_reaps_the_owned_child() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
+
+#[test]
+fn task_run_auto_selects_the_next_ready_task_from_the_canonical_queue() {
+    // Regression: `task run <component>` (with no task id) used to read
+    // `<component>/.kvist/TODOS.yaml`, a path that does not exist, so it always
+    // reported "no ready task found" even while `kvist status` correctly showed
+    // a ready task. It must read the canonical `<component>/TODOS.yaml` and
+    // agree with the shared `next_ready_task_id` definition.
+    const READY_QUEUE: &str = r#"schema_version: 1
+component:
+  requirements_revision: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  contract_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  design_revision: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  parent_contract: null
+  revalidation:
+    state: current
+    checked_at: 2026-08-13T20:19:53Z
+    stale_since: null
+    causes: []
+tasks:
+  - id: write-tests
+    title: Write tests
+    description: Define tests.
+    context: Context.
+    purpose: Purpose.
+    expected_outcome: Outcome.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: []
+    timestamps:
+      created_at: 2026-08-13T20:19:53Z
+      updated_at: 2026-08-13T20:19:53Z
+      completed_at: 2026-08-13T20:19:53Z
+    blocked_reason: null
+  - id: implement-code
+    title: Implement
+    description: Implement.
+    context: Context.
+    purpose: Purpose.
+    expected_outcome: Outcome.
+    kind: implementation
+    status: pending
+    depends_on:
+      - write-tests
+    requirements: []
+    timestamps:
+      created_at: 2026-08-13T20:19:53Z
+      updated_at: 2026-08-13T20:19:53Z
+      completed_at: null
+    blocked_reason: null
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::new(dir.path()).unwrap();
+    let component = dir.path().join("blad");
+    std::fs::create_dir_all(&component).unwrap();
+    // The queue lives at the component root, matching every other reader
+    // (`status`, `kvist task run`, `kvist repair`).
+    std::fs::write(component.join("TODOS.yaml"), READY_QUEUE).unwrap();
+
+    // `write-tests` is completed, so `implement-code` (whose only dependency is
+    // done) is the next ready task and must be auto-selected.
+    assert_eq!(workspace.next_ready_task("blad"), Some("implement-code".to_owned()));
+
+    // A component whose queue has no ready task yields `None` (the caller then
+    // reports the actionable "specify a task or make one ready" error).
+    let empty = dir.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    let empty_queue = READY_QUEUE.replace("status: pending", "status: blocked");
+    std::fs::write(empty.join("TODOS.yaml"), empty_queue).unwrap();
+    assert_eq!(workspace.next_ready_task("empty"), None);
+
+    // And a component with no queue at all is also `None`, not an error.
+    assert_eq!(workspace.next_ready_task("missing"), None);
+}

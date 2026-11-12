@@ -380,22 +380,17 @@ impl Workspace {
     }
 
     /// Finds the next ready task in the given component, if any.
-    fn next_ready_task(&self, component: &str) -> Option<String> {
-        let queue_path = self
-            .project
-            .join(component)
-            .join(".kvist")
-            .join("TODOS.yaml");
+    ///
+    /// Uses the canonical queue path (`<component>/TODOS.yaml`) and the shared
+    /// [`crate::task_queue::next_ready_task_id`] definition so the TUI's
+    /// auto-selection matches `kvist status` exactly (a task is ready when it
+    /// is `pending` with every recorded dependency `completed`).
+    pub(super) fn next_ready_task(&self, component: &str) -> Option<String> {
+        let component_path = self.project.join(component);
+        let queue_path = component_path.join("TODOS.yaml");
         let text = std::fs::read_to_string(queue_path).ok()?;
-        let queue: serde_yaml::Value = serde_yaml::from_str(&text).ok()?;
-        let tasks = queue.get("tasks")?.as_sequence()?;
-        for task in tasks {
-            let status = task.get("status")?.as_str()?;
-            if status == "pending" || status == "in-progress" {
-                return task.get("id")?.as_str().map(str::to_owned);
-            }
-        }
-        None
+        let queue = crate::task_queue::parse(&text).ok()?;
+        crate::task_queue::next_ready_task_id(&queue.tasks)
     }
 
     fn edit_prompt(
