@@ -982,13 +982,15 @@ separate unwrapped blocks. Existing horizontal overflow handles long formulas.
 
 ### P4 backend admission
 
-Admit pinned Merman 0.9.1 with defaults disabled and only `ascii` plus the
-flowchart, sequence, state, class and ER selectors. Mmdflux 2.6.1 lacks the
-required ER family; retaining five families justifies Merman's larger graph.
-The active graph excludes graphical renderer crates. Approved `kvist vendor`
-provisioning updated the canonical locked snapshot; its documented host
-acquisition fallback was used when sandbox toolchain discovery failed.
-This added 73 locked crates, about 47 MB unpacked. Merman/Dugong are
+Admit pinned Merman 0.10 with defaults disabled and only `ascii` plus the
+flowchart, sequence, state, class and ER selectors. Merman 0.10 ships a native
+ER text backend, so no secondary backend is required; retaining five families
+justifies Merman's larger graph. The active graph excludes graphical renderer
+crates. Approved `kvist vendor` provisioning updated the canonical locked
+snapshot; its documented host acquisition fallback was used when sandbox
+toolchain discovery failed. The 0.10 facade (merman + merman-core/ascii/model/
+render and transitive graph/ICU crates) replaces the 0.9.x dependency set.
+Merman/Dugong are
 MIT OR Apache-2.0 with retained translated-source notices; transitive
 MPL-2.0, Unicode, BSD and Zlib notices remain distribution obligations.
 
@@ -1055,7 +1057,7 @@ source range for fallback, rather than reconstructing its delimiters.
 Initial limits are 16 KiB per formula, nesting depth 32 and 64 KiB projected
 text. No macro expansion, file inclusion or executable TeX is supported.
 
-The Mermaid backend is selected from pinned Merman 0.9.1 and mmdflux 2.6.1
+The Mermaid backend is selected from pinned Merman 0.10
 using the accepted corpus criteria before integration. Prefer Merman's text-only
 feature set because ER is required. One backend only; record actual dependency
 availability, licenses, feature graph and corpus measurements before admission.

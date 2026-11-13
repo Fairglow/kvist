@@ -61,7 +61,7 @@ regex = { version = "1.13", default-features = false, features = [
     "perf",
     "unicode",
 ] }
-merman = { version = "0.9", default-features = false, features = [
+merman = { version = "0.10", default-features = false, features = [
     "ascii",
     "diagram-flowchart",
     "diagram-sequence",

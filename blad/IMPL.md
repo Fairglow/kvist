@@ -1425,7 +1425,7 @@ Earlier observed execution results do not establish results for these fingerprin
 - Script scanning checks bounds and ASCII whitespace before `bytes[cursor] != marker || escaped(...)`; escaped means an odd preceding backslash run.
 - Math is a nonexecuting Greek/operator/script/fraction/root/group/limited-text/paired-delimiter subset; unsupported/invalid source remains visible with distinct annotations.
 - Math projection limits: 16,384 input bytes, 32 nesting levels, 65,536 output bytes; oversize fallback bounds retained source; source mode bypasses projection.
-- Native Merman 0.9.1 admits spatial flowchart, sequence, state, class and ER subsets; width never reflows finished rows; ASCII changes structure, not authored Unicode.
+- Native Merman 0.10 admits spatial flowchart, sequence, state, class and ER subsets; width never reflows finished rows; ASCII changes structure, not authored Unicode.
 - Mermaid rejects unsupported semantics/nonspatial fallbacks and bounds source/lexical/model/layout/grid/output/graphemes; invalid/resource/unsupported failures visibly retain bounded source.
 - Mermaid limits include 64 KiB source, 256 nodes, 512 edges, 32 nesting, 262,144 cells, 2,000,000 work units, 2 MiB output and a cooperative 500 ms deadline.
 - Cancellation clones share state; cancellation/deadlines return Interrupted rather than successful fallback; errors may follow partial output. No hard total-time or aggregate-memory bound exists.
@@ -2097,7 +2097,7 @@ source-derived findings:
 - Unsupported/invalid/resource diagnostics retain source, capped at 65,536
   bytes on a UTF-8 boundary with explicit omitted bytes. Source mode bypasses
   the cap. Writer errors propagate without rolling back existing output.
-- Selected Merman 0.9.1 disables defaults and enables only ASCII plus five
+- Selected Merman 0.10 disables defaults and enables only ASCII plus five
   family selectors. HTML/CSS/URL/ICU parsing appears in the active graph;
   URL parsing alone is not networking. Optional graphical/editor/analysis
   packages in the lockfile are inactive. Adapter code contains no process,

@@ -1,14 +1,35 @@
-//! Bounded native Mermaid-to-text adapter (Merman 0.9.1, MIT OR Apache-2.0).
+//! Bounded native Mermaid-to-text adapter (Merman 0.10, MIT OR Apache-2.0).
 //!
 //! The admitted profile is spatial flowchart, sequence, state, class and ER:
 //! boxes/shape approximations, labelled directed connections, groups, notes,
 //! class members and ER attributes/cardinalities. Browser interactions, actor
 //! properties/links, animation, accessibility metadata, configuration
-//! directives, front matter and rich HTML labels (other than `<br>`) are
-//! unsupported. Styling is not interpreted.
-//! Class/ER scenes requiring Merman's textual `relations:` projection are
-//! rejected rather than misrepresented as fully routed diagrams. Actors use
-//! participant boxes; some composite-state boundary/cycle routes are unsupported.
+//! directives, front matter and rich HTML labels (other than `<br>` line
+//! breaks) are unsupported. Styling is not interpreted.
+//!
+//! Class/ER scenes that Merman resolves through its textual `relations:`
+//! projection are rejected rather than misrepresented as fully routed
+//! diagrams. Actors use participant boxes; some composite-state
+//! boundary/cycle routes are unsupported.
+//!
+//! Merman 0.10 exposes exactly one further *spatial* (diagrammatic) ASCII
+//! family, `xychart`; it is deliberately not admitted because that backend
+//! always prepends machine-readable data-disclosure lines (e.g. `values:` /
+//! `xDomain:` / per-point `samples=[...]`) above the chart, which a spatial
+//! text viewer must not surface. Every other 0.10 family (gantt, journey,
+//! kanban, mindmap, packet, timeline, treeView, and the rest) projects to
+//! `structured_text` summaries, which this adapter already rejects.
+//!
+//! Labels admit only authored `<br>` line breaks (`<br/>`, `<br >`, and
+//! `<BR>` all work); they map to real text line breaks. Any *other* literal
+//! HTML tag is rejected, because Merman's plain-text backend does not render
+//! HTML faithfully: it keeps such tags literally in the output (and re-escapes
+//! a bare `&` to `&amp;` once a tag is present), which a spatial text viewer
+//! must not surface as if it were styled. HTML entities pass through to
+//! Merman's terminal-safe normalizer rather than being admitted or stripped by
+//! this adapter; that normalizer guarantees no raw control or bidirectional
+//! escape is ever emitted, but its entity decoding is deliberately not
+//! browser-faithful.
 //!
 //! Canonical layout and Unicode's ordinary (not CJK ambiguous-wide) width
 //! convention are fixed. Viewport width is deliberately not a layout bound:
@@ -26,16 +47,18 @@
 //! not thread preemption or a promise that a callback returns within 500 ms.
 //! There are no subprocesses, files, network requests or graphical intermediates.
 
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use merman::ascii::{
     AsciiColorMode, AsciiError, AsciiOutputOutcome, AsciiProjection, AsciiRenderOptions,
-    AsciiRenderer, AsciiResourceLimitId, AsciiResourcePolicy, AsciiViewportPolicy,
+    AsciiResourceLimitId, AsciiResourcePolicy, AsciiViewportPolicy,
 };
-use merman::diagram::RenderSemanticModel;
-use merman::resources::{InputResourceLimitId, InputResourcePolicy, ResourceProfile};
-use merman::{Engine, OperationLedgerError, ParseOptions};
+use merman::model::resources::{InputResourceLimitId, InputResourcePolicy, ResourceProfile};
+use merman::model::{OperationLedgerError, SemanticDiagramModel};
+use merman::{
+    AsciiRequest, MermaidConfig, ParseOptions, RenderError, RenderOutput, RenderTarget, Renderer,
+    SemanticParser,
+};
 
 pub(crate) use merman::OperationControl as DiagramControl;
 
@@ -97,6 +120,51 @@ fn render_bounded(
     let control = control.child().with_deadline(DEADLINE);
     checkpoint(&control)?;
     preflight(source, &control)?;
+    let renderer = build_renderer()?;
+    let artifact = renderer
+        .parse_semantic(source, control)
+        .map_err(render_error)?
+        .ok_or_else(|| DiagramError::Invalid("no diagram found".into()))?;
+    admit_model(artifact.model())?;
+    let target = RenderTarget::Ascii(AsciiRequest {
+        options: if ascii {
+            AsciiRenderOptions::ascii()
+        } else {
+            AsciiRenderOptions::unicode()
+        }
+        .with_color_mode(AsciiColorMode::Plain),
+        resources: ascii_resources(work, cells, bytes)?,
+        viewport: AsciiViewportPolicy::unrestricted(),
+    });
+    let RenderOutput::Ascii(Some(report)) = artifact
+        .render(target)
+        .map_err(render_error)?
+    else {
+        return Err(DiagramError::Invalid("no diagram found".into()));
+    };
+    if report.projection != AsciiProjection::Diagrammatic
+        || report.outcome == AsciiOutputOutcome::Fallback
+        || report.text.lines().any(|line| line.trim() == "relations:")
+    {
+        return unsupported("this topology requires a non-spatial relation summary");
+    }
+    Ok(report.text)
+}
+
+/// Build a strict renderer for one operation. Construction is cheap (Merman caches
+/// the hardened site configuration in a process-global static), so the renderer is
+/// built per render rather than held in a global. Each operation still owns its own
+/// cancellation, deadline, and output policy; the fixed input admission policy and
+/// strict parse options are the only shared defaults.
+///
+/// Merman 0.10 introduced a parser-internal flowchart `maxEdges` budget (default 500)
+/// that is stricter than this adapter's `MAX_EDGES` model admission. Left at its default
+/// it would reject a 513-edge source during parsing (a parse error) instead of after the
+/// typed model is admitted (a resource error). The host override lifts that internal
+/// budget to `MAX_MODEL_ITEMS`, well above the product ceiling, so the adapter's
+/// `admit_model` — not a library parse default — remains the authoritative resource
+/// boundary, and an over-limit source is reported as a resource limit, not a parse error.
+fn build_renderer() -> Result<Renderer, DiagramError> {
     let mut input = InputResourcePolicy::for_profile(ResourceProfile::Constrained);
     for (id, value) in [
         (InputResourceLimitId::MaxSourceBytes, MAX_SOURCE),
@@ -104,30 +172,24 @@ fn render_bounded(
         (InputResourceLimitId::MaxModelTextBytes, MAX_MODEL_TEXT),
         (InputResourceLimitId::MaxModelNestingDepth, MAX_NESTING),
     ] {
-        input
-            .apply_limit(id, value)
-            .map_err(|error| DiagramError::Resource(error.to_string()))?;
+        input.apply_limit(id, value).map_err(|error| {
+            DiagramError::Resource(format!("input policy: {error}"))
+        })?;
     }
-    static ENGINE: OnceLock<Engine> = OnceLock::new();
-    let engine = ENGINE.get_or_init(Engine::new);
-    let context = engine
-        .begin_operation()
-        .map_err(|error| DiagramError::Invalid(error.to_string()))?;
-    let parsed = engine
-        .parse_diagram_for_render_model_controlled_in_context_sync(
-            source,
-            ParseOptions::strict(),
-            &control,
-            &context,
-        )
-        .map_err(|error| DiagramError::Cancelled(error.to_string()))?
-        .map_err(parse_error)?
-        .ok_or_else(|| DiagramError::Invalid("no diagram found".into()))?;
-    checkpoint(&control)?;
-    input
-        .check_parsed_render(&parsed)
-        .map_err(|error| DiagramError::Resource(error.to_string()))?;
-    admit_model(parsed.model())?;
+    let parser = SemanticParser::new().with_site_config(
+        MermaidConfig::from_value(serde_json::json!({ "maxEdges": MAX_MODEL_ITEMS })),
+    );
+    Ok(Renderer::new()
+        .with_semantic_parser(parser)
+        .with_parse_options(ParseOptions::strict())
+        .with_resource_policy(input))
+}
+
+fn ascii_resources(
+    work: usize,
+    cells: usize,
+    bytes: usize,
+) -> Result<AsciiResourcePolicy, DiagramError> {
     let mut resources = AsciiResourcePolicy::for_profile(ResourceProfile::Constrained);
     for (id, value) in [
         (AsciiResourceLimitId::MaxGridCells, cells),
@@ -137,34 +199,11 @@ fn render_bounded(
         (AsciiResourceLimitId::MaxNestingDepth, MAX_NESTING),
         (AsciiResourceLimitId::MaxGraphemeBytes, MAX_GRAPHEME),
     ] {
-        resources
-            .apply_limit(id, value)
-            .map_err(|error| DiagramError::Resource(error.to_string()))?;
+        resources.apply_limit(id, value).map_err(|error| {
+            DiagramError::Resource(format!("ascii policy: {error}"))
+        })?;
     }
-    let options = if ascii {
-        AsciiRenderOptions::ascii()
-    } else {
-        AsciiRenderOptions::unicode()
-    }
-    .with_color_mode(AsciiColorMode::Plain);
-    let report = AsciiRenderer::new(options)
-        .map_err(ascii_error)?
-        .render_parsed_report(
-            &parsed,
-            AsciiViewportPolicy::unrestricted(),
-            &control,
-            &context,
-            resources,
-        )
-        .map_err(ascii_error)?;
-    checkpoint(&control)?;
-    if report.projection != AsciiProjection::Diagrammatic
-        || report.outcome == AsciiOutputOutcome::Fallback
-        || report.text.lines().any(|line| line.trim() == "relations:")
-    {
-        return unsupported("this topology requires a non-spatial relation summary");
-    }
-    Ok(report.text)
+    Ok(resources)
 }
 
 fn checkpoint(control: &DiagramControl) -> Result<(), DiagramError> {
@@ -303,7 +342,7 @@ fn preflight(source: &str, control: &DiagramControl) -> Result<(), DiagramError>
                     ceiling("nesting depth", blocks, MAX_NESTING)?;
                 }
             }
-            if matches!(ch, '"' | '`') {
+            if matches!(ch, '\"' | '`') {
                 quote = Some(ch);
             }
             if matches!(ch, '[' | '(' | '{') {
@@ -333,72 +372,86 @@ fn preflight(source: &str, control: &DiagramControl) -> Result<(), DiagramError>
     Ok(())
 }
 
-fn admit_model(model: &RenderSemanticModel) -> Result<(), DiagramError> {
-    let (nodes, edges) =
-        match model {
-            RenderSemanticModel::Flowchart(model) => {
-                if model.nodes.iter().any(|node| {
-                    node.link.is_some()
-                        || node.have_callback
-                        || node.icon.is_some()
-                        || node.img.is_some()
-                }) || model
-                    .edges
-                    .iter()
-                    .any(|edge| edge.animate == Some(true) || edge.animation.is_some())
-                {
-                    return unsupported("flowchart interactions, icons, images or animation");
-                }
-                (model.nodes.len() + model.subgraphs.len(), model.edges.len())
+fn admit_model(model: &SemanticDiagramModel) -> Result<(), DiagramError> {
+    let (nodes, edges) = match model {
+        SemanticDiagramModel::Flowchart(model) => {
+            if model.nodes.iter().any(|node| {
+                node.link.is_some()
+                    || node.have_callback
+                    || node.icon.is_some()
+                    || node.img.is_some()
+            }) || model
+                .edges
+                .iter()
+                .any(|edge| edge.animate == Some(true) || edge.animation.is_some())
+            {
+                return unsupported("flowchart interactions, icons, images or animation");
             }
-            RenderSemanticModel::Sequence(model) => {
-                if model.actors.values().any(|actor| {
-                    !actor.links.is_empty()
-                        || !actor.properties.is_empty()
-                        || !matches!(actor.actor_type.as_str(), "" | "participant" | "actor")
-                }) {
-                    return unsupported("sequence actor presentation metadata or links");
-                }
-                (model.actors.len() + model.boxes.len(), model.messages.len())
+            (model.nodes.len() + model.subgraphs.len(), model.edges.len())
+        }
+        SemanticDiagramModel::Sequence(model) => {
+            if model.actors.values().any(|actor| {
+                !actor.links.is_empty()
+                    || !actor.properties.is_empty()
+                    || !matches!(actor.actor_type.as_str(), "" | "participant" | "actor")
+            }) {
+                return unsupported("sequence actor presentation metadata or links");
             }
-            RenderSemanticModel::State(model) => {
-                if !model.links.is_empty() {
-                    return unsupported("state links");
-                }
-                (model.nodes.len().max(model.states.len()), model.edges.len())
+            (model.actors.len() + model.boxes.len(), model.messages.len())
+        }
+        SemanticDiagramModel::State(model) => {
+            if !model.links.is_empty() {
+                return unsupported("state links");
             }
-            RenderSemanticModel::Class(model) => {
-                if model.classes.values().any(|node| {
-                    node.link.is_some() || node.have_callback || node.callback.is_some()
-                }) {
-                    return unsupported("class interactions");
-                }
-                (
-                    model.classes.len() + model.namespaces.len() + model.interfaces.len(),
-                    model.relations.len(),
-                )
+            (model.nodes.len().max(model.states.len()), model.edges.len())
+        }
+        SemanticDiagramModel::Class(model) => {
+            if model.classes.values().any(|node| {
+                node.link.is_some() || node.have_callback || node.callback.is_some()
+            }) {
+                return unsupported("class interactions");
             }
-            RenderSemanticModel::Er(model) => (
-                model.entities.len() + model.subgraphs.len(),
-                model.relationships.len(),
-            ),
-            _ => return unsupported("the parsed family has no admitted spatial text backend"),
-        };
+            (
+                model.classes.len() + model.namespaces.len() + model.interfaces.len(),
+                model.relations.len(),
+            )
+        }
+        SemanticDiagramModel::Er(model) => (
+            model.entities.len() + model.subgraphs.len(),
+            model.relationships.len(),
+        ),
+        _ => return unsupported("the parsed family has no admitted spatial text backend"),
+    };
     ceiling("nodes/participants", nodes, MAX_NODES)?;
     ceiling("edges/messages", edges, MAX_EDGES)
 }
 
-fn parse_error(error: merman::Error) -> DiagramError {
-    let message = merman::ascii::normalize_terminal_diagnostic(&error.to_string());
+fn render_error(error: RenderError) -> DiagramError {
     match error {
-        merman::Error::UnsupportedDiagram { .. } => DiagramError::Unsupported(message),
-        merman::Error::OperationCancelled(_) => DiagramError::Cancelled(message),
-        _ => DiagramError::Invalid(message),
+        RenderError::Cancelled(_) => DiagramError::Cancelled("render operation cancelled".into()),
+        RenderError::NoDiagram => DiagramError::Invalid("no diagram found".into()),
+        RenderError::ResourceLimitExceeded(resource) => DiagramError::Resource(resource.to_string()),
+        RenderError::Parse(diagnostic) => {
+            let message = diagnostic.terminal_safe_message();
+            let unsupported =
+                diagnostic.terminal_diagnostic_details().code.as_str()
+                    == "merman.parse.unsupported_diagram";
+            if unsupported {
+                DiagramError::Unsupported(message)
+            } else if diagnostic.is_resource_limit() {
+                DiagramError::Resource(message)
+            } else {
+                DiagramError::Invalid(message)
+            }
+        }
+        RenderError::RuntimePolicy(error) => DiagramError::Resource(error.terminal_safe_message()),
+        RenderError::Ascii(error) => ascii_error(error),
+        _ => DiagramError::Invalid("render target failed".into()),
     }
 }
 
 fn ascii_error(error: AsciiError) -> DiagramError {
-    let message = merman::ascii::normalize_terminal_diagnostic(&error.to_string());
+    let message = merman::normalize_terminal_diagnostic(&error.to_string());
     match error {
         AsciiError::Cancelled(_)
         | AsciiError::OperationResourceTerminal(OperationLedgerError::Cancelled(_)) => {
@@ -406,6 +459,7 @@ fn ascii_error(error: AsciiError) -> DiagramError {
         }
         AsciiError::ResourceLimitExceeded(_)
         | AsciiError::AllocationFailed { .. }
+        | AsciiError::WidthOverflow { .. }
         | AsciiError::OperationResourceTerminal(_) => DiagramError::Resource(message),
         AsciiError::UnsupportedDiagram { .. }
         | AsciiError::UnsupportedFeature { .. }
