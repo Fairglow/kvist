@@ -1155,6 +1155,7 @@ mod tests {
         // Pump until the worker death is surfaced (the thread may take a moment
         // to exit). It must be reported exactly once and finish the session.
         let deadline = Instant::now() + Duration::from_secs(5);
+        #[allow(unused)]
         let mut reported = false;
         loop {
             embedded.pump();

@@ -1790,10 +1790,7 @@ pub(crate) fn install_panic_hook(project_dir: &Path) {
 /// Writes a compact, durable crash record and returns its path, or `None` when
 /// the file could not be written (the record is then echoed to stderr). Never
 /// panics: a fault inside the hook would mask the original one.
-fn write_crash_log(
-    project_dir: &Path,
-    info: &std::panic::PanicHookInfo<'_>,
-) -> Option<PathBuf> {
+fn write_crash_log(project_dir: &Path, info: &std::panic::PanicHookInfo<'_>) -> Option<PathBuf> {
     let log_dir = project_dir.join(".kvist").join("logs");
     if std::fs::create_dir_all(&log_dir).is_err() {
         return None;
@@ -1803,31 +1800,28 @@ fn write_crash_log(
         .location()
         .map(|location| format!("{}:{}", location.file(), location.line()))
         .unwrap_or_else(|| "unknown location".to_owned());
-    let message = info
-        .payload()
-        .downcast_ref::<&str>()
-        .map_or_else(
-            || {
-                info.payload()
-                    .downcast_ref::<String>()
-                    .cloned()
-                    .unwrap_or_else(|| "<non-string panic payload>".to_owned())
-            },
-            |value| (*value).to_owned(),
-        );
+    let message = info.payload().downcast_ref::<&str>().map_or_else(
+        || {
+            info.payload()
+                .downcast_ref::<String>()
+                .cloned()
+                .unwrap_or_else(|| "<non-string panic payload>".to_owned())
+        },
+        |value| (*value).to_owned(),
+    );
     let thread = std::thread::current()
         .name()
         .map_or_else(|| "unnamed".to_owned(), str::to_owned);
     let backtrace = std::backtrace::Backtrace::force_capture().to_string();
 
     let now = chrono::Utc::now();
-    let path = log_dir.join(format!(
-        "kvist-panic-{}.log",
-        now.format("%Y%m%dT%H%M%SZ")
-    ));
+    let path = log_dir.join(format!("kvist-panic-{}.log", now.format("%Y%m%dT%H%M%SZ")));
 
     let mut record = String::new();
-    record.push_str(&format!("timestamp: {}\n", now.format("%Y-%m-%dT%H:%M:%SZ")));
+    record.push_str(&format!(
+        "timestamp: {}\n",
+        now.format("%Y-%m-%dT%H:%M:%SZ")
+    ));
     record.push_str(&format!("thread: {thread}\n"));
     record.push_str(&format!("location: {location}\n"));
     record.push_str(&format!("message: {message}\n\n"));

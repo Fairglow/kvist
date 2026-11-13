@@ -1,7 +1,7 @@
 # Ignore Rust target directories
 /target
 
-# Ignore settings
+# Ignore settings and runtime data
 /.cargo
 /.config/*
 !/.config/nextest.toml
@@ -11,6 +11,8 @@
 !/.kvist/
 /.kvist/*
 !/.kvist/vendor.toml
+# Ignore skott runtime data (session journals + transcripts)
+.skott/
 /.vscode
 /.zed
 skott.toml
@@ -26,14 +28,7 @@ kvist.toml
 .vendor-write-*
 .skott-rust-*/
 .maerg-rust-*/
-
-# Ignore skott runtime data (session journals + transcripts)
-.skott/
-
-# Ignore Gemini CLI deps
-/node_modules
-/package-lock.json
-/package.json
+.go-offline-native-*/
 
 # Work documents: one-off findings, evaluations, reviews, and plans that are
 # not part of the Kvist durable set. Kept on disk for reference, excluded from

@@ -7,7 +7,6 @@ authors = ["Stefan Lindblad"]
 description = "First-class, sandbox-integrated interactive agent runner shell for Kvist"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/Fairglow/kvist"
-homepage = "https://github.com/Fairglow/kvist"
 build = "build.rs"
 
 [lib]

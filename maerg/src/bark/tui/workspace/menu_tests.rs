@@ -365,7 +365,10 @@ tasks:
 
     // `write-tests` is completed, so `implement-code` (whose only dependency is
     // done) is the next ready task and must be auto-selected.
-    assert_eq!(workspace.next_ready_task("blad"), Some("implement-code".to_owned()));
+    assert_eq!(
+        workspace.next_ready_task("blad"),
+        Some("implement-code".to_owned())
+    );
 
     // A component whose queue has no ready task yields `None` (the caller then
     // reports the actionable "specify a task or make one ready" error).

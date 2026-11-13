@@ -168,15 +168,7 @@ pub(crate) fn render_controlled_with_tree(
     control: &DiagramControl,
     tree: MermaidTreeMode,
 ) -> Result<String, DiagramError> {
-    render_bounded(
-        source,
-        ascii,
-        control,
-        MAX_WORK,
-        MAX_GRID,
-        MAX_OUTPUT,
-        tree,
-    )
+    render_bounded(source, ascii, control, MAX_WORK, MAX_GRID, MAX_OUTPUT, tree)
 }
 
 fn render_bounded(
@@ -230,10 +222,7 @@ fn render_bounded(
         resources: ascii_resources(work, cells, bytes)?,
         viewport: AsciiViewportPolicy::unrestricted(),
     });
-    let RenderOutput::Ascii(Some(report)) = artifact
-        .render(target)
-        .map_err(render_error)?
-    else {
+    let RenderOutput::Ascii(Some(report)) = artifact.render(target).map_err(render_error)? else {
         return Err(DiagramError::Invalid("no diagram found".into()));
     };
     if tree == MermaidTreeMode::Merman {
@@ -274,13 +263,13 @@ fn build_renderer() -> Result<Renderer, DiagramError> {
         (InputResourceLimitId::MaxModelTextBytes, MAX_MODEL_TEXT),
         (InputResourceLimitId::MaxModelNestingDepth, MAX_NESTING),
     ] {
-        input.apply_limit(id, value).map_err(|error| {
-            DiagramError::Resource(format!("input policy: {error}"))
-        })?;
+        input
+            .apply_limit(id, value)
+            .map_err(|error| DiagramError::Resource(format!("input policy: {error}")))?;
     }
-    let parser = SemanticParser::new().with_site_config(
-        MermaidConfig::from_value(serde_json::json!({ "maxEdges": MAX_MODEL_ITEMS })),
-    );
+    let parser = SemanticParser::new().with_site_config(MermaidConfig::from_value(
+        serde_json::json!({ "maxEdges": MAX_MODEL_ITEMS }),
+    ));
     Ok(Renderer::new()
         .with_semantic_parser(parser)
         .with_parse_options(ParseOptions::strict())
@@ -301,9 +290,9 @@ fn ascii_resources(
         (AsciiResourceLimitId::MaxNestingDepth, MAX_NESTING),
         (AsciiResourceLimitId::MaxGraphemeBytes, MAX_GRAPHEME),
     ] {
-        resources.apply_limit(id, value).map_err(|error| {
-            DiagramError::Resource(format!("ascii policy: {error}"))
-        })?;
+        resources
+            .apply_limit(id, value)
+            .map_err(|error| DiagramError::Resource(format!("ascii policy: {error}")))?;
     }
     Ok(resources)
 }
@@ -507,55 +496,56 @@ fn admit_model(model: &SemanticDiagramModel) -> Result<(), DiagramError> {
         }
         _ => {}
     }
-    let (nodes, edges) = match model {
-        SemanticDiagramModel::Flowchart(model) => {
-            if model.nodes.iter().any(|node| {
-                node.link.is_some()
-                    || node.have_callback
-                    || node.icon.is_some()
-                    || node.img.is_some()
-            }) || model
-                .edges
-                .iter()
-                .any(|edge| edge.animate == Some(true) || edge.animation.is_some())
-            {
-                return unsupported("flowchart interactions, icons, images or animation");
+    let (nodes, edges) =
+        match model {
+            SemanticDiagramModel::Flowchart(model) => {
+                if model.nodes.iter().any(|node| {
+                    node.link.is_some()
+                        || node.have_callback
+                        || node.icon.is_some()
+                        || node.img.is_some()
+                }) || model
+                    .edges
+                    .iter()
+                    .any(|edge| edge.animate == Some(true) || edge.animation.is_some())
+                {
+                    return unsupported("flowchart interactions, icons, images or animation");
+                }
+                (model.nodes.len() + model.subgraphs.len(), model.edges.len())
             }
-            (model.nodes.len() + model.subgraphs.len(), model.edges.len())
-        }
-        SemanticDiagramModel::Sequence(model) => {
-            if model.actors.values().any(|actor| {
-                !actor.links.is_empty()
-                    || !actor.properties.is_empty()
-                    || !matches!(actor.actor_type.as_str(), "" | "participant" | "actor")
-            }) {
-                return unsupported("sequence actor presentation metadata or links");
+            SemanticDiagramModel::Sequence(model) => {
+                if model.actors.values().any(|actor| {
+                    !actor.links.is_empty()
+                        || !actor.properties.is_empty()
+                        || !matches!(actor.actor_type.as_str(), "" | "participant" | "actor")
+                }) {
+                    return unsupported("sequence actor presentation metadata or links");
+                }
+                (model.actors.len() + model.boxes.len(), model.messages.len())
             }
-            (model.actors.len() + model.boxes.len(), model.messages.len())
-        }
-        SemanticDiagramModel::State(model) => {
-            if !model.links.is_empty() {
-                return unsupported("state links");
+            SemanticDiagramModel::State(model) => {
+                if !model.links.is_empty() {
+                    return unsupported("state links");
+                }
+                (model.nodes.len().max(model.states.len()), model.edges.len())
             }
-            (model.nodes.len().max(model.states.len()), model.edges.len())
-        }
-        SemanticDiagramModel::Class(model) => {
-            if model.classes.values().any(|node| {
-                node.link.is_some() || node.have_callback || node.callback.is_some()
-            }) {
-                return unsupported("class interactions");
+            SemanticDiagramModel::Class(model) => {
+                if model.classes.values().any(|node| {
+                    node.link.is_some() || node.have_callback || node.callback.is_some()
+                }) {
+                    return unsupported("class interactions");
+                }
+                (
+                    model.classes.len() + model.namespaces.len() + model.interfaces.len(),
+                    model.relations.len(),
+                )
             }
-            (
-                model.classes.len() + model.namespaces.len() + model.interfaces.len(),
-                model.relations.len(),
-            )
-        }
-        SemanticDiagramModel::Er(model) => (
-            model.entities.len() + model.subgraphs.len(),
-            model.relationships.len(),
-        ),
-        _ => return unsupported("the parsed family has no admitted spatial text backend"),
-    };
+            SemanticDiagramModel::Er(model) => (
+                model.entities.len() + model.subgraphs.len(),
+                model.relationships.len(),
+            ),
+            _ => return unsupported("the parsed family has no admitted spatial text backend"),
+        };
     ceiling("nodes/participants", nodes, MAX_NODES)?;
     ceiling("edges/messages", edges, MAX_EDGES)
 }
@@ -563,7 +553,9 @@ fn admit_model(model: &SemanticDiagramModel) -> Result<(), DiagramError> {
 /// Bounded, iterative mindmap admission: total node count and maximum depth,
 /// without recursion (so a hostile tree cannot overflow the stack before we
 /// draw it). A mindmap with more than one root is rejected.
-fn admit_mindmap(model: &merman::model::families::mindmap::MindmapDiagramModel) -> Result<(), DiagramError> {
+fn admit_mindmap(
+    model: &merman::model::families::mindmap::MindmapDiagramModel,
+) -> Result<(), DiagramError> {
     ceiling("tree nodes", model.nodes.len(), MAX_TREE_NODES)?;
     if model.nodes.iter().filter(|n| n.is_root).count() > 1 {
         return unsupported("mindmap has more than one root");
@@ -658,20 +650,13 @@ fn render_tree(
                 out.push_str(title.trim());
                 out.push('\n');
             }
-            render_node_children(
-                &model.root.children,
-                &glyphs,
-                &mut out,
-                control,
-            )?;
+            render_node_children(&model.root.children, &glyphs, &mut out, control)?;
         }
         SemanticDiagramModel::Mindmap(model) => {
             let nodes = &model.nodes;
             let root_idx = nodes.iter().position(|n| n.is_root);
             let Some(root_idx) = root_idx else {
-                return Err(DiagramError::Invalid(
-                    "mindmap has no root node".into(),
-                ));
+                return Err(DiagramError::Invalid("mindmap has no root node".into()));
             };
             let child_count = nodes.iter().map(|n| n.children.len()).sum::<usize>();
             ceiling("tree nodes", nodes.len() + child_count, MAX_TREE_NODES)?;
@@ -701,7 +686,11 @@ fn render_node_children(
         let is_last = i + 1 == children.len();
         out.push_str(if is_last { glyphs.end } else { glyphs.branch });
         out.push_str(child.name.trim());
-        if let Some(desc) = child.description.as_deref().filter(|d| !d.trim().is_empty()) {
+        if let Some(desc) = child
+            .description
+            .as_deref()
+            .filter(|d| !d.trim().is_empty())
+        {
             out.push_str(&format!(" ({})", desc.trim()));
         }
         out.push('\n');
@@ -726,7 +715,11 @@ fn render_indented_children(
         out.push_str(prefix);
         out.push_str(if is_last { glyphs.end } else { glyphs.branch });
         out.push_str(child.name.trim());
-        if let Some(desc) = child.description.as_deref().filter(|d| !d.trim().is_empty()) {
+        if let Some(desc) = child
+            .description
+            .as_deref()
+            .filter(|d| !d.trim().is_empty())
+        {
             out.push_str(&format!(" ({})", desc.trim()));
         }
         out.push('\n');
@@ -736,13 +729,7 @@ fn render_indented_children(
                 prefix,
                 if is_last { glyphs.space } else { glyphs.pipe }
             );
-            render_indented_children(
-                &child.children,
-                &child_prefix,
-                glyphs,
-                out,
-                control,
-            )?;
+            render_indented_children(&child.children, &child_prefix, glyphs, out, control)?;
         }
     }
     Ok(())
@@ -825,12 +812,13 @@ fn render_error(error: RenderError) -> DiagramError {
     match error {
         RenderError::Cancelled(_) => DiagramError::Cancelled("render operation cancelled".into()),
         RenderError::NoDiagram => DiagramError::Invalid("no diagram found".into()),
-        RenderError::ResourceLimitExceeded(resource) => DiagramError::Resource(resource.to_string()),
+        RenderError::ResourceLimitExceeded(resource) => {
+            DiagramError::Resource(resource.to_string())
+        }
         RenderError::Parse(diagnostic) => {
             let message = diagnostic.terminal_safe_message();
-            let unsupported =
-                diagnostic.terminal_diagnostic_details().code.as_str()
-                    == "merman.parse.unsupported_diagram";
+            let unsupported = diagnostic.terminal_diagnostic_details().code.as_str()
+                == "merman.parse.unsupported_diagram";
             if unsupported {
                 DiagramError::Unsupported(message)
             } else if diagnostic.is_resource_limit() {
@@ -882,9 +870,16 @@ mod budget_tests {
                 (MAX_WORK, MAX_GRID, 1),
             ] {
                 let control = DiagramControl::new();
-                let error =
-                    render_bounded(source, false, &control, work, cells, bytes, MermaidTreeMode::Text)
-                        .unwrap_err();
+                let error = render_bounded(
+                    source,
+                    false,
+                    &control,
+                    work,
+                    cells,
+                    bytes,
+                    MermaidTreeMode::Text,
+                )
+                .unwrap_err();
                 assert!(matches!(error, DiagramError::Resource(_)), "{error}");
                 assert!(render_controlled(source, false, None, &control).is_ok());
             }
@@ -963,7 +958,10 @@ mod budget_tests {
     fn merman_mode_passes_through_raw_structured_text() {
         let source = "mindmap\n  root\n    a";
         let raw = render_with_tree(source, false, None, MermaidTreeMode::Merman).unwrap();
-        assert!(raw.contains("bytes="), "debug mode shows Merman framing: {raw}");
+        assert!(
+            raw.contains("bytes="),
+            "debug mode shows Merman framing: {raw}"
+        );
     }
 
     #[test]

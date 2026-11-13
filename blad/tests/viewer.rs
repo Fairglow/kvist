@@ -1473,11 +1473,7 @@ fn monochrome_search_inside_code_is_precise_and_esc_does_not_close_a_tab() {
     let mut viewer = Viewer::start_with(&path, 60, 12, false, &["--color", "never"], &[]);
     viewer.keys(b"/needle\r");
     for (column, underlined) in viewer.screen.underlined[1].iter().enumerate().take(29) {
-        assert_eq!(
-            *underlined,
-            (12..18).contains(&column),
-            "column {column}"
-        );
+        assert_eq!(*underlined, (12..18).contains(&column), "column {column}");
     }
     viewer.keys(b"/missing\x1b");
     assert!(viewer.child.try_wait().unwrap().is_none());
@@ -2015,12 +2011,13 @@ fn unicode_search_link_clicks_and_clipping_use_display_columns() {
     assert_eq!(viewer.screen.cells[1][3].to_string(), "界");
     assert_eq!(viewer.screen.cells[1][4].to_string(), "");
     viewer.keys("/e\u{301}👩‍💻\r".as_bytes());
-    for (column, underlined) in viewer.screen.underlined[1].iter().enumerate().take(18).skip(2) {
-        assert_eq!(
-            *underlined,
-            (5..8).contains(&column),
-            "column {column}"
-        );
+    for (column, underlined) in viewer.screen.underlined[1]
+        .iter()
+        .enumerate()
+        .take(18)
+        .skip(2)
+    {
+        assert_eq!(*underlined, (5..8).contains(&column), "column {column}");
     }
     viewer.resize(30, 12);
     assert!(viewer.screen.line(11).contains("1/1"));

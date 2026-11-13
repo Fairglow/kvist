@@ -252,7 +252,10 @@ fn table_inline_code_has_monospace_styling() {
     styled.assert_code_background("inline", code_bg);
     // The surrounding cell text does not carry the code background.
     assert!(
-        styled.styles_for("text").iter().all(|a| a.bg != Some(code_bg)),
+        styled
+            .styles_for("text")
+            .iter()
+            .all(|a| a.bg != Some(code_bg)),
         "plain cell text must not inherit the code background"
     );
 }
@@ -352,7 +355,8 @@ fn explicit_breaks_in_table_cells_are_preserved() {
 
 #[test]
 fn table_overflow_does_not_corrupt_cell_geometry() {
-    let md = "| LongContent | Short |\n| ----------- | ----- |\n| verylongwordthatwilloverflow | x |";
+    let md =
+        "| LongContent | Short |\n| ----------- | ----- |\n| verylongwordthatwilloverflow | x |";
     let output = render_width(md, Some(20));
     let lines: Vec<&str> = output.lines().collect();
     // All non-empty lines should have consistent structure

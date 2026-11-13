@@ -610,8 +610,8 @@ impl Workspace {
             }
         }
         if !self.capture_failed && capture_error.is_none() {
-            for index in 0..2 {
-                batch.push_str(&self.streams[index].flush(status.is_some()));
+            for item in &mut self.streams {
+                batch.push_str(&item.flush(status.is_some()));
             }
         }
         if !batch.is_empty()

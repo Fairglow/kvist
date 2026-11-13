@@ -197,17 +197,15 @@ impl Drop for SessionHandle {
         if let Some(thread) = self.thread.take()
             && let Err(payload) = thread.join()
         {
-            let message = payload
-                .downcast_ref::<&str>()
-                .map_or_else(
-                    || {
-                        payload
-                            .downcast_ref::<String>()
-                            .cloned()
-                            .unwrap_or_else(|| "unknown panic payload".to_owned())
-                    },
-                    |value| (*value).to_owned(),
-                );
+            let message = payload.downcast_ref::<&str>().map_or_else(
+                || {
+                    payload
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .unwrap_or_else(|| "unknown panic payload".to_owned())
+                },
+                |value| (*value).to_owned(),
+            );
             tracing::error!(
                 message = %message,
                 "session worker thread panicked; the agent session is dead and no further events will be delivered"
