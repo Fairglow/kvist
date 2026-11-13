@@ -1,6 +1,6 @@
 [package]
 name = "kvist-blad"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 rust-version = "1.95"
 authors = ["Stefan Lindblad"]
@@ -68,6 +68,19 @@ merman = { version = "0.10", default-features = false, features = [
     "diagram-state",
     "diagram-class",
     "diagram-er",
+    "diagram-tree-view",
+    "diagram-mindmap",
+    # The following are backlog structured_text families. They are enabled so the
+    # debug pass-through (--mermaid-tree merman) can display Merman's raw
+    # projection for them while Blad's own bounded projections are designed; they
+    # are NOT admitted in the default Text mode. Internal merman features only —
+    # no new external dependencies.
+    "diagram-git-graph",
+    "diagram-gantt",
+    "diagram-timeline",
+    "diagram-journey",
+    "diagram-kanban",
+    "diagram-packet",
 ] }
 
 [dev-dependencies]

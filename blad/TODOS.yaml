@@ -3052,3 +3052,78 @@ tasks:
       completed_at: "2026-10-14T10:00:00Z"
     blocked_reason: null
     recovery_state: null
+  - id: "blad-mermaid-tree-mindmap-implement-code"
+    title: "implement_code: bounded tree projection for treeView and mindmap"
+    description: "Relax the structured_text restriction with limited staged support: treeView and mindmap render through a Blad-owned bounded tree projection drawn from the typed model (clean output, no Merman model-evidence framing), with node/depth ceilings. Add a debug-only MermaidTreeMode::Merman pass-through (CLI --mermaid-tree merman, RenderOptions.mermaid_tree) that shows Merman's raw structured_text projection including its internal framing, best-effort (the framing is a private merman-ascii module, not a stable format)."
+    context: "Implemented in this session after the Merman 0.10 migration. Merman 0.10's structured_text renderers hardcode a bytes=/id=/level= model-evidence framing with no public parse helper and no stability guarantee (safe_text::framing is a private module), so relying on or regex-stripping it is fragile; Blad renders tree shapes from the typed model instead. Merman's own debug output is exposed opt-in only. No new dependency crates were added. Verified: lib, mermaid_backend (21), diagrams and the remaining integration suites pass; clippy clean."
+    purpose: "Useful, faithful, bounded terminal rendering for tree-shaped diagrams without surfacing Merman's internal model framing in the default output."
+    expected_outcome: "treeView and mindmap render clean bounded trees; non-tree structured_text is rejected in Text mode; MermaidTreeMode::Merman shows Merman's raw projection for inspection."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "blad-mermaid"
+    requirements:
+      - "REQUIREMENTS.md#R-037"
+    timestamps:
+      created_at: "2026-11-10T21:00:00Z"
+      updated_at: "2026-11-10T22:00:00Z"
+      completed_at: "2026-11-10T22:00:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-mermaid-structured-text-gitgraph"
+    title: "backlog: gitGraph terminal projection"
+    description: "Add a bounded, Blad-owned git log --graph style projection (branch rails, commit markers, merge joins) drawn from merman::model GitGraphDiagramModel. The Merman structured_text projection for gitGraph is a flat commit list with ids/parents; a graph layout is the more useful terminal form. Hand-roll the layout (bounded, deterministic) before considering any external crate."
+    context: "Deferred from the initial tree/mindmap staged support. Merman's raw structured_text is visible via MermaidTreeMode::Merman for reference."
+    purpose: "Render git history as a bounded terminal graph without model-evidence framing."
+    expected_outcome: "gitGraph renders a bounded commit/branch graph; over-complex graphs are resource rejections."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "blad-mermaid-tree-mindmap-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#R-037"
+    timestamps:
+      created_at: "2026-11-10T21:00:00Z"
+      updated_at: "2026-11-10T21:00:00Z"
+      completed_at: null
+      recovered: false
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-mermaid-structured-text-gantt-timeline-journey-kanban"
+    title: "backlog: time/queue structured_text projections (gantt, timeline, journey, kanban)"
+    description: "Add bounded, Blad-owned terminal projections for the time/queue structured_text families: gantt (time-axis rows of blocks), timeline (era/event rows), journey (actor/step/score table) and kanban (column/task lists), drawn from the merman::model family models. Hand-roll bounded, deterministic layout; no new crates. Merman's raw structured_text is visible via MermaidTreeMode::Merman for reference."
+    context: "Deferred from the initial tree/mindmap staged support. These are the next candidates for staged structured_text support beyond the trivial tree shapes."
+    purpose: "Render schedule/queue diagrams as useful bounded terminal text."
+    expected_outcome: "Each admitted family renders a bounded projection; over-complex input is a resource rejection; Merman framing never reaches the default output."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "blad-mermaid-tree-mindmap-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#R-037"
+    timestamps:
+      created_at: "2026-11-10T21:00:00Z"
+      updated_at: "2026-11-10T21:00:00Z"
+      completed_at: null
+      recovered: false
+    blocked_reason: null
+    recovery_state: null
+  - id: "blad-mermaid-structured-text-data-charts"
+    title: "backlog: data-chart families (xychart, packet, and the remaining structured_text families)"
+    description: "Evaluate terminal projections for the data/chart families that Merman renders as diagrammatic-but-disclosure-heavy (xychart) or structured_text (packet, sankey, radar, venn, quadrantChart, treemap, block, etc.). For xychart, a clean projection would drop the mandatory values:/xDomain:/samples= disclosure lines Merman always emits. For packet, a bit-range table is a natural terminal form. Hand-roll bounded layout; no new crates unless a specific layout genuinely needs one. Merman's raw output is visible via MermaidTreeMode::Merman for reference."
+    context: "Deferred. xychart is the only additional diagrammatic family in 0.10 but always carries machine-readable disclosure lines; the rest are structured_text summaries. Each needs its own bounded projection design."
+    purpose: "Reach the goal of rendering as much Mermaid as makes sense in a terminal, family by family, with clean bounded output."
+    expected_outcome: "Admitted data-chart families render bounded clean projections; Merman framing is never the default output."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "blad-mermaid-tree-mindmap-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#R-037"
+    timestamps:
+      created_at: "2026-11-10T21:00:00Z"
+      updated_at: "2026-11-10T21:00:00Z"
+      completed_at: null
+      recovered: false
+    blocked_reason: null
+    recovery_state: null

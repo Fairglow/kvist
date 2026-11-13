@@ -83,7 +83,7 @@ fn main() {
 | Code blocks | ✅ | 50+ languages via syntect |
 | Tables | ✅ | Whole-word wrapping and delimiter alignment |
 | Math | ✅ | Bounded inline/display text subset |
-| Mermaid | ✅ | Admitted spatial text subset |
+| Mermaid | ✅ | Admitted spatial text subset plus bounded tree/mindmap trees |
 
 Left/center/right delimiter markers below align both headers and body cells:
 
@@ -183,11 +183,13 @@ Use `--math source` to preserve all original expressions instead of projecting.
 
 ## Mermaid Diagrams
 
-These five families use a bounded native text renderer, not a browser or
-external Mermaid executable. Some syntax/topologies fall back to visible
-source; see the [complete Mermaid profile](USAGE.md#mermaid-diagrams).
-Use Left/Right for overflow, `--diagram-charset ascii` for structural ASCII,
-or `--mermaid source` to inspect authored source.
+The spatial families (flowchart, sequence, state, class, ER) use a bounded
+native text renderer, not a browser or external Mermaid executable. The
+tree-shaped families (treeView, mindmap) render as bounded trees through the
+same adapter. Some syntax/topologies fall back to visible source; see the
+[complete Mermaid profile](USAGE.md#mermaid-diagrams). Use Left/Right for
+overflow, `--diagram-charset ascii` for structural ASCII, or `--mermaid source`
+to inspect authored source.
 
 ### Flowchart
 
@@ -259,6 +261,100 @@ erDiagram
 ```
 
 The `||` and `o{` cardinalities remain explicit text, not crow's-foot graphics.
+
+### Tree View
+
+The `treeView-beta` header is required (it is what Merman detects). Nested
+entries indent by two spaces. Blad renders the tree with its own bounded
+projection, so the output is clean — no model-evidence framing.
+
+```mermaid
+treeView-beta
+blad/
+  src/
+    lib.rs
+    main.rs
+    mermaid.rs
+  tests/
+    mermaid_backend.rs
+  Cargo.toml
+  README.md
+```
+
+Renders as:
+
+```text
+└── blad
+    ├── src
+    │   ├── lib.rs
+    │   ├── main.rs
+    │   └── mermaid.rs
+    ├── tests
+    │   └── mermaid_backend.rs
+    ├── Cargo.toml
+    └── README.md
+```
+
+Use `--diagram-charset ascii` for the ASCII connector set
+(`+--`/`` `-- `` instead of `├──`/`└──`).
+
+### Mind Map
+
+`mindmap` entries also indent by two spaces; the first node is the root.
+Mermaid node-shape markers (`(...)`, `[...]`, `((...))`) are parsed by Merman
+as shape information and are not shown in the label.
+
+```mermaid
+mindmap
+  root
+    Rendering
+      Tree view
+      Mind map
+    Backlog
+      Git graph
+      Gantt
+```
+
+Renders as:
+
+```text
+root
+├── Rendering
+│   ├── Tree view
+│   └── Mind map
+└── Backlog
+    ├── Git graph
+    └── Gantt
+```
+
+### Inspecting the other (backlog) families
+
+The remaining structured families (`gitGraph`, `gantt`, `timeline`,
+`journey`, `kanban`, `packet`, …) are not rendered by Blad yet. You can view
+Merman's own raw text projection for them — best-effort, for evaluation only,
+including Merman's internal model-evidence framing:
+
+```bash
+blad --dump demo.md --mermaid-tree merman
+```
+
+Example source and raw output for a `gantt` diagram:
+
+```mermaid
+gantt
+title Plan
+task1 : 2024-01-01, 3d
+task2 : 2024-01-04, 2d
+```
+
+```text
+title(bytes=4)="Plan"
+section(bytes=0)=""
+  - task(bytes=6)="task1 " [id(bytes=5)="task1", order=0, range=2024-01-01 ->
+    2024-01-04, start(bytes=10)="2024-01-01", duration(bytes=2)="3d"]
+  - task(bytes=6)="task2 " [id(bytes=5)="task2", order=1, range=2024-01-04 ->
+    2024-01-06, start(bytes=10)="2024-01-04", duration(bytes=2)="2d"]
+```
 
 ## Horizontal Rules
 

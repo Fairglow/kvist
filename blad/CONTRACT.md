@@ -172,6 +172,7 @@ retain the regular-file policy.
 | `--color auto\|always\|never` | Color policy; defaults to `auto`; explicit `always` overrides `NO_COLOR` |
 | `--math unicode\|source` | Supported mathematical text projection or original TeX; defaults to `unicode` |
 | `--mermaid text\|source` | Supported text diagrams or original source; defaults to `text` |
+| `--mermaid-tree text\|merman` | Tree-family projection: Blad's own clean tree (`text`) or Merman's raw `structured_text` pass-through (`merman`, debug only); defaults to `text` |
 | `--diagram-charset unicode\|ascii` | Structural diagram glyphs; defaults to `unicode`; preserves authored Unicode |
 | `--strip-html` | Strip unsupported HTML markup, retaining its text; default preserves literal markup |
 
@@ -550,6 +551,17 @@ The admitted profile and approximated presentation MUST be documented.
 Diagrams MUST retain authored direction, labels and endpoints and MUST NOT
 silently rotate, truncate labels, or wrap completed diagram rows to fit.
 Unicode/ASCII selection affects structural glyphs only.
+
+Tree-shaped families (`treeView`, `mindmap`) are admitted in a limited, growing
+form: Blad renders them through its own bounded tree projection (node and depth
+ceilings) drawn from the typed model, so Merman's internal model-evidence
+framing (`name(bytes=N)="..."`, `[id=.., level=..]`, …) never reaches the
+default output. The remaining `structured_text` families are rejected for now;
+that is a staged-support decision, not a parsing limitation. A debug-only
+`--mermaid-tree merman` / `RenderOptions.mermaid_tree` pass-through shows Merman's
+raw `structured_text` projection for those admitted families; that framing is
+Merman-internal (a private module, no public parse helper, no stability
+guarantee) and MUST be treated as best-effort inspection only.
 
 Resource-limit failures MUST be visible and distinct from unsupported syntax.
 Cancellation and writer failures MUST propagate rather than become source

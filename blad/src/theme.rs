@@ -99,6 +99,9 @@ pub enum DiagramCharset {
     Ascii,
 }
 
+/// Tree-family (`treeView`/`mindmap`) projection selection.
+pub use crate::mermaid::MermaidTreeMode;
+
 /// Semantic colors supplied by an embedding application.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Palette {
@@ -181,6 +184,8 @@ pub struct RenderOptions {
     pub math: MathMode,
     /// Diagram projection policy.
     pub mermaid: MermaidMode,
+    /// Tree-family (`treeView`/`mindmap`) projection policy.
+    pub mermaid_tree: MermaidTreeMode,
     /// Diagram structure encoding.
     pub diagram_charset: DiagramCharset,
     /// Remove unsupported HTML markup rather than displaying it literally.

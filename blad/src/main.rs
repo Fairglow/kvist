@@ -2,7 +2,10 @@
 
 #[cfg(feature = "sessions")]
 use blad::session;
-use blad::{ColorDepth, DiagramCharset, MathMode, MermaidMode, RenderOptions, Theme, display};
+use blad::{
+    ColorDepth, DiagramCharset, MathMode, MermaidMode, MermaidTreeMode, RenderOptions, Theme,
+    display,
+};
 use clap::{CommandFactory, Parser, ValueEnum};
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
@@ -51,6 +54,11 @@ pub struct Cli {
     /// Render admitted Mermaid diagrams as terminal text, or show source
     #[clap(long, global = true, value_enum, default_value = "text")]
     mermaid: MermaidMode,
+
+    /// Tree-family (treeView/mindmap) projection: Blad's own text tree, or
+    /// Merman's raw structured_text pass-through (debug only)
+    #[clap(long, global = true, value_enum, default_value = "text")]
+    mermaid_tree: MermaidTreeMode,
 
     /// Character set for text diagrams
     #[clap(long, global = true, value_enum, default_value = "unicode")]
@@ -124,6 +132,7 @@ fn render_options(cli: &Cli) -> std::io::Result<RenderOptions> {
             || (!std::io::stdout().is_terminal() && !matches!(cli.color, ColorChoice::Always)),
         math: cli.math,
         mermaid: cli.mermaid,
+        mermaid_tree: cli.mermaid_tree,
         diagram_charset: cli.diagram_charset,
         strip_html: cli.strip_html,
         palette: file

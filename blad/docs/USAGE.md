@@ -234,6 +234,7 @@ FIFOs/devices and theme files retain the regular-file checks.
 | `--color auto\|always\|never` | Color independently of appearance; auto honors TTY, `NO_COLOR`, `TERM=dumb` |
 | `--math unicode\|source` | Mathematical projection policy; default `unicode` |
 | `--mermaid text\|source` | Diagram projection policy; default `text` |
+| `--mermaid-tree text\|merman` | Tree-family projection; `text` uses Blad's own clean tree, `merman` is a debug pass-through of Merman's raw `structured_text`; default `text` |
 | `--diagram-charset unicode\|ascii` | Structural glyphs, not authored labels; default `unicode` |
 | `--strip-html` | Strip unsupported HTML markup, keeping its text; default preserves literal source |
 
@@ -829,7 +830,7 @@ or terminal image protocols.
 ### Mermaid Diagrams
 
 Blad renders ` ```mermaid ` fences directly into terminal text using pinned
-Merman 0.9.1. No PNG/SVG, graphical intermediates, browsers, runtime tools or
+Merman 0.10. No PNG/SVG, graphical intermediates, browsers, runtime tools or
 network calls are involved. `--diagram-charset ascii` changes structural glyphs,
 not authored Unicode. `--mermaid source` skips the engine and shows source.
 
@@ -840,6 +841,16 @@ not authored Unicode. `--mermaid source` skips the engine and shows source.
 | `stateDiagram` / `stateDiagram-v2` | Transitions, root cycles, simple composites, attached notes; LR/RL/TB/BT | Some composite crossings/cycles exceed the admitted routing profile |
 | `classDiagram` | Members/methods/visibility, interface annotations, inheritance, labelled directed relations, namespaces, attached notes; LR/RL/TB/BT | Namespace-plus-external-note combinations and some relation topologies fall back |
 | `erDiagram` | Entities, attributes, key tokens/comments, labelled cardinality relations; LR/RL/TB/BT | Cardinalities are textual; some relation topologies fall back |
+| `treeView-beta` | Nested directory/file trees (`└──`/`├──`), optional node descriptions | Rendered by Blad's own bounded projection (4,096 nodes, depth 64); the `treeView-beta` header is required (Merman's detector) |
+| `mindmap` | Nested mind-map trees from the root node | Rendered by Blad's own bounded projection; Mermaid shape markers (`(...)`, `[...]`, `((...))`, etc.) and icons are not represented |
+
+The remaining Merman `structured_text` families (`gitGraph`, `gantt`,
+`timeline`, `journey`, `kanban`, `packet`, `xychart`, and the rest) are a
+staged backlog: the default projection rejects them with an explanation rather
+than surfacing Merman's internal model-evidence framing
+(`name(bytes=N)="..."`, `[id=.., level=..]`, …), which is not a stable
+documented format. For inspection, `--mermaid-tree merman` shows Merman's raw
+`structured_text` output for those families (debug only, best-effort).
 
 ER cardinalities deliberately use textual Mermaid endpoint tags, not graphical
 crow's-foot glyphs: `||` means exactly one, `o|` zero or one, `|{` one or more,
@@ -897,6 +908,22 @@ blad README.md
 ```bash
 blad --dump README.md > readme.txt
 blad --math source --mermaid source README.md
+```
+
+### Mermaid trees and the debug pass-through
+
+```bash
+# treeView-beta and mindmap render as clean bounded trees (default):
+#
+#   └── blad
+#       ├── src
+#       │   └── lib.rs
+#       └── Cargo.toml
+blad tree-demo.md
+
+# Show Merman's own raw structured_text output (internal model framing,
+# best-effort, for evaluating the staged structured_text backlog):
+blad --mermaid-tree merman tree-demo.md
 ```
 
 Open the [feature showcase](EXAMPLES.md) to exercise the rendering profile.

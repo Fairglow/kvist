@@ -16,9 +16,19 @@
 //! family, `xychart`; it is deliberately not admitted because that backend
 //! always prepends machine-readable data-disclosure lines (e.g. `values:` /
 //! `xDomain:` / per-point `samples=[...]`) above the chart, which a spatial
-//! text viewer must not surface. Every other 0.10 family (gantt, journey,
-//! kanban, mindmap, packet, timeline, treeView, and the rest) projects to
-//! `structured_text` summaries, which this adapter already rejects.
+//! text viewer must not surface.
+//!
+//! Tree-shaped families are admitted in a limited, growing form: `treeView`
+//! and `mindmap` render through this adapter's own bounded tree projection
+//! (`MermaidTreeMode::Text`, the default), drawn from the typed model, so no
+//! Merman model-evidence framing reaches the terminal. The remaining
+//! `structured_text` families (gantt, journey, kanban, packet, timeline, and
+//! the rest) are still rejected for now; that is a deliberate staged-support
+//! choice, not a parsing limitation. `MermaidTreeMode::Merman` is a
+//! debug-only pass-through that shows Merman's own raw `structured_text`
+//! projection for those admitted families; that framing is Merman-internal
+//! formatting (a private `safe_text::framing` module, no public parse helper,
+//! no stability guarantee) and is best-effort only.
 //!
 //! Labels admit only authored `<br>` line breaks (`<br/>`, `<br >`, and
 //! `<BR>` all work); they map to real text line breaks. Any *other* literal
@@ -62,6 +72,21 @@ use merman::{
 
 pub(crate) use merman::OperationControl as DiagramControl;
 
+/// Tree-family (`treeView`/`mindmap`) projection selection.
+///
+/// Re-exported from `theme` as the public `blad::MermaidTreeMode`. Defined here
+/// (a mermaid concept) so the `#[path]`-includer contract test crate stays
+/// self-contained.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum MermaidTreeMode {
+    /// Blad's own bounded tree projection: clean, no model-evidence framing.
+    #[default]
+    Text,
+    /// Debug only: show Merman's raw `structured_text` projection, including
+    /// its internal framing (best-effort; not a stable format).
+    Merman,
+}
+
 const MAX_SOURCE: usize = 64 * 1024;
 const MAX_LEXICAL_UNITS: usize = 8192;
 const MAX_NODES: usize = 256;
@@ -73,6 +98,8 @@ const MAX_GRID: usize = 262_144;
 const MAX_OUTPUT: usize = 2 * 1024 * 1024;
 const MAX_WORK: usize = 2_000_000;
 const MAX_GRAPHEME: usize = 256;
+const MAX_TREE_NODES: usize = 4096;
+const MAX_TREE_DEPTH: usize = 64;
 const DEADLINE: Duration = Duration::from_millis(500);
 
 /// Failure categories remain distinct so the host never turns cancellation
@@ -90,6 +117,11 @@ pub(crate) enum DiagramError {
 }
 
 /// Render plain text. Width never rotates, clips or reflows completed rows.
+/// Tree families use this adapter's bounded tree projection.
+///
+/// Retained as the stable default-mode entry point (the contract suite calls
+/// these directly); production rendering goes through [`render_with_tree`].
+#[allow(dead_code)]
 pub(crate) fn render(
     source: &str,
     ascii: bool,
@@ -100,13 +132,51 @@ pub(crate) fn render(
 
 /// The host can cancel through a retained clone, including from another thread.
 /// Each render owns a child deadline without changing the host's control.
+#[allow(dead_code)]
 pub(crate) fn render_controlled(
     source: &str,
     ascii: bool,
     _width: Option<usize>,
     control: &DiagramControl,
 ) -> Result<String, DiagramError> {
-    render_bounded(source, ascii, control, MAX_WORK, MAX_GRID, MAX_OUTPUT)
+    render_bounded(
+        source,
+        ascii,
+        control,
+        MAX_WORK,
+        MAX_GRID,
+        MAX_OUTPUT,
+        MermaidTreeMode::Text,
+    )
+}
+
+/// Like [`render`], with an explicit tree-family projection mode.
+pub(crate) fn render_with_tree(
+    source: &str,
+    ascii: bool,
+    width: Option<usize>,
+    tree: MermaidTreeMode,
+) -> Result<String, DiagramError> {
+    render_controlled_with_tree(source, ascii, width, &DiagramControl::new(), tree)
+}
+
+/// Like [`render_controlled`], with an explicit tree-family projection mode.
+pub(crate) fn render_controlled_with_tree(
+    source: &str,
+    ascii: bool,
+    _width: Option<usize>,
+    control: &DiagramControl,
+    tree: MermaidTreeMode,
+) -> Result<String, DiagramError> {
+    render_bounded(
+        source,
+        ascii,
+        control,
+        MAX_WORK,
+        MAX_GRID,
+        MAX_OUTPUT,
+        tree,
+    )
 }
 
 fn render_bounded(
@@ -116,16 +186,40 @@ fn render_bounded(
     work: usize,
     cells: usize,
     bytes: usize,
+    tree: MermaidTreeMode,
 ) -> Result<String, DiagramError> {
     let control = control.child().with_deadline(DEADLINE);
     checkpoint(&control)?;
-    preflight(source, &control)?;
+    preflight(source, &control, tree)?;
     let renderer = build_renderer()?;
+    // `parse_semantic` consumes its operation control by value; a clone shares
+    // the same cancellation/deadline state and is cheap (an `Arc` bump). The
+    // clone drives the bounded tree render's cooperative checkpoints when the
+    // tree family is projected by Blad rather than the ASCII backend.
+    let parse_control = control.clone();
     let artifact = renderer
-        .parse_semantic(source, control)
+        .parse_semantic(source, parse_control)
         .map_err(render_error)?
         .ok_or_else(|| DiagramError::Invalid("no diagram found".into()))?;
-    admit_model(artifact.model())?;
+    // The production typed-model admission is skipped in the Merman debug
+    // pass-through: there Merman's own parser and the input resource policy
+    // are the bounds, and the goal is to observe Merman's raw projection.
+    if tree == MermaidTreeMode::Text {
+        admit_model(artifact.model())?;
+    }
+    let family = artifact.diagram_type();
+    let is_tree_family = matches!(family, "treeView" | "mindmap");
+    if is_tree_family && tree == MermaidTreeMode::Text {
+        // Default: this adapter's own bounded tree projection. Clean output,
+        // no Merman model-evidence framing, bounded independently of the ASCII
+        // layout budget.
+        return render_tree(artifact, ascii, &control);
+    }
+    // Merman ASCII backend. For spatial (diagrammatic) families this is the
+    // production path. For structured_text families it is a debug-only
+    // pass-through (MermaidTreeMode::Merman) showing Merman's own projection
+    // including its internal framing; the projection gate is skipped in that
+    // mode. Text mode for a non-tree structured_text family is rejected below.
     let target = RenderTarget::Ascii(AsciiRequest {
         options: if ascii {
             AsciiRenderOptions::ascii()
@@ -142,8 +236,16 @@ fn render_bounded(
     else {
         return Err(DiagramError::Invalid("no diagram found".into()));
     };
-    if report.projection != AsciiProjection::Diagrammatic
-        || report.outcome == AsciiOutputOutcome::Fallback
+    if tree == MermaidTreeMode::Merman {
+        return Ok(report.text);
+    }
+    if report.projection != AsciiProjection::Diagrammatic {
+        return unsupported(
+            "this family has no spatial text projection; \
+             structured_text support is staged and not yet admitted",
+        );
+    }
+    if report.outcome == AsciiOutputOutcome::Fallback
         || report.text.lines().any(|line| line.trim() == "relations:")
     {
         return unsupported("this topology requires a non-spatial relation summary");
@@ -229,7 +331,18 @@ fn ceiling(name: &str, actual: usize, maximum: usize) -> Result<(), DiagramError
 /// Conservative lexical admission, not another Mermaid parser. In particular,
 /// excluding endpoint products prevents short source from expanding to N² edges
 /// inside the parser before the typed-model admission can run.
-fn preflight(source: &str, control: &DiagramControl) -> Result<(), DiagramError> {
+///
+/// `tree == MermaidTreeMode::Text` (production) additionally enforces the
+/// strict family allowlist and the `<br>`-only HTML rule; the tree-shaped
+/// families are admitted here so Blad can render them through its own bounded
+/// projection. `MermaidTreeMode::Merman` is a debug pass-through and skips
+/// those production gates so Merman's own projection can be observed for any
+/// family; the source-size, control-character and nesting ceilings still apply.
+fn preflight(
+    source: &str,
+    control: &DiagramControl,
+    tree: MermaidTreeMode,
+) -> Result<(), DiagramError> {
     ceiling("source bytes", source.len(), MAX_SOURCE)?;
     if source.chars().any(|ch| {
         (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
@@ -241,18 +354,6 @@ fn preflight(source: &str, control: &DiagramControl) -> Result<(), DiagramError>
     }
     if source.contains("%%{") {
         return unsupported("configuration directives");
-    }
-    for (offset, _) in source.match_indices('<') {
-        if source[offset..].starts_with("<<") || source[..offset].ends_with('<') {
-            continue;
-        }
-        let suffix = source[offset + 1..].trim_start_matches('/');
-        if suffix.starts_with(|ch: char| ch.is_ascii_alphabetic()) {
-            let tag = suffix.split(|ch: char| !ch.is_ascii_alphabetic()).next();
-            if !tag.is_some_and(|tag| tag.eq_ignore_ascii_case("br")) {
-                return unsupported("rich HTML labels; only <br> line breaks are admitted");
-            }
-        }
     }
     let header = source
         .lines()
@@ -266,17 +367,35 @@ fn preflight(source: &str, control: &DiagramControl) -> Result<(), DiagramError>
     if header.is_empty() {
         return Err(DiagramError::Invalid("no diagram header found".into()));
     }
-    if !matches!(
-        header,
-        "flowchart"
-            | "graph"
-            | "sequenceDiagram"
-            | "stateDiagram"
-            | "stateDiagram-v2"
-            | "classDiagram"
-            | "erDiagram"
-    ) {
-        return unsupported("expected flowchart, sequence, state, class or ER syntax");
+    if tree == MermaidTreeMode::Text {
+        if !matches!(
+            header,
+            "flowchart"
+                | "graph"
+                | "sequenceDiagram"
+                | "stateDiagram"
+                | "stateDiagram-v2"
+                | "classDiagram"
+                | "erDiagram"
+                | "mindmap"
+                | "treeView-beta"
+        ) {
+            return unsupported(
+                "expected flowchart, sequence, state, class, ER, mindmap or treeView syntax",
+            );
+        }
+        for (offset, _) in source.match_indices('<') {
+            if source[offset..].starts_with("<<") || source[..offset].ends_with('<') {
+                continue;
+            }
+            let suffix = source[offset + 1..].trim_start_matches('/');
+            if suffix.starts_with(|ch: char| ch.is_ascii_alphabetic()) {
+                let tag = suffix.split(|ch: char| !ch.is_ascii_alphabetic()).next();
+                if !tag.is_some_and(|tag| tag.eq_ignore_ascii_case("br")) {
+                    return unsupported("rich HTML labels; only <br> line breaks are admitted");
+                }
+            }
+        }
     }
     let mut units = 0usize;
     let mut delimiters = 0usize;
@@ -373,6 +492,21 @@ fn preflight(source: &str, control: &DiagramControl) -> Result<(), DiagramError>
 }
 
 fn admit_model(model: &SemanticDiagramModel) -> Result<(), DiagramError> {
+    // Tree-shaped families have their own (larger, shape-specific) ceilings and
+    // are admitted here rather than through the spatial node/edge ceilings.
+    match model {
+        SemanticDiagramModel::TreeView(model) => {
+            let mut nodes = 0usize;
+            let mut depth = 0usize;
+            count_tree_nodes(&model.root, 0, &mut nodes, &mut depth)?;
+            return Ok(());
+        }
+        SemanticDiagramModel::Mindmap(model) => {
+            admit_mindmap(model)?;
+            return Ok(());
+        }
+        _ => {}
+    }
     let (nodes, edges) = match model {
         SemanticDiagramModel::Flowchart(model) => {
             if model.nodes.iter().any(|node| {
@@ -424,6 +558,267 @@ fn admit_model(model: &SemanticDiagramModel) -> Result<(), DiagramError> {
     };
     ceiling("nodes/participants", nodes, MAX_NODES)?;
     ceiling("edges/messages", edges, MAX_EDGES)
+}
+
+/// Bounded, iterative mindmap admission: total node count and maximum depth,
+/// without recursion (so a hostile tree cannot overflow the stack before we
+/// draw it). A mindmap with more than one root is rejected.
+fn admit_mindmap(model: &merman::model::families::mindmap::MindmapDiagramModel) -> Result<(), DiagramError> {
+    ceiling("tree nodes", model.nodes.len(), MAX_TREE_NODES)?;
+    if model.nodes.iter().filter(|n| n.is_root).count() > 1 {
+        return unsupported("mindmap has more than one root");
+    }
+    // Iterative depth computation over the child-id adjacency.
+    let by_id: std::collections::HashMap<i32, usize> = model
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.id, i))
+        .collect();
+    let roots: Vec<usize> = model
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.is_root)
+        .map(|(i, _)| i)
+        .collect();
+    let mut stack: Vec<(usize, usize)> = roots.iter().map(|&i| (i, 0)).collect();
+    let mut depth = 0usize;
+    while let Some((idx, d)) = stack.pop() {
+        depth = depth.max(d);
+        if depth > MAX_TREE_DEPTH {
+            return Err(DiagramError::Resource(format!(
+                "tree depth: {depth} exceeds {MAX_TREE_DEPTH}; simplify the tree"
+            )));
+        }
+        for &child in &model.nodes[idx].children {
+            if let Some(&ci) = by_id.get(&child) {
+                stack.push((ci, d + 1));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Count a treeView's nodes and maximum depth within the bounded ceilings, so a
+/// hostile tree cannot drive unbounded recursion before we render it.
+fn count_tree_nodes(
+    node: &merman::model::families::tree_view::TreeViewNode,
+    depth: usize,
+    nodes: &mut usize,
+    max_depth: &mut usize,
+) -> Result<(), DiagramError> {
+    *nodes += 1;
+    if *nodes > MAX_TREE_NODES {
+        return Err(DiagramError::Resource(format!(
+            "tree nodes: {nodes} exceeds {MAX_TREE_NODES}; simplify the tree"
+        )));
+    }
+    if depth > MAX_TREE_DEPTH {
+        return Err(DiagramError::Resource(format!(
+            "tree depth: {depth} exceeds {MAX_TREE_DEPTH}; simplify the tree"
+        )));
+    }
+    *max_depth = (*max_depth).max(depth);
+    for child in &node.children {
+        count_tree_nodes(child, depth + 1, nodes, max_depth)?;
+    }
+    Ok(())
+}
+
+/// Bounded, Blad-owned tree projection for `treeView` and `mindmap`.
+///
+/// Renders from the typed model (not Merman's ASCII backend) so the output is
+/// clean terminal text with no model-evidence framing. Tree connectors and
+/// indentation only; no width reflow of completed rows.
+fn render_tree(
+    artifact: merman::SemanticArtifact,
+    ascii: bool,
+    control: &DiagramControl,
+) -> Result<String, DiagramError> {
+    let glyphs = if ascii {
+        TreeGlyphs {
+            branch: "+-- ",
+            end: "`-- ",
+            pipe: "|   ",
+            space: "    ",
+        }
+    } else {
+        TreeGlyphs {
+            branch: "├── ",
+            end: "└── ",
+            pipe: "│   ",
+            space: "    ",
+        }
+    };
+    let mut out = String::new();
+    match artifact.model() {
+        SemanticDiagramModel::TreeView(model) => {
+            if let Some(title) = model.title.as_deref().filter(|t| !t.trim().is_empty()) {
+                out.push_str(title.trim());
+                out.push('\n');
+            }
+            render_node_children(
+                &model.root.children,
+                &glyphs,
+                &mut out,
+                control,
+            )?;
+        }
+        SemanticDiagramModel::Mindmap(model) => {
+            let nodes = &model.nodes;
+            let root_idx = nodes.iter().position(|n| n.is_root);
+            let Some(root_idx) = root_idx else {
+                return Err(DiagramError::Invalid(
+                    "mindmap has no root node".into(),
+                ));
+            };
+            let child_count = nodes.iter().map(|n| n.children.len()).sum::<usize>();
+            ceiling("tree nodes", nodes.len() + child_count, MAX_TREE_NODES)?;
+            out.push_str(nodes[root_idx].descr.trim());
+            out.push('\n');
+            render_mindmap_level(
+                nodes,
+                nodes[root_idx].children.as_slice(),
+                &glyphs,
+                &mut out,
+                control,
+            )?;
+        }
+        _ => return Err(DiagramError::Invalid("not a tree family".into())),
+    }
+    Ok(out)
+}
+
+fn render_node_children(
+    children: &[merman::model::families::tree_view::TreeViewNode],
+    glyphs: &TreeGlyphs,
+    out: &mut String,
+    control: &DiagramControl,
+) -> Result<(), DiagramError> {
+    for (i, child) in children.iter().enumerate() {
+        checkpoint(control)?;
+        let is_last = i + 1 == children.len();
+        out.push_str(if is_last { glyphs.end } else { glyphs.branch });
+        out.push_str(child.name.trim());
+        if let Some(desc) = child.description.as_deref().filter(|d| !d.trim().is_empty()) {
+            out.push_str(&format!(" ({})", desc.trim()));
+        }
+        out.push('\n');
+        if !child.children.is_empty() {
+            let prefix = if is_last { glyphs.space } else { glyphs.pipe };
+            render_indented_children(&child.children, prefix, glyphs, out, control)?;
+        }
+    }
+    Ok(())
+}
+
+fn render_indented_children(
+    children: &[merman::model::families::tree_view::TreeViewNode],
+    prefix: &str,
+    glyphs: &TreeGlyphs,
+    out: &mut String,
+    control: &DiagramControl,
+) -> Result<(), DiagramError> {
+    for (i, child) in children.iter().enumerate() {
+        checkpoint(control)?;
+        let is_last = i + 1 == children.len();
+        out.push_str(prefix);
+        out.push_str(if is_last { glyphs.end } else { glyphs.branch });
+        out.push_str(child.name.trim());
+        if let Some(desc) = child.description.as_deref().filter(|d| !d.trim().is_empty()) {
+            out.push_str(&format!(" ({})", desc.trim()));
+        }
+        out.push('\n');
+        if !child.children.is_empty() {
+            let child_prefix = format!(
+                "{}{}",
+                prefix,
+                if is_last { glyphs.space } else { glyphs.pipe }
+            );
+            render_indented_children(
+                &child.children,
+                &child_prefix,
+                glyphs,
+                out,
+                control,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn render_mindmap_level(
+    nodes: &[merman::model::families::mindmap::MindmapNodeModel],
+    child_ids: &[i32],
+    glyphs: &TreeGlyphs,
+    out: &mut String,
+    control: &DiagramControl,
+) -> Result<(), DiagramError> {
+    for (i, &child_id) in child_ids.iter().enumerate() {
+        checkpoint(control)?;
+        let Some(ci) = nodes.iter().position(|n| n.id == child_id) else {
+            continue;
+        };
+        let is_last = i + 1 == child_ids.len();
+        out.push_str(if is_last { glyphs.end } else { glyphs.branch });
+        out.push_str(nodes[ci].descr.trim());
+        out.push('\n');
+        let prefix = if is_last { glyphs.space } else { glyphs.pipe };
+        render_mindmap_level_indented(
+            nodes,
+            nodes[ci].children.as_slice(),
+            prefix,
+            glyphs,
+            out,
+            control,
+        )?;
+    }
+    Ok(())
+}
+
+fn render_mindmap_level_indented(
+    nodes: &[merman::model::families::mindmap::MindmapNodeModel],
+    child_ids: &[i32],
+    prefix: &str,
+    glyphs: &TreeGlyphs,
+    out: &mut String,
+    control: &DiagramControl,
+) -> Result<(), DiagramError> {
+    for (i, &child_id) in child_ids.iter().enumerate() {
+        checkpoint(control)?;
+        let Some(ci) = nodes.iter().position(|n| n.id == child_id) else {
+            continue;
+        };
+        let is_last = i + 1 == child_ids.len();
+        out.push_str(prefix);
+        out.push_str(if is_last { glyphs.end } else { glyphs.branch });
+        out.push_str(nodes[ci].descr.trim());
+        out.push('\n');
+        if !nodes[ci].children.is_empty() {
+            let child_prefix = format!(
+                "{}{}",
+                prefix,
+                if is_last { glyphs.space } else { glyphs.pipe }
+            );
+            render_mindmap_level_indented(
+                nodes,
+                nodes[ci].children.as_slice(),
+                &child_prefix,
+                glyphs,
+                out,
+                control,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+struct TreeGlyphs {
+    branch: &'static str,
+    end: &'static str,
+    pipe: &'static str,
+    space: &'static str,
 }
 
 fn render_error(error: RenderError) -> DiagramError {
@@ -488,7 +883,8 @@ mod budget_tests {
             ] {
                 let control = DiagramControl::new();
                 let error =
-                    render_bounded(source, false, &control, work, cells, bytes).unwrap_err();
+                    render_bounded(source, false, &control, work, cells, bytes, MermaidTreeMode::Text)
+                        .unwrap_err();
                 assert!(matches!(error, DiagramError::Resource(_)), "{error}");
                 assert!(render_controlled(source, false, None, &control).is_ok());
             }
@@ -507,13 +903,88 @@ mod budget_tests {
             let text = render(source, false, None).unwrap();
             let control = DiagramControl::new();
             assert_eq!(
-                render_bounded(source, false, &control, MAX_WORK, MAX_GRID, text.len()).unwrap(),
+                render_bounded(
+                    source,
+                    false,
+                    &control,
+                    MAX_WORK,
+                    MAX_GRID,
+                    text.len(),
+                    MermaidTreeMode::Text,
+                )
+                .unwrap(),
                 text,
             );
             assert!(matches!(
-                render_bounded(source, false, &control, MAX_WORK, MAX_GRID, text.len() - 1),
+                render_bounded(
+                    source,
+                    false,
+                    &control,
+                    MAX_WORK,
+                    MAX_GRID,
+                    text.len() - 1,
+                    MermaidTreeMode::Text,
+                ),
                 Err(DiagramError::Resource(_)),
             ));
         }
+    }
+
+    #[test]
+    fn tree_view_renders_a_bounded_clean_tree() {
+        let source = "treeView-beta\napps/\n  src/\n    main.rs\n    lib.rs\n  README.md";
+        for ascii in [false, true] {
+            let text = render(source, ascii, None).unwrap();
+            for name in ["apps", "src", "main.rs", "lib.rs", "README.md"] {
+                assert!(text.contains(name), "{text}");
+            }
+            assert!(!text.contains("bytes="), "no model framing in {text}");
+            assert!(!text.contains('\x1b'), "{text}");
+            if ascii {
+                assert!(text.is_ascii(), "{text}");
+                assert!(text.contains("+-- ") || text.contains("`-- "), "{text}");
+            } else {
+                assert!(text.contains('└') || text.contains('├'), "{text}");
+            }
+        }
+    }
+
+    #[test]
+    fn mindmap_renders_a_bounded_clean_tree() {
+        let source = "mindmap\n  root\n    idea A\n    idea B\n      sub B1\n      sub B2";
+        let text = render(source, false, None).unwrap();
+        for label in ["root", "idea A", "idea B", "sub B1", "sub B2"] {
+            assert!(text.contains(label), "{text}");
+        }
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+    }
+
+    #[test]
+    fn merman_mode_passes_through_raw_structured_text() {
+        let source = "mindmap\n  root\n    a";
+        let raw = render_with_tree(source, false, None, MermaidTreeMode::Merman).unwrap();
+        assert!(raw.contains("bytes="), "debug mode shows Merman framing: {raw}");
+    }
+
+    #[test]
+    fn non_tree_structured_text_is_rejected_in_text_mode() {
+        let source = "gantt\ntitle P\nt1 : 2024-01-01, 3d";
+        assert!(matches!(
+            render(source, false, None),
+            Err(DiagramError::Unsupported(_)),
+        ));
+    }
+
+    #[test]
+    fn tree_node_ceiling_is_a_resource_error() {
+        // A wide tree exceeding MAX_TREE_NODES must be a resource rejection.
+        let branches = (0..(MAX_TREE_NODES as i32 + 2))
+            .map(|i| format!("  n{i}\n"))
+            .collect::<String>();
+        let source = format!("treeView-beta\nroot\n{branches}");
+        assert!(matches!(
+            render(&source, false, None),
+            Err(DiagramError::Resource(_)),
+        ));
     }
 }

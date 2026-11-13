@@ -80,7 +80,8 @@ pub use diagram::RenderCancellation;
 pub use markdown::MarkdownRenderer;
 pub use markdown::render_markdown;
 pub use theme::{
-    Color, ColorDepth, DiagramCharset, MathMode, MermaidMode, Palette, RenderOptions, Theme,
+    Color, ColorDepth, DiagramCharset, MathMode, MermaidMode, MermaidTreeMode, Palette,
+    RenderOptions, Theme,
 };
 
 mod browser;

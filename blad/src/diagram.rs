@@ -61,10 +61,11 @@ pub(crate) fn write(
         return text(writer, source);
     }
     let ascii = options.diagram_charset == DiagramCharset::Ascii;
+    let tree = options.mermaid_tree;
     let result = if let Some(control) = cancellation {
-        mermaid::render_controlled(source, ascii, width, &control.inner)
+        mermaid::render_controlled_with_tree(source, ascii, width, &control.inner, tree)
     } else {
-        mermaid::render(source, ascii, width)
+        mermaid::render_with_tree(source, ascii, width, tree)
     };
     match result {
         Ok(rendered) => text(writer, &rendered),

@@ -997,12 +997,19 @@ MPL-2.0, Unicode, BSD and Zlib notices remain distribution obligations.
 The adapter rejects rather than pretending success when the scene requires a
 non-spatial relation summary. Five-family fixtures admit labelled spatial
 diagrams, branches/cycles, groups/control frames, notes, class members and ER
-attributes/keys. Browser interactions, directives/front matter, accessibility
-declarations, rich HTML, endpoint-product shorthand and unsupported model
-features are gated explicitly. Some composite-state crossings/cycles,
-namespace-plus-external-note combinations and relation topologies remain
-unsupported. Styling and elaborate shapes are text approximations. The exact
-profile is documented in `docs/USAGE.md`.
+attributes/keys. Tree-shaped families (`treeView`, `mindmap`) are additionally
+admitted through a Blad-owned bounded tree projection drawn from the typed
+model, so Merman's internal model-evidence framing never reaches the default
+output; the remaining `structured_text` families are a staged backlog (gitGraph,
+gantt, timeline, journey, kanban, packet, xychart, and the rest). A debug-only
+`--mermaid-tree merman` pass-through exposes Merman's raw `structured_text`
+projection (internal framing, best-effort, no stability guarantee) for
+evaluating that backlog. Browser interactions, directives/front matter,
+accessibility declarations, rich HTML, endpoint-product shorthand and
+unsupported model features are gated explicitly. Some composite-state
+crossings/cycles, namespace-plus-external-note combinations and relation
+topologies remain unsupported. Styling and elaborate shapes are text
+approximations. The exact profile is documented in `docs/USAGE.md`.
 
 Enforced rejection ceilings: 65,536 source bytes, 8,192 lexical units, 256
 nodes/participants/containers, 512 edges/messages, nesting 32, 32,768 model
