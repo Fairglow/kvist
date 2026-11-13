@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use sav::{CancellationToken, ToolIntent};
@@ -30,6 +30,15 @@ fn fixture() -> tempfile::TempDir {
         .prefix(".rust-environment-test-")
         .tempdir_in(manifest_dir())
         .unwrap()
+}
+
+/// Newer cargo writes test and dependency artifacts to
+/// `debug/build/<package>/<hash>/out/` instead of `debug/deps/`; accept any
+/// non-empty `debug` directory as evidence that the build produced artifacts.
+fn debug_artifacts(target: &Path) -> bool {
+    fs::read_dir(target.join("debug"))
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
 }
 
 fn runner() -> PathBuf {
@@ -495,7 +504,7 @@ fn repository_cargo_does_not_wait_for_enclosing_target_locks() {
         result.error_text(16384)
     );
     assert!(result.output_text(16384).contains("1 passed; 0 failed"));
-    assert!(workdir.join("target/repository-trial/debug/deps").is_dir());
+    assert!(debug_artifacts(&workdir.join("target/repository-trial")));
 }
 
 #[derive(Clone)]
@@ -1294,5 +1303,5 @@ fn workspace_cargo_resolves_live_project_locks_offline() {
         Some("locked-trial")
     );
     assert_eq!(resolved["package"][0]["version"].as_str(), Some("0.1.0"));
-    assert!(workdir.join("target/debug/deps").is_dir());
+    assert!(debug_artifacts(&workdir.join("target")));
 }

@@ -199,6 +199,15 @@ fn provisioning_flags_are_not_agent_execution_flags() {
     assert!(!dir.path().join(".kvist").exists());
 }
 
+/// Newer cargo writes test and dependency artifacts to
+/// `debug/build/<package>/<hash>/out/` instead of `debug/deps/`; accept any
+/// non-empty `debug` directory as evidence that the build produced artifacts.
+fn debug_artifacts(target: &Path) -> bool {
+    fs::read_dir(target.join("debug"))
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
+}
+
 fn host_cargo() -> PathBuf {
     let out = Command::new("/usr/bin/rustup")
         .args(["which", "cargo"])
@@ -249,7 +258,7 @@ fn local_git_cache_builds_offline_with_private_admin_and_live_roots() {
             "cargo test && cargo clippy --all-targets && cargo doc --no-deps && test -L \"$CARGO_HOME/git\" && test \"$(readlink \"$CARGO_HOME/git\")\" = /rust/cargo-git && test -w \"$CARGO_HOME\" && test ! -w /rust/cargo-git && touch \"$CARGO_HOME/admin-proof\" && test ! -e /rust/runtime/vendor-config.toml && test ! -e /rust/vendor && test ! -e \"$CARGO_HOME/credentials.toml\" && test ! -e \"$CARGO_HOME/config.toml\"",
         );
         assert!(!out.failed(), "{}", out.error_text(16384));
-        assert!(root.join("target/debug/deps").is_dir());
+        assert!(debug_artifacts(&root.join("target")));
         assert_eq!(fs::read(cache.join(".package-cache")).unwrap(), host_admin);
         assert!(!cache.join("admin-proof").exists());
         no_vendor_state(&root);

@@ -310,6 +310,36 @@ fn acquisition_failure_diagnostics_name_each_limit_and_bound_redacted_output() {
     assert!(error.contains("[truncated]"), "{error}");
 }
 
+/// Locate the native Galla runner built alongside this test binary.
+///
+/// Older cargo places test executables in `target/debug/deps/`, while newer
+/// cargo nests them under `target/debug/build/<package>/<hash>/out/`. Walk up
+/// from the executable and accept the first ancestor directory containing a
+/// `galla` binary, which covers both layouts.
+fn native_runner() -> PathBuf {
+    if let Some(path) = std::env::var_os("KVIST_GALLA").map(PathBuf::from)
+        && path.is_file()
+    {
+        return path;
+    }
+    let mut directory = std::env::current_exe()
+        .expect("test executable")
+        .parent()
+        .expect("test executable directory")
+        .to_path_buf();
+    for _ in 0..6 {
+        let candidate = directory.join("galla");
+        if candidate.is_file() {
+            return candidate;
+        }
+        let Some(parent) = directory.parent() else {
+            break;
+        };
+        directory = parent.to_path_buf();
+    }
+    panic!("build the native Galla runner first");
+}
+
 impl Fixture {
     fn new() -> Self {
         let root = tempfile::tempdir_in(".").expect("project-local fixture");
@@ -456,18 +486,7 @@ fn protected_native_readiness_leaves_legacy_export_fences_untouched() {
 #[test]
 fn native_acquisition_fetches_a_locked_workspace_without_building_or_downloading() {
     let mut fixture = Fixture::new();
-    let runner = std::env::var_os("KVIST_GALLA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_exe()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("galla")
-        });
-    assert!(runner.is_file(), "build the native Galla runner first");
+    let runner = native_runner();
     fixture.sandbox.runner = runner
         .canonicalize()
         .unwrap()
@@ -538,18 +557,7 @@ fn protected_vendor_does_not_replace_the_approved_runner_identity() {
 #[test]
 fn native_configured_metadata_admits_cached_git_without_building_or_host_fallback() {
     let mut fixture = Fixture::new();
-    let runner = std::env::var_os("KVIST_GALLA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_exe()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("galla")
-        });
-    assert!(runner.is_file(), "build the native Galla runner first");
+    let runner = native_runner();
     fixture.sandbox.runner = runner
         .canonicalize()
         .unwrap()

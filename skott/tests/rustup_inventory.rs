@@ -457,6 +457,10 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
                 format!("RUSTUP_TOOLCHAIN={name} cargo test"),
                 format!("rustup run {name} cargo test --offline --locked"),
             ] {
+                // Newer cargo rewrites the fixture lock to a version that
+                // older toolchains cannot parse; restore the shared v3 lock
+                // before every invocation.
+                fs::write(workspace.join("Cargo.lock"), &lock).unwrap();
                 let outcome = shell(&executor, &command);
                 assert!(
                     !outcome.failed(),
