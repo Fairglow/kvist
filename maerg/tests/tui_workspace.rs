@@ -4,6 +4,7 @@
 use std::io;
 use std::os::fd::AsFd;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -141,25 +142,34 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
         FcntlArg::F_SETFL(OFlag::from_bits_truncate(flags) | OFlag::O_NONBLOCK),
     )
     .unwrap();
-    let mut child = Guard(
-        Command::new(env!("CARGO_BIN_EXE_kvist"))
-            .current_dir(dir.path())
-            .env_remove("KVIST_THEME")
-            .env("KVIST_LOG", "debug")
-            .env("TERM", "xterm-256color")
-            .env("KVIST_SKOTT", &stub)
-            .env("XDG_CONFIG_HOME", dir.path().join("user-config"))
-            .env("XDG_STATE_HOME", dir.path().join("user-state"))
-            .env_remove("NO_COLOR")
-            .env_remove("CLICOLOR")
-            .env_remove("CLICOLOR_FORCE")
-            .env_remove("KVIST_CONFIG_PATH")
-            .stdin(Stdio::from(pty.slave.try_clone().unwrap()))
-            .stdout(Stdio::from(pty.slave.try_clone().unwrap()))
-            .stderr(Stdio::from(pty.slave))
-            .spawn()
-            .unwrap(),
-    );
+    let mut command = Command::new(env!("CARGO_BIN_EXE_kvist"));
+    command
+        .current_dir(dir.path())
+        .env_remove("KVIST_THEME")
+        .env("KVIST_LOG", "debug")
+        .env("TERM", "xterm-256color")
+        .env("KVIST_SKOTT", &stub)
+        .env("XDG_CONFIG_HOME", dir.path().join("user-config"))
+        .env("XDG_STATE_HOME", dir.path().join("user-state"))
+        .env_remove("NO_COLOR")
+        .env_remove("CLICOLOR")
+        .env_remove("CLICOLOR_FORCE")
+        .env_remove("KVIST_CONFIG_PATH")
+        .stdin(Stdio::from(pty.slave.try_clone().unwrap()))
+        .stdout(Stdio::from(pty.slave.try_clone().unwrap()))
+        .stderr(Stdio::from(pty.slave));
+    // Become a session leader so the pty is the child's controlling terminal;
+    // otherwise crossterm's size probe reads the parent's terminal and the
+    // workspace refuses to start in CI and other no-tty contexts.
+    unsafe {
+        command.pre_exec(|| {
+            nix::unistd::setsid()
+                .map(|_| ())
+                .map_err(io::Error::other)?;
+            Ok(())
+        });
+    }
+    let mut child = Guard(command.spawn().unwrap());
     let mut output = Vec::new();
     wait_for(&pty.master, &mut output, || {
         transcript(dir.path()).contains("# Kvist workspace")
