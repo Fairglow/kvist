@@ -423,7 +423,17 @@ fn render_markdown_theme(
                 } else if in_table {
                     let cleaned = text.replace('\n', " ").replace('\r', "");
                     if links > 0 {
-                        table_spans.append(&mut table_row_cells, table_rows.len(), style, &cleaned);
+                        // Table link labels use the link palette color
+                        // (R-074), composing with any enclosing emphasis.
+                        table_spans.append(
+                            &mut table_row_cells,
+                            table_rows.len(),
+                            Style {
+                                color: Some(palette.link),
+                                ..style
+                            },
+                            &cleaned,
+                        );
                     } else {
                         let mut end = 0;
                         for url in crate::links::bare_urls(&cleaned) {
@@ -441,6 +451,7 @@ fn render_markdown_theme(
                                         event: range.start,
                                         offset: url.start,
                                     }),
+                                    color: Some(palette.link),
                                     ..style
                                 },
                                 &cleaned[url.clone()],
@@ -548,7 +559,18 @@ fn render_markdown_theme(
             Event::Code(text) => {
                 let text = inert_source(&text);
                 if in_table {
-                    table_spans.append(&mut table_row_cells, table_rows.len(), style, &text);
+                    // Table code uses the code-background palette, not
+                    // reverse video (R-074). Whitespace and wrapping keep the
+                    // cell's normalization.
+                    table_spans.append(
+                        &mut table_row_cells,
+                        table_rows.len(),
+                        Style {
+                            code: true,
+                            ..style
+                        },
+                        &text,
+                    );
                 } else {
                     inline.code(
                         &text,
@@ -748,6 +770,7 @@ fn render_markdown_theme(
                     &table_spans,
                     terminal_width,
                     settings,
+                    &code_bg,
                 )?;
                 writeln!(w)?;
                 need_blank = true;
@@ -954,6 +977,7 @@ fn render_table(
     spans: &crate::table_spans::TableSpans,
     terminal_width: Option<usize>,
     settings: &RenderOptions,
+    code_background: &str,
 ) -> std::io::Result<()> {
     if rows.is_empty() {
         return Ok(());
@@ -1050,7 +1074,13 @@ fn render_table(
                         alignments.get(i).copied().unwrap_or(Alignment::None),
                     );
                     write!(w, "{}", " ".repeat(leading))?;
-                    crate::table_spans::write_cell(w, cell, &wrapped_spans[i][line_idx])?;
+                    crate::table_spans::write_cell(
+                        w,
+                        cell,
+                        &wrapped_spans[i][line_idx],
+                        code_background,
+                        prefix,
+                    )?;
                     write!(w, "{}", " ".repeat(trailing))?;
                 } else {
                     // Pad with spaces for shorter cells

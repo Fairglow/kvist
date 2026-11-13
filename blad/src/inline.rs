@@ -12,6 +12,9 @@ pub(crate) struct Style {
     pub strike: bool,
     pub reverse: bool,
     pub dim: bool,
+    /// A dedicated inline-code span. Prose code renders as reverse video;
+    /// table code uses the code-background palette instead (R-074).
+    pub code: bool,
     pub color: Option<crate::theme::Color>,
     pub link: Option<crate::links::NavigationId>,
 }

@@ -79,8 +79,8 @@ impl Screen {
             "grapheme exceeds the terminal edge"
         );
         self.cells[row][column] = text;
-        for continuation in column + 1..end {
-            self.cells[row][continuation].clear();
+        for cell in self.cells[row].iter_mut().take(end).skip(column + 1) {
+            cell.clear();
         }
         for cell in column..end {
             self.reversed[row][cell] = self.reverse;
@@ -1472,9 +1472,9 @@ fn monochrome_search_inside_code_is_precise_and_esc_does_not_close_a_tab() {
     std::fs::write(&path, "before `code needle after` tail").unwrap();
     let mut viewer = Viewer::start_with(&path, 60, 12, false, &["--color", "never"], &[]);
     viewer.keys(b"/needle\r");
-    for column in 0..29 {
+    for (column, underlined) in viewer.screen.underlined[1].iter().enumerate().take(29) {
         assert_eq!(
-            viewer.screen.underlined[1][column],
+            *underlined,
             (12..18).contains(&column),
             "column {column}"
         );
@@ -1543,13 +1543,13 @@ fn spatial_links_select_only_the_label_and_heading_keys_are_separate() {
     let mut viewer = Viewer::start(&path, 60, 12, false);
     viewer.keys(b"\t");
     assert!(viewer.screen.line(11).contains("Links: 1/3"));
-    for column in 0..14 {
-        assert_eq!(viewer.screen.reversed[3][column], column < 4);
+    for (column, reversed) in viewer.screen.reversed[3].iter().enumerate().take(14) {
+        assert_eq!(*reversed, column < 4);
     }
     viewer.keys(b"\x1b[1;5C");
     assert!(viewer.screen.line(11).contains("Links: 2/3"));
-    for column in 0..14 {
-        assert_eq!(viewer.screen.reversed[3][column], (9..14).contains(&column));
+    for (column, reversed) in viewer.screen.reversed[3].iter().enumerate().take(14) {
+        assert_eq!(*reversed, (9..14).contains(&column));
     }
     viewer.keys(b"\x1b[1;5B");
     assert!(viewer.screen.line(11).contains("Links: 3/3"));
@@ -2015,9 +2015,9 @@ fn unicode_search_link_clicks_and_clipping_use_display_columns() {
     assert_eq!(viewer.screen.cells[1][3].to_string(), "界");
     assert_eq!(viewer.screen.cells[1][4].to_string(), "");
     viewer.keys("/e\u{301}👩‍💻\r".as_bytes());
-    for column in 2..18 {
+    for (column, underlined) in viewer.screen.underlined[1].iter().enumerate().take(18).skip(2) {
         assert_eq!(
-            viewer.screen.underlined[1][column],
+            *underlined,
             (5..8).contains(&column),
             "column {column}"
         );

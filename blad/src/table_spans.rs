@@ -32,7 +32,12 @@ impl TableSpans {
                 bold: style.bold,
                 italic: style.italic,
                 strike: style.strike,
+                code: style.code,
                 link: style.link,
+                // Preserve the semantic foreground (link color for link
+                // labels, or the enclosing quote color) so it composes with
+                // the code background and emphasis (R-074).
+                color: style.color,
                 ..Style::default()
             };
             if text.is_empty() || style == Style::default() {
@@ -161,6 +166,8 @@ pub(crate) fn write_cell(
     writer: &mut RenderWriter<'_, impl Write>,
     text: &str,
     spans: &[WrappedSpan],
+    code_background: &str,
+    row_background: &str,
 ) -> io::Result<()> {
     for span in spans {
         if let Some(source) = span.style.link {
@@ -174,15 +181,33 @@ pub(crate) fn write_cell(
             .ok_or_else(invalid_span)?;
         let styled = text.get(span.bytes.clone()).ok_or_else(invalid_span)?;
         write!(writer, "{plain}")?;
-        write_emphasis(writer, span.style, true)?;
+        write_span_style(writer, span.style, code_background, row_background, true)?;
         write!(writer, "{styled}")?;
-        write_emphasis(writer, span.style, false)?;
+        write_span_style(writer, span.style, code_background, row_background, false)?;
         cursor = span.bytes.end;
     }
     write!(writer, "{}", text.get(cursor..).ok_or_else(invalid_span)?)
 }
 
-fn write_emphasis(writer: &mut impl Write, style: Style, enabled: bool) -> io::Result<()> {
+/// Write the SGR transitions for one styled table span, composed over the
+/// row's already-active styling (R-074).
+///
+/// Emphasis, the link palette color, and the code-background palette are
+/// independent SGR attributes, so they compose freely (e.g. a linked code
+/// span carries both the link color and the code background). When a span
+/// ends, each attribute it enabled is restored to the row state: the
+/// foreground back to default, and the code background cleared and the row
+/// background (zebra tint or header reversal) re-asserted. This keeps the
+/// code background from leaking into padding, separators or neighboring
+/// cells. Plain output (or a host with no code palette) leaves
+/// `code_background` empty, so no background is written.
+fn write_span_style(
+    writer: &mut impl Write,
+    style: Style,
+    code_background: &str,
+    row_background: &str,
+    enabled: bool,
+) -> io::Result<()> {
     for (active, on, off) in [
         (style.bold, 1, 22),
         (style.italic, 3, 23),
@@ -190,6 +215,22 @@ fn write_emphasis(writer: &mut impl Write, style: Style, enabled: bool) -> io::R
     ] {
         if active {
             write!(writer, "\x1b[{}m", if enabled { on } else { off })?;
+        }
+    }
+    if let Some(color) = style.color {
+        if enabled {
+            color.write(writer, false)?;
+        } else {
+            write!(writer, "\x1b[39m")?;
+        }
+    }
+    if style.code {
+        if enabled {
+            write!(writer, "{code_background}")?;
+        } else {
+            // Drop the code background, then re-assert the row background (if
+            // the row has one) so the zebra tint / header reversal continues.
+            write!(writer, "\x1b[49m{row_background}")?;
         }
     }
     Ok(())
@@ -232,7 +273,9 @@ mod tests {
         assert_eq!(wrapped[0][0].bytes, 0..2);
         assert!(wrapped[0][0].style.bold);
         assert!(!wrapped[0][0].style.reverse);
-        assert_eq!(wrapped[0][0].style.color, None);
+        // The semantic foreground (quote/link color) is preserved through the
+        // projection so it composes with the code background (R-074).
+        assert_eq!(wrapped[0][0].style.color, Some(crate::Color::Ansi(1)));
         assert_eq!(wrapped[0][1].bytes, 2..3);
         assert!(wrapped[0][1].style.italic);
     }
@@ -290,7 +333,7 @@ mod tests {
             columns: 0..100,
         }];
         assert_eq!(
-            write_cell(&mut writer, "short", &invalid)
+            write_cell(&mut writer, "short", &invalid, "", "")
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::InvalidData
