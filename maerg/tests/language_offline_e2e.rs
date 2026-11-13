@@ -256,10 +256,13 @@ fn go_offline_verification_builds_and_tests_denied_network() {
     }
     if std::env::var_os("KVIST_GO_OFFLINE_CHILD").is_none() {
         let worktree = git_worktree_root().expect("worktree checked by live_sandbox_ready");
-        let cache = tempfile::Builder::new()
-            .prefix(".go-offline-native-")
-            .tempdir_in(worktree)
-            .expect("owned native Go cache fixture");
+        // A dedicated, reusable native Go cache. Go makes *extracted* module
+        // directories read-only (555), so a per-run tempdir cannot be removed
+        // by the non-root test process and the directories accumulate. A fixed,
+        // gitignored cache is reused across runs exactly like a developer's own
+        // GOMODCACHE/GOCACHE, so nothing is ever deleted and nothing piles up.
+        let cache = worktree.join(".go-offline-native-cache");
+        std::fs::create_dir_all(&cache).expect("owned native Go cache fixture");
         let output = Command::new(std::env::current_exe().expect("test executable"))
             .args([
                 "--exact",
@@ -267,9 +270,9 @@ fn go_offline_verification_builds_and_tests_denied_network() {
                 "--nocapture",
             ])
             .env("KVIST_GO_OFFLINE_CHILD", "1")
-            .env("GOMODCACHE", cache.path().join("modules"))
-            .env("GOPATH", cache.path().join("gopath"))
-            .env("GOCACHE", cache.path().join("compiler-cache"))
+            .env("GOMODCACHE", cache.join("modules"))
+            .env("GOPATH", cache.join("gopath"))
+            .env("GOCACHE", cache.join("compiler-cache"))
             .env("GOENV", "off")
             .env("GOTOOLCHAIN", "local")
             .output()
