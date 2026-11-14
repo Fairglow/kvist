@@ -170,7 +170,20 @@ impl Workspace {
                 self.edit_prompt(&seed, vec!["prompt".into()], terminal)?;
             }
             "agent" => {
-                if arguments.is_empty() {
+                // Known agent subcommands are dispatched to the CLI; anything
+                // else is treated as a prompt to the embedded Skott agent.
+                let is_agent_subcommand = arguments.first().map(|arg| {
+                    matches!(
+                        arg.as_str(),
+                        "list" | "show" | "setup" | "enable" | "disable"
+                            | "remove" | "check" | "role"
+                    )
+                });
+                if is_agent_subcommand == Some(true) {
+                    let mut args = vec!["agent".into()];
+                    args.extend(arguments);
+                    self.dispatch(args, terminal)?;
+                } else if arguments.is_empty() {
                     self.append("usage: agent <PROMPT…> — runs the prompt through the embedded Skott agent; Ctrl+Tab switches between the Kvist metrics, the Skott detail, and a side-by-side view.\n")?;
                 } else {
                     self.start_agent_session(&arguments.join(" "))?;
