@@ -316,7 +316,8 @@ impl Workspace {
                         "no task ID given and no ready task found; specify a task or make one ready",
                     )
                 })?;
-            return self.start_task_run(&component, &task_id, *allow_control);
+            let all_components = component_dir == std::path::Path::new(".");
+            return self.start_task_run(&component, &task_id, *allow_control, true, all_components);
         }
         self.start(arguments)
     }
@@ -325,11 +326,13 @@ impl Workspace {
     /// the task-queue state (lock, status, prompt, context), hands the prompt
     /// to Skott, and awaits the result. When the session finishes, the pump
     /// interprets the RunSummary and transitions the task.
-    fn start_task_run(
+    pub(super) fn start_task_run(
         &mut self,
         component: &str,
         task_id: &str,
         allow_control: bool,
+        continuous: bool,
+        all_components: bool,
     ) -> io::Result<()> {
         if self.skott.as_ref().is_some_and(|skott| skott.is_active()) {
             return Err(io::Error::other(
@@ -385,12 +388,52 @@ impl Workspace {
         self.skott_scroll = 0;
         self.skott_follow = true;
         self.task_run_prep = Some(prep);
+        self.task_run_continuous = continuous;
+        self.task_run_component = if continuous { Some(component.to_owned()) } else { None };
+        self.task_run_all_components = all_components;
         self.skott = Some(session);
         self.append(&format!(
             "\n\n## Task run\n\nRunning task `{task_id}` via Skott agent `{model}`. Ctrl+Tab switches between the Kvist metrics, the Skott detail, and a side-by-side view.\n\n",
             model = model.id
         ))?;
         self.dirty = true;
+        Ok(())
+    }
+
+    /// In cross-component continuous mode, tries to find and start a task in
+    /// the next component that has ready work.
+    pub(super) fn try_next_component(&mut self) -> io::Result<()> {
+        let inspection = crate::project_state::inspect(&self.project)
+            .map_err(|e| io::Error::other(e.to_string()))?;
+        let current_component = self.task_run_component.clone().unwrap_or_default();
+        
+        // Try all components
+        for comp in &inspection.components {
+            if comp.state != crate::project_state::ComponentState::Current {
+                continue;
+            }
+            if comp.path.to_string_lossy() == current_component {
+                continue;
+            }
+            if let Some(next_task) = self.next_ready_task(&comp.path.to_string_lossy()) {
+                self.append(&format!(
+                    "\n\n## Continuous mode\n\nMoving to component `{}`...\n\n",
+                    comp.path.to_string_lossy()
+                ))?;
+                self.task_run_component = Some(comp.path.to_string_lossy().to_string());
+                self.task_run_prep = None;
+                self.skott = None;
+                self.skott_result_reported = false;
+                return self.start_task_run(&comp.path.to_string_lossy(), &next_task, false, true, self.task_run_all_components);
+            }
+        }
+        
+        // No more components with ready tasks
+        self.append(&format!(
+            "\n\n## Continuous mode\n\nAll components processed. No more ready tasks.\n\n"
+        ))?;
+        self.task_run_continuous = false;
+        self.task_run_component = None;
         Ok(())
     }
 

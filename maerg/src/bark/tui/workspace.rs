@@ -117,6 +117,18 @@ pub(super) struct Workspace {
     /// scroll offset without re-deriving the layout in the input path.
     skott_viewport: usize,
     task_run_prep: Option<crate::task_commands::TaskRunPrep>,
+    /// When true, the current task run was started without an explicit task ID,
+    /// so after completion the workspace should automatically start the next
+    /// ready task (continuous mode). When false, the user specified an exact
+    /// task ID and the workspace should stop after that one task.
+    task_run_continuous: bool,
+    /// The component path for the current continuous task run, used to resolve
+    /// the next ready task after the current one completes.
+    task_run_component: Option<String>,
+    /// When true, the continuous task run should proceed across all components
+    /// (no specific component was requested). When false, it's limited to the
+    /// current component.
+    task_run_all_components: bool,
 }
 
 pub(crate) fn available() -> bool {
@@ -375,6 +387,9 @@ impl Workspace {
             skott_follow: true,
             skott_viewport: 1,
             task_run_prep: None,
+            task_run_continuous: false,
+            task_run_component: None,
+            task_run_all_components: false,
         };
         workspace.refresh();
         workspace.append(&format!(
@@ -722,13 +737,40 @@ impl Workspace {
                                 if finished { "0" } else { "1" }
                             ))?;
                             self.refresh();
-                            // The run is terminal; drop the (now lock-free)
-                            // preparation so the process does not retain a
-                            // dead handle for the rest of the session. The
-                            // lock was already released above (or flagged if
-                            // it could not be), so dropping the handle only
-                            // clears it.
-                            self.task_run_prep = None;
+                            // In continuous mode, if the task completed successfully
+                            // and there's another ready task, automatically start it.
+                            if self.task_run_continuous
+                                && finished
+                                && let Some(component) = self.task_run_component.clone()
+                            {
+                                if let Some(next_task) = self.next_ready_task(&component) {
+                                    self.append(&format!(
+                                        "\n\n## Continuous mode\n\nStarting next ready task `{next_task}` in `{component}`...\n\n"
+                                    ))?;
+                                    // Reset for the next task
+                                    self.task_run_prep = None;
+                                    self.skott = None;
+                                    self.skott_result_reported = false;
+                                    self.start_task_run(&component, &next_task, false, true, self.task_run_all_components)?;
+                                } else if self.task_run_all_components {
+                                    // Try the next component
+                                    self.try_next_component()?;
+                                } else {
+                                    self.append(&format!(
+                                        "\n\n## Continuous mode\n\nAll ready tasks in `{component}` are complete.\n\n"
+                                    ))?;
+                                    self.task_run_continuous = false;
+                                    self.task_run_component = None;
+                                }
+                            } else {
+                                // The run is terminal; drop the (now lock-free)
+                                // preparation so the process does not retain a
+                                // dead handle for the rest of the session. The
+                                // lock was already released above (or flagged if
+                                // it could not be), so dropping the handle only
+                                // clears it.
+                                self.task_run_prep = None;
+                            }
                         } else {
                             self.report_skott_result(&result, &metrics)?;
                         }
