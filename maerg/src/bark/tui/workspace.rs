@@ -179,81 +179,136 @@ pub(crate) fn run(project: &Path) -> Result<()> {
         let _guard = TerminalGuard::enter()?;
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
         let mut last_render = Instant::now() - Duration::from_secs(1);
+        let mut last_error = String::new();
         loop {
-            let diagnostic = diagnostics.drain();
-            if !diagnostic.is_empty() {
-                workspace.append(&format!(
-                    "\n\n### Host diagnostics\n\n{}\n\n",
-                    crate::presentation::fence(&diagnostic, "text")
-                ))?;
-            }
-            workspace.pump()?;
-            if sav::take_interrupted() {
-                if let Some(run) = &mut workspace.running {
-                    run.cancel()?;
-                } else {
-                    workspace.input.set("");
-                    workspace.candidates.clear();
+            let quit = (|| -> io::Result<bool> {
+                let diagnostic = diagnostics.drain();
+                if !diagnostic.is_empty() {
+                    workspace.append(&format!(
+                        "\n\n### Host diagnostics\n\n{}\n\n",
+                        crate::presentation::fence(&diagnostic, "text")
+                    ))?;
                 }
-            }
-            let size = terminal.size()?;
-            let width = size.width.saturating_sub(3).max(1);
-            if workspace.width != width {
-                workspace.width = width;
-                workspace.dirty = true;
-            }
-            if workspace.dirty && last_render.elapsed() >= Duration::from_millis(100) {
-                workspace.rendered = render::markdown(&workspace.source, width, workspace.theme)?;
-                workspace.dirty = false;
-                last_render = Instant::now();
-            }
-            let mut drawing = Ok(());
-            terminal.draw(|frame| drawing = workspace.draw(frame))?;
-            drawing?;
-            if workspace.quit && workspace.running.is_none() {
-                break;
-            }
-            if event::poll(Duration::from_millis(50))? {
-                match event::read()? {
-                    Event::Key(key) if key.kind != KeyEventKind::Release => {
-                        if let Err(error) = workspace.key(key, &mut terminal) {
-                            workspace.record_error(&error.to_string())?;
-                        }
+                workspace.pump()?;
+                if sav::take_interrupted() {
+                    if let Some(run) = &mut workspace.running {
+                        run.cancel()?;
+                    } else {
+                        workspace.input.set("");
+                        workspace.candidates.clear();
                     }
-                    Event::Paste(text) => workspace.paste(&text),
-                    Event::Mouse(mouse) => match mouse.kind {
-                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-                            if workspace.overlay.is_some() =>
-                        {
-                            let key = if mouse.kind == MouseEventKind::ScrollUp {
-                                KeyCode::Up
-                            } else {
-                                KeyCode::Down
-                            };
-                            for _ in 0..3 {
-                                workspace.overlay_key(key.into())?;
+                }
+                let size = terminal.size()?;
+                let width = size.width.saturating_sub(3).max(1);
+                if workspace.width != width {
+                    workspace.width = width;
+                    workspace.dirty = true;
+                }
+                if workspace.dirty && last_render.elapsed() >= Duration::from_millis(100) {
+                    workspace.rendered =
+                        render::markdown(&workspace.source, width, workspace.theme)?;
+                    workspace.dirty = false;
+                    last_render = Instant::now();
+                }
+                let mut drawing = Ok(());
+                terminal.draw(|frame| drawing = workspace.draw(frame))?;
+                drawing?;
+                if workspace.quit && workspace.running.is_none() {
+                    return Ok(true);
+                }
+                if event::poll(Duration::from_millis(50))? {
+                    match event::read()? {
+                        Event::Key(key) if key.kind != KeyEventKind::Release => {
+                            if let Err(error) = workspace.key(key, &mut terminal) {
+                                workspace.record_error(&error.to_string())?;
                             }
                         }
-                        MouseEventKind::ScrollUp => workspace.navigate(-3)?,
-                        MouseEventKind::ScrollDown => workspace.navigate(3)?,
-                        MouseEventKind::Down(event::MouseButton::Left)
-                        | MouseEventKind::Drag(event::MouseButton::Left)
-                            if workspace.overlay.is_none()
-                                && mouse.column == size.width.saturating_sub(1) =>
-                        {
-                            let height = size.height.saturating_sub(7).max(1);
-                            let row = mouse.row.saturating_sub(3).min(height);
-                            workspace.seek_history(row, height)?;
-                        }
+                        Event::Paste(text) => workspace.paste(&text),
+                        Event::Mouse(mouse) => match mouse.kind {
+                            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                                if workspace.overlay.is_some() =>
+                            {
+                                let key = if mouse.kind == MouseEventKind::ScrollUp {
+                                    KeyCode::Up
+                                } else {
+                                    KeyCode::Down
+                                };
+                                for _ in 0..3 {
+                                    workspace.overlay_key(key.into())?;
+                                }
+                            }
+                            MouseEventKind::ScrollUp => workspace.navigate(-3)?,
+                            MouseEventKind::ScrollDown => workspace.navigate(3)?,
+                            MouseEventKind::Down(event::MouseButton::Left)
+                            | MouseEventKind::Drag(event::MouseButton::Left)
+                                if workspace.overlay.is_none()
+                                    && mouse.column == size.width.saturating_sub(1) =>
+                            {
+                                let height = size.height.saturating_sub(7).max(1);
+                                let row = mouse.row.saturating_sub(3).min(height);
+                                workspace.seek_history(row, height)?;
+                            }
+                            _ => {}
+                        },
+                        Event::Resize(_, _) => workspace.dirty = true,
                         _ => {}
-                    },
-                    Event::Resize(_, _) => workspace.dirty = true,
-                    _ => {}
+                    }
+                }
+                Ok(false)
+            })();
+            match quit {
+                Ok(true) => break,
+                Ok(false) => last_error.clear(),
+                Err(error) => {
+                    // Kvist must stay running through in-loop failures: record the
+                    // error so it is visible in the notice bar and transcript, then
+                    // continue. Only a dead terminal forces a clean exit, never an
+                    // unhandled crash. A persistent error with a live terminal keeps
+                    // the shell alive and surfaces the error so the user can decide.
+                    if error.to_string() != last_error {
+                        if let Err(record_error) = workspace.record_error(&error.to_string()) {
+                            eprintln!("kvist: could not record workspace error: {record_error}");
+                        }
+                        last_error = error.to_string();
+                    }
+                    let terminal_gone = matches!(
+                        error.kind(),
+                        io::ErrorKind::BrokenPipe
+                            | io::ErrorKind::NotConnected
+                            | io::ErrorKind::UnexpectedEof
+                            | io::ErrorKind::WriteZero
+                    );
+                    if terminal_gone {
+                        break;
+                    }
+                    // Throttle the retry so a persistent failure does not spin the
+                    // loop at full CPU. The shell stays alive and the error stays
+                    // visible so the user can decide how to proceed.
+                    std::thread::sleep(Duration::from_millis(100));
+                    // If the user pressed Ctrl+C during the retry, cancel the
+                    // stuck Skott session and clear the task-run state so the
+                    // loop can recover and reach the normal event handling.
+                    if sav::take_interrupted() {
+                        if let Some(skott) = &mut workspace.skott {
+                            skott.cancel();
+                        }
+                        workspace.task_run_prep = None;
+                        workspace.skott = None;
+                        workspace.dirty = true;
+                        workspace.notice =
+                            "Interrupted; stuck session cleared. Try again or inspect the task."
+                                .into();
+                    }
                 }
             }
         }
-        terminal.show_cursor()?;
-        TerminalGuard::restore()
+        // Best-effort terminal restore: a broken terminal must not turn a clean
+        // exit into an unhandled crash.
+        let _ = terminal.show_cursor();
+        if let Err(error) = TerminalGuard::restore() {
+            eprintln!("kvist: could not fully restore the terminal: {error}");
+        }
+        Ok(())
     })();
     result.map_err(|source| KvistError::Io {
         operation: "run Markdown workspace (terminal restored; task effects are not rolled back)",
@@ -416,10 +471,17 @@ impl Workspace {
         self.last_failed = true;
         self.notice =
             crate::presentation::sanitize(&crate::presentation::redact(error, &self.redactions));
-        self.append(&format!(
+        // The notice bar always carries the error. A transcript append failure
+        // is reported to stderr but never propagated, so recording an error can
+        // never itself force Kvist to exit: the failure is always visible in the
+        // notice bar even when the transcript cannot be written.
+        if let Err(append_error) = self.append(&format!(
             "\n\n## Error\n\n{}\n\n",
             crate::presentation::report(error)
-        ))
+        )) {
+            eprintln!("kvist: could not append error to transcript: {append_error}");
+        }
+        Ok(())
     }
 
     fn load_segment(&mut self, segment: u64, bottom: bool) -> io::Result<()> {

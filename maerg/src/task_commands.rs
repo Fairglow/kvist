@@ -1761,7 +1761,8 @@ fn assess_attempt_journal(
             "execution-finished"
             | "verification-finished"
             | "agent-execution"
-            | "verification-repair" => {
+            | "verification-repair"
+            | "continuation" => {
                 attempt.execution_observed = true;
             }
             "pre-spawn-failure" => {

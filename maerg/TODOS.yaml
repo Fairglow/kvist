@@ -35,7 +35,7 @@ tasks:
     purpose: "Make a finished run release its lock, make the transcript a faithful, unambiguous record, and make an interrupted run leave a diagnostic and a recoverable lock."
     expected_outcome: "A second run of the same component in one session proceeds without a manual unlock; the transcript shows the complete answer and a completion footer; an interrupted run is diagnosable and the component lock can be cleared or recovered without a manual stale-lock dance."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "task-run-reliability-write-tests"
     requirements:
@@ -43,10 +43,11 @@ tasks:
       - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-15T16:52:34Z"
+      completed_at: "2026-11-15T16:52:34Z"
     blocked_reason: null
     recovery_state: null
+    disposition: reset
   - id: "task-run-reliability-security-audit"
     title: "security_audit: observe the task-run lock lifecycle, transcript boundary, and crash recovery"
     description: "Independently observe that the per-component lock is released only on a terminal result, that `task unlock` still refuses a live owner, that releasing the lock on completion does not weaken stale-lock protection, and that an interrupted run leaves a durable diagnostic and a recoverable lock rather than a silently held one."
@@ -243,8 +244,8 @@ tasks:
     status: pending
     depends_on: []
     requirements:
-      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
       - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
       updated_at: "2026-11-15T01:40:00Z"
@@ -262,8 +263,8 @@ tasks:
     depends_on:
       - "skott-progress-visibility-write-tests"
     requirements:
-      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
       - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
       updated_at: "2026-11-15T01:40:00Z"
@@ -299,8 +300,8 @@ tasks:
     depends_on:
       - "skott-progress-visibility-security-audit"
     requirements:
-      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
       - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
       updated_at: "2026-11-15T01:40:00Z"
