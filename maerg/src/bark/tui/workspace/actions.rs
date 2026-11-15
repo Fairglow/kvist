@@ -299,6 +299,7 @@ impl Workspace {
                 },
         } = &command
         {
+            let all_components = component_dir == std::path::Path::new(".");
             let component = if component_dir.as_os_str().is_empty()
                 || component_dir == std::path::Path::new(".")
             {
@@ -310,14 +311,36 @@ impl Workspace {
             };
             let task_id = task_id
                 .clone()
-                .or_else(|| self.next_ready_task(&component))
-                .ok_or_else(|| {
-                    io::Error::other(
-                        "no task ID given and no ready task found; specify a task or make one ready",
-                    )
-                })?;
-            let all_components = component_dir == std::path::Path::new(".");
-            return self.start_task_run(&component, &task_id, *allow_control, true, all_components);
+                .or_else(|| self.next_ready_task(&component));
+            if let Some(id) = task_id {
+                return self.start_task_run(&component, &id, *allow_control, true, all_components);
+            }
+            // No task found in the target component. If we're in all-components
+            // mode (no component was specified), search across all components
+            // for a ready task.
+            if all_components {
+                let inspection = crate::project_state::inspect(&self.project)
+                    .map_err(|e| io::Error::other(e.to_string()))?;
+                for comp in &inspection.components {
+                    if comp.state != crate::project_state::ComponentState::Current {
+                        continue;
+                    }
+                    let comp_path = comp.path.to_string_lossy();
+                    if comp_path == component {
+                        continue; // Already tried the focused component
+                    }
+                    if let Some(id) = self.next_ready_task(&comp_path) {
+                        self.append(&format!(
+                            "\n\n## Continuous mode\n\nNo ready task in `{}`; moving to component `{}`...\n\n",
+                            component, comp_path
+                        ))?;
+                        return self.start_task_run(&comp_path, &id, *allow_control, true, true);
+                    }
+                }
+            }
+            return Err(io::Error::other(
+                "no task ID given and no ready task found; specify a task or make one ready",
+            ));
         }
         self.start(arguments)
     }

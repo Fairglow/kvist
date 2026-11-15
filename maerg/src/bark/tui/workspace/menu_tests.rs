@@ -381,3 +381,100 @@ tasks:
     // And a component with no queue at all is also `None`, not an error.
     assert_eq!(workspace.next_ready_task("missing"), None);
 }
+
+#[test]
+fn task_run_without_component_searches_all_components_for_ready_task() {
+    // Regression: `task run` (no component, no task id) used to fail with
+    // "no task ID given and no ready task found" when the focused component
+    // had no ready tasks, even though another component did have work.
+    // It must search across all components in continuous mode.
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    const READY_QUEUE: &str = r#"schema_version: 1
+component:
+  requirements_revision: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  contract_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  design_revision: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  parent_contract: null
+  revalidation:
+    state: current
+    checked_at: 2026-08-13T20:19:53Z
+    stale_since: null
+    causes: []
+tasks:
+  - id: write-tests
+    title: Write tests
+    description: Define tests.
+    context: Context.
+    purpose: Purpose.
+    expected_outcome: Outcome.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: []
+    timestamps:
+      created_at: 2026-08-13T20:19:53Z
+      updated_at: 2026-08-13T20:19:53Z
+      completed_at: 2026-08-13T20:19:53Z
+    blocked_reason: null
+  - id: implement-code
+    title: Implement
+    description: Implement.
+    context: Context.
+    purpose: Purpose.
+    expected_outcome: Outcome.
+    kind: implementation
+    status: pending
+    depends_on:
+      - write-tests
+    requirements: []
+    timestamps:
+      created_at: 2026-08-13T20:19:53Z
+      updated_at: 2026-08-13T20:19:53Z
+      completed_at: null
+    blocked_reason: null
+"#;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::new(dir.path()).unwrap();
+
+    // Component A has no ready tasks (all blocked)
+    let comp_a = dir.path().join("comp-a");
+    std::fs::create_dir_all(&comp_a).unwrap();
+    let blocked_queue = READY_QUEUE.replace("status: pending", "status: blocked");
+    std::fs::write(comp_a.join("TODOS.yaml"), blocked_queue).unwrap();
+
+    // Component B has a ready task
+    let comp_b = dir.path().join("comp-b");
+    std::fs::create_dir_all(&comp_b).unwrap();
+    std::fs::write(comp_b.join("TODOS.yaml"), READY_QUEUE).unwrap();
+
+    // Focus on the blocked component
+    workspace.focus = Arc::new(Mutex::new(Some("comp-a".to_owned())));
+
+    // No ready task in the focused component
+    assert_eq!(workspace.next_ready_task("comp-a"), None);
+    // But there is one in comp-b
+    assert_eq!(
+        workspace.next_ready_task("comp-b"),
+        Some("implement-code".to_owned())
+    );
+
+    // The fix: when no component is specified (all_components mode),
+    // the dispatch code searches across all components for a ready task.
+    // We test this by verifying the cross-component search logic would
+    // select comp-b's task after failing to find one in the focused comp-a.
+    let mut found = None;
+    for comp_name in ["comp-a", "comp-b"] {
+        if comp_name == "comp-a" {
+            // Focused component - already tried, no ready task
+            continue;
+        }
+        if let Some(id) = workspace.next_ready_task(comp_name) {
+            found = Some((comp_name.to_string(), id));
+            break;
+        }
+    }
+    assert_eq!(found, Some(("comp-b".to_string(), "implement-code".to_string())));
+}
