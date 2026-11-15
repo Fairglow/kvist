@@ -501,12 +501,10 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         .map(|artifact| inspect_artifact(project_dir, artifact))
         .collect::<Result<Vec<_>>>()?;
     let state = classify(&artifacts);
-    let (component_root, components, discovery_error) =
-        if matches!(state, ProjectState::Current | ProjectState::Blocked) {
-            inspect_components(project_dir)?
-        } else {
-            (None, Vec::new(), None)
-        };
+    // Always discover and inspect components, even when the project root state
+    // is not current. One invalid component artifact must not block discovery
+    // of other valid components or prevent selecting them with `cd`.
+    let (component_root, components, discovery_error) = inspect_components(project_dir)?;
     let toolchain = inspect_toolchain(project_dir);
     tracing::debug!(
         project_dir = %project_dir.display(),
