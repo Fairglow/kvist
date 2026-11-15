@@ -535,7 +535,7 @@ mod tests {
                 command: crate::cli::TaskCommand::Run {
                     component_dir: component, ..
                 }
-            }) if component == std::path::Path::new("./-child")
+            }) if component.as_deref() == Some(std::path::Path::new("./-child"))
         ));
         prefill.begin_submission();
         let mut explicit = editor("task run maerg ");

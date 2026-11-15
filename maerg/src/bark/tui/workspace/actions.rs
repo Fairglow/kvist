@@ -299,15 +299,20 @@ impl Workspace {
                 },
         } = &command
         {
-            let all_components = component_dir == std::path::Path::new(".");
-            let component = if component_dir.as_os_str().is_empty()
-                || component_dir == std::path::Path::new(".")
-            {
+            let all_components = component_dir.is_none()
+                || component_dir.as_ref().map_or(false, |p| p == std::path::Path::new("."));
+            let component = if let Some(dir) = component_dir {
+                if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
+                    self.focus()
+                        .map(|f| f.to_owned())
+                        .unwrap_or_else(|| ".".to_owned())
+                } else {
+                    dir.to_string_lossy().into_owned()
+                }
+            } else {
                 self.focus()
                     .map(|f| f.to_owned())
                     .unwrap_or_else(|| ".".to_owned())
-            } else {
-                component_dir.to_string_lossy().into_owned()
             };
             let task_id = task_id
                 .clone()

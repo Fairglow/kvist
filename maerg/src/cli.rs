@@ -604,9 +604,9 @@ pub enum TaskCommand {
     /// continuously, checkpointing complete items until final approval,
     /// a decision, or a blocker. No confirmation or `all` selector is needed.
     Run {
-        /// Explicit component directory; the interactive shell prefills its focus.
+        /// Explicit component directory; omit to run across all components continuously.
         #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: PathBuf,
+        component_dir: Option<PathBuf>,
         /// Exact task ID; omit to run component work continuously.
         #[arg(value_name = "TASK_ID")]
         task_id: Option<String>,
@@ -1275,7 +1275,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
-                let component = project.resolve_component(Some(&component_dir))?;
+                let component = project.resolve_component(component_dir.as_deref())?;
                 let message = task_commands::run_task_or_item_with_controls(
                     &project.project_dir,
                     &component,
@@ -1891,7 +1891,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
-                let component = project.resolve_component(Some(&component_dir))?;
+                let component = project.resolve_component(component_dir.as_deref())?;
                 task_commands::run_task_or_item_with_controls(
                     &project.project_dir,
                     &component,
@@ -3070,7 +3070,7 @@ mod tests {
             panic!("expected task run command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
         assert_eq!(task_id, Some("task-1".to_owned()));
         assert!(!stream);
     }
@@ -3093,7 +3093,7 @@ mod tests {
             panic!("expected task run command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
         assert_eq!(task_id, None);
         assert!(!stream);
     }
@@ -3116,14 +3116,27 @@ mod tests {
             panic!("expected task run command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
         assert_eq!(task_id, Some("task-1".to_owned()));
         assert!(stream);
     }
 
     #[test]
-    fn task_run_requires_an_explicit_component() {
-        assert!(Cli::try_parse_from(["kvist", "task", "run"]).is_err());
+    fn task_run_without_component_is_continuous() {
+        let cli = Cli::try_parse_from(["kvist", "task", "run"]).expect("task run without component is valid");
+        let Some(Command::Task {
+            command:
+                TaskCommand::Run {
+                    component_dir,
+                    task_id,
+                    ..
+                },
+        }) = cli.command
+        else {
+            panic!("expected task run command");
+        };
+        assert!(component_dir.is_none());
+        assert!(task_id.is_none());
     }
 
     #[test]

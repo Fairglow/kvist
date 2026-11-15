@@ -922,7 +922,7 @@ impl Shell {
                     },
             } => crate::context::ProjectContext::resolve(Some(&self.project_dir)).and_then(
                 |project| {
-                    let component = project.resolve_component(Some(&component_dir))?;
+                    let component = project.resolve_component(component_dir.as_deref())?;
                     task_commands::run_task_or_item_with_controls(
                         &project.project_dir,
                         &component,
@@ -2041,7 +2041,7 @@ mod tests {
     fn is_streaming_command_classifies_correctly() {
         let task_run = cli::Command::Task {
             command: cli::TaskCommand::Run {
-                component_dir: ".".into(),
+                component_dir: Some(".".into()),
                 task_id: Some("t1".to_owned()),
                 stream: true,
                 allow_control: false,
@@ -2071,7 +2071,7 @@ mod tests {
     fn task_runs_never_require_interactive_confirmation() {
         let mut command = cli::Command::Task {
             command: cli::TaskCommand::Run {
-                component_dir: ".".into(),
+                component_dir: Some(".".into()),
                 task_id: None,
                 stream: false,
                 allow_control: false,
@@ -2112,7 +2112,7 @@ mod tests {
         // Explicit arguments always win over the focus.
         let mut run = cli::Command::Task {
             command: cli::TaskCommand::Run {
-                component_dir: ".".into(),
+                component_dir: Some(".".into()),
                 task_id: None,
                 stream: false,
                 allow_control: false,
@@ -2122,7 +2122,7 @@ mod tests {
         match run {
             cli::Command::Task {
                 command: cli::TaskCommand::Run { component_dir, .. },
-            } => assert_eq!(component_dir, PathBuf::from(".")),
+            } => assert_eq!(component_dir, Some(PathBuf::from("."))),
             _ => panic!("expected task run"),
         }
 
@@ -2749,7 +2749,7 @@ mod tests {
         assert!(destructive_gate(&commit_accepted).is_some());
         let plain_run = cli::Command::Task {
             command: cli::TaskCommand::Run {
-                component_dir: ".".into(),
+                component_dir: Some(".".into()),
                 task_id: Some("t1".to_owned()),
                 stream: false,
                 allow_control: false,
