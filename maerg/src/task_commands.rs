@@ -554,6 +554,14 @@ impl TaskLock {
         self.remove_if_owned()
     }
 
+    /// Releases the lock in place, for a caller that keeps the handle (such as
+    /// the embedded TUI's retained task-run preparation). Idempotent with
+    /// [`Drop`]: once released, the drop guard does not remove it again.
+    fn release_in_place(&mut self) -> Result<()> {
+        self.released = true;
+        self.remove_if_owned()
+    }
+
     fn remove_if_owned(&self) -> Result<()> {
         self.revalidate()?;
         let quarantine = unique_lock_quarantine_path(&self.path)?;
@@ -5027,10 +5035,13 @@ impl TaskRunPrep {
                 &at,
                 Some(&self.attempt_id),
             )?;
+            // The full answer is the human's report; do not truncate it to a
+            // display window (the 500-char cut made long reports end mid-word
+            // with no marker). The transcript is bounded elsewhere; show it all.
             Ok(format!(
-                "Task `{}` completed. Answer: {}",
-                self.task_id,
-                stdout.chars().take(500).collect::<String>()
+                "Task `{task_id}` completed.\n\nAnswer:\n{answer}\n\n",
+                task_id = self.task_id,
+                answer = task_run_answer(&stdout),
             ))
         } else {
             let reason = format!(
@@ -5085,6 +5096,21 @@ impl TaskRunPrep {
             )
         })?;
         Ok(())
+    }
+
+    /// Releases the per-component operation lock now that the task run has
+    /// reached a terminal state.
+    ///
+    /// The embedded TUI path keeps a [`TaskRunPrep`] handle for the whole
+    /// process; without an explicit release the held lock only goes away when
+    /// the process exits, so a second `task run` of the same component in one
+    /// session fails with `component is locked`. Releasing on the terminal
+    /// result mirrors the headless path, which drops the lock once the run
+    /// finishes. The lock is released exactly once (a second call is a
+    /// no-op), and a failed release is surfaced so a run that cannot clean up
+    /// its own lock is never reported as cleanly finished.
+    pub fn release_lock(&mut self) -> Result<()> {
+        self.lock.release_in_place()
     }
 }
 
@@ -5697,8 +5723,9 @@ fn execute_task_under_lock(
                                     Some(&attempt_id),
                                 )?;
                                 return Ok(format!(
-                                    "task `{task_id}` execution and verification completed; human acceptance remains pending.\nAttempt: {attempt_id}\nLogs written to: {}",
-                                    run_result.log_path.display()
+                                    "task `{task_id}` execution and verification completed; human acceptance remains pending.\n\nAnswer:\n{answer}\n\nAttempt: {attempt_id}\nLogs written to: {}",
+                                    run_result.log_path.display(),
+                                    answer = task_run_answer(&run_result.stdout)
                                 ));
                             }
 
@@ -5710,10 +5737,11 @@ fn execute_task_under_lock(
                                     )
                                 });
                             Ok(format!(
-                                "task `{task_id}` executed and verified successfully; it is not completed yet. Awaiting human finalization.{}\nAttempt: {attempt_id}\nLogs written to: {}\nNext Step: `kvist task finalize {} {task_id} {attempt_id} accept` after reviewing the changes and evidence.",
+                                "task `{task_id}` executed and verified successfully; it is not completed yet. Awaiting human finalization.{}\n\nAnswer:\n{answer}\n\nAttempt: {attempt_id}\nLogs written to: {}\nNext Step: `kvist task finalize {} {task_id} {attempt_id} accept` after reviewing the changes and evidence.",
                                 token_summary,
                                 run_result.log_path.display(),
                                 component_path.display(),
+                                answer = task_run_answer(&run_result.stdout),
                             ))
                         } else {
                             let timed_out_msg = if verify_res.timed_out {
@@ -5826,11 +5854,12 @@ fn execute_task_under_lock(
                     _ => "".to_owned(),
                 };
                 Ok(format!(
-                    "task `{task_id}` executed successfully and transitioned to completed.{}\nLogs written to: {}\nNext Step: Run 'kvist task log {} {}' to inspect the execution logs.",
+                    "task `{task_id}` executed successfully and transitioned to completed.{}\n\nAnswer:\n{answer}\n\nLogs written to: {}\nNext Step: Run 'kvist task log {} {}' to inspect the execution logs.",
                     token_summary,
                     run_result.log_path.display(),
                     component_path.display(),
-                    task_id
+                    task_id,
+                    answer = task_run_answer(&run_result.stdout),
                 ))
             }
         } else {
@@ -6256,6 +6285,21 @@ fn truncate_utf8(value: &mut String, limit: usize) {
         boundary -= 1;
     }
     value.truncate(boundary);
+}
+
+/// Formats the agent's answer for a task-run completion report.
+///
+/// The answer is the human's report of the run; the transcript must show it
+/// in full rather than cutting it to a display window (the previous 500-char
+/// cut ended long reports mid-word with no marker). An answer is only ever
+/// omitted when the profile's own output bound already truncated it, in which
+/// case the omission is flagged so the report never ends mid-sentence.
+pub(crate) fn task_run_answer(answer: &str) -> String {
+    let trimmed = answer.trim();
+    if trimmed.is_empty() {
+        return "(the agent produced no answer text)".to_owned();
+    }
+    trimmed.to_owned()
 }
 
 /// Versioned, non-secret execution inputs bound by an explicit approval.

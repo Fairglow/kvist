@@ -398,7 +398,7 @@ impl Workspace {
     /// Renders the detailed Skott agent view using Skott's own App state and
     /// rendering, so the Kvist view matches the standalone Skott TUI exactly.
     fn render_skott_body(
-        &self,
+        &mut self,
         frame: &mut Frame<'_>,
         body: Rect,
         base: Style,
@@ -410,12 +410,10 @@ impl Workspace {
             .as_ref()
             .ok_or_else(|| io::Error::other("Skott view requested with no session"))?;
         let app = &skott.app;
-        let metrics = skott.metrics();
-        let title = format!(
-            " Skott agent | {} | {} ",
-            skott.model_id().unwrap_or("unknown"),
-            metrics.summary_line(),
-        );
+        // The dedicated Skott metrics line (rendered above the body) already
+        // shows the model and the full turn/token/context/elapsed summary; the
+        // panel title must not repeat it, so it names the view only.
+        let title = " Skott agent ".to_owned();
         let panel = Block::default()
             .borders(Borders::TOP)
             .title(title)
@@ -445,8 +443,21 @@ impl Workspace {
             .collect();
 
         let height = usize::from(inner.height).max(1);
+        // Record the viewport so the input path can clamp and step the scroll.
+        self.skott_viewport = height;
         let total_lines = lines.len().max(height);
-        let scroll = u16::try_from(total_lines.saturating_sub(height)).unwrap_or(u16::MAX);
+        let max_scroll = lines.len().saturating_sub(height);
+        // Auto-follow pins the view to the newest line; scrolling back unpins
+        // it so a long run's agent work stays reviewable. Clamp the stored
+        // offset and re-pin when it is at the bottom.
+        self.skott_scroll = self.skott_scroll.min(max_scroll);
+        self.skott_follow = self.skott_follow || self.skott_scroll == max_scroll;
+        let scroll = if self.skott_follow {
+            max_scroll
+        } else {
+            self.skott_scroll
+        };
+        let scroll = u16::try_from(scroll).unwrap_or(u16::MAX);
         frame.render_widget(
             Paragraph::new(Text::from(lines))
                 .style(base)
@@ -455,7 +466,11 @@ impl Workspace {
         );
 
         // Add scrollbar, matching the Kvist view.
-        let position = scroll as f64 / total_lines.saturating_sub(height) as f64;
+        let position = if max_scroll > 0 {
+            scroll as f64 / max_scroll as f64
+        } else {
+            0.0
+        };
         let visible = height as f64 / total_lines as f64;
         let mut scrollbar = ScrollbarState::new(65_536)
             .position((position * 65_536.0) as usize)

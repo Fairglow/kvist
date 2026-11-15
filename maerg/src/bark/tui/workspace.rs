@@ -38,7 +38,9 @@ use crate::bark::{
     prefill::ComponentPrefill,
     tree::{CommandNode, build_root},
 };
-use crate::skott_embedded::{ContinuationDecision, EmbeddedSkott, SkottMetrics, SkottResult};
+use crate::skott_embedded::{
+    ActivePane, ContinuationDecision, EmbeddedSkott, SkottMetrics, SkottResult,
+};
 
 /// The maximum automatic continuations Kvist submits for one agent session
 /// before it stops forcing progress and surfaces the result for a decision.
@@ -106,6 +108,14 @@ pub(super) struct Workspace {
     skott: Option<EmbeddedSkott>,
     skott_continuations: u32,
     skott_result_reported: bool,
+    /// Scroll offset (in lines) into the embedded Skott transcript. While
+    /// `skott_follow` is set the view is pinned to the newest line; scrolling
+    /// back clears the pin so a long run's agent work stays reviewable.
+    skott_scroll: usize,
+    skott_follow: bool,
+    /// Last known inner height (rows) of the Skott body, used to clamp the
+    /// scroll offset without re-deriving the layout in the input path.
+    skott_viewport: usize,
     task_run_prep: Option<crate::task_commands::TaskRunPrep>,
 }
 
@@ -306,6 +316,9 @@ impl Workspace {
             skott: None,
             skott_continuations: 0,
             skott_result_reported: false,
+            skott_scroll: 0,
+            skott_follow: true,
+            skott_viewport: 1,
             task_run_prep: None,
         };
         workspace.refresh();
@@ -421,6 +434,44 @@ impl Workspace {
         };
         self.dirty = false;
         Ok(())
+    }
+
+    /// True when a plain PageUp/PageDown should scroll the embedded Skott
+    /// transcript rather than the Kvist transcript: the session is active and
+    /// the Skott view (alone or side-by-side) is the active pane.
+    fn skott_viewport_scroll_active(&self) -> bool {
+        self.skott.as_ref().is_some_and(|skott| {
+            skott.is_active()
+                && matches!(
+                    skott.active_pane(),
+                    ActivePane::Skott | ActivePane::Both
+                )
+        })
+    }
+
+    /// Scrolls the embedded Skott transcript by `delta` lines, clamped to the
+    /// transcript's bounds. While auto-follow is on the effective position is
+    /// the bottom, so a PageUp scrolls back one page from the newest line and
+    /// unpins follow; PageDown to the bottom re-pins it, so the view tracks
+    /// new output again. This keeps a long run's agent work reviewable.
+    fn skott_scroll_page(&mut self, delta: isize) {
+        let Some(skott) = self.skott.as_ref().filter(|skott| skott.is_active()) else {
+            return;
+        };
+        let lines = skott.app.lines.len();
+        let max_scroll = lines.saturating_sub(self.skott_viewport);
+        let current = if self.skott_follow {
+            max_scroll
+        } else {
+            self.skott_scroll
+        };
+        let next = if delta < 0 {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current.saturating_add(delta as usize)
+        };
+        self.skott_scroll = next.min(max_scroll);
+        self.skott_follow = self.skott_scroll == max_scroll;
     }
 
     fn navigate(&mut self, delta: isize) -> io::Result<()> {
@@ -552,7 +603,7 @@ impl Workspace {
                         // teardown and displays only the resulting task
                         // transition; the generic agent result is not shown.
                         // Otherwise, show the agent result as before.
-                        if let Some(prep) = &self.task_run_prep {
+                        if self.task_run_prep.is_some() {
                             use sav::runtime::StopReason;
                             let summary = sav::runtime::RunSummary {
                                 stop_reason: result.stop_reason,
@@ -567,10 +618,55 @@ impl Workspace {
                                 budget_exhausted: false,
                                 failure: result.failure.clone(),
                             };
-                            let message = prep
+                            let message = self
+                                .task_run_prep
+                                .as_mut()
+                                .expect("task run preparation present")
                                 .complete(&summary, result.answer.clone())
                                 .map_err(|error| io::Error::other(error.to_string()))?;
                             self.append(&format!("\n\n{message}\n"))?;
+                            // The task run reached a terminal state (completed,
+                            // blocked, or awaiting-decision); release the
+                            // per-component operation lock now so a subsequent
+                            // run of the same component can start without a
+                            // manual `task unlock`. The lock would otherwise
+                            // persist until the process exits. A failed release
+                            // does not abort the shell (the task outcome is
+                            // already recorded); it surfaces a warning and
+                            // leaves the retained lock for an explicit unlock.
+                            if let Err(error) = self
+                                .task_run_prep
+                                .as_mut()
+                                .expect("task run preparation present")
+                                .release_lock()
+                            {
+                                self.append(&format!(
+                                    "\n\nWarning: the task run finished but its component lock could not be released ({error}); run `kvist task unlock` if a later run reports the component is locked.\n",
+                                ))?;
+                                self.notice =
+                                    "Task lock release failed; run `kvist task unlock` if needed".into();
+                            }
+                            // Close the transcript entry with the same footer a
+                            // subprocess command produces, so a task run never
+                            // ends mid-sentence without a completion marker.
+                            let finished = matches!(
+                                result.stop_reason,
+                                Some(sav::runtime::StopReason::Completed)
+                            );
+                            self.last_failed = !finished;
+                            self.append(&format!(
+                                "\n\n**Command {}** (exit status: {}).\n\n",
+                                if finished { "finished" } else { "failed" },
+                                if finished { "0" } else { "1" }
+                            ))?;
+                            self.refresh();
+                            // The run is terminal; drop the (now lock-free)
+                            // preparation so the process does not retain a
+                            // dead handle for the rest of the session. The
+                            // lock was already released above (or flagged if
+                            // it could not be), so dropping the handle only
+                            // clears it.
+                            self.task_run_prep = None;
                         } else {
                             self.report_skott_result(&result, &metrics)?;
                         }
@@ -737,6 +833,21 @@ impl Workspace {
                 self.overlay = Some(Overlay::Help { scroll: 0 });
             }
             KeyCode::F(2) => self.open_menu(menus::Page::Root)?,
+            // While the embedded Skott session is active and the Skott view is
+            // showing, plain PageUp/PageDown scroll the *Skott* transcript
+            // (not the Kvist transcript). Scrolling back unpins auto-follow so
+            // a long run's agent work stays reviewable; reaching the bottom
+            // re-pins it. (Ctrl+PageUp / Ctrl+PageDown still switch views.)
+            KeyCode::PageUp
+                if self.skott_viewport_scroll_active() =>
+            {
+                self.skott_scroll_page(-(self.skott_viewport.max(1) as isize));
+            }
+            KeyCode::PageDown
+                if self.skott_viewport_scroll_active() =>
+            {
+                self.skott_scroll_page(self.skott_viewport.max(1) as isize);
+            }
             KeyCode::PageUp => self.navigate(-(self.viewport.max(1) as isize))?,
             KeyCode::PageDown => self.navigate(self.viewport.max(1) as isize)?,
             KeyCode::Home if control => {

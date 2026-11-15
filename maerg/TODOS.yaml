@@ -1,16 +1,384 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:1339c23f9bfbeacaf136e951c4f62ecec394c932101691fdc241a19402cc62c5"
-  contract_revision: "sha256:2bceb93227d8669a775839cc66a3551913d53273c8917973b2fe447399bbd300"
-  design_revision: "sha256:e18eae35428b3e86a5aed9f4feaff20b3d7aff10c1bdb652f5d23b25f0fe4206"
+  requirements_revision: "sha256:c786ec71ab7aa367e6305ae1a715adb6a16c7126410fe72dd760c83d9f3e712e"
+  contract_revision: "sha256:646ba4be7b92ac8e292a4cae80274ff239ed06c3c7e7925dac4e5d2bed4a04f6"
+  design_revision: "sha256:bc195225b837d3416c7d9fe9bb154759606bdbd4246dc768687e0349f0acef3f"
   parent_contract: null
   revalidation:
-    state: stale
-    checked_at: "2026-11-06T13:12:02Z"
-    stale_since: "2026-11-06T06:54:17Z"
-    causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:1339c23f9bfbeacaf136e951c4f62ecec394c932101691fdc241a19402cc62c5", "observed_revision": "sha256:91d5b83ce9c19639c2d381062413d6e60c4e6f06a3e889589e2d6661cf4dddd5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:2bceb93227d8669a775839cc66a3551913d53273c8917973b2fe447399bbd300", "observed_revision": "sha256:f9c3f0229bc4968cc099e3a139ea7dd8fc75933cd7ac6465a01596ff4a3a0029"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:e18eae35428b3e86a5aed9f4feaff20b3d7aff10c1bdb652f5d23b25f0fe4206", "observed_revision": "sha256:0ca9db51d23c506aad7f648c9ceca5784d613846b1d109ea618f6a2dfac64c2c"}]
+    state: current
+    checked_at: "2026-11-14T19:35:33Z"
+    stale_since: null
+    causes: []
 tasks:
-  - id: boundary-fixture-repair-write-tests
+  - id: "task-run-reliability-write-tests"
+    title: "write_tests: pin task-run lock release, transcript completion, and crash recovery"
+    description: "Reproduce (a) a second `task run` of the same component in one TUI session failing with `component is locked`; (b) the transcript completion message ending mid-sentence at 500 characters with no completion footer; and (c) an embedded run interrupted mid-generation leaving the session non-terminal and the component lock stale with no durable diagnostic."
+    context: "Investigation of session 2026-11-14T10-16-36Z-854756-1 confirmed `Workspace.task_run_prep` (holding the per-component `TaskLock`) is set when a run starts (actions.rs:372) and never cleared when the run reaches a terminal state; the lock is released only when the process exits via `TaskLock::drop` (task_commands.rs:801). That same session's final run (model 'qwen38-27b-q4') hit finish_reason length at the 8192-token output cap, entered the bounded length regeneration, and died mid attempt 2 with no model_result/prompt_end/run_end, leaving session.json at status streaming; the durable panic-hook log directory was empty, so the interruption was not a Rust panic."
+    purpose: "Pin the three reliability defects before changing behavior."
+    expected_outcome: "Failing tests demonstrate the retained lock blocks the next run, the unmarked 500-character truncation, and a non-recoverable, non-diagnosable interrupted run."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T20:26:35Z"
+      completed_at: "2026-11-14T20:26:35Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-run-reliability-implement-code"
+    title: "implement_code: release the task lock, un-truncate the transcript, and make interrupted runs diagnosable"
+    description: "Clear `task_run_prep` (releasing the per-component `TaskLock`) once an embedded task run reaches a terminal state (complete, blocked, or awaiting-decision) so a subsequent run of the same component can start without a manual unlock; stop the silent 500-character answer truncation in the transcript by showing the full answer or an explicit truncation marker; append a consistent completion footer to task runs so the transcript does not end mid-sentence; and when an embedded run is interrupted (transport loss, regeneration failure, or process death), leave a durable diagnostic and a recoverable, unambiguous component lock state instead of a stale streaming session."
+    context: "Implemented (2026-11-15, verified by tests/task_run_reliability.rs 3/3 + tests/task_commands.rs 88/88): (a) the embedded TUI pump now calls TaskRunPrep::release_lock on the terminal result (TaskLock::release_in_place), so a finished run releases its per-component lock in place and a second `task run` of the same component in one session no longer hits `TaskLockExists`; the lock would otherwise persist until process exit (only released by `Drop`). (b) The TUI `TaskRunPrep::complete` no longer truncates the answer to `stdout.chars().take(500)` (which ended long reports mid-word, confirmed in the maerg transcript ending at 'truncating at 500 chara'); it now renders the full answer via task_run_answer(). The headless `kvist task run` success paths (implementation continuous, implementation awaiting-finalization, and non-implementation completed) also now include the full answer (they previously omitted it entirely). (c) The TUI task run now appends a `**Command finished/failed**` completion footer so the transcript does not end mid-sentence. REMAINING (not yet done): the interrupted-run sub-part — when an embedded run is interrupted (transport loss, bounded length regeneration dying mid-attempt, or process death) it should leave a durable diagnostic and a recoverable, unambiguous component lock state instead of a stale streaming session. In session 2026-11-14T10-16-36Z-854756-1 a run that hit the 8192-token output cap, entered the bounded length regeneration (sav runtime/driver.rs, 'regenerating 2/3, reserving 16384 output tokens before any effects'), and then died mid attempt 2 left session.json at status streaming, no run_end, and the component lock held; the empty durable panic-hook log directory (`.kvist/logs/`) is the only evidence that it was not a Rust panic, so the interruption is otherwise un-diagnosable."
+    purpose: "Make a finished run release its lock, make the transcript a faithful, unambiguous record, and make an interrupted run leave a diagnostic and a recoverable lock."
+    expected_outcome: "A second run of the same component in one session proceeds without a manual unlock; the transcript shows the complete answer and a completion footer; an interrupted run is diagnosable and the component lock can be cleared or recovered without a manual stale-lock dance."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "task-run-reliability-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-run-reliability-security-audit"
+    title: "security_audit: observe the task-run lock lifecycle, transcript boundary, and crash recovery"
+    description: "Independently observe that the per-component lock is released only on a terminal result, that `task unlock` still refuses a live owner, that releasing the lock on completion does not weaken stale-lock protection, and that an interrupted run leaves a durable diagnostic and a recoverable lock rather than a silently held one."
+    context: "Clean-slate, source-blind audit; the lock lifecycle, its liveness refusal, and the interrupted-run recovery path are safety-relevant boundaries."
+    purpose: "Retain an independent assessment of the lock-release, transcript, and crash-recovery changes."
+    expected_outcome: "Independent observations and any residual risk are recorded without self-certification."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "task-run-reliability-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-run-reliability-compliance-review"
+    title: "compliance_review: task-run lock release, transcript completion, and crash recovery"
+    description: "Compare the intended task-lifecycle, transcript-persistence, and recovery behavior with the independent source observations and executed tests, retaining limitations."
+    context: "Source-blind comparison separate from the audit context."
+    purpose: "Separate implemented behavior from the compliance judgment."
+    expected_outcome: "Scoped correspondence and any discrepancies are persisted without acceptance."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "task-run-reliability-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-view-switching-write-tests"
+    title: "write_tests: pin view switching keys, menu item, and joint view"
+    description: "Reproduce that the documented view-switching keys do not work (Ctrl+Tab triggers a normal Tab; Ctrl+PageUp triggers PageUp; Ctrl+PageDown triggers PageDown while Skott is inactive) and that the joint/side-by-side view cannot be triggered, then pin the corrected keys, a menu item, and joint-view reachability."
+    context: "Reported from session 2026-11-14T10-16-36Z-854756-1; the footer documents `Ctrl+Tab` as 'Switch agent view' (bindings.rs:37) but the modifier keys are consumed as plain editing/navigation keys before the TUI can act on them."
+    purpose: "Pin the view-switching defect and the required replacement surface before changing behavior."
+    expected_outcome: "Failing tests demonstrate the colliding keys and the unreachable joint view; passing tests pin the new keys, the menu item, and the reachable joint view."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-view-switching-implement-code"
+    title: "implement_code: add a view-switch menu item and non-colliding keybindings"
+    description: "Add a menu item that always switches among the Kvist metrics, Skott detail, and side-by-side (joint) views, and replace the problematic Ctrl+Tab / Ctrl+PageUp / Ctrl+PageDown bindings with working keys that do not collide with editing or navigation, so every view, including the joint view, is reachable."
+    context: "The existing modifier-based keys are indistinguishable from the underlying Tab / PageUp / PageDown events at the TUI, so they cannot be dispatched; a menu entry plus unambiguous keys removes the dependence on the host terminal delivering distinct sequences."
+    purpose: "Make Kvist/Skott view switching reliable and always triggerable."
+    expected_outcome: "A menu choice and new keys switch all three views, the joint view is reachable, and the plain Tab / PageUp / PageDown editing and scrolling behavior is preserved."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "skott-view-switching-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-view-switching-security-audit"
+    title: "security_audit: observe view switching input routing and focus isolation"
+    description: "Independently observe that the new view-switch keys and menu route input to the intended view, that switching never delivers user input to the agent or a running command, and that a running command still reaps and cancels as before."
+    context: "Clean-slate, source-blind audit; input routing and focus isolation are safety-relevant TUI boundaries."
+    purpose: "Retain an independent assessment of the view-switching input handling."
+    expected_outcome: "Independent observations and any residual risk are recorded without self-certification."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "skott-view-switching-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-view-switching-compliance-review"
+    title: "compliance_review: skott view switching keys and menu"
+    description: "Compare the intended interactive-TUI and settings-menu behavior with the independent source observations and executed tests, retaining limitations."
+    context: "Source-blind comparison separate from the audit context."
+    purpose: "Separate implemented behavior from the compliance judgment."
+    expected_outcome: "Scoped correspondence and any discrepancies are persisted without acceptance."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "skott-view-switching-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "embedded-skott-reachability-write-tests"
+    title: "write_tests: pin always-reachable embedded Skott and user steering"
+    description: "Reproduce that an embedded Skott session is only reachable as a Kvist-guided task run, then pin that it can be started at any time Kvist is not steering it and that the user can provide their own steering while it is active."
+    context: "Reported from session 2026-11-14T10-16-36Z-854756-1; `EmbeddedSkott` currently owns the session lifecycle and Kvist alone decides when a run starts and issues bounded automatic continuations (MAX_SKOTT_CONTINUATIONS), with no operator-initiated session or operator steering."
+    purpose: "Pin the reachability and steering gap before changing behavior."
+    expected_outcome: "Failing tests demonstrate the missing standalone entry point and the missing operator steering; passing tests pin both."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "embedded-skott-reachability-implement-code"
+    title: "implement_code: always-reachable embedded Skott with user steering"
+    description: "Make embedded Skott reachable at any time Kvist is not steering it (a menu entry and/or a command that does not require leaving Kvist), and let the user supply their own steering (input) to an active Skott session rather than only Kvist's automatic continuations, while preserving the existing bounded-continuation and terminal-result reporting behavior."
+    context: "The TUI already renders the two views of one live session and reaps owned commands on quit; the change is to add an operator-initiated session start and an operator steering path that coexists with the Kvist continuation policy. Reported symptom (2026-11-15, session 2026-11-13T11-43-52Z-1851409-0): while the Skott view is active the bottom row is still the Kvist `Command` area (labelled `answer> ` while running), not a guidance/prompt area for the agent — the embedded Skott's own prompt editor (`App.editor`) is never rendered by `render_skott_body` (view.rs renders only `app.lines`), so there is no in-view way to give the agent steering/guidance; the only input path is the Kvist command line, which while a command is running is repurposed as 'answer to the running command' (`Workspace::submit`, actions.rs), not agent guidance. The Skott prompt channel (`EmbeddedSkott::submit` -> `PromptSender`) exists and is used only by Kvist's bounded automatic continuations."
+    purpose: "Let the operator use Skott directly inside Kvist and steer it."
+    expected_outcome: "The operator can start and steer an embedded Skott session at any idle moment; task-run sessions still report exactly one terminal result and reaping still works; while the Skott view is active the bottom row is a guidance/prompt area for the agent, not the Kvist command area."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "embedded-skott-reachability-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "embedded-skott-reachability-security-audit"
+    title: "security_audit: observe embedded Skott reachability and steering authority"
+    description: "Independently observe that the new always-reachable entry point and the user steering path do not grant the agent authority beyond the existing prompt/task-run model, that host execution is still distinguished from sandboxed task execution, and that reaping and cancellation remain intact."
+    context: "Clean-slate, source-blind audit; reachability and steering are authority-relevant boundaries."
+    purpose: "Retain an independent assessment of the reachability and steering changes."
+    expected_outcome: "Independent observations and any residual risk are recorded without self-certification."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "embedded-skott-reachability-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "embedded-skott-reachability-compliance-review"
+    title: "compliance_review: embedded skott reachability and steering"
+    description: "Compare the intended agent-integration and multi-turn-execution behavior with the independent source observations and executed tests, retaining limitations."
+    context: "Source-blind comparison separate from the audit context."
+    purpose: "Separate implemented behavior from the compliance judgment."
+    expected_outcome: "Scoped correspondence and any discrepancies are persisted without acceptance."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "embedded-skott-reachability-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
+    timestamps:
+      created_at: "2026-11-14T17:20:00Z"
+      updated_at: "2026-11-14T17:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-progress-visibility-write-tests"
+    title: "write_tests: pin live progress visibility for an embedded Skott task run"
+    description: "Reproduce that, during an embedded Skott task run, the Kvist transcript pane shows no progress between the 'Running task ... via Skott agent ...' header and the final result (no streaming of turns/tools/answer), then pin that the operator can observe the run making progress in the view they are reading, not only in the dedicated metrics line and the Skott detail pane."
+    context: "Reported 2026-11-15 ('the Kvist shell doesn't get any progress updates at all'). Verified in source: sav emits `Event::Progress` at a bounded rate while a turn streams (runtime/driver.rs LIVE_PROGRESS_INTERVAL, 250 ms) and after each turn; the embedded pump folds `Event::Progress` into `SkottMetrics` (skott_embedded.rs `observe`) and the dedicated Skott metrics line (view.rs `render_skott_metrics_line`) is updated live from `summary_line()`. However `render_skott_body` (view.rs) renders only `SkottApp`'s transcript lines and, before this change, hard-coded the scroll to the bottom, so in the Skott pane the newest line only appeared when the operator happened to be at the bottom; and the Kvist view body (the Markdown transcript) receives no live progress at all — only the start header and the terminal result — so while the Kvist pane is showing (the default `ActivePane::Kvist`) the operator sees nothing change for minutes. The standalone Skott TUI shows a live stats bar and auto-follow, which the embedded view does not fully mirror."
+    purpose: "Make an embedded run visibly progress in the view the operator is reading, rather than going silent until it finishes."
+    expected_outcome: "A test demonstrates the embedded view tracks live progress (metrics and/or transcript) and does not pin-scroll the Skott detail away from new output."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+    timestamps:
+      created_at: "2026-11-15T01:40:00Z"
+      updated_at: "2026-11-15T01:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-progress-visibility-implement-code"
+    title: "implement_code: make embedded Skott progress visible in the view being read"
+    description: "Ensure an embedded Skott task run visibly progresses in whichever view the operator has active: the Skott detail pane should auto-follow new output (and let the operator scroll back, which this change adds) so the newest turn/tool/answer line is visible by default; and the Kvist view (the default pane) should surface run progress — at minimum by streaming the agent's turns/tool calls/answer text into the Kvist transcript while the run is active — so the Kvist pane does not go silent for the duration of the run. Preserve the existing dedicated Skott metrics line and the bounded auto-continuation and terminal-result behavior."
+    context: "The embedded session already receives and folds `Event::Progress` (metrics) and streams `Event::Text`/`Event::ToolCall`/`Event::ToolResult` into `SkottApp.lines` (the Skott detail pane); the gap is presentation. `render_skott_body` previously pinned the scroll to the bottom (now fixed to auto-follow with manual scroll-back via plain PageUp/PageDown when the Skott view is active); the remaining gap is that the Kvist Markdown transcript gets no live progress — it only receives the start header and the terminal result — so while `ActivePane::Kvist` (the default) is showing, the operator sees no update until the run ends. Mirror what the standalone Skott TUI shows (a live stats bar plus a growing, auto-following transcript)."
+    purpose: "So an operator reading the Kvist pane during a run can tell it is still working, rather than assuming it hung."
+    expected_outcome: "While a run is active the active view shows progressing output (metrics and a growing transcript); the Skott detail auto-follows new lines and scrolls back on demand; the Kvist pane no longer goes silent for the whole run."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "skott-progress-visibility-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+    timestamps:
+      created_at: "2026-11-15T01:40:00Z"
+      updated_at: "2026-11-15T01:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-progress-visibility-security-audit"
+    title: "security_audit: observe embedded progress display and streaming"
+    description: "Independently observe that surfacing embedded Skott progress (metrics, streamed turns/tools/answer) into the Kvist view and Skott detail pane does not leak the agent's effects or host state, that redactions apply to streamed progress exactly as to the final result, and that progress display cannot be used to authorize or steer an effect."
+    context: "Clean-slate, source-blind audit; streaming agent output into the transcript is a display boundary that must respect the same redaction and effect-authorization rules as the recorded result."
+    purpose: "Retain an independent assessment of the progress-display boundary."
+    expected_outcome: "Independent observations and any residual risk are recorded without self-certification."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "skott-progress-visibility-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+    timestamps:
+      created_at: "2026-11-15T01:40:00Z"
+      updated_at: "2026-11-15T01:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-progress-visibility-compliance-review"
+    title: "compliance_review: embedded Skott progress visibility"
+    description: "Compare the intended interactive-TUI and agent-integration behavior with the independent source observations and executed tests, retaining limitations."
+    context: "Source-blind comparison separate from the audit context."
+    purpose: "Separate implemented behavior from the compliance judgment."
+    expected_outcome: "Scoped correspondence and any discrepancies are persisted without acceptance."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "skott-progress-visibility-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+    timestamps:
+      created_at: "2026-11-15T01:40:00Z"
+      updated_at: "2026-11-15T01:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "transcript-scoping-rotation-write-tests"
+    title: "write_tests: pin transcript scoping and rotation behavior"
+    description: "Reproduce that all command output for one Kvist workspace session accumulates in a single per-scope transcript file with no size-based rotation, and pin the intended scoping (one transcript per focus scope, re-rooted on `cd`) and the rotation bound so long sessions do not silently keep one ever-growing segment."
+    context: "Reported 2026-11-15 ('all Kvist transcripts are in the same file; are they concatenated? when will it rotate?'). Verified in source: each Kvist scope has its own `.kvist/transcript/` directory (storage.rs `Transcript::open`), and `cd` re-roots the transcript to the component scope (actions.rs `change_focus` -> `Transcript::open(&scope)`), so files are not shared across scopes — the single `00000000000000000000.md` per scope is the *first* segment, appended to for the whole session. Rotation is implemented in `Transcript::append`: a new segment is cut only when the current segment would exceed `SEGMENT_BYTES` (1 MiB) at a Markdown block boundary, and one segment must never exceed `DOCUMENT_BYTES` (16 MiB). Because a long interactive session (repeated `status`/`overview`/`task run` output) can stay under 1 MiB for a long time, one scope's transcript can appear to be 'all in the same file' until it crosses the bound; segments are sequential (`0000...0001.md`, ...), not concatenated, and only the latest is rendered by default (older segments are browsable with PageUp/PageDown / Ctrl+Home)."
+    purpose: "Make the transcript scoping and rotation contract explicit and test-pinned."
+    expected_outcome: "A test pins per-scope scoping, the 1 MiB block-boundary rotation into sequential (non-concatenated) segments, and the 16 MiB hard segment bound."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+    timestamps:
+      created_at: "2026-11-15T01:40:00Z"
+      updated_at: "2026-11-15T01:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "transcript-scoping-rotation-implement-code"
+    title: "implement_code: make transcript scoping and rotation clear to the operator"
+    description: "Make it evident in the TUI (and/or `kvist status`) which scope's transcript is open and whether the current segment is near its rotation bound, so the operator is not surprised when all output appears in one file; document or surface the 1 MiB block-boundary rotation and the 16 MiB hard bound. Do not change the rotation algorithm unless the scoping/rotation test pins a defect in it."
+    context: "The rotation and scoping behavior is already implemented (storage.rs `Transcript::append`/`open`, actions.rs `change_focus`); the gap is that nothing tells the operator that a single-segment file is expected, that `cd` re-roots the transcript, or how/when it will rotate, so it reads as 'everything is in the same file and never rotates'."
+    purpose: "Make the transcript's scoping and rotation observable rather than a surprise."
+    expected_outcome: "The operator can see the active transcript scope and its rotation bound; the 1 MiB block-boundary rotation into sequential segments and the 16 MiB hard bound are documented or surfaced."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "transcript-scoping-rotation-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+    timestamps:
+      created_at: "2026-11-15T01:40:00Z"
+      updated_at: "2026-11-15T01:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "transcript-scoping-rotation-security-audit"
+    title: "security_audit: observe transcript scoping, rotation, and private access"
+    description: "Independently observe that transcript scoping (per-scope `.kvist/transcript`, re-rooted on `cd`), the 1 MiB/16 MiB bounds, and the private (0600, non-symlink, single-link) access rules remain intact under rotation, and that one scope's transcript cannot read or clobber another's."
+    context: "Clean-slate, source-blind audit; transcript files are private per-scope state and rotation must not relax the private-file guarantees."
+    purpose: "Retain an independent assessment of the transcript scoping and rotation boundary."
+    expected_outcome: "Independent observations and any residual risk are recorded without self-certification."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "transcript-scoping-rotation-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+    timestamps:
+      created_at: "2026-11-15T01:40:00Z"
+      updated_at: "2026-11-15T01:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "transcript-scoping-rotation-compliance-review"
+    title: "compliance_review: transcript scoping and rotation"
+    description: "Compare the intended transcript-persistence behavior with the independent source observations and executed tests, retaining limitations."
+    context: "Source-blind comparison separate from the audit context."
+    purpose: "Separate implemented behavior from the compliance judgment."
+    expected_outcome: "Scoped correspondence and any discrepancies are persisted without acceptance."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "transcript-scoping-rotation-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
+    timestamps:
+      created_at: "2026-11-15T01:40:00Z"
+      updated_at: "2026-11-15T01:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "boundary-fixture-repair-write-tests"
     title: "write_tests: reproduce seven reported failures"
     description: "Retain executed failures and align assertions with current grant, native-cache and payload resource contracts."
     context: "Five failures reproduced in nextest 3d718dbe-6d0d-4591-8a8f-707d2b305ddf; two long loops passed near their fixture deadline. Explicit scoped advisory exception."
@@ -19,9 +387,17 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:44:02Z", completed_at: "2026-11-08T18:44:02Z"}
-  - id: boundary-fixture-repair-implement-code
+    requirements:
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+      - "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-08T18:44:02Z"
+      updated_at: "2026-11-08T18:44:02Z"
+      completed_at: "2026-11-08T18:44:02Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "boundary-fixture-repair-implement-code"
     title: "implement_code: current boundary fixtures"
     description: "Repair retired export/resource/approval assumptions and long-loop fixture budgets without changing production limits."
     context: "Current contracts distinguish native reuse, caller approval, process-local file caps and private tmpfs budgets."
@@ -29,10 +405,19 @@ tasks:
     expected_outcome: "Affected boundary/live suites pass with exact effects, denial and correction checks."
     kind: implementation
     status: completed
-    depends_on: [boundary-fixture-repair-write-tests]
-    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
-  - id: boundary-fixture-repair-security-audit
+    depends_on:
+      - "boundary-fixture-repair-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+      - "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-08T18:44:02Z"
+      updated_at: "2026-11-08T18:54:13Z"
+      completed_at: "2026-11-08T18:54:13Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "boundary-fixture-repair-security-audit"
     title: "security_audit: fixture authority and evidence"
     description: "Independently observe that assertions exercise current authority boundaries and do not claim unavailable publication."
     context: "Fresh source-only context excludes intent and prior records."
@@ -40,10 +425,17 @@ tasks:
     expected_outcome: "Independent observations and evidence limits are retained."
     kind: security-audit
     status: completed
-    depends_on: [boundary-fixture-repair-implement-code]
-    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"]
-    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
-  - id: boundary-fixture-repair-compliance-review
+    depends_on:
+      - "boundary-fixture-repair-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+    timestamps:
+      created_at: "2026-11-08T18:44:02Z"
+      updated_at: "2026-11-08T18:54:13Z"
+      completed_at: "2026-11-08T18:54:13Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "boundary-fixture-repair-compliance-review"
     title: "compliance_review: reported failure repair"
     description: "Compare local intended behavior with independent source observations and executed tests, retaining limitations."
     context: "Separate source-blind context does not inspect test implementations."
@@ -51,10 +443,19 @@ tasks:
     expected_outcome: "Scoped correspondence and discrepancies are persisted without acceptance."
     kind: compliance-review
     status: completed
-    depends_on: [boundary-fixture-repair-security-audit]
-    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
-  - id: native-package-write-tests
+    depends_on:
+      - "boundary-fixture-repair-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+      - "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-08T18:44:02Z"
+      updated_at: "2026-11-08T18:54:13Z"
+      completed_at: "2026-11-08T18:54:13Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-package-write-tests"
     title: "write_tests: bounded incremental native package acquisition"
     description: "Pin actual manager error/timeout causes, optional absence and direct pnpm store selection without global copies."
     context: "Human-approved native-cache implementation; explicit scoped advisory exception."
@@ -63,9 +464,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"]
-    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
-  - id: native-package-implement-code
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"
+    timestamps:
+      created_at: "2026-11-07T21:28:52Z"
+      updated_at: "2026-11-07T23:21:51Z"
+      completed_at: "2026-11-07T23:21:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-package-implement-code"
     title: "implement_code: bounded native package acquisition"
     description: "Reuse the supervisor/diagnostic helper for host managers and uv export, select uv explicitly and use the native project pnpm store directly."
     context: "No arbitrary global store source grants or checksum inventories are introduced."
@@ -73,10 +480,17 @@ tasks:
     expected_outcome: "Focused native package regressions pass."
     kind: implementation
     status: completed
-    depends_on: [native-package-write-tests]
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"]
-    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
-  - id: native-package-security-audit
+    depends_on:
+      - "native-package-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"
+    timestamps:
+      created_at: "2026-11-07T21:28:52Z"
+      updated_at: "2026-11-07T23:21:51Z"
+      completed_at: "2026-11-07T23:21:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-package-security-audit"
     title: "security_audit: native package-manager authority"
     description: "Independently inspect bounded captures, safe diagnostics and removed global-store link traversal."
     context: "Source-only observations are separate from intent and human acceptance."
@@ -84,10 +498,17 @@ tasks:
     expected_outcome: "Scoped observations and findings are persisted."
     kind: security-audit
     status: completed
-    depends_on: [native-package-implement-code]
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"]
-    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-package-compliance-review
+    depends_on:
+      - "native-package-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"
+    timestamps:
+      created_at: "2026-11-07T21:28:52Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-package-compliance-review"
     title: "compliance_review: native package preparation"
     description: "Compare scoped intent with independent implementation observations and executed tests without source access."
     context: "Independent source-only observation and separate source-blind comparison are linked from IMPL.md; reported cold host-installer path was reproduced, fixed and independently re-observed. No acceptance."
@@ -95,10 +516,17 @@ tasks:
     expected_outcome: "Scoped source-blind comparison and limitations are persisted."
     kind: compliance-review
     status: completed
-    depends_on: [native-package-security-audit]
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"]
-    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-go-cache-write-tests
+    depends_on:
+      - "native-package-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-PACKAGE-ACQUISITION"
+    timestamps:
+      created_at: "2026-11-07T21:28:52Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-go-cache-write-tests"
     title: "write_tests: native Go offline cache"
     description: "Pin isolated Go cache selection including missing-path traversal/ancestor aliases, no-copy preparation, native missing material, combined lock identity and readonly offline profile."
     context: "Human-approved Go cache-backed backend; explicit scoped advisory exception; no fake native archives/checksums."
@@ -107,9 +535,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:51:09Z", updated_at: "2026-11-07T22:28:22Z", completed_at: "2026-11-07T22:28:22Z"}
-  - id: native-go-cache-implement-code
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:51:09Z"
+      updated_at: "2026-11-07T22:28:22Z"
+      completed_at: "2026-11-07T22:28:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-go-cache-implement-code"
     title: "implement_code: native Go offline cache"
     description: "Use native GOMODCACHE and go mod download, preserve locked input identity and mount readonly module data with writable compiler scratch."
     context: "Only Go-specific operator adapter changes; preserve other language materialization and parent Rust work."
@@ -117,10 +551,17 @@ tasks:
     expected_outcome: "Focused tests and available real offline Go checks pass; limitations documented."
     kind: implementation
     status: completed
-    depends_on: [native-go-cache-write-tests]
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:51:09Z", updated_at: "2026-11-07T22:38:20Z", completed_at: "2026-11-07T22:38:20Z"}
-  - id: native-go-cache-security-audit
+    depends_on:
+      - "native-go-cache-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:51:09Z"
+      updated_at: "2026-11-07T22:38:20Z"
+      completed_at: "2026-11-07T22:38:20Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-go-cache-security-audit"
     title: "security_audit: native Go offline cache"
     description: "Independently observe native cache authority, locked acquisition, no-copy behavior and scratch separation."
     context: "Parent coordinates clean-slate source-only evidence; no implementation self-certification."
@@ -128,10 +569,17 @@ tasks:
     expected_outcome: "Scoped findings and remaining native/sandbox limits are recorded."
     kind: security-audit
     status: completed
-    depends_on: [native-go-cache-implement-code]
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:51:09Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-go-cache-compliance-review
+    depends_on:
+      - "native-go-cache-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:51:09Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-go-cache-compliance-review"
     title: "compliance_review: native Go offline cache"
     description: "Compare scoped intended behavior with independent observed/test evidence without source access."
     context: "Independent observations/comparison are linked from IMPL.md; coarse catalogue and fixed native budget limits remain explicit. Acceptance and arbitration remain human."
@@ -139,10 +587,17 @@ tasks:
     expected_outcome: "Independent source-blind comparison retains limitations and discrepancies."
     kind: compliance-review
     status: completed
-    depends_on: [native-go-cache-security-audit]
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:51:09Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-cache-write-tests
+    depends_on:
+      - "native-go-cache-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-GO-OFFLINE-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:51:09Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-write-tests"
     title: "write_tests: native Rust cache topology"
     description: "Pin warm reuse, source-only mounts, writable private administrative state and locked incremental acquisition."
     context: "Human-approved ADR 0020; exact local advisory exception while review receipts are unavailable."
@@ -151,9 +606,17 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
-  - id: native-cache-implement-code
+    requirements:
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+      - "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION"
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T21:28:52Z"
+      updated_at: "2026-11-07T23:21:51Z"
+      completed_at: "2026-11-07T23:21:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-implement-code"
     title: "implement_code: native Rust cache preparation"
     description: "Reuse shared native cache roots and remove routine empty-cache fetch, repack, full-home mounts and unsupported promotion."
     context: "Keep configured acquisition fail-closed and protected fulfillment unsupported; preserve explicit exports."
@@ -161,10 +624,19 @@ tasks:
     expected_outcome: "Focused native cache and sandbox regressions pass."
     kind: implementation
     status: completed
-    depends_on: [native-cache-write-tests]
-    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
-  - id: native-cache-security-audit
+    depends_on:
+      - "native-cache-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+      - "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION"
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T21:28:52Z"
+      updated_at: "2026-11-07T23:21:51Z"
+      completed_at: "2026-11-07T23:21:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-security-audit"
     title: "security_audit: native cache authority"
     description: "Independently inspect cache roots, private administrative links, exact argv and absence of fallback."
     context: "No self-certification; retain source-only observations and concrete limitations."
@@ -172,10 +644,19 @@ tasks:
     expected_outcome: "Independent findings and observations are persisted."
     kind: security-audit
     status: completed
-    depends_on: [native-cache-implement-code]
-    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-cache-compliance-review
+    depends_on:
+      - "native-cache-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+      - "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION"
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T21:28:52Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-compliance-review"
     title: "compliance_review: native offline preparation"
     description: "Compare scoped intent with independently derived implementation and executed evidence without source."
     context: "Independent records are linked from IMPL.md. Three obsolete-documentation conflicts were retained, corrected under the approved design and independently re-observed closed. Broad failures are not passing evidence; no acceptance."
@@ -183,10 +664,19 @@ tasks:
     expected_outcome: "A source-blind comparison and evidence limits are persisted."
     kind: compliance-review
     status: completed
-    depends_on: [native-cache-security-audit]
-    requirements: ["REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION", "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION", "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T21:28:52Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-rust-language-write-tests
+    depends_on:
+      - "native-cache-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+      - "REQUIREMENTS.md#REQ-NATIVE-CARGO-ADMISSION"
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T21:28:52Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-rust-language-write-tests"
     title: "write_tests: native Rust language strategy"
     description: "Replace default-runtime export assumptions with isolated native-home, optional mount, lock-identity and context-free noncanonical admission regressions; native export gating and noncanonical admission checks have executed red."
     context: "Human-directed module integration; explicit scoped advisory exception. Do not inspect actual operator caches or interruption state."
@@ -195,9 +685,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:37:00Z", updated_at: "2026-11-07T22:28:22Z", completed_at: "2026-11-07T22:28:22Z"}
-  - id: native-rust-language-implement-code
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:37:00Z"
+      updated_at: "2026-11-07T22:28:22Z"
+      completed_at: "2026-11-07T22:28:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-rust-language-implement-code"
     title: "implement_code: native Rust language strategy"
     description: "Use shared native home/sources, adapt catalogue reports, perform required admission through the selected frontend helper and mount only present registry/Git data roots. Seven native integrations including selected-context no-fallback coverage pass."
     context: "Protected readiness is separate; preserve explicit export APIs and legacy operator state untouched."
@@ -205,10 +701,17 @@ tasks:
     expected_outcome: "Focused native/non-Rust checks pass with accurate runtime paths and no full-home mount."
     kind: implementation
     status: completed
-    depends_on: [native-rust-language-write-tests]
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:37:00Z", updated_at: "2026-11-07T22:38:20Z", completed_at: "2026-11-07T22:38:20Z"}
-  - id: native-rust-language-security-audit
+    depends_on:
+      - "native-rust-language-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:37:00Z"
+      updated_at: "2026-11-07T22:38:20Z"
+      completed_at: "2026-11-07T22:38:20Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-rust-language-security-audit"
     title: "security_audit: native Rust language strategy"
     description: "Independently observe native selection, mount separation and absence of legacy export gating."
     context: "Parent coordinates clean-slate source-only observation; no self-certification."
@@ -216,10 +719,17 @@ tasks:
     expected_outcome: "Scoped source observations and limitations are recorded."
     kind: security-audit
     status: completed
-    depends_on: [native-rust-language-implement-code]
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:37:00Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-rust-language-compliance-review
+    depends_on:
+      - "native-rust-language-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:37:00Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-rust-language-compliance-review"
     title: "compliance_review: native Rust language strategy"
     description: "Compare scoped intent with independent observations and focused test evidence without source access."
     context: "Independent observations/comparison are linked from IMPL.md; actual configured cached-Git metadata and denied-network registry build pass. No acceptance or fabricated receipts."
@@ -227,10 +737,17 @@ tasks:
     expected_outcome: "Scoped source-blind comparison is retained."
     kind: compliance-review
     status: completed
-    depends_on: [native-rust-language-security-audit]
-    requirements: ["REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:37:00Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: non-rust-cache-write-tests
+    depends_on:
+      - "native-rust-language-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NATIVE-RUST-LANGUAGE-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:37:00Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "non-rust-cache-write-tests"
     title: "write_tests: non-Rust offline cache preparation"
     description: "Pin JavaScript manager/lock consistency, unchanged config reuse, atomic repair and linked config refusal before production changes."
     context: "Human-approved cache-backed design; explicit scoped advisory exception while review receipts are unavailable."
@@ -239,9 +756,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"]
-    timestamps: {created_at: "2026-11-07T21:34:36Z", updated_at: "2026-11-07T21:34:36Z", completed_at: "2026-11-07T21:34:36Z"}
-  - id: non-rust-cache-implement-code
+    requirements:
+      - "REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"
+    timestamps:
+      created_at: "2026-11-07T21:34:36Z"
+      updated_at: "2026-11-07T21:34:36Z"
+      completed_at: "2026-11-07T21:34:36Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "non-rust-cache-implement-code"
     title: "implement_code: non-Rust offline cache preparation"
     description: "Align JavaScript lock identity with provisioning and reuse/atomically repair generated Python, JavaScript and Conan configuration."
     context: "Do not modify native package trees, operator caches or Rust acquisition."
@@ -249,10 +772,17 @@ tasks:
     expected_outcome: "Focused tests pass and dedicated user documentation identifies actual and deferred semantics."
     kind: implementation
     status: completed
-    depends_on: [non-rust-cache-write-tests]
-    requirements: ["REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"]
-    timestamps: {created_at: "2026-11-07T21:34:36Z", updated_at: "2026-11-07T22:28:22Z", completed_at: "2026-11-07T22:28:22Z"}
-  - id: non-rust-cache-security-audit
+    depends_on:
+      - "non-rust-cache-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"
+    timestamps:
+      created_at: "2026-11-07T21:34:36Z"
+      updated_at: "2026-11-07T22:28:22Z"
+      completed_at: "2026-11-07T22:28:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "non-rust-cache-security-audit"
     title: "security_audit: non-Rust offline cache preparation"
     description: "Independently observe scoped source/tests, configuration path safety and unchanged package-cache authority."
     context: "Source-only observation excludes intent, queue, prior IMPL and history; parent coordinates independent evidence."
@@ -260,10 +790,17 @@ tasks:
     expected_outcome: "Scoped independent observations and limitations are recorded."
     kind: security-audit
     status: completed
-    depends_on: [non-rust-cache-implement-code]
-    requirements: ["REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"]
-    timestamps: {created_at: "2026-11-07T21:34:36Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: non-rust-cache-compliance-review
+    depends_on:
+      - "non-rust-cache-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"
+    timestamps:
+      created_at: "2026-11-07T21:34:36Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "non-rust-cache-compliance-review"
     title: "compliance_review: non-Rust offline cache preparation"
     description: "Compare scoped intent with independent source observations and executed test evidence without source access."
     context: "Independent observations/comparison are linked from IMPL.md; configuration limits, coarse readiness and the closed cold-host-installer path are explicit. No acceptance."
@@ -271,10 +808,17 @@ tasks:
     expected_outcome: "Source-blind comparison retains discrepancies and limitations."
     kind: compliance-review
     status: completed
-    depends_on: [non-rust-cache-security-audit]
-    requirements: ["REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"]
-    timestamps: {created_at: "2026-11-07T21:34:36Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: failure-diagnostics-write-tests
+    depends_on:
+      - "non-rust-cache-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-NON-RUST-OFFLINE-CACHE-REUSE"
+    timestamps:
+      created_at: "2026-11-07T21:34:36Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "failure-diagnostics-write-tests"
     title: "write_tests: actionable Cargo and Rust resource failures"
     description: "Reproduce lost paths/types and parser/OS causes before production changes."
     context: "User-requested diagnostic repair; explicit local advisory exception while receipts are unavailable."
@@ -283,9 +827,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"]
-    timestamps: {created_at: "2026-11-07T19:43:56Z", updated_at: "2026-11-07T19:52:32Z", completed_at: "2026-11-07T19:52:32Z"}
-  - id: failure-diagnostics-implement-code
+    requirements:
+      - "REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"
+    timestamps:
+      created_at: "2026-11-07T19:43:56Z"
+      updated_at: "2026-11-07T19:52:32Z"
+      completed_at: "2026-11-07T19:52:32Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "failure-diagnostics-implement-code"
     title: "implement_code: actionable Cargo and Rust resource failures"
     description: "Retain paths, observed validation conditions and native causes through sandbox/vendor errors."
     context: "Keep existing isolation, resource bounds and no-host-fallback behavior."
@@ -293,10 +843,17 @@ tasks:
     expected_outcome: "Focused and affected checks pass with actionable diagnostics."
     kind: implementation
     status: completed
-    depends_on: [failure-diagnostics-write-tests]
-    requirements: ["REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"]
-    timestamps: {created_at: "2026-11-07T19:43:56Z", updated_at: "2026-11-07T19:52:32Z", completed_at: "2026-11-07T19:52:32Z"}
-  - id: failure-diagnostics-security-audit
+    depends_on:
+      - "failure-diagnostics-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"
+    timestamps:
+      created_at: "2026-11-07T19:43:56Z"
+      updated_at: "2026-11-07T19:52:32Z"
+      completed_at: "2026-11-07T19:52:32Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "failure-diagnostics-security-audit"
     title: "security_audit: diagnostic source observations"
     description: "Independently derive scoped IMPL evidence from changed source/tests without intent or history."
     context: "Check retained validation and no automatic cleanup/fallback; do not certify compliance."
@@ -304,10 +861,17 @@ tasks:
     expected_outcome: "Persist scoped observed behavior and limitations."
     kind: security-audit
     status: completed
-    depends_on: [failure-diagnostics-implement-code]
-    requirements: ["REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"]
-    timestamps: {created_at: "2026-11-07T19:43:56Z", updated_at: "2026-11-07T19:54:20Z", completed_at: "2026-11-07T19:54:20Z"}
-  - id: failure-diagnostics-compliance-review
+    depends_on:
+      - "failure-diagnostics-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"
+    timestamps:
+      created_at: "2026-11-07T19:43:56Z"
+      updated_at: "2026-11-07T19:54:20Z"
+      completed_at: "2026-11-07T19:54:20Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "failure-diagnostics-compliance-review"
     title: "compliance_review: diagnostic intent comparison"
     description: "Compare scoped intent with independent observed/test evidence without source access."
     context: "Record discrepancies and limitations for human arbitration, not acceptance."
@@ -315,10 +879,17 @@ tasks:
     expected_outcome: "Persist an independent source-blind comparison."
     kind: compliance-review
     status: completed
-    depends_on: [failure-diagnostics-security-audit]
-    requirements: ["REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"]
-    timestamps: {created_at: "2026-11-07T19:43:56Z", updated_at: "2026-11-07T19:55:29Z", completed_at: "2026-11-07T19:55:29Z"}
-  - id: shared-area-write-tests
+    depends_on:
+      - "failure-diagnostics-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-FAILURE-DIAGNOSTICS"
+    timestamps:
+      created_at: "2026-11-07T19:43:56Z"
+      updated_at: "2026-11-07T19:55:29Z"
+      completed_at: "2026-11-07T19:55:29Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shared-area-write-tests"
     title: "write_tests: shared Rust vendor ownership"
     description: "Pin shared metadata, limits and read ownership through native authoring/verification."
     context: "User requests one shared area and lightweight checks; explicit local advisory exception."
@@ -327,9 +898,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
-  - id: shared-area-implement-code
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T00:05:25Z"
+      updated_at: "2026-11-07T01:03:30Z"
+      completed_at: "2026-11-07T01:03:30Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shared-area-implement-code"
     title: "implement_code: shared Rust vendor ownership"
     description: "Use common receipt/limits and hold read owners through Rust execution; expose explicit force rebuild."
     context: "Configured acquisition and protected refusal retain separate authority."
@@ -337,10 +914,17 @@ tasks:
     expected_outcome: "Native Rust and shared-use regressions pass."
     kind: implementation
     status: completed
-    depends_on: [shared-area-write-tests]
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
-  - id: shared-area-security-audit
+    depends_on:
+      - "shared-area-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T00:05:25Z"
+      updated_at: "2026-11-07T01:03:30Z"
+      completed_at: "2026-11-07T01:03:30Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shared-area-security-audit"
     title: "security_audit: shared Rust vendor boundary"
     description: "Independently observe reader ownership, minimal metadata and unchanged acquisition authority."
     context: "Source-only context excludes intent, queue, old observations and history."
@@ -348,10 +932,17 @@ tasks:
     expected_outcome: "Record scoped observations and limitations."
     kind: security-audit
     status: completed
-    depends_on: [shared-area-implement-code]
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
-  - id: shared-area-compliance-review
+    depends_on:
+      - "shared-area-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T00:05:25Z"
+      updated_at: "2026-11-07T01:03:30Z"
+      completed_at: "2026-11-07T01:03:30Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shared-area-compliance-review"
     title: "compliance_review: shared Rust vendor boundary"
     description: "Compare scoped local intent and independent observations without raw source."
     context: "Retain discrepancies rather than certify or accept stale revisions."
@@ -359,64 +950,102 @@ tasks:
     expected_outcome: "Persist bounded source-blind comparison."
     kind: compliance-review
     status: completed
-    depends_on: [shared-area-security-audit]
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:06:47Z", completed_at: "2026-11-07T01:06:47Z"}
+    depends_on:
+      - "shared-area-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T00:05:25Z"
+      updated_at: "2026-11-07T01:06:47Z"
+      completed_at: "2026-11-07T01:06:47Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "shared-dependencies-write-tests"
     title: "write_tests: shared offline Rust provider"
     description: "REQ-SHARED-OFFLINE-DEPENDENCIES: failure/no fallback, common readiness and retained protected refusals."
     context: "Human approved consolidated Rust-first offline dependency mechanics and completion of the missing acquisition manifests and authoritative readiness gates. Initial blocker and Git admission regressions failed before repair; final affected 389-case suite passed. Reopened timestamp bookkeeping reconciled at actual 2026-11-06T23:34:10Z; execution chronology remains in IMPL."
     purpose: "Test configured failure without acquiring extra host authority."
-    kind: test
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    depends_on: []
-    status: completed
     expected_outcome: "New regressions fail before integration code."
-    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-06T20:10:03Z"
+      updated_at: "2026-11-06T23:34:10Z"
+      completed_at: "2026-11-06T23:34:10Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "shared-dependencies-implement-code"
     title: "implement_code: shared offline Rust provider"
     description: "Extract catalogue ownership and use the common Rust transaction while retaining maerg acquisition authority."
     context: "Common provider retains frontend authorization separation."
     purpose: "Remove duplicated Rust publication mechanics."
-    kind: implementation
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    depends_on: ["shared-dependencies-write-tests"]
-    status: completed
     expected_outcome: "Common backend used, existing errors preserved and configured acquisition never host-falls-back."
-    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "shared-dependencies-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-06T20:10:03Z"
+      updated_at: "2026-11-06T23:34:10Z"
+      completed_at: "2026-11-06T23:34:10Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "shared-dependencies-security-audit"
     title: "security_audit: shared offline Rust provider"
     description: "Independent examination of explicit operator and protected-request boundaries."
     context: "Protected requests remain unsupported independently of operator capability. Independent source observations and the reported/repaired native Git admission issue are retained in IMPL, without claiming total egress proof."
     purpose: "Independently inspect authority and publication failures."
-    kind: security-audit
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    depends_on: ["shared-dependencies-implement-code"]
-    status: completed
     expected_outcome: "Persist scoped independent findings."
-    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "shared-dependencies-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-06T20:10:03Z"
+      updated_at: "2026-11-06T23:34:10Z"
+      completed_at: "2026-11-06T23:34:10Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "shared-dependencies-compliance-review"
     title: "compliance_review: shared offline Rust provider"
     description: "Compare source-only observed behavior with local intent in a separate source-blind context."
     context: "Separate rust-source-blind-comparator found scoped correspondence and recorded broader lock-changing acquisition, unimplemented automatic fulfillment and baseline-intent discrepancies for human arbitration in IMPL. Review completed, not accepted or certified; no automatic acquisition enabled."
     purpose: "Record discrepancies rather than certify implementation."
-    kind: compliance-review
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"]
-    depends_on: ["shared-dependencies-security-audit"]
-    status: completed
     expected_outcome: "No material unexplained contradictions; limitations retained."
-    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:37:01Z", completed_at: "2026-11-06T23:37:01Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "shared-dependencies-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-06T20:10:03Z"
+      updated_at: "2026-11-06T23:37:01Z"
+      completed_at: "2026-11-06T23:37:01Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "resilience-p1-write-tests"
     title: "write_tests: resilience phase 1"
     description: "Write and execute regressions before production changes. Scope: honest outcomes, fresh reads, refused proposals and repair propagation."
     context: "Protected resilience regressions failed before: 5 live_runtime and4 task_commands cases, plus later completion and feedback regressions. Independent main rerun of resilience_ verifies 9+5 passing cases."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Required behavioral regressions fail against the prior implementation."
-    kind: "test"
-    status: "completed"
+    kind: test
+    status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T07:09:49Z", "completed_at": "2026-11-06T07:09:49Z"}
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T07:09:49Z"
+      completed_at: "2026-11-06T07:09:49Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p1-implement-code"
@@ -425,11 +1054,16 @@ tasks:
     context: "Honest stalled outcomes, exact observation suppression, typed failed reads, explicit completion and shared repair-outcome mapping implemented. Focused and affected suites, strict clippy and formatting passed (runner evidence pending scoped independent review)."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
-    kind: "implementation"
-    status: "completed"
-    depends_on: ["resilience-p1-write-tests"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T07:09:49Z", "completed_at": "2026-11-06T07:09:49Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "resilience-p1-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T07:09:49Z"
+      completed_at: "2026-11-06T07:09:49Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p1-security-audit"
@@ -438,11 +1072,16 @@ tasks:
     context: "Clean-slate maerg-p1-observer derived scoped source behavior and identified three coupled discrepancies: failed trajectory exit codes, later genuine-decision downgrade and partial-work completion. Disposition: explicit corrective tests/source/audit tasks before final comparison; no certification."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
-    kind: "security-audit"
-    status: "completed"
-    depends_on: ["resilience-p1-implement-code"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T07:12:46Z", "completed_at": "2026-11-06T07:12:46Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "resilience-p1-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T07:12:46Z"
+      completed_at: "2026-11-06T07:12:46Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p1-compliance-review"
@@ -451,11 +1090,16 @@ tasks:
     context: "Source-blind initial comparator confirms three disclosed discrepancies in initial observations; requires corrective red/green tests, final clean observations and separate final comparison before phase2. Completed means the comparison occurred, not acceptance."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
-    kind: "compliance-review"
-    status: "completed"
-    depends_on: ["resilience-p1-security-audit"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T07:28:43Z", "completed_at": "2026-11-06T07:28:43Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "resilience-p1-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T07:28:43Z"
+      completed_at: "2026-11-06T07:28:43Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p1-correction-write-tests"
@@ -464,11 +1108,16 @@ tasks:
     context: "Initial review regressions3fail/1pass became4pass. Two more false-completion/summary-choice regressions failed before correction; additional inline-quote and OptionB cases also reproduced before fixes. All6 review test functions now pass with quoted/negated success fixtures preserved."
     purpose: "Resolve review findings transparently rather than self-certifying or hiding discrepancies."
     expected_outcome: "Required behavioral regressions fail against the prior implementation."
-    kind: "test"
-    status: "completed"
-    depends_on: ["resilience-p1-compliance-review"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T07:12:46Z", "updated_at": "2026-11-06T07:37:31Z", "completed_at": "2026-11-06T07:37:31Z"}
+    kind: test
+    status: completed
+    depends_on:
+      - "resilience-p1-compliance-review"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T07:12:46Z"
+      updated_at: "2026-11-06T07:37:31Z"
+      completed_at: "2026-11-06T07:37:31Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p1-correction-implement-code"
@@ -477,11 +1126,16 @@ tasks:
     context: "Faithful exit codes, no later broker decision downgrade, all-field labeled alternatives and clear final/proposal blocker handling implemented. Actual tool_dispatch fixture checks effect names. Full affected integrations8/26/81,53authoring/61agent units andstrict targetedclippy pass;92taskcommand units pass after queue canonicalization."
     purpose: "Resolve review findings transparently rather than self-certifying or hiding discrepancies."
     expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
-    kind: "implementation"
-    status: "completed"
-    depends_on: ["resilience-p1-correction-write-tests"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T07:12:46Z", "updated_at": "2026-11-06T07:37:31Z", "completed_at": "2026-11-06T07:37:31Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "resilience-p1-correction-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T07:12:46Z"
+      updated_at: "2026-11-06T07:37:31Z"
+      completed_at: "2026-11-06T07:37:31Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p1-correction-security-audit"
@@ -490,11 +1144,16 @@ tasks:
     context: "Final source-only maerg-p1-final-observer and narrower patch-observer derive current outcomes, all-field classification, pause ordering and fixtures. Last patch-field gap reproduced and fixed. Known scoped findings resolved; lexical/semantic and later-phase limits recorded."
     purpose: "Resolve review findings transparently rather than self-certifying or hiding discrepancies."
     expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
-    kind: "security-audit"
-    status: "completed"
-    depends_on: ["resilience-p1-correction-implement-code"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T07:12:46Z", "updated_at": "2026-11-06T07:42:22Z", "completed_at": "2026-11-06T07:42:22Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "resilience-p1-correction-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T07:12:46Z"
+      updated_at: "2026-11-06T07:42:22Z"
+      completed_at: "2026-11-06T07:42:22Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p1-correction-compliance-review"
@@ -503,11 +1162,16 @@ tasks:
     context: "Independent final source-blind comparator reports no high-confidence scoped discrepancy. Supplied outputs and unchanged initial repair observations are explicit limits. Final full live27 and92taskcommand units independently passed after its report."
     purpose: "Retain honest review history and the continuous-run four-stage item model."
     expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
-    kind: "compliance-review"
-    status: "completed"
-    depends_on: ["resilience-p1-correction-security-audit"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T07:27:10Z", "updated_at": "2026-11-06T07:43:03Z", "completed_at": "2026-11-06T07:43:03Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "resilience-p1-correction-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T07:27:10Z"
+      updated_at: "2026-11-06T07:43:03Z"
+      completed_at: "2026-11-06T07:43:03Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-write-tests"
@@ -516,11 +1180,16 @@ tasks:
     context: "Final callback-ignoring completed-stream regressions reproduced 0 passed/2 failed (lost 10100 known usage and wrong cancellation); both now pass."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Required behavioral regressions fail against the prior implementation."
-    kind: "test"
-    status: "completed"
-    depends_on: ["resilience-p1-correction-compliance-review"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:46:23Z", "completed_at": "2026-11-06T09:46:23Z"}
+    kind: test
+    status: completed
+    depends_on:
+      - "resilience-p1-correction-compliance-review"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T09:46:23Z"
+      completed_at: "2026-11-06T09:46:23Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-implement-code"
@@ -529,11 +1198,16 @@ tasks:
     context: "Private report/returned-turn handoff retains known usage, required journal order and first cause. Implementer 65 agent+11 generation cases, scoped fmt and strict lint pass; no discarded proposals or peer API change."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
-    kind: "implementation"
-    status: "completed"
-    depends_on: ["resilience-p2-write-tests"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:46:23Z", "completed_at": "2026-11-06T09:46:23Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "resilience-p2-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T09:46:23Z"
+      completed_at: "2026-11-06T09:46:23Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-security-audit"
@@ -542,11 +1216,16 @@ tasks:
     context: "Final clean-slate private-handoff observer established retained accounting before rejection, first-cause latch and no dispatch; no high-confidence defect. Parent 65 agent/38 live and strict lint passed."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
-    kind: "security-audit"
-    status: "completed"
-    depends_on: ["resilience-p2-implement-code"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:48:17Z", "completed_at": "2026-11-06T09:48:17Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "resilience-p2-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T09:48:17Z"
+      completed_at: "2026-11-06T09:48:17Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-compliance-review"
@@ -555,11 +1234,16 @@ tasks:
     context: "Fresh final source-blind comparator read exact phase2 supplement and intent only; no established scoped contradiction after handoff. Imported/fsync/failure-seam limits recorded; no acceptance/certification."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
-    kind: "compliance-review"
-    status: "completed"
-    depends_on: ["resilience-p2-security-audit"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:49:52Z", "completed_at": "2026-11-06T09:49:52Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "resilience-p2-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T09:49:52Z"
+      completed_at: "2026-11-06T09:49:52Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-write-tests"
@@ -568,11 +1252,16 @@ tasks:
     context: "Six initial live failures (two fixture deadlines), separate cross-turn/terminal-precedence/linked-ancestor red evidence; final ten progress cases pass."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Required behavioral regressions fail against the prior implementation."
-    kind: "test"
-    status: "completed"
-    depends_on: ["resilience-p2-compliance-review"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:42:51Z", "completed_at": "2026-11-06T10:42:51Z"}
+    kind: test
+    status: completed
+    depends_on:
+      - "resilience-p2-compliance-review"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T10:42:51Z"
+      completed_at: "2026-11-06T10:42:51Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-implement-code"
@@ -581,11 +1270,16 @@ tasks:
     context: "Actual revision/outcome evidence, fair paired batches, shared correction and continuity implemented. Independent69 agent/53 authoring/8 agent CLI/5 repair/10 progress tests pass; implementer full48 live and strict lint pass."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
-    kind: "implementation"
-    status: "completed"
-    depends_on: ["resilience-p3-write-tests"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:42:51Z", "completed_at": "2026-11-06T10:42:51Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "resilience-p3-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T10:42:51Z"
+      completed_at: "2026-11-06T10:42:51Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-security-audit"
@@ -594,11 +1288,16 @@ tasks:
     context: "Fresh source-only factual record retained with effect/broker/imported limits; separate scoped security reviewer found no vulnerabilities. No acceptance/certification."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
-    kind: "security-audit"
-    status: "completed"
-    depends_on: ["resilience-p3-implement-code"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:42:51Z", "completed_at": "2026-11-06T10:42:51Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "resilience-p3-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T10:42:51Z"
+      completed_at: "2026-11-06T10:42:51Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-compliance-review"
@@ -607,11 +1306,16 @@ tasks:
     context: "Separate scoped source-blind comparison established no concrete phase3 contradiction, preserving test/imported limits and dispatch/read semantics. Cross-repair history remains explicit phase4 gap; no certification/acceptance."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
-    kind: "compliance-review"
-    status: "completed"
-    depends_on: ["resilience-p3-security-audit"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:45:03Z", "completed_at": "2026-11-06T10:45:03Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "resilience-p3-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T10:45:03Z"
+      completed_at: "2026-11-06T10:45:03Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p4-write-tests"
@@ -620,11 +1324,16 @@ tasks:
     context: "Nine initial plus six recording/fence,fourinventory andoneFIFO behavioral reds archived; compilation/path fixture mistakes excluded. Parentfinal696lib+476integration,19P4unit checks pass; no weakened grants/caps/assertions."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Required behavioral regressions fail against the prior implementation."
-    kind: "test"
-    status: "completed"
-    depends_on: ["resilience-p3-compliance-review"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T13:12:02Z", "completed_at": "2026-11-06T13:12:02Z"}
+    kind: test
+    status: completed
+    depends_on:
+      - "resilience-p3-compliance-review"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T13:12:02Z"
+      completed_at: "2026-11-06T13:12:02Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p4-implement-code"
@@ -633,11 +1342,16 @@ tasks:
     context: "Uniquelyowned authoring/repairclock/debit/history,cause/knownusage handoff,callbacklatch,finite recurringrepair,late successfences,fallible shallowinventory/reusedbounds,Unixnonblocking/nofollow. Final1172distinctcases pass,7existingignores; strictchecks/releasepass."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
-    kind: "implementation"
-    status: "completed"
-    depends_on: ["resilience-p4-write-tests"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T13:12:02Z", "completed_at": "2026-11-06T13:12:02Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "resilience-p4-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T13:12:02Z"
+      completed_at: "2026-11-06T13:12:02Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p4-security-audit"
@@ -646,11 +1360,16 @@ tasks:
     context: "Fresh initial/recording/inventory/reader source-only observations and independentexecution persisted; separate scoped security reviewers report no vulnerabilities. Numerical/FIFO/error/effects/atomicity/imported/coverage limits explicit, no blanketcertification."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
-    kind: "security-audit"
-    status: "completed"
-    depends_on: ["resilience-p4-implement-code"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T13:12:02Z", "completed_at": "2026-11-06T13:12:02Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "resilience-p4-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T13:12:02Z"
+      completed_at: "2026-11-06T13:12:02Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p4-compliance-review"
@@ -659,11 +1378,16 @@ tasks:
     context: "Separate exactrange sourceblind comparison finds sole designinitialinventory wording discrepancy; conservativelycorrected underuserfixall, no source/scope expansion. Narrowwordingcomparison confirmscoreexclusion withpartialexcerptqualification. Recordsretain finding/limits, no receipt/acceptance."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
-    kind: "compliance-review"
-    status: "completed"
-    depends_on: ["resilience-p4-security-audit"]
-    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T13:12:02Z", "completed_at": "2026-11-06T13:12:02Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "resilience-p4-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T13:12:02Z"
+      completed_at: "2026-11-06T13:12:02Z"
     blocked_reason: null
     recovery_state: null
   - id: "runtime-shim-lifetime-write-tests"

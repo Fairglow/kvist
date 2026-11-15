@@ -382,6 +382,8 @@ impl Workspace {
             .map_err(|error| io::Error::other(error.to_string()))?;
         self.skott_continuations = 0;
         self.skott_result_reported = false;
+        self.skott_scroll = 0;
+        self.skott_follow = true;
         self.task_run_prep = Some(prep);
         self.skott = Some(session);
         self.append(&format!(
@@ -499,6 +501,8 @@ impl Workspace {
             .map_err(|error| io::Error::other(error.to_string()))?;
         self.skott_continuations = 0;
         self.skott_result_reported = false;
+        self.skott_scroll = 0;
+        self.skott_follow = true;
         self.skott = Some(session);
         self.append(&format!(
             "\n\n## Agent session\n\nStarted Skott agent `{model}`. The Skott metrics appear on their own line above the transcript; Ctrl+Tab switches between the Kvist metrics, the Skott detail, and a side-by-side view.\n\n",
