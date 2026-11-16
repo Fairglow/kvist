@@ -417,8 +417,9 @@ impl Workspace {
                 error.describe()
             ))
         })?;
-        // Use Kvist's selected model, falling back to Skott's default.
-        let kvist_model_id = &self.status.default_model;
+        // Use Kvist's role-selected model (developer, security-reviewer, or
+        // architect, per task kind), falling back to Skott's default.
+        let kvist_model_id = &prep.profile.profile;
         let model = config
             .models
             .iter()

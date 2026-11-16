@@ -4941,6 +4941,10 @@ pub(crate) struct TaskRunPrep {
     pub(crate) attempt_id: String,
     /// The task kind (Test, Implementation, SecurityAudit, ComplianceReview).
     pub(crate) task_kind: TaskKind,
+    /// The agent profile selected by task kind (developer, security-reviewer,
+    /// or architect). The embedded TUI path uses this to pick the Skott model,
+    /// so review tasks run on the architect model, not the developer default.
+    pub(crate) profile: crate::config::RoleConfig,
     /// The interpolated prompt to hand to Skott.
     pub(crate) prompt: String,
     /// The context files Skott should make available to the agent.
@@ -5064,7 +5068,9 @@ pub(crate) fn prepare_task_run(
             &format!("task `{task_id}` is not ready for execution"),
         ));
     }
-    let (_agent_profile, _role) = match task.kind {
+    // The embedded TUI path selects the Skott model from this profile, so the
+    // role must be resolved here, not discarded.
+    let (agent_profile, _role) = match task.kind {
         TaskKind::Test | TaskKind::Implementation => {
             (&config.agent.developer, crate::config::Role::Developer)
         }
@@ -5149,6 +5155,7 @@ pub(crate) fn prepare_task_run(
         task_id: task_id.to_owned(),
         attempt_id,
         task_kind: task.kind,
+        profile: agent_profile.clone(),
         prompt,
         context_files,
         read_only_mounts,
