@@ -595,12 +595,37 @@ impl EmbeddedSkott {
 
     /// Handles keyboard events for pane switching.
     ///
-    /// Returns `true` when the event was consumed (a pane switch). Ctrl+Tab
-    /// toggles between the two views; Ctrl+PageUp / Ctrl+PageDown and
-    /// Alt+Left / Alt+Right select a specific view. Plain PageUp/PageDown,
+    /// Returns `true` when the event was consumed (a pane switch). F3 cycles
+    /// views; F4 selects Kvist metrics; F5 selects Skott detail. The older
+    /// modifier shortcuts (Ctrl+Tab, Ctrl+PageUp/PageDown, Alt+Left/Right) are
+    /// kept for backward compatibility but are unreliable on terminals that
+    /// send the same sequence for Tab and Ctrl+Tab. Plain PageUp/PageDown,
     /// Left/Right and Home/End are never consumed here, so the Kvist
     /// transcript keeps its normal scrolling.
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
+        // F-key shortcuts: unambiguous and reliable across all terminals.
+        match key.code {
+            KeyCode::F(3) => {
+                self.active_pane = match self.active_pane {
+                    ActivePane::Kvist => ActivePane::Skott,
+                    ActivePane::Skott => ActivePane::Both,
+                    ActivePane::Both => ActivePane::Kvist,
+                };
+                return true;
+            }
+            KeyCode::F(4) => {
+                self.active_pane = ActivePane::Kvist;
+                return true;
+            }
+            KeyCode::F(5) => {
+                self.active_pane = ActivePane::Skott;
+                return true;
+            }
+            _ => {}
+        }
+        // Modifier-based shortcuts: kept for backward compatibility, but
+        // unreliable on terminals that send the same sequence for Tab and
+        // Ctrl+Tab. Prefer the F-key shortcuts above.
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         if control && key.code == KeyCode::Tab {
             self.active_pane = match self.active_pane {

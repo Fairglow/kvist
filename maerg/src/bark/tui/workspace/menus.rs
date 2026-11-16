@@ -182,7 +182,7 @@ impl Workspace {
                         }
                     };
                     let label = format!(
-                        "Switch view (Ctrl+Tab): {}",
+                        "Switch view (F3): {}",
                         match next {
                             crate::skott_embedded::ActivePane::Kvist => "Kvist metrics",
                             crate::skott_embedded::ActivePane::Skott => "Skott detail",
