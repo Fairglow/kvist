@@ -11,6 +11,7 @@ compile_error!("Kvist currently supports Linux only");
 
 pub mod acquisition;
 pub mod agent;
+pub mod agn;
 pub mod artifacts;
 pub mod authoring;
 pub mod bark;
@@ -19,6 +20,7 @@ pub mod component_documents;
 pub mod config;
 pub mod context;
 pub mod convert;
+pub mod conversion_state;
 pub mod discovery;
 mod error;
 pub(crate) mod file_io;

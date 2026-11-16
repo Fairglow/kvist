@@ -388,6 +388,10 @@ pub enum ComponentCommand {
         /// Explicit commit message when --commit is used.
         #[arg(long)]
         message: Option<String>,
+        /// Explicit exception when project review is required but no current
+        /// review receipt exists. Records the reason with the acceptance.
+        #[arg(long, value_name = "REASON")]
+        review_exception: Option<String>,
     },
     /// (Re)perform the isolated index commit for a pending acceptance.
     ///
@@ -398,6 +402,20 @@ pub enum ComponentCommand {
         /// Unique identifier of the pending acceptance state.
         #[arg(value_name = "ACCEPTANCE_ID")]
         acceptance_id: String,
+    },
+    /// Run a bounded advisory review of the component's intent bundle.
+    ///
+    /// Reviews REQUIREMENTS.md, CONTRACT.md, DESIGN.md, and the canonical
+    /// task definition projection from TODOS.yaml. Includes ROOT_CONTRACT.md
+    /// and the immediate parent CONTRACT.md as bounded context. Writes a
+    /// versioned receipt to .kvist/reviews/ and returns the report.
+    ///
+    /// Review findings are nonbinding; no severity threshold blocks acceptance.
+    Review {
+        /// Component directory containing the intent documents; defaults to
+        /// the component containing the current directory.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: Option<PathBuf>,
     },
 }
 
@@ -1475,12 +1493,13 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                         component_dir,
                         commit,
                         message,
+                        review_exception,
                     },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
                 let component = project.resolve_component(component_dir.as_deref())?;
                 let response =
-                    task_commands::accept(&project.project_dir, &component, commit, message.as_deref(), true)?;
+                    task_commands::accept(&project.project_dir, &component, commit, message.as_deref(), review_exception.as_deref(), true)?;
                 Ok(CommandOutput::message(response))
             }
             Command::Component {
@@ -1488,6 +1507,23 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             } => {
                 let project = context::ProjectContext::resolve(None)?;
                 let response = task_commands::commit_accepted(&project.project_dir, &acceptance_id, true)?;
+                Ok(CommandOutput::message(response))
+            }
+            Command::Component {
+                command: ComponentCommand::Review { component_dir },
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                let config = config::load(&project.project_dir)?;
+                let context = task_commands::validate_accept_context(&project.project_dir, &component)?;
+                let (receipt_path, report) = task_commands::review::review_intent(&context, &config)?;
+                let response = serde_json::json!({
+                    "status": "success",
+                    "command": "component-review",
+                    "component_dir": context.component_dir.to_string_lossy(),
+                    "receipt_path": receipt_path.to_string_lossy(),
+                    "report": report,
+                }).to_string();
                 Ok(CommandOutput::message(response))
             }
             Command::Completions { shell } => {
@@ -2048,6 +2084,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                         component_dir,
                         commit,
                         message,
+                        review_exception,
                     },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
@@ -2057,6 +2094,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     &component,
                     commit,
                     message.as_deref(),
+                    review_exception.as_deref(),
                     false,
                 )?;
                 Ok(CommandOutput::message(response))
@@ -2067,6 +2105,24 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 let project = context::ProjectContext::resolve(None)?;
                 task_commands::commit_accepted(&project.project_dir, &acceptance_id, false)
                     .map(CommandOutput::message)
+            }
+            Command::Component {
+                command: ComponentCommand::Review { component_dir },
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                let config = config::load(&project.project_dir)?;
+                let context = task_commands::validate_accept_context(&project.project_dir, &component)?;
+                let (receipt_path, report) = task_commands::review::review_intent(&context, &config)?;
+                let receipt_rel = receipt_path
+                    .strip_prefix(&project.project_dir)
+                    .unwrap_or(&receipt_path);
+                Ok(CommandOutput::message(format!(
+                    "completed component intent review for {}\nreceipt: {}\n\n{}",
+                    component.display(),
+                    receipt_rel.display(),
+                    report
+                )))
             }
             Command::Completions { shell } => {
                 use clap::CommandFactory;

@@ -168,6 +168,25 @@ impl Workspace {
                 if self.running.is_some() {
                     entries.push(Entry::new("Cancel command", Action::Cancel));
                 }
+                // Always offer to start an agent session when idle (no running
+                // command and no active Skott session).
+                if self.running.is_none()
+                    && !self
+                        .skott
+                        .as_ref()
+                        .is_some_and(|skott| skott.is_active())
+                {
+                    entries.push(Entry::new(
+                        "Start agent session (Ctrl+A)",
+                        Action::Command {
+                            arguments: vec!["agent".into()],
+                            confirm: Some(
+                                "Start an interactive Skott agent session?\n\nThis opens the Skott view with a live agent. Use Ctrl+A to start, Ctrl+C to cancel the current turn, and Ctrl+Q to quit."
+                            .to_owned()),
+                            return_to: Page::Root,
+                        },
+                    ));
+                }
                 if let Some(skott) = self.skott.as_ref().filter(|skott| skott.is_active()) {
                     let pane = skott.active_pane();
                     let next = match pane {

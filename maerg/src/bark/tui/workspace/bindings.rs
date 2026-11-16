@@ -56,6 +56,11 @@ const BINDINGS: &[(&str, &str, Option<&str>)] = &[
         "Pin/unpin the highlighted component",
         None,
     ),
+    (
+        "Ctrl+A (idle)",
+        "Start interactive Skott agent session",
+        Some("agent"),
+    ),
 ];
 
 pub(super) fn footer() -> String {

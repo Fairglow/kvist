@@ -55,15 +55,15 @@ tasks:
     purpose: "Retain an independent assessment of the lock-release, transcript, and crash-recovery changes."
     expected_outcome: "Independent observations and any residual risk are recorded without self-certification."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "task-run-reliability-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-15T17:18:19Z"
+      completed_at: "2026-11-15T17:18:19Z"
     blocked_reason: null
     recovery_state: null
   - id: "task-run-reliability-compliance-review"
@@ -73,7 +73,7 @@ tasks:
     purpose: "Separate implemented behavior from the compliance judgment."
     expected_outcome: "Scoped correspondence and any discrepancies are persisted without acceptance."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "task-run-reliability-security-audit"
     requirements:
@@ -81,8 +81,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-15T17:23:44Z"
+      completed_at: "2026-11-15T17:23:44Z"
     blocked_reason: null
     recovery_state: null
   - id: "skott-view-switching-write-tests"
@@ -92,15 +92,15 @@ tasks:
     purpose: "Pin the view-switching defect and the required replacement surface before changing behavior."
     expected_outcome: "Failing tests demonstrate the colliding keys and the unreachable joint view; passing tests pin the new keys, the menu item, and the reachable joint view."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
       - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-15T17:46:14Z"
+      completed_at: "2026-11-15T17:46:14Z"
     blocked_reason: null
     recovery_state: null
   - id: "skott-view-switching-implement-code"
@@ -110,7 +110,7 @@ tasks:
     purpose: "Make Kvist/Skott view switching reliable and always triggerable."
     expected_outcome: "A menu choice and new keys switch all three views, the joint view is reachable, and the plain Tab / PageUp / PageDown editing and scrolling behavior is preserved."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "skott-view-switching-write-tests"
     requirements:
@@ -118,8 +118,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-15T17:57:18Z"
+      completed_at: "2026-11-15T17:57:18Z"
     blocked_reason: null
     recovery_state: null
   - id: "skott-view-switching-security-audit"
@@ -129,15 +129,15 @@ tasks:
     purpose: "Retain an independent assessment of the view-switching input handling."
     expected_outcome: "Independent observations and any residual risk are recorded without self-certification."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "skott-view-switching-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-15T18:01:05Z"
+      completed_at: "2026-11-15T18:01:05Z"
     blocked_reason: null
     recovery_state: null
   - id: "skott-view-switching-compliance-review"
@@ -147,7 +147,7 @@ tasks:
     purpose: "Separate implemented behavior from the compliance judgment."
     expected_outcome: "Scoped correspondence and any discrepancies are persisted without acceptance."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "skott-view-switching-security-audit"
     requirements:
@@ -155,8 +155,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-15T18:15:09Z"
+      completed_at: "2026-11-15T18:15:09Z"
     blocked_reason: null
     recovery_state: null
   - id: "embedded-skott-reachability-write-tests"
@@ -166,15 +166,15 @@ tasks:
     purpose: "Pin the reachability and steering gap before changing behavior."
     expected_outcome: "Failing tests demonstrate the missing standalone entry point and the missing operator steering; passing tests pin both."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
       - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:36:31Z"
+      completed_at: "2026-11-16T15:36:31Z"
     blocked_reason: null
     recovery_state: null
   - id: "embedded-skott-reachability-implement-code"
@@ -184,7 +184,7 @@ tasks:
     purpose: "Let the operator use Skott directly inside Kvist and steer it."
     expected_outcome: "The operator can start and steer an embedded Skott session at any idle moment; task-run sessions still report exactly one terminal result and reaping still works; while the Skott view is active the bottom row is a guidance/prompt area for the agent, not the Kvist command area."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "embedded-skott-reachability-write-tests"
     requirements:
@@ -192,8 +192,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:56:00Z"
+      completed_at: "2026-11-16T15:56:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "embedded-skott-reachability-security-audit"
@@ -203,7 +203,7 @@ tasks:
     purpose: "Retain an independent assessment of the reachability and steering changes."
     expected_outcome: "Independent observations and any residual risk are recorded without self-certification."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "embedded-skott-reachability-implement-code"
     requirements:
@@ -211,8 +211,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:58:30Z"
+      completed_at: "2026-11-16T15:58:30Z"
     blocked_reason: null
     recovery_state: null
   - id: "embedded-skott-reachability-compliance-review"
@@ -222,7 +222,7 @@ tasks:
     purpose: "Separate implemented behavior from the compliance judgment."
     expected_outcome: "Scoped correspondence and any discrepancies are persisted without acceptance."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "embedded-skott-reachability-security-audit"
     requirements:
@@ -230,8 +230,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
     timestamps:
       created_at: "2026-11-14T17:20:00Z"
-      updated_at: "2026-11-14T17:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:00:42Z"
+      completed_at: "2026-11-16T16:00:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "skott-progress-visibility-write-tests"
@@ -241,15 +241,15 @@ tasks:
     purpose: "Make an embedded run visibly progress in the view the operator is reading, rather than going silent until it finishes."
     expected_outcome: "A test demonstrates the embedded view tracks live progress (metrics and/or transcript) and does not pin-scroll the Skott detail away from new output."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
       - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
-      updated_at: "2026-11-15T01:40:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:04:35Z"
+      completed_at: "2026-11-16T16:04:35Z"
     blocked_reason: null
     recovery_state: null
   - id: "skott-progress-visibility-implement-code"
@@ -259,7 +259,7 @@ tasks:
     purpose: "So an operator reading the Kvist pane during a run can tell it is still working, rather than assuming it hung."
     expected_outcome: "While a run is active the active view shows progressing output (metrics and a growing transcript); the Skott detail auto-follows new lines and scrolls back on demand; the Kvist pane no longer goes silent for the whole run."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "skott-progress-visibility-write-tests"
     requirements:
@@ -267,8 +267,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
-      updated_at: "2026-11-15T01:40:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:10:20Z"
+      completed_at: "2026-11-16T16:10:20Z"
     blocked_reason: null
     recovery_state: null
   - id: "skott-progress-visibility-security-audit"
@@ -278,15 +278,15 @@ tasks:
     purpose: "Retain an independent assessment of the progress-display boundary."
     expected_outcome: "Independent observations and any residual risk are recorded without self-certification."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "skott-progress-visibility-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
-      updated_at: "2026-11-15T01:40:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:15:16Z"
+      completed_at: "2026-11-16T16:15:16Z"
     blocked_reason: null
     recovery_state: null
   - id: "skott-progress-visibility-compliance-review"
@@ -296,7 +296,7 @@ tasks:
     purpose: "Separate implemented behavior from the compliance judgment."
     expected_outcome: "Scoped correspondence and any discrepancies are persisted without acceptance."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "skott-progress-visibility-security-audit"
     requirements:
@@ -304,8 +304,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-INTERACTIVE-TUI"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
-      updated_at: "2026-11-15T01:40:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:19:16Z"
+      completed_at: "2026-11-16T16:19:16Z"
     blocked_reason: null
     recovery_state: null
   - id: "transcript-scoping-rotation-write-tests"
@@ -315,14 +315,14 @@ tasks:
     purpose: "Make the transcript scoping and rotation contract explicit and test-pinned."
     expected_outcome: "A test pins per-scope scoping, the 1 MiB block-boundary rotation into sequential (non-concatenated) segments, and the 16 MiB hard segment bound."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
-      updated_at: "2026-11-15T01:40:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:21:25Z"
+      completed_at: "2026-11-16T16:21:25Z"
     blocked_reason: null
     recovery_state: null
   - id: "transcript-scoping-rotation-implement-code"
@@ -332,15 +332,15 @@ tasks:
     purpose: "Make the transcript's scoping and rotation observable rather than a surprise."
     expected_outcome: "The operator can see the active transcript scope and its rotation bound; the 1 MiB block-boundary rotation into sequential segments and the 16 MiB hard bound are documented or surfaced."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "transcript-scoping-rotation-write-tests"
     requirements:
       - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
-      updated_at: "2026-11-15T01:40:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:27:07Z"
+      completed_at: "2026-11-16T16:27:07Z"
     blocked_reason: null
     recovery_state: null
   - id: "transcript-scoping-rotation-security-audit"
@@ -350,15 +350,15 @@ tasks:
     purpose: "Retain an independent assessment of the transcript scoping and rotation boundary."
     expected_outcome: "Independent observations and any residual risk are recorded without self-certification."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "transcript-scoping-rotation-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
-      updated_at: "2026-11-15T01:40:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:28:25Z"
+      completed_at: "2026-11-16T16:28:25Z"
     blocked_reason: null
     recovery_state: null
   - id: "transcript-scoping-rotation-compliance-review"
@@ -368,15 +368,15 @@ tasks:
     purpose: "Separate implemented behavior from the compliance judgment."
     expected_outcome: "Scoped correspondence and any discrepancies are persisted without acceptance."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "transcript-scoping-rotation-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-TRANSCRIPT-PERSISTENCE"
     timestamps:
       created_at: "2026-11-15T01:40:00Z"
-      updated_at: "2026-11-15T01:40:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:30:23Z"
+      completed_at: "2026-11-16T16:30:23Z"
     blocked_reason: null
     recovery_state: null
   - id: "boundary-fixture-repair-write-tests"
@@ -1506,7 +1506,7 @@ tasks:
     purpose: "Retain an independent path/input assessment."
     expected_outcome: "Record findings without fabricating protected execution or acceptance."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "scoped-status-implement-code"
     requirements:
@@ -1514,8 +1514,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-11-04T08:48:00Z"
-      updated_at: "2026-11-04T08:48:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:31:44Z"
+      completed_at: "2026-11-16T16:31:44Z"
     blocked_reason: null
     recovery_state: null
   - id: "scoped-status-compliance-review"
@@ -1525,7 +1525,7 @@ tasks:
     purpose: "Keep implementation observation independent from authored intent."
     expected_outcome: "Persist a source-blind diagnostic comparison and explicit limits."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "scoped-status-security-audit"
     requirements:
@@ -1533,8 +1533,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-11-04T08:48:00Z"
-      updated_at: "2026-11-04T08:48:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:34:15Z"
+      completed_at: "2026-11-16T16:34:15Z"
     blocked_reason: null
     recovery_state: null
   - id: "workspace-settings-write-tests"
@@ -1583,7 +1583,7 @@ tasks:
     purpose: "Retain independent assessment of registry and terminal boundaries."
     expected_outcome: "Record findings or explicit blockers without inventing receipts or approvals."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "workspace-settings-implement-code"
     requirements:
@@ -1591,8 +1591,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-11-04T07:00:00Z"
-      updated_at: "2026-11-04T07:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:35:42Z"
+      completed_at: "2026-11-16T16:35:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "workspace-settings-compliance-review"
@@ -1602,7 +1602,7 @@ tasks:
     purpose: "Keep implementation evidence distinct from authored intent."
     expected_outcome: "Persist a source-blind diagnostic comparison and its limits."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "workspace-settings-security-audit"
     requirements:
@@ -1611,8 +1611,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-11-04T07:00:00Z"
-      updated_at: "2026-11-04T07:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:37:56Z"
+      completed_at: "2026-11-16T16:37:56Z"
     blocked_reason: null
     recovery_state: null
   - id: "capacity-fixtures-write-tests"
@@ -1728,15 +1728,15 @@ tasks:
     purpose: "Retain independent authority findings."
     expected_outcome: "Shortcut controls and limitations remain inspectable."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "decision-shortcuts-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
     timestamps:
       created_at: "2026-10-31T12:05:00Z"
-      updated_at: "2026-11-04T16:07:34Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:38:54Z"
+      completed_at: "2026-11-16T16:38:54Z"
     blocked_reason: null
     recovery_state: null
     disposition: block
@@ -1747,15 +1747,15 @@ tasks:
     purpose: "Keep intent and observed behavior separate."
     expected_outcome: "Discrepancies and proof limitations remain durable."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "decision-shortcuts-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
     timestamps:
       created_at: "2026-10-31T12:05:00Z"
-      updated_at: "2026-10-31T12:05:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:46:57Z"
+      completed_at: "2026-11-16T16:46:57Z"
     blocked_reason: null
     recovery_state: null
   - id: "decision-automation-write-tests"
@@ -1800,15 +1800,15 @@ tasks:
     purpose: "Retain authority and recovery findings."
     expected_outcome: "Observed controls and remaining limitations are durable."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "decision-automation-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
     timestamps:
       created_at: "2026-10-30T22:20:00Z"
-      updated_at: "2026-10-30T22:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:50:50Z"
+      completed_at: "2026-11-16T16:50:50Z"
     blocked_reason: null
     recovery_state: null
   - id: "decision-automation-compliance-review"
@@ -1818,15 +1818,15 @@ tasks:
     purpose: "Independently assess the implemented decision workflow."
     expected_outcome: "Scoped observation/comparison and actual execution evidence remain attributed."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "decision-automation-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-DECISION-AUTOMATION"
     timestamps:
       created_at: "2026-10-30T22:20:00Z"
-      updated_at: "2026-10-30T22:20:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:53:26Z"
+      completed_at: "2026-11-16T16:53:26Z"
     blocked_reason: null
     recovery_state: null
   - id: "runtime-budgets-write-tests"
@@ -2812,15 +2812,15 @@ tasks:
     purpose: "Prevent self-certification."
     expected_outcome: "Observed behavior and discrepancies remain durable."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "shared-runtime-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
     timestamps:
       created_at: "2026-10-23T22:00:00Z"
-      updated_at: "2026-10-29T23:44:06Z"
-      completed_at: null
+      updated_at: "2026-11-16T16:55:48Z"
+      completed_at: "2026-11-16T16:55:48Z"
     blocked_reason: null
     recovery_state: null
     disposition: block
@@ -3337,7 +3337,7 @@ tasks:
     purpose: "Make review occurrence and human acknowledgement enforceable without allowing agent findings to become compliance or veto authority."
     expected_outcome: "Tests distinguish review evidence from review findings and prove component and project acceptance require a configured persistent opt-out, a current acknowledged receipt, or an exact-bundle exception while validation, status, and task readiness remain unchanged."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-boundary-compliance-review"
     requirements:
@@ -3347,8 +3347,8 @@ tasks:
       - "TODO.md#DOC-01"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-09-01T19:23:23Z"
-      completed_at: null
+      updated_at: "2026-11-16T17:01:07Z"
+      completed_at: "2026-11-16T17:01:07Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-01-implement-evidence"
@@ -3358,7 +3358,7 @@ tasks:
     purpose: "Give acceptance deterministic local evidence that feedback was produced and acknowledged or deliberately skipped."
     expected_outcome: "Kvist alone writes canonical evidence from bounded agent execution records, rejects stale or malformed records, and never persists raw transcripts or secrets."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "doc-01-write-tests"
     requirements:
@@ -3368,8 +3368,8 @@ tasks:
       - "TODO.md#DOC-01"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T17:09:42Z"
+      completed_at: "2026-11-16T17:09:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-01-implement-component-review"
@@ -3379,7 +3379,7 @@ tasks:
     purpose: "Ensure the user has an opportunity to understand review findings while preserving unconditional human arbitration."
     expected_outcome: "Review uses only local intent, root constraints, and the immediate parent contract; no finding severity blocks acceptance, and no configured agent requires an explicit exception rather than an implicit pass."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "doc-01-implement-evidence"
     requirements:
@@ -3389,8 +3389,8 @@ tasks:
       - "TODO.md#DOC-01"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T17:23:59Z"
+      completed_at: "2026-11-16T17:23:59Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-01-implement-project-review"
@@ -3400,7 +3400,7 @@ tasks:
     purpose: "Apply the same review opportunity to authoritative project documents without silently broadening component acceptance."
     expected_outcome: "Project acceptance validates exact governed paths and the configured opt-out, review receipt plus acknowledgement, or exception path while preserving independent format versions and strict context boundaries."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "doc-01-implement-component-review"
     requirements:
@@ -3410,8 +3410,8 @@ tasks:
       - "TODO.md#DOC-01"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T17:29:47Z"
+      completed_at: "2026-11-16T17:29:47Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-01-security-audit"
@@ -3421,7 +3421,7 @@ tasks:
     purpose: "Ensure advisory review adds informed human choice without creating a new execution, disclosure, or false-certification boundary."
     expected_outcome: "Every high-confidence bypass or data-exposure issue is fixed or retained as an explicit blocker before review gating is enabled."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "doc-01-implement-project-review"
     requirements:
@@ -3431,8 +3431,8 @@ tasks:
       - "TODO.md#DOC-01"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T17:39:00Z"
+      completed_at: "2026-11-16T17:39:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-01-compliance-review"
@@ -3442,7 +3442,7 @@ tasks:
     purpose: "Retain an independent verdict for every review, acknowledgement, exception, project-scope, and context-boundary guarantee."
     expected_outcome: "The review records satisfied clauses, discrepancies, and approved deferrals before advisory review gating is promoted."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "doc-01-security-audit"
     requirements:
@@ -3452,8 +3452,8 @@ tasks:
       - "TODO.md#DOC-01"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T17:41:01Z"
+      completed_at: "2026-11-16T17:41:01Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-02-write-tests"
@@ -3463,7 +3463,7 @@ tasks:
     purpose: "Prevent an implementation-derived convenience from laundering current behavior into authoritative intent."
     expected_outcome: "Tests prove that proposal and comparison are bounded advisory operations that preserve every existing intended and observed artifact."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "doc-01-compliance-review"
     requirements:
@@ -3473,8 +3473,8 @@ tasks:
       - "TODO.md#DOC-02"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T17:49:02Z"
+      completed_at: "2026-11-16T17:49:02Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-02-implement-code"
@@ -3484,7 +3484,7 @@ tasks:
     purpose: "Help users articulate intent for existing implementations while keeping uncertainty and human authorship explicit."
     expected_outcome: "Proposal output is clearly draft, comparison output uses non-compliance vocabulary, and both remain subject to advisory review or explicit exception before acceptance."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "doc-02-write-tests"
     requirements:
@@ -3494,8 +3494,8 @@ tasks:
       - "TODO.md#DOC-02"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T17:54:04Z"
+      completed_at: "2026-11-16T17:54:04Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-02-security-audit"
@@ -3505,7 +3505,7 @@ tasks:
     purpose: "Ensure proposal tooling cannot overwrite intent, broaden context, or present observed behavior as approved requirements."
     expected_outcome: "Security and authority findings are corrected or retained as explicit blockers before proposal tooling is promoted."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "doc-02-implement-code"
     requirements:
@@ -3515,8 +3515,8 @@ tasks:
       - "TODO.md#DOC-02"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T18:06:44Z"
+      completed_at: "2026-11-16T18:06:44Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-02-compliance-review"
@@ -3526,7 +3526,7 @@ tasks:
     purpose: "Record whether the feature assists intent authoring without claiming to recover or approve it."
     expected_outcome: "Every discrepancy and unsupported inference is retained for human arbitration before the feature is declared compliant."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "doc-02-security-audit"
     requirements:
@@ -3536,8 +3536,8 @@ tasks:
       - "TODO.md#DOC-02"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T18:09:07Z"
+      completed_at: "2026-11-16T18:09:07Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-03-write-tests"
@@ -3547,7 +3547,7 @@ tasks:
     purpose: "Turn contract-test claims into bounded inspectable evidence without overstating what tests prove."
     expected_outcome: "Tests require a deterministic contract clause traceability report and reject unknown, duplicate, stale, or unexecuted mappings."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "doc-01-compliance-review"
     requirements:
@@ -3557,8 +3557,8 @@ tasks:
       - "TODO.md#DOC-03"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T18:12:39Z"
+      completed_at: "2026-11-16T18:12:39Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-03-implement-code"
@@ -3568,7 +3568,7 @@ tasks:
     purpose: "Give users evidence that consumer promises are exercised while leaving completeness and compliance judgments independent."
     expected_outcome: "The report preserves exact contract and test revisions, never calls itself code coverage, and cannot mark a component compliant."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "doc-03-write-tests"
     requirements:
@@ -3578,8 +3578,8 @@ tasks:
       - "TODO.md#DOC-03"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T18:14:08Z"
+      completed_at: "2026-11-16T18:14:08Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-03-security-audit"
@@ -3589,7 +3589,7 @@ tasks:
     purpose: "Ensure the report is useful evidence rather than a forgeable certification surface."
     expected_outcome: "High-confidence provenance and authority defects are fixed or retained as blockers before contract verification is promoted."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "doc-03-implement-code"
     requirements:
@@ -3599,8 +3599,8 @@ tasks:
       - "TODO.md#DOC-03"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T18:21:27Z"
+      completed_at: "2026-11-16T18:21:27Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-03-compliance-review"
@@ -3610,7 +3610,7 @@ tasks:
     purpose: "Preserve a separate compliance judgment over contract, implementation record, test evidence, and traceability output."
     expected_outcome: "The review records every uncovered or unsupported claim and prevents traceability evidence from becoming self-certification."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "doc-03-security-audit"
     requirements:
@@ -3620,8 +3620,8 @@ tasks:
       - "TODO.md#DOC-03"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
-      completed_at: null
+      updated_at: "2026-11-16T18:22:26Z"
+      completed_at: "2026-11-16T18:22:26Z"
     blocked_reason: null
     recovery_state: null
   - id: "onb-01-write-tests"
@@ -3631,7 +3631,7 @@ tasks:
     purpose: "Establish executable evidence for safely integrating existing projects before implementation changes."
     expected_outcome: "Tests cover normal conversion, malformed and link-like metadata, every review and acceptance transition, changed drafts, and task execution refusal until the configured review policy and acceptance state are satisfied."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "doc-01-compliance-review"
     requirements:
@@ -3640,8 +3640,8 @@ tasks:
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
-      updated_at: "2026-08-28T13:20:32Z"
-      completed_at: null
+      updated_at: "2026-11-16T18:25:59Z"
+      completed_at: "2026-11-16T18:25:59Z"
     blocked_reason: null
     recovery_state: null
   - id: "onb-01-integrate-project-state"
@@ -3651,7 +3651,7 @@ tasks:
     purpose: "Give every later command one bounded, link-safe source of conversion state."
     expected_outcome: "Status and doctor report deterministic draft, partial, invalid, stale, and accepted conversion states without modifying user files."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "onb-01-write-tests"
     requirements:
@@ -3660,8 +3660,8 @@ tasks:
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
-      updated_at: "2026-08-28T13:20:32Z"
-      completed_at: null
+      updated_at: "2026-11-16T18:41:37Z"
+      completed_at: "2026-11-16T18:41:37Z"
     blocked_reason: null
     recovery_state: null
   - id: "onb-01-implement-acceptance"
@@ -3671,7 +3671,7 @@ tasks:
     purpose: "Prevent imported work from being selected or executed before human review."
     expected_outcome: "Only a valid current accepted component intent set can precede queue acceptance; malformed, stale, partial, and link-like metadata is rejected."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "onb-01-integrate-project-state"
     requirements:
@@ -3680,8 +3680,8 @@ tasks:
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
-      updated_at: "2026-08-28T13:20:32Z"
-      completed_at: null
+      updated_at: "2026-11-16T18:46:02Z"
+      completed_at: "2026-11-16T18:46:02Z"
     blocked_reason: null
     recovery_state: null
   - id: "onb-01-connect-task-workflow"
@@ -3691,7 +3691,7 @@ tasks:
     purpose: "Make accepted conversion artifacts executable without weakening existing task security boundaries."
     expected_outcome: "Task commands use one conversion context, reject drafts, and preserve existing lock, audit, sandbox, and verification behavior."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "onb-01-implement-acceptance"
     requirements:
@@ -3700,8 +3700,8 @@ tasks:
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
-      updated_at: "2026-08-28T13:20:32Z"
-      completed_at: null
+      updated_at: "2026-11-16T19:21:54Z"
+      completed_at: "2026-11-16T19:21:54Z"
     blocked_reason: null
     recovery_state: null
   - id: "onb-01-harden-draft-generation"
@@ -3711,7 +3711,7 @@ tasks:
     purpose: "Keep generated drafts trustworthy, reproducible, and useful for independent review."
     expected_outcome: "Draft metadata is bounded, safely escaped, stable for identical inputs, and records recursively observed implementation evidence without reading intended component documents."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "onb-01-connect-task-workflow"
     requirements:
@@ -3720,8 +3720,8 @@ tasks:
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
-      updated_at: "2026-08-28T13:20:32Z"
-      completed_at: null
+      updated_at: "2026-11-16T19:28:18Z"
+      completed_at: "2026-11-16T19:28:18Z"
     blocked_reason: null
     recovery_state: null
   - id: "onb-01-security-audit"
@@ -3731,7 +3731,7 @@ tasks:
     purpose: "Find approval bypasses, path traversal, link following, unsafe writes, and execution-context confusion."
     expected_outcome: "Security findings are remediated or retained as explicit human-approved risks before conversion is certified."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "onb-01-harden-draft-generation"
     requirements:
@@ -3740,8 +3740,8 @@ tasks:
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
-      updated_at: "2026-08-28T13:20:32Z"
-      completed_at: null
+      updated_at: "2026-11-16T19:32:28Z"
+      completed_at: "2026-11-16T19:32:28Z"
     blocked_reason: null
     recovery_state: null
   - id: "onb-01-compliance-review"
@@ -3751,7 +3751,7 @@ tasks:
     purpose: "Retain independent evidence that the implemented conversion lifecycle matches its approved contract."
     expected_outcome: "Clean-slate and source-blind review records every discrepancy for human arbitration before ONB-01 is completed."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "onb-01-security-audit"
     requirements:
@@ -3761,8 +3761,8 @@ tasks:
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
-      updated_at: "2026-08-28T13:20:32Z"
-      completed_at: null
+      updated_at: "2026-11-16T19:36:13Z"
+      completed_at: "2026-11-16T19:36:13Z"
     blocked_reason: null
     recovery_state: null
   - id: "p2-01-implement-code"
@@ -4447,7 +4447,7 @@ tasks:
     purpose: "Specify the Kvist half of native agent execution before the child loop is enabled with real host services."
     expected_outcome: "Tests prove that fake model intent cannot broaden task scope, dispatch without an exact grant, forge evidence, or promote artifacts without a separate Kvist decision."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "DESIGN.md#Security-and-resource-design"
@@ -4455,8 +4455,8 @@ tasks:
       - "TODO.md#AGN-09"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
+      updated_at: "2026-11-16T19:47:49Z"
+      completed_at: "2026-11-16T19:47:49Z"
     blocked_reason: null
     recovery_state: null
   - id: "agn-authority-implement-code"
@@ -4466,7 +4466,7 @@ tasks:
     purpose: "Connect the standalone runtime to Kvist's durable recursive workflow without leaking root types into the child crate."
     expected_outcome: "Every effect and promotion is bound to current task, policy, workspace, tool, argument, resource, and budget revisions, with explicit denial and bounded redacted evidence."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "agn-authority-write-tests"
     requirements:
@@ -4475,8 +4475,8 @@ tasks:
       - "TODO.md#AGN-09"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
+      updated_at: "2026-11-16T20:04:53Z"
+      completed_at: "2026-11-16T20:04:53Z"
     blocked_reason: null
     recovery_state: null
   - id: "agn-authority-security-audit"
@@ -4486,7 +4486,7 @@ tasks:
     purpose: "Find authorization, escalation, leakage, and false-evidence paths before native model execution is enabled."
     expected_outcome: "No unresolved high-confidence issue permits an effect outside an exact grant, sensitive event retention, forged completion, or unauthorized artifact promotion."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "agn-authority-implement-code"
     requirements:
@@ -4495,8 +4495,8 @@ tasks:
       - "TODO.md#AGN-09"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
+      updated_at: "2026-11-16T20:10:54Z"
+      completed_at: "2026-11-16T20:10:54Z"
     blocked_reason: null
     recovery_state: null
   - id: "agn-authority-compliance-review"
@@ -4506,7 +4506,7 @@ tasks:
     purpose: "Retain independent evidence that the Kvist host integration preserves the standalone ownership split and recursive workflow contract."
     expected_outcome: "The review records every satisfied guarantee, discrepancy, unsupported execution tier, and remaining prerequisite before native model mode can be enabled."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "agn-authority-security-audit"
     requirements:
@@ -4516,8 +4516,8 @@ tasks:
       - "TODO.md#AGN-09"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
+      updated_at: "2026-11-16T20:13:46Z"
+      completed_at: "2026-11-16T20:13:46Z"
     blocked_reason: null
     recovery_state: null
   - id: "artifact-model-write-tests"
@@ -4857,7 +4857,7 @@ tasks:
     purpose: "Identify path, parsing, or process-control weaknesses before the shell is treated as the trusted primary interface."
     expected_outcome: "An independent finding record confirms or remediates shell input bounds, subprocess handling, and state-file hygiene."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "shell-hardening-implement-code"
       - "shell-polish-implement-code"
@@ -4868,8 +4868,8 @@ tasks:
       - "TODO.md#SHL-01"
     timestamps:
       created_at: "2026-09-13T19:30:00Z"
-      updated_at: "2026-09-13T19:30:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T20:15:52Z"
+      completed_at: "2026-11-16T20:15:52Z"
     blocked_reason: null
     recovery_state: null
   - id: "shell-hardening-compliance-review"
@@ -4879,7 +4879,7 @@ tasks:
     purpose: "Preserve independent evidence that the shell matches its declared behavior."
     expected_outcome: "A clean-slate implementation record and source-blind review classify shell behavior without silently changing its contract."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "shell-hardening-security-audit"
     requirements:
@@ -4889,8 +4889,8 @@ tasks:
       - "TODO.md#SHL-01"
     timestamps:
       created_at: "2026-09-13T19:30:00Z"
-      updated_at: "2026-09-13T19:30:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T20:20:01Z"
+      completed_at: "2026-11-16T20:20:01Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-boundary-reverification-security-audit"
@@ -4900,7 +4900,7 @@ tasks:
     purpose: "Replace the placeholder-era security receipts with genuine independent findings before the execution boundary is treated as trusted."
     expected_outcome: "A genuine independent audit records or remediates every high-confidence finding, and its disposition is retained for human arbitration against the placeholder-era receipts."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-runner-integrate-code"
     requirements:
@@ -4909,8 +4909,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T20:24:32Z"
+      completed_at: "2026-11-16T20:24:32Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-boundary-reverification-compliance-review"
@@ -4920,7 +4920,7 @@ tasks:
     purpose: "Preserve independent evidence that the execution boundary matches its declared guarantees."
     expected_outcome: "A clean-slate record and source-blind comparison classify every boundary clause, retaining discrepancies for explicit human arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-boundary-reverification-security-audit"
     requirements:
@@ -4929,8 +4929,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T20:27:53Z"
+      completed_at: "2026-11-16T20:27:53Z"
     blocked_reason: null
     recovery_state: null
   - id: "test-policy-verification-write-tests"
@@ -4940,7 +4940,7 @@ tasks:
     purpose: "Make placeholder verification detectable and replaceable before the dogfood flow relies on recorded verification evidence."
     expected_outcome: "Tests fail while the committed policy contains placeholder echo commands and pass once real per-component verification commands are committed, approved, and executed."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Compatibility-and-verification"
@@ -4948,8 +4948,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T20:34:34Z"
+      completed_at: "2026-11-16T20:34:34Z"
     blocked_reason: null
     recovery_state: null
   - id: "test-policy-verification-implement-code"
@@ -4959,7 +4959,7 @@ tasks:
     purpose: "Ensure recorded verification evidence corresponds to commands that actually execute component tests."
     expected_outcome: "The committed test policy runs real per-component verification, approve-policy records the new digest, and task run evidence reflects actual test execution."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "test-policy-verification-write-tests"
     requirements:
@@ -4969,8 +4969,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T20:36:58Z"
+      completed_at: "2026-11-16T20:36:58Z"
     blocked_reason: null
     recovery_state: null
   - id: "test-policy-verification-security-audit"

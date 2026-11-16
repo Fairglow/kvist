@@ -8,6 +8,30 @@ use clap::Parser;
 
 impl Workspace {
     pub(super) fn submit(&mut self, terminal: &mut Screen) -> io::Result<()> {
+        // When the Skott view is active, the bottom row is the agent guidance
+        // area. Submitting here sends steering input to the running Skott
+        // session rather than answering a running command.
+        let skott_active = self.skott.as_ref().is_some_and(|skott| skott.is_active());
+        let skott_pane = self
+            .skott
+            .as_ref()
+            .map(|skott| skott.active_pane())
+            .unwrap_or(crate::skott_embedded::ActivePane::Kvist);
+        let in_skott_steering = skott_active
+            && skott_pane == crate::skott_embedded::ActivePane::Skott
+            && self.overlay.is_none();
+        if in_skott_steering {
+            let guidance = self.input.text.trim().to_owned();
+            if !guidance.is_empty() {
+                if let Some(skott) = &mut self.skott {
+                    skott.submit(guidance.clone()).map_err(|error| {
+                        io::Error::other(format!("failed to send guidance to Skott: {error}"))
+                    })?;
+                }
+            }
+            self.input.set("");
+            return Ok(());
+        }
         if let Some(run) = &mut self.running {
             run.answer(&self.input.text)?;
             self.input.set("");
@@ -136,10 +160,19 @@ impl Workspace {
                 let text = self.history.iter().rev().take(count).map(|line| format!("- {}\n", presentation::literal(line))).collect::<String>();
                 self.append(&format!("# Command history\n\n{text}"))?;
             }
-            "journal" if arguments.is_empty() => self.append(&format!(
-                "# Transcript\n\n**Directory:** {}\n\n{} segments. PageUp/PageDown browse; Ctrl+Home/End reach the ends. Source Markdown is local diagnostic history, not workflow evidence.\n",
-                presentation::literal(&self.transcript.directory.display().to_string()), self.transcript.latest() + 1
-            ))?,
+            "journal" if arguments.is_empty() => {
+                let bytes = self.transcript.bytes();
+                let remaining = 1_048_576usize.saturating_sub(bytes);
+                let segments = self.transcript.latest() + 1;
+                let markdown = format!(
+                    "# Transcript\n\n**Directory:** {}\n\n{} segment(s). Current segment is {} bytes ({} bytes until rotation at 1 MiB).\n\nRotation: at 1 MiB the transcript splits at the next Markdown block boundary into a new segment (sequential numeric files). A single segment never exceeds 16 MiB.\n\nPageUp/PageDown browse; Ctrl+Home/End reach the ends. Source Markdown is local diagnostic history, not workflow evidence.\n",
+                    presentation::literal(&self.transcript.directory.display().to_string()),
+                    segments,
+                    bytes,
+                    remaining
+                );
+                self.append(&markdown)?;
+            }
             "last" => {
                 let count = bark::parse_count("last", &arguments, 10).map_err(io::Error::other)?;
                 let runs = bark::runs::scan_recent_runs(&self.project, count);
@@ -567,9 +600,11 @@ impl Workspace {
             None,
         )
         .map_err(|error| io::Error::other(error.to_string()))?;
-        session
-            .submit(prompt.to_owned())
-            .map_err(|error| io::Error::other(error.to_string()))?;
+        if !prompt.is_empty() {
+            session
+                .submit(prompt.to_owned())
+                .map_err(|error| io::Error::other(error.to_string()))?;
+        }
         self.skott_continuations = 0;
         self.skott_result_reported = false;
         self.skott_scroll = 0;

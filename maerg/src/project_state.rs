@@ -158,6 +158,8 @@ pub struct ProjectInspection {
     pub components: Vec<ComponentInspection>,
     /// Discovery failure captured without changing root-artifact classification.
     pub discovery_error: Option<String>,
+    /// Read-only conversion state inspection for existing-project conversions.
+    pub conversion: Option<crate::conversion_state::ConversionInspection>,
 }
 
 /// The inspected state of the project's Rust toolchain.
@@ -386,6 +388,14 @@ impl fmt::Display for ProjectInspection {
             }
         }
 
+        if let Some(conversion) = &self.conversion {
+            writeln!(formatter, "\n[Conversion State]")?;
+            writeln!(formatter, "  state: {}", conversion.state)?;
+            if let Some(diagnostic) = &conversion.diagnostic {
+                writeln!(formatter, "  diagnostic: {}", diagnostic)?;
+            }
+        }
+
         write!(formatter, "\nguidance: {}", self.guidance)
     }
 }
@@ -492,6 +502,7 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
             component_root: None,
             components: Vec::new(),
             discovery_error: None,
+            conversion: None,
         });
     }
 
@@ -513,6 +524,25 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         has_toolchain = toolchain.is_some(),
         "inspected project state"
     );
+    // Inspect conversion state for existing-project conversions
+    let conversion = match crate::conversion_state::inspect(project_dir) {
+        Ok(inspection) => {
+            if inspection.state == crate::conversion_state::ConversionState::NotConverted {
+                None
+            } else {
+                Some(inspection)
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                project_dir = %project_dir.display(),
+                error = %error,
+                "failed to inspect conversion state"
+            );
+            None
+        }
+    };
+
     Ok(ProjectInspection {
         project_dir: project_dir.to_path_buf(),
         state,
@@ -524,6 +554,7 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         component_root,
         components,
         discovery_error,
+        conversion,
     })
 }
 
@@ -653,6 +684,7 @@ fn invalid_root_inspection(project_dir: &Path) -> ProjectInspection {
         component_root: None,
         components: Vec::new(),
         discovery_error: None,
+        conversion: None,
     }
 }
 

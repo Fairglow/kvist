@@ -35,6 +35,7 @@ mod completion;
 mod continuous;
 pub mod decisions;
 mod repair;
+pub mod review;
 
 /// Selects the first ready task in declared queue order, using the same
 /// definition as the overview, the shell, and the blank-task `task run`
@@ -219,6 +220,52 @@ fn validate_context_in_states(
     if let Some(details) = untracked_durable_artifacts(&inspection) {
         return Err(KvistError::TaskVcsNotCurrent { details });
     }
+
+    // Check for converted components: artifacts in .kvist/ are not discovered
+    // as regular components, so validate them separately.
+    if component_path == Path::new(".") {
+        if let Some(conversion) = &inspection.conversion {
+            match conversion.state {
+                crate::conversion_state::ConversionState::Accepted => {
+                    // Accepted conversion: treat as current component
+                    let component_dir =
+                        project_dir.join(crate::conversion_state::CONVERSION_METADATA_DIRECTORY);
+                    return Ok(TaskContext {
+                        project_dir: project_dir.to_path_buf(),
+                        component_dir,
+                        component_path,
+                    });
+                }
+                crate::conversion_state::ConversionState::Draft
+                | crate::conversion_state::ConversionState::Partial
+                | crate::conversion_state::ConversionState::Invalid => {
+                    // Draft/partial/invalid conversions are not ready for tasks
+                    return Err(KvistError::TaskComponentNotCurrent {
+                        component: component_path.clone(),
+                        state: conversion.state.name().to_owned(),
+                        hint: format!(
+                            "run `kvist component accept {}` to accept the converted component before task execution",
+                            component_path.display()
+                        ),
+                    });
+                }
+                crate::conversion_state::ConversionState::Stale => {
+                    return Err(KvistError::TaskComponentNotCurrent {
+                        component: component_path.clone(),
+                        state: conversion.state.name().to_owned(),
+                        hint: format!(
+                            "the converted component has drifted; run `kvist component accept {}` to re-accept",
+                            component_path.display()
+                        ),
+                    });
+                }
+                crate::conversion_state::ConversionState::NotConverted => {
+                    // No conversion; fall through to normal component discovery
+                }
+            }
+        }
+    }
+
     let component = inspection
         .components
         .iter()
@@ -1889,7 +1936,7 @@ fn status_name(status: TaskStatus) -> &'static str {
     }
 }
 
-fn validate_accept_context(project_dir: &Path, component_path: &Path) -> Result<TaskContext> {
+pub fn validate_accept_context(project_dir: &Path, component_path: &Path) -> Result<TaskContext> {
     let inspection = project_state::inspect(project_dir)?;
     if inspection.state != ProjectState::Current {
         return Err(KvistError::TaskProjectNotCurrent {
@@ -1900,6 +1947,28 @@ fn validate_accept_context(project_dir: &Path, component_path: &Path) -> Result<
     if let Some(details) = untracked_durable_artifacts(&inspection) {
         return Err(KvistError::TaskVcsNotCurrent { details });
     }
+    let component_path = context::normalize_component_path(component_path)?;
+
+    // Converted components live in .kvist/ and are not discovered as regular
+    // components. Accept them directly when the conversion state is Draft,
+    // Partial, or Invalid (not yet accepted).
+    if let Some(conversion) = &inspection.conversion {
+        if matches!(
+            conversion.state,
+            crate::conversion_state::ConversionState::Draft
+                | crate::conversion_state::ConversionState::Partial
+                | crate::conversion_state::ConversionState::Invalid
+        ) {
+            let component_dir =
+                project_dir.join(crate::conversion_state::CONVERSION_METADATA_DIRECTORY);
+            return Ok(TaskContext {
+                project_dir: project_dir.to_path_buf(),
+                component_dir,
+                component_path,
+            });
+        }
+    }
+
     let component_root =
         inspection
             .component_root
@@ -1909,7 +1978,6 @@ fn validate_accept_context(project_dir: &Path, component_path: &Path) -> Result<
                 state: "component root is unavailable".to_owned(),
                 hint: "run `kvist doctor` to inspect the project root".to_owned(),
             })?;
-    let component_path = context::normalize_component_path(component_path)?;
     let component = inspection
         .components
         .iter()
@@ -2023,6 +2091,7 @@ pub fn accept(
     component_path: &Path,
     commit: bool,
     message: Option<&str>,
+    review_exception: Option<&str>,
     is_json: bool,
 ) -> Result<String> {
     if commit {
@@ -2055,6 +2124,114 @@ pub fn accept(
                 .component_dir
                 .join(ComponentArtifact::Design.filename()),
         )?;
+
+        // Check for a valid review receipt when project review is required
+        let config = crate::config::load(project_dir)?;
+        if config.review.required {
+            let requirements_digest = digest(requirements.as_bytes());
+            let contract_digest = digest(contract.as_bytes());
+            let design_digest = digest(design.as_bytes());
+            
+            let queue_path = context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename());
+            let queue_content = fs::read_to_string(&queue_path).map_err(|source| KvistError::Io {
+                operation: "read TODOS.yaml for review digest",
+                path: queue_path.clone(),
+                source,
+            })?;
+            let current_queue: crate::task_queue::TaskQueue = 
+                crate::task_queue::parse(&queue_content).map_err(|source| KvistError::TaskQueueUnavailable {
+                    path: queue_path,
+                    reason: source.to_string(),
+                })?;
+            
+            // Build canonical task projection
+            let task_projections: Vec<crate::task_commands::review::TaskProjection> = current_queue
+                .tasks
+                .iter()
+                .map(|task| crate::task_commands::review::TaskProjection {
+                    id: task.id.clone(),
+                    title: task.title.clone(),
+                    description: task.description.clone(),
+                    context: task.context.clone(),
+                    purpose: task.purpose.clone(),
+                    expected_outcome: task.expected_outcome.clone(),
+                    kind: format!("{:?}", task.kind),
+                    depends_on: task.depends_on.clone(),
+                    requirements: task.requirements.clone(),
+                })
+                .collect();
+            let projection_json = serde_json::to_string_pretty(&task_projections).map_err(|source| {
+                KvistError::AgentEvidenceFailed {
+                    reason: format!("cannot serialize task projection for review check: {source}"),
+                }
+            })?;
+            let todos_projection_digest = digest(projection_json.as_bytes());
+            
+            // Check for current review receipt
+            let reviews_dir = context.component_dir.join(".kvist").join("reviews");
+            let mut has_current_receipt = false;
+            if reviews_dir.exists() {
+                for entry in fs::read_dir(&reviews_dir).map_err(|source| KvistError::Io {
+                    operation: "read reviews directory",
+                    path: reviews_dir.clone(),
+                    source,
+                })? {
+                    let entry = entry.map_err(|source| KvistError::Io {
+                        operation: "read reviews entry",
+                        path: reviews_dir.clone(),
+                        source,
+                    })?;
+                    let path = entry.path();
+                    if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+                        if let Ok(receipt_bytes) = fs::read(&path) {
+                            match serde_json::from_slice::<crate::task_commands::review::ReviewReceipt>(&receipt_bytes) {
+                                Ok(receipt) if receipt.requirements_digest == requirements_digest
+                                    && receipt.contract_digest == contract_digest
+                                    && receipt.design_digest == design_digest
+                                    && receipt.todos_projection_digest == todos_projection_digest =>
+                                {
+                                    // Verify HMAC authentication to prevent receipt forgery
+                                    let receipt_json = serde_json::to_string(&receipt).map_err(|source| {
+                                        KvistError::AgentEvidenceFailed {
+                                            reason: format!("cannot serialize receipt for HMAC verification: {source}"),
+                                        }
+                                    })?;
+                                    if crate::task_commands::review::verify_receipt_hmac(
+                                        &receipt_json,
+                                        &receipt.authentication,
+                                        project_dir,
+                                    ) {
+                                        has_current_receipt = true;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if !has_current_receipt {
+                if let Some(exception_reason) = review_exception {
+                    // Record the exception with the acceptance
+                    eprintln!(
+                        "review exception recorded: {}",
+                        exception_reason
+                    );
+                } else {
+                    return Err(KvistError::ComponentDocumentValidationFailed {
+                        path: context.component_dir.join(ComponentArtifact::TaskQueue.filename()),
+                        diagnostics: format!(
+                            "project review is required but no current review receipt exists for this intent bundle. Run `kvist component review {}` first, or use `kvist component accept {} --review-exception 'reason'`",
+                            context.component_path.display(),
+                            context.component_path.display()
+                        ),
+                    });
+                }
+            }
+        }
 
         let inspection = project_state::inspect(project_dir)?;
         let component_root = project_dir.join(
@@ -2102,6 +2279,21 @@ pub fn accept(
                 .join(ComponentArtifact::TaskQueue.filename()),
             &serialized,
         )?;
+
+        // Mark converted components as accepted so task commands can find them
+        if context.component_path == Path::new(".") {
+            let inspection = project_state::inspect(project_dir)?;
+            if let Some(conversion) = &inspection.conversion {
+                if matches!(
+                    conversion.state,
+                    crate::conversion_state::ConversionState::Draft
+                        | crate::conversion_state::ConversionState::Partial
+                        | crate::conversion_state::ConversionState::Invalid
+                ) {
+                    crate::conversion_state::mark_accepted(project_dir)?;
+                }
+            }
+        }
 
         let blocked = queue
             .tasks
@@ -7513,7 +7705,8 @@ mod tests {
     use super::{
         MAX_ATTEMPT_JOURNAL_BYTES, MAX_SCOPE_DEPTH, MAX_SCOPE_ENTRIES, MAX_SCOPE_FILE_BYTES,
         TaskLock, Timestamp, append_encoded_attempt, digest, digest_path_tree,
-        is_rust_verification, read_attempt_journal, resolve_task_spec, unresolved_attempt_error,
+        is_rust_verification, read_attempt_journal, resolve_task_spec,
+        unresolved_attempt_error,
     };
     use crate::task_queue::{Task, TaskKind, TaskStatus, TaskTimestamps};
 
@@ -7808,6 +8001,68 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&replacement_path).expect("read replacement lock"),
             "replacement-owner"
+        );
+    }
+
+    #[test]
+    fn converted_component_validation_rejects_drafts() {
+        use crate::conversion_state::{CONVERSION_METADATA_DIRECTORY, mark_accepted};
+
+        let project = TempDir::new().expect("create test project");
+        let project_dir = project.path();
+
+        // Create conversion metadata directory with draft artifacts
+        let kvist_dir = project_dir.join(CONVERSION_METADATA_DIRECTORY);
+        fs::create_dir_all(&kvist_dir).expect("create .kvist directory");
+
+        // Write draft artifacts
+        fs::write(
+            kvist_dir.join("REQUIREMENTS.md"),
+            crate::component_documents::COMPONENT_REQUIREMENTS_TEMPLATE,
+        )
+        .expect("write draft REQUIREMENTS.md");
+        fs::write(
+            kvist_dir.join("CONTRACT.md"),
+            crate::component_documents::COMPONENT_CONTRACT_TEMPLATE,
+        )
+        .expect("write draft CONTRACT.md");
+        fs::write(
+            kvist_dir.join("DESIGN.md"),
+            crate::component_documents::COMPONENT_DESIGN_TEMPLATE,
+        )
+        .expect("write draft DESIGN.md");
+        fs::write(
+            kvist_dir.join("IMPL.md"),
+            "# Component Implementation Record\n\nNo implementation yet.\n",
+        )
+        .expect("write draft IMPL.md");
+        fs::write(
+            kvist_dir.join("COMPLIANCE_REVIEW.md"),
+            "# Compliance Review\n\nInitial review pending.\n",
+        )
+        .expect("write draft COMPLIANCE_REVIEW.md");
+
+        // Draft TODOS.yaml (not yet accepted)
+        let draft_todos = "schema_version: 1\ncomponent:\n  revalidation:\n    state: current\n    checked_at: \"2026-01-01T00:00:00Z\"\n    causes: []\ntasks:\n  - id: t1\n    title: Test task\n    description: \"\"\n    context: \"\"\n    purpose: \"\"\n    expected_outcome: \"\"\n    kind: implementation\n    status: pending\n    depends_on: []\n    requirements: []\n    timestamps:\n      created_at: \"2026-01-01T00:00:00Z\"\n      updated_at: \"2026-01-01T00:00:00Z\"\n";
+        fs::write(kvist_dir.join("TODOS.yaml"), draft_todos).expect("write draft TODOS.yaml");
+
+        // Before acceptance: inspect should show draft state
+        let inspection = crate::conversion_state::inspect(project_dir).expect("inspect conversion");
+        assert_eq!(
+            inspection.state,
+            crate::conversion_state::ConversionState::Draft,
+            "conversion should be in draft state before acceptance"
+        );
+
+        // Mark as accepted
+        mark_accepted(project_dir).expect("mark conversion accepted");
+
+        // After acceptance: inspect should show accepted state
+        let inspection = crate::conversion_state::inspect(project_dir).expect("inspect conversion");
+        assert_eq!(
+            inspection.state,
+            crate::conversion_state::ConversionState::Accepted,
+            "conversion should be in accepted state after acceptance"
         );
     }
 }

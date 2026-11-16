@@ -62,6 +62,16 @@ fn render_text(
         output.push_str("\ndiscovery-error: ");
         output.push_str(&escape_text(error));
     }
+    if let Some(conversion) = &inspection.conversion {
+        if conversion.state != crate::conversion_state::ConversionState::NotConverted {
+            output.push_str("\nconversion-state: ");
+            output.push_str(&escape_text(conversion.state.name()));
+            if let Some(diagnostic) = &conversion.diagnostic {
+                output.push_str("\nconversion-diagnostic: ");
+                output.push_str(&escape_text(diagnostic));
+            }
+        }
+    }
     for artifact in &inspection.artifacts {
         output.push_str("\nroot-artifact: ");
         output.push_str(&escape_text(&artifact.path));
@@ -404,6 +414,19 @@ fn render_json(
     output.push_str("],\"discovery_error\":");
     match &inspection.discovery_error {
         Some(error) => json_string(&mut output, error),
+        None => output.push_str("null"),
+    }
+    output.push_str(",\"conversion\":");
+    match &inspection.conversion {
+        Some(conversion) => {
+            output.push_str("{\"state\":");
+            json_string(&mut output, conversion.state.name());
+            if let Some(diagnostic) = &conversion.diagnostic {
+                output.push_str(",\"diagnostic\":");
+                json_string(&mut output, diagnostic);
+            }
+            output.push('}');
+        }
         None => output.push_str("null"),
     }
     output.push('}');
@@ -885,6 +908,7 @@ mod tests {
             component_root: None,
             components: vec![component],
             discovery_error: None,
+            conversion: None,
         }
     }
 

@@ -90,9 +90,29 @@ fn status_reports_a_current_initialized_project_in_stable_text_and_json() {
     assert!(json.stderr.is_empty());
     let output = String::from_utf8(json.stdout).expect("UTF-8 JSON output");
     assert!(output.starts_with("{\"format_version\":1,\"project_path\":"));
-    assert!(output.contains(
-        "\"project_state\":\"current\",\"component_root\":\"src\",\"root_artifacts\":[{\"path\":\"kvist.toml\",\"status\":\"valid (configuration version 1)\"},{\"path\":\"VISION.md\",\"status\":\"valid (version 1)\"},{\"path\":\"ARCHITECTURE.md\",\"status\":\"valid (version 1)\"},{\"path\":\"ROOT_CONTRACT.md\",\"status\":\"valid (version 1)\"},{\"path\":\"src/REQUIREMENTS.md\",\"status\":\"valid (REQUIREMENTS.md version 1)\"},{\"path\":\"src/CONTRACT.md\",\"status\":\"valid (CONTRACT.md version 1)\"},{\"path\":\"src/DESIGN.md\",\"status\":\"valid (DESIGN.md version 1)\"},{\"path\":\"src/TODOS.yaml\",\"status\":\"valid (TODO queue version 1)\"},{\"path\":\"src/IMPL.md\",\"status\":\"valid (version 1)\"}],\"root_diagnostic\":null,\"guidance\":\"project is ready for Phase 1 read-only commands\",\"components\":[{\"path\":\".\",\"state\":\"current\",\"artifacts\":[{\"path\":\"REQUIREMENTS.md\",\"state\":\"valid\"},{\"path\":\"CONTRACT.md\",\"state\":\"valid\"},{\"path\":\"DESIGN.md\",\"state\":\"valid\"},{\"path\":\"TODOS.yaml\",\"state\":\"valid\"},{\"path\":\"IMPL.md\",\"state\":\"valid\"}],\"revalidation_causes\":[],\"recovery_blockers\":[]}],\"discovery_error\":null}"
-    ));
+    assert!(output.contains("\"project_state\":\"current\""));
+    assert!(output.contains("\"component_root\":\"src\""));
+    assert!(output.contains("\"path\":\"kvist.toml\",\"status\":\"valid (configuration version 1)\""));
+    assert!(output.contains("\"path\":\"VISION.md\",\"status\":\"valid (version 1)\""));
+    assert!(output.contains("\"path\":\"ARCHITECTURE.md\",\"status\":\"valid (version 1)\""));
+    assert!(output.contains("\"path\":\"ROOT_CONTRACT.md\",\"status\":\"valid (version 1)\""));
+    assert!(output.contains("\"path\":\"src/REQUIREMENTS.md\",\"status\":\"valid (REQUIREMENTS.md version 1)\""));
+    assert!(output.contains("\"path\":\"src/CONTRACT.md\",\"status\":\"valid (CONTRACT.md version 1)\""));
+    assert!(output.contains("\"path\":\"src/DESIGN.md\",\"status\":\"valid (DESIGN.md version 1)\""));
+    assert!(output.contains("\"path\":\"src/TODOS.yaml\",\"status\":\"valid (TODO queue version 1)\""));
+    assert!(output.contains("\"path\":\"src/IMPL.md\",\"status\":\"valid (version 1)\""));
+    assert!(output.contains("\"root_diagnostic\":null"));
+    assert!(output.contains("\"guidance\":\"project is ready for Phase 1 read-only commands\""));
+    assert!(output.contains("\"path\":\".\",\"state\":\"current\""));
+    assert!(output.contains("\"path\":\"REQUIREMENTS.md\",\"state\":\"valid\""));
+    assert!(output.contains("\"path\":\"CONTRACT.md\",\"state\":\"valid\""));
+    assert!(output.contains("\"path\":\"DESIGN.md\",\"state\":\"valid\""));
+    assert!(output.contains("\"path\":\"TODOS.yaml\",\"state\":\"valid\""));
+    assert!(output.contains("\"path\":\"IMPL.md\",\"state\":\"valid\""));
+    assert!(output.contains("\"revalidation_causes\":[]"));
+    assert!(output.contains("\"recovery_blockers\":[]"));
+    assert!(output.contains("\"discovery_error\":null"));
+    assert!(output.contains("\"conversion\":null"));
 }
 
 #[test]

@@ -3550,6 +3550,7 @@ mod tests {
             replacement: None,
             content_bytes: 3,
             purpose: "test".to_owned(),
+            execution_tier: crate::agn::ExecutionTier::Sandboxed,
         }
     }
 

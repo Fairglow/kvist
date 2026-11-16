@@ -17,7 +17,9 @@ use crate::{
 };
 
 const METADATA_DIRECTORY: &str = ".kvist";
-const GENERATED_AT: &str = "2026-08-28T13:03:02Z";
+
+/// Maximum length for manifest fields interpolated into generated documents.
+const MAX_FIELD_LENGTH: usize = 256;
 
 /// The observable result of an existing-project conversion.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -289,7 +291,92 @@ fn read_manifest(project_dir: &Path) -> Result<Manifest> {
     })
 }
 
+/// Derive a deterministic UTC timestamp from manifest content for reproducible
+/// draft generation. Identical inputs produce identical timestamps.
+fn deterministic_timestamp(manifest: &Manifest) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{}:{}:{}", manifest.name, manifest.version, manifest.description).as_bytes());
+    let digest = hasher.finalize();
+    // Use first 8 bytes to derive a Unix timestamp in a reasonable range
+    let bytes = &digest[..8];
+    let mut value: u64 = 0;
+    for (i, byte) in bytes.iter().enumerate() {
+        value = value | ((*byte as u64) << (i * 8));
+    }
+    // Map to a timestamp between 2020-01-01 and 2030-01-01
+    let base: u64 = 1577836800; // 2020-01-01T00:00:00Z
+    let range: u64 = 315360000; // 10 years in seconds
+    let timestamp = base + (value % range);
+    
+    // Convert to ISO 8601 format
+    let days = timestamp / 86400;
+    let rem = timestamp % 86400;
+    let hours = rem / 3600;
+    let mins = (rem % 3600) / 60;
+    let secs = rem % 60;
+    
+    // Days since epoch to date
+    let mut year = 1970;
+    let mut remaining_days = days as i64;
+    loop {
+        let days_in_year = if is_leap(year) { 366 } else { 365 };
+        if remaining_days < days_in_year {
+            break;
+        }
+        remaining_days -= days_in_year;
+        year += 1;
+    }
+    let mut month = 1;
+    let month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let days_in_feb = if is_leap(year) { 29 } else { 28 };
+    let mut md = month_days;
+    md[1] = days_in_feb;
+    for (i, &d) in md.iter().enumerate() {
+        if remaining_days < d as i64 {
+            month = i + 1;
+            break;
+        }
+        remaining_days -= d as i64;
+    }
+    let day = remaining_days + 1;
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, hours, mins, secs
+    )
+}
+
+fn is_leap(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+/// Truncate and escape a manifest field for safe interpolation.
+fn bounded_field(value: &str) -> String {
+    let truncated = if value.len() > MAX_FIELD_LENGTH {
+        format!("{}...", &value[..MAX_FIELD_LENGTH])
+    } else {
+        value.to_owned()
+    };
+    // Escape backslashes and double quotes for YAML/JSON contexts
+    truncated.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn draft_documents(manifest: &Manifest) -> (String, String, String) {
+    let name = bounded_field(&manifest.name);
+    let version = bounded_field(&manifest.version);
+    let description = bounded_field(&manifest.description);
+    let authors = {
+        let bounded: Vec<String> = manifest.authors.iter().map(|s| bounded_field(s.as_str())).collect();
+        list_or_none(&bounded)
+    };
+    let dependencies = {
+        let bounded: Vec<String> = manifest.dependencies.iter().map(|s| bounded_field(s.as_str())).collect();
+        list_or_none(&bounded)
+    };
+    let features = {
+        let bounded: Vec<String> = manifest.features.iter().map(|s| bounded_field(s.as_str())).collect();
+        list_or_none(&bounded)
+    };
+
     let requirements = format!(
         r#"<!-- kvist-requirements-version: 1 -->
 # {name} Requirements
@@ -321,12 +408,12 @@ Current dependencies: {dependencies}. Current features: {features}.
 Acceptance requires human-authored requirements, links to the parent
 architecture and contract clauses, and observable verification criteria.
 "#,
-        name = manifest.name,
-        version = manifest.version,
-        description = manifest.description,
-        authors = list_or_none(&manifest.authors),
-        dependencies = list_or_none(&manifest.dependencies),
-        features = list_or_none(&manifest.features),
+        name = name,
+        version = version,
+        description = description,
+        authors = authors,
+        dependencies = dependencies,
+        features = features
     );
     let contract = format!(
         r#"<!-- kvist-contract-version: 1 -->
@@ -370,9 +457,9 @@ human review.
 Package version `{version}` was observed. Define the actual public compatibility
 policy and contract-test evidence before acceptance.
 "#,
-        name = manifest.name,
-        version = manifest.version,
-        dependencies = list_or_none(&manifest.dependencies),
+        name = name,
+        version = version,
+        dependencies = dependencies
     );
     let design = format!(
         r#"<!-- kvist-design-version: 1 -->
@@ -410,9 +497,9 @@ Security enforcement and resource bounds require explicit design.
 Review existing tests without treating them as intended requirements, then map
 approved requirement and contract IDs to independent verification.
 "#,
-        name = manifest.name,
-        dependencies = list_or_none(&manifest.dependencies),
-        features = list_or_none(&manifest.features),
+        name = name,
+        dependencies = dependencies,
+        features = features
     );
     (requirements, contract, design)
 }
@@ -426,6 +513,7 @@ fn draft_todos(
     let requirements_revision = revision(requirements);
     let contract_revision = revision(contract);
     let design_revision = revision(design);
+    let generated_at = deterministic_timestamp(manifest);
     let context = yaml_string(&format!(
         "Converted package {} {} with authors [{}], dependencies [{}], and features [{}].",
         manifest.name,
@@ -443,7 +531,7 @@ component:
   parent_contract: null
   revalidation:
     state: current
-    checked_at: {GENERATED_AT}
+    checked_at: {generated_at}
     stale_since: null
     causes: []
 tasks:
@@ -459,8 +547,8 @@ tasks:
     requirements:
       - TODO.md#ONB-01
     timestamps:
-      created_at: {GENERATED_AT}
-      updated_at: {GENERATED_AT}
+      created_at: {generated_at}
+      updated_at: {generated_at}
       completed_at: null
     blocked_reason: null
     recovery_state: null
@@ -477,8 +565,8 @@ tasks:
     requirements:
       - TODO.md#ONB-01
     timestamps:
-      created_at: {GENERATED_AT}
-      updated_at: {GENERATED_AT}
+      created_at: {generated_at}
+      updated_at: {generated_at}
       completed_at: null
     blocked_reason: null
     recovery_state: null
@@ -495,8 +583,8 @@ tasks:
     requirements:
       - TODO.md#ONB-01
     timestamps:
-      created_at: {GENERATED_AT}
-      updated_at: {GENERATED_AT}
+      created_at: {generated_at}
+      updated_at: {generated_at}
       completed_at: null
     blocked_reason: null
     recovery_state: null
@@ -513,8 +601,8 @@ tasks:
     requirements:
       - TODO.md#ONB-01
     timestamps:
-      created_at: {GENERATED_AT}
-      updated_at: {GENERATED_AT}
+      created_at: {generated_at}
+      updated_at: {generated_at}
       completed_at: null
     blocked_reason: null
     recovery_state: null
@@ -522,29 +610,52 @@ tasks:
     ))
 }
 
-fn draft_implementation_record(project_dir: &Path) -> Result<String> {
-    let mut source_files = fs::read_dir(project_dir.join("src"))
-        .map_err(|source| KvistError::Io {
-            operation: "list existing Rust source files",
-            path: project_dir.join("src"),
+/// Recursively inventory Rust implementation files under `src/`.
+/// Returns paths relative to the project root, sorted for deterministic output.
+fn inventory_implementation_files(project_dir: &Path) -> Result<Vec<String>> {
+    let src_dir = project_dir.join("src");
+    let mut files = Vec::new();
+    walk_rust_files(&src_dir, &src_dir, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn walk_rust_files(base: &Path, current: &Path, out: &mut Vec<String>) -> Result<()> {
+    let entries = fs::read_dir(current).map_err(|source| KvistError::Io {
+        operation: "list directory",
+        path: current.to_path_buf(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| KvistError::Io {
+            operation: "inspect directory entry",
+            path: current.to_path_buf(),
             source,
-        })?
-        .map(|entry| {
-            entry.map_err(|source| KvistError::Io {
-                operation: "inspect existing Rust source entry",
-                path: project_dir.join("src"),
-                source,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
-        .filter_map(|entry| {
-            let path = entry.path();
-            (path.extension().is_some_and(|extension| extension == "rs"))
-                .then(|| entry.file_name().to_string_lossy().into_owned())
-        })
-        .collect::<Vec<_>>();
-    source_files.sort();
+        })?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|source| KvistError::Io {
+            operation: "inspect file metadata",
+            path: path.clone(),
+            source,
+        })?;
+        if is_link_like(&metadata) {
+            continue;
+        }
+        if metadata.file_type().is_dir() {
+            walk_rust_files(base, &path, out)?;
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            let relative = path
+                .strip_prefix(base)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| path.file_name().unwrap_or_default().to_string_lossy().into_owned());
+            out.push(relative);
+        }
+    }
+    Ok(())
+}
+
+fn draft_implementation_record(project_dir: &Path) -> Result<String> {
+    let source_files = inventory_implementation_files(project_dir)?;
 
     Ok(format!(
         r#"<!-- kvist-implementation-record-version: 1 -->
@@ -606,4 +717,140 @@ fn yaml_string(value: &str) -> Result<String> {
         path: PathBuf::from("Cargo.toml"),
         reason: format!("serialize generated conversion queue: {error}"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn test_manifest(name: &str, version: &str, description: &str) -> Manifest {
+        Manifest {
+            name: name.to_owned(),
+            version: version.to_owned(),
+            description: description.to_owned(),
+            authors: vec![],
+            dependencies: vec![],
+            features: vec![],
+        }
+    }
+
+    #[test]
+    fn deterministic_timestamp_is_stable_for_identical_inputs() {
+        let m = test_manifest("pkg", "1.0", "desc");
+        let t1 = deterministic_timestamp(&m);
+        let t2 = deterministic_timestamp(&m);
+        assert_eq!(t1, t2, "identical inputs must produce identical timestamps");
+    }
+
+    #[test]
+    fn deterministic_timestamp_differs_for_different_inputs() {
+        let m1 = test_manifest("pkg-a", "1.0", "desc");
+        let m2 = test_manifest("pkg-b", "1.0", "desc");
+        let t1 = deterministic_timestamp(&m1);
+        let t2 = deterministic_timestamp(&m2);
+        assert_ne!(t1, t2, "different inputs should produce different timestamps");
+    }
+
+    #[test]
+    fn deterministic_timestamp_is_valid_iso8601() {
+        let m = test_manifest("pkg", "1.0", "desc");
+        let t = deterministic_timestamp(&m);
+        // Basic format validation: YYYY-MM-DDTHH:MM:SSZ
+        assert!(t.ends_with("Z"));
+        assert_eq!(t.len(), 20);
+        assert_eq!(t.chars().nth(4), Some('-'));
+        assert_eq!(t.chars().nth(7), Some('-'));
+        assert_eq!(t.chars().nth(10), Some('T'));
+        assert_eq!(t.chars().nth(13), Some(':'));
+        assert_eq!(t.chars().nth(16), Some(':'));
+    }
+
+    #[test]
+    fn bounded_field_truncates_long_values() {
+        let long = "x".repeat(500);
+        let result = bounded_field(&long);
+        assert!(result.len() <= MAX_FIELD_LENGTH + 4); // +4 for "..."
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn bounded_field_escapes_special_characters() {
+        let input = "hello \"world\" \\ path";
+        let result = bounded_field(input);
+        assert!(result.contains("\\\""));
+        assert!(result.contains("\\\\"));
+    }
+
+    #[test]
+    fn inventory_recurses_into_subdirectories() {
+        let project = TempDir::new().unwrap();
+        let src = project.path().join("src");
+        fs::create_dir_all(src.join("sub")).unwrap();
+        fs::write(src.join("main.rs"), "").unwrap();
+        fs::write(src.join("sub/nested.rs"), "").unwrap();
+        fs::write(src.join("sub/deep.rs"), "").unwrap();
+
+        let files = inventory_implementation_files(project.path()).unwrap();
+        assert_eq!(files.len(), 3);
+        assert!(files.contains(&"main.rs".to_owned()));
+        assert!(files.contains(&"sub/nested.rs".to_owned()));
+        assert!(files.contains(&"sub/deep.rs".to_owned()));
+    }
+
+    #[test]
+    fn inventory_skips_non_rust_files() {
+        let project = TempDir::new().unwrap();
+        let src = project.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("main.rs"), "").unwrap();
+        fs::write(src.join("README.md"), "").unwrap();
+        fs::write(src.join("data.json"), "").unwrap();
+
+        let files = inventory_implementation_files(project.path()).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], "main.rs");
+    }
+
+    #[test]
+    fn inventory_is_sorted_deterministically() {
+        let project = TempDir::new().unwrap();
+        let src = project.path().join("src");
+        fs::create_dir_all(src.join("b")).unwrap();
+        fs::create_dir_all(src.join("a")).unwrap();
+        fs::write(src.join("z.rs"), "").unwrap();
+        fs::write(src.join("a/first.rs"), "").unwrap();
+        fs::write(src.join("b/second.rs"), "").unwrap();
+
+        let files = inventory_implementation_files(project.path()).unwrap();
+        assert_eq!(files, vec!["a/first.rs", "b/second.rs", "z.rs"]);
+    }
+
+    #[test]
+    fn draft_documents_use_bounded_fields() {
+        let manifest = Manifest {
+            name: "test-pkg".to_owned(),
+            version: "1.0.0".to_owned(),
+            description: "A test package".to_owned(),
+            authors: vec!["Author <author@example.com>".to_owned()],
+            dependencies: vec!["serde".to_owned()],
+            features: vec!["default".to_owned()],
+        };
+        let (requirements, contract, design) = draft_documents(&manifest);
+        assert!(requirements.contains("test-pkg"));
+        assert!(requirements.contains("1.0.0"));
+        assert!(requirements.contains("serde"));
+        assert!(contract.contains("test-pkg"));
+        assert!(design.contains("test-pkg"));
+    }
+
+    #[test]
+    fn draft_todos_contains_deterministic_timestamp() {
+        let manifest = test_manifest("pkg", "1.0", "desc");
+        let (req, con, des) = draft_documents(&manifest);
+        let todos = draft_todos(&manifest, &req, &con, &des).unwrap();
+        let expected_ts = deterministic_timestamp(&manifest);
+        assert!(todos.contains(&expected_ts));
+        assert!(!todos.contains("2026-08-28T13:03:02Z")); // old fixed timestamp
+    }
 }

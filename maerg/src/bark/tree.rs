@@ -618,13 +618,13 @@ mod tests {
     fn component_node_exposes_its_subcommands() {
         let root = root();
         let component = node(&root, "component");
-        for name in ["new", "validate", "accept", "commit"] {
+        for name in ["new", "validate", "accept", "commit", "review"] {
             assert!(
                 component.find_subcommand(name).is_some(),
                 "missing component {name}"
             );
         }
-        assert_eq!(component.subcommands.len(), 4);
+        assert_eq!(component.subcommands.len(), 5);
     }
 
     #[test]

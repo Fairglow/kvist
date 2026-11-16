@@ -2132,6 +2132,7 @@ mod tests {
                 component_dir: None,
                 commit: false,
                 message: None,
+                review_exception: None,
             },
         };
         inject_command_focus(&mut accept, Some("maerg"));
@@ -2738,6 +2739,7 @@ mod tests {
                 component_dir: Some(".".into()),
                 commit: true,
                 message: None,
+                review_exception: None,
             },
         };
         assert!(destructive_gate(&accept_commit).is_some());

@@ -157,6 +157,10 @@ impl Transcript {
         self.latest
     }
 
+    pub(super) fn bytes(&self) -> usize {
+        self.bytes
+    }
+
     pub(super) fn read(&self, sequence: u64) -> io::Result<String> {
         private_directory(&self.directory)?;
         let path = self.directory.join(format!("{sequence:020}.md"));
@@ -391,5 +395,41 @@ mod tests {
         transcript.append("```text\nretained\n").unwrap();
         assert!(transcript.append(&"x".repeat(DOCUMENT_BYTES)).is_err());
         assert_eq!(transcript.read(0).unwrap(), "```text\nretained\n");
+    }
+
+    #[test]
+    fn long_session_of_small_commands_stays_in_one_segment_until_bound() {
+        // Simulates repeated status/overview/task run output that stays under 1 MiB
+        // for a long time, then crosses the bound and rotates.
+        let dir = tempfile::tempdir().unwrap();
+        let mut transcript = Transcript::open(dir.path()).unwrap();
+
+        // Many small appends, each well under the segment bound
+        let small = "## status\n\nok\n\n";
+        for i in 0..150_000 {
+            transcript
+                .append(&format!("[{i}] {small}"))
+                .unwrap();
+        }
+
+        // Should have rotated at least once once total exceeds SEGMENT_BYTES
+        assert!(transcript.latest() > 0, "should have rotated past segment 0");
+
+        // All segments individually bounded
+        for i in 0..=transcript.latest() {
+            let seg = transcript.read(i).unwrap();
+            assert!(
+                seg.len() <= DOCUMENT_BYTES,
+                "segment {i} exceeds 16 MiB"
+            );
+        }
+
+        // Content is reconstructible from segments (not concatenated into one)
+        let mut reconstructed = String::new();
+        for i in 0..=transcript.latest() {
+            reconstructed.push_str(&transcript.read(i).unwrap());
+        }
+        assert!(reconstructed.contains("[0] ## status"));
+        assert!(reconstructed.contains("[149999] ## status"));
     }
 }

@@ -134,6 +134,8 @@ pub struct CheckedIntent {
     pub content_bytes: usize,
     /// Human-readable purpose bound to the grant.
     pub purpose: String,
+    /// Execution tier selected by Kvist task policy, not by the model.
+    pub execution_tier: crate::agn::ExecutionTier,
 }
 
 /// A model intent the broker refused. Recorded, never executed: it becomes no sandbox
@@ -1143,6 +1145,7 @@ fn authorize_write(
         replacement: None,
         content_bytes: byte_len,
         purpose: format!("authoring: {}", intent.id),
+        execution_tier: crate::agn::ExecutionTier::Sandboxed,
     })
 }
 
@@ -1212,6 +1215,7 @@ fn authorize_edit(
         replacement: Some(replacement),
         content_bytes: byte_len,
         purpose: format!("authoring: {}", intent.id),
+        execution_tier: crate::agn::ExecutionTier::Sandboxed,
     })
 }
 

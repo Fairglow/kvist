@@ -112,6 +112,7 @@ mod tests {
             replacement: None,
             content_bytes: 0,
             purpose: "fixture".into(),
+            execution_tier: crate::agn::ExecutionTier::Sandboxed,
         }
     }
 

@@ -112,14 +112,27 @@ impl Workspace {
             _ => self.render_kvist_body(frame, body, base, border, accent)?,
         }
         let footer = if skott_active { parts[4] } else { parts[3] };
-        let label = if self.running.is_some() {
+        // When the Skott view is active, the bottom row is a guidance area for
+        // steering the agent, not the Kvist command area. The user can submit
+        // their own steering input to an active Skott session.
+        let in_skott_steering = skott_active
+            && pane == ActivePane::Skott
+            && self.overlay.is_none();
+        let label = if self.running.is_some() && !in_skott_steering {
             "answer> "
+        } else if in_skott_steering {
+            "guide> "
         } else {
             "> "
         };
+        let input_title = if in_skott_steering {
+            " Agent guidance "
+        } else {
+            " Command "
+        };
         let input = Block::default()
             .borders(Borders::TOP)
-            .title(" Command ")
+            .title(input_title)
             .style(raised)
             .border_style(border);
         let input_area = input.inner(footer);
@@ -683,7 +696,7 @@ mod tests {
         let Some(super::super::Overlay::Menu(menu)) = &workspace.overlay else {
             panic!("expected settings menu");
         };
-        assert_eq!(menu.choices.len(), 7);
+        assert_eq!(menu.choices.len(), 8);
         assert!(menu.choices.iter().any(|entry| entry.label == "Quit"));
         workspace.set_theme("light").unwrap();
         assert_eq!(workspace.theme.name(), "light");

@@ -510,6 +510,8 @@ pub struct ProjectConfig {
     pub sandbox: Option<SandboxConfig>,
     /// Local checkpoint frequency for continuous component execution.
     pub task_run: TaskRunConfig,
+    /// Component advisory review policy.
+    pub review: ReviewConfig,
 }
 
 /// Approval-bound continuous execution policy.
@@ -518,6 +520,24 @@ pub struct ProjectConfig {
 pub struct TaskRunConfig {
     /// Checkpoint complete items by default, never human acceptance.
     pub commit: CommitFrequency,
+}
+
+/// Component advisory review policy.
+///
+/// When `required` is `true` (the default), target acceptance requires a
+/// current review receipt plus explicit human acknowledgement, or a
+/// deliberate exception bound to the exact bundle digests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReviewConfig {
+    /// Whether component acceptance requires an acknowledged review receipt.
+    /// Defaults to `true` when the section or field is absent.
+    #[serde(default = "review_required_default")]
+    pub required: bool,
+}
+
+fn review_required_default() -> bool {
+    true
 }
 
 /// When continuous work creates local unaccepted checkpoint commits.
@@ -747,6 +767,15 @@ fn parse(config_path: &Path, project_root: &Path, contents: &str) -> Result<Proj
             .map(|value| {
                 value.clone().try_into().map_err(|error| {
                     invalid_configuration(config_path, &format!("invalid task_run policy: {error}"))
+                })
+            })
+            .transpose()?
+            .unwrap_or_default(),
+        review: table
+            .get("review")
+            .map(|value| {
+                value.clone().try_into().map_err(|error| {
+                    invalid_configuration(config_path, &format!("invalid review policy: {error}"))
                 })
             })
             .transpose()?

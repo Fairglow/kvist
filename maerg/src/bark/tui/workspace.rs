@@ -906,6 +906,18 @@ impl Workspace {
 
     fn key(&mut self, key: KeyEvent, terminal: &mut Screen) -> io::Result<()> {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
+        if control && key.code == KeyCode::Char('a') {
+            // Ctrl+A: start an interactive agent session when idle.
+            if self.running.is_none()
+                && !self
+                    .skott
+                    .as_ref()
+                    .is_some_and(|skott| skott.is_active())
+            {
+                self.start_agent_session("")?;
+            }
+            return Ok(());
+        }
         if control && key.code == KeyCode::Char('q') {
             self.request_quit();
             return Ok(());

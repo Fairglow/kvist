@@ -681,6 +681,11 @@ impl EmbeddedSkott {
         &self.app
     }
 
+    /// Mutable access to the Skott App state, for tests and direct event injection.
+    pub fn app_mut(&mut self) -> &mut SkottApp {
+        &mut self.app
+    }
+
     /// The reconstructed session result.
     pub fn result(&self) -> &SkottResult {
         &self.result

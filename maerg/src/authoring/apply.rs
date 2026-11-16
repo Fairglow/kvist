@@ -391,6 +391,7 @@ mod tests {
             replacement: None,
             content_bytes: content.len(),
             purpose: "test".to_owned(),
+            execution_tier: crate::agn::ExecutionTier::Sandboxed,
         }
     }
 
@@ -404,6 +405,7 @@ mod tests {
             replacement: Some(replacement.to_owned()),
             content_bytes: result.len(),
             purpose: "test".to_owned(),
+            execution_tier: crate::agn::ExecutionTier::Sandboxed,
         }
     }
 
