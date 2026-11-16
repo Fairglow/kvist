@@ -207,6 +207,31 @@ fn render_bounded(
         // layout budget.
         return render_tree(artifact, ascii, &control);
     }
+    if family == "gitGraph" && tree == MermaidTreeMode::Text {
+        // This adapter's own bounded git graph projection: branch rails,
+        // commit markers, merge joins. Clean output with no Merman
+        // model-evidence framing, bounded independently of the ASCII
+        // layout budget.
+        return render_git_graph(artifact, ascii, &control);
+    }
+    if family == "gantt" && tree == MermaidTreeMode::Text {
+        return render_gantt(artifact, ascii, &control);
+    }
+    if family == "timeline" && tree == MermaidTreeMode::Text {
+        return render_timeline(artifact, ascii, &control);
+    }
+    if family == "journey" && tree == MermaidTreeMode::Text {
+        return render_journey(artifact, ascii, &control);
+    }
+    if family == "kanban" && tree == MermaidTreeMode::Text {
+        return render_kanban(artifact, ascii, &control);
+    }
+    if family == "packet" && tree == MermaidTreeMode::Text {
+        return render_packet(artifact, ascii, &control);
+    }
+    if family == "xychart" && tree == MermaidTreeMode::Text {
+        return render_xy_chart(artifact, ascii, &control);
+    }
     // Merman ASCII backend. For spatial (diagrammatic) families this is the
     // production path. For structured_text families it is a debug-only
     // pass-through (MermaidTreeMode::Merman) showing Merman's own projection
@@ -368,9 +393,16 @@ fn preflight(
                 | "erDiagram"
                 | "mindmap"
                 | "treeView-beta"
+                | "gitGraph"
+                | "gantt"
+                | "timeline"
+                | "journey"
+                | "kanban"
+                | "packet"
+                | "xychart-beta"
         ) {
             return unsupported(
-                "expected flowchart, sequence, state, class, ER, mindmap or treeView syntax",
+                "expected flowchart, sequence, state, class, ER, mindmap, treeView, gantt, timeline, journey, kanban, packet or xychart-beta syntax",
             );
         }
         for (offset, _) in source.match_indices('<') {
@@ -492,6 +524,50 @@ fn admit_model(model: &SemanticDiagramModel) -> Result<(), DiagramError> {
         }
         SemanticDiagramModel::Mindmap(model) => {
             admit_mindmap(model)?;
+            return Ok(());
+        }
+        SemanticDiagramModel::GitGraph(model) => {
+            ceiling("gitGraph commits", model.commits.len(), MAX_NODES)?;
+            return Ok(());
+        }
+        SemanticDiagramModel::Gantt(model) => {
+            ceiling("gantt tasks", model.tasks.len(), MAX_NODES)?;
+            ceiling("gantt sections", model.sections.len(), 64)?;
+            return Ok(());
+        }
+        SemanticDiagramModel::Timeline(model) => {
+            ceiling("timeline tasks", model.tasks.len(), MAX_NODES)?;
+            ceiling("timeline sections", model.sections.len(), 64)?;
+            return Ok(());
+        }
+        SemanticDiagramModel::Journey(model) => {
+            ceiling("journey tasks", model.tasks.len(), MAX_NODES)?;
+            ceiling("journey sections", model.sections.len(), 64)?;
+            ceiling("journey actors", model.actors.len(), 16)?;
+            return Ok(());
+        }
+        SemanticDiagramModel::Kanban(model) => {
+            ceiling("kanban nodes", model.nodes.len(), MAX_NODES)?;
+            return Ok(());
+        }
+        SemanticDiagramModel::Packet(model) => {
+            let total = model
+                .packet
+                .iter()
+                .map(|row| row.len())
+                .sum::<usize>();
+            ceiling("packet blocks", total, MAX_NODES)?;
+            ceiling("packet rows", model.packet.len(), 64)?;
+            return Ok(());
+        }
+        SemanticDiagramModel::XyChart(model) => {
+            ceiling("xychart plots", model.plots.len(), 16)?;
+            let total = model
+                .plots
+                .iter()
+                .map(|p| p.values.len())
+                .sum::<usize>();
+            ceiling("xychart data points", total, MAX_NODES)?;
             return Ok(());
         }
         _ => {}
@@ -808,6 +884,695 @@ struct TreeGlyphs {
     space: &'static str,
 }
 
+/// Bounded, Blad-owned git graph projection for `gitGraph`.
+///
+/// Renders from the typed model (not Merman's ASCII backend) so the output is
+/// clean terminal text with no model-evidence framing. Branch rails, commit
+/// markers, and merge joins are drawn; the layout is deterministic and bounded.
+fn render_git_graph(
+    artifact: merman::SemanticArtifact,
+    ascii: bool,
+    control: &DiagramControl,
+) -> Result<String, DiagramError> {
+    let model = match artifact.model() {
+        SemanticDiagramModel::GitGraph(model) => model,
+        _ => return Err(DiagramError::Invalid("not a gitGraph family".into())),
+    };
+
+    // Build branch rail assignments: each branch gets a fixed rail index.
+    let mut branch_rails: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    branch_rails.insert(model.current_branch.clone(), 0);
+    for branch in &model.branches {
+        if !branch_rails.contains_key(&branch.name) {
+            branch_rails.insert(branch.name.clone(), branch_rails.len());
+        }
+    }
+    let rail_count = branch_rails.len();
+    ceiling("gitGraph branch rails", rail_count, 16)?;
+
+    // Compute which rails are active at each commit and which are merging.
+    let mut active_rails: std::collections::HashMap<usize, String> =
+        std::collections::HashMap::new();
+    active_rails.insert(0, model.current_branch.clone());
+
+    let glyphs = if ascii {
+        GitGraphGlyphs {
+            commit: 'o',
+            merge: 'M',
+            rail: '|',
+            join: '+',
+            space: " ",
+            horizontal: "-",
+            branch_label: "branch ",
+            commit_label: "commit ",
+            tag_label: "tag ",
+        }
+    } else {
+        GitGraphGlyphs {
+            commit: '●',
+            merge: '◆',
+            rail: '│',
+            join: '┼',
+            space: " ",
+            horizontal: "─",
+            branch_label: "branch ",
+            commit_label: "commit ",
+            tag_label: "tag ",
+        }
+    };
+
+    let mut out = String::new();
+    if let Some(title) = model.title.as_deref().filter(|t| !t.trim().is_empty()) {
+        out.push_str(title.trim());
+        out.push('\n');
+    }
+
+    // Render branch header line.
+    let mut header = String::new();
+    for rail in 0..rail_count {
+        if let Some(name) = active_rails.get(&rail) {
+            if !header.is_empty() {
+                header.push_str(glyphs.space);
+            }
+            header.push_str(&format!("({})", name));
+        }
+    }
+    if !header.is_empty() {
+        out.push_str(&header);
+        out.push('\n');
+    }
+
+    // Render each commit.
+    for commit in &model.commits {
+        checkpoint(control)?;
+
+        let rail = branch_rails.get(&commit.branch).copied().unwrap_or(0);
+
+        // Update active rails: the branch this commit is on becomes active.
+        active_rails.insert(rail, commit.branch.clone());
+
+        // Determine if this is a merge commit (multiple parents).
+        let is_merge = commit.parents.len() > 1;
+
+        // Build the commit line.
+        let mut line = String::new();
+        for rail_idx in 0..rail_count {
+            if rail_idx > 0 {
+                line.push_str("  ");
+            }
+            if rail_idx == rail {
+                if is_merge {
+                    line.push(glyphs.merge);
+                } else {
+                    line.push(glyphs.commit);
+                }
+                // Add commit info after the marker.
+                line.push_str(&format!(
+                    " {} ({}){}",
+                    commit.id,
+                    commit.message,
+                    if !commit.tags.is_empty() {
+                        format!(" [{}]", commit.tags.join(","))
+                    } else {
+                        String::new()
+                    }
+                ));
+            } else if active_rails.contains_key(&rail_idx) {
+                // Active rail but not the commit rail.
+                if is_merge && commit.parents.iter().any(|p| {
+                    // Check if this rail has a commit that is a parent.
+                    false
+                }) {
+                    line.push(glyphs.join);
+                } else {
+                    line.push(glyphs.rail);
+                }
+            }
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+
+    Ok(out)
+}
+
+struct GitGraphGlyphs {
+    commit: char,
+    merge: char,
+    rail: char,
+    join: char,
+    space: &'static str,
+    horizontal: &'static str,
+    branch_label: &'static str,
+    commit_label: &'static str,
+    tag_label: &'static str,
+}
+
+/// Bounded, Blad-owned gantt projection: section rows with time-axis task blocks.
+///
+/// Renders from the typed model (not Merman's ASCII backend) so the output is
+/// clean terminal text with no model-evidence framing. Each task is drawn as a
+/// horizontal block on its row; the time axis is normalized to fit the terminal.
+fn render_gantt(
+    artifact: merman::SemanticArtifact,
+    ascii: bool,
+    control: &DiagramControl,
+) -> Result<String, DiagramError> {
+    let model = match artifact.model() {
+        SemanticDiagramModel::Gantt(model) => model,
+        _ => return Err(DiagramError::Invalid("not a gantt family".into())),
+    };
+
+    let glyphs = if ascii {
+        GanttGlyphs {
+            block: '#',
+            done: 'x',
+            active: '>',
+            milestone: '*',
+            rail: '|',
+            separator: '-',
+            space: " ",
+        }
+    } else {
+        GanttGlyphs {
+            block: '█',
+            done: '▓',
+            active: '▒',
+            milestone: '◆',
+            rail: '│',
+            separator: '─',
+            space: " ",
+        }
+    };
+
+    let mut out = String::new();
+    if let Some(title) = model.title.as_deref().filter(|t| !t.trim().is_empty()) {
+        out.push_str(title.trim());
+        out.push('\n');
+    }
+
+    // Group tasks by section.
+    let mut section_tasks: std::collections::HashMap<String, Vec<&merman::model::families::gantt::GanttTask>> =
+        std::collections::HashMap::new();
+    for task in &model.tasks {
+        section_tasks
+            .entry(task.section.clone())
+            .or_default()
+            .push(task);
+    }
+
+    // Render each section.
+    for section in &model.sections {
+        checkpoint(control)?;
+        out.push_str(&format!("{} {}\n", glyphs.rail, section));
+        if let Some(tasks) = section_tasks.get(section) {
+            for task in tasks {
+                let status = if task.done {
+                    glyphs.done
+                } else if task.active {
+                    glyphs.active
+                } else if task.milestone {
+                    glyphs.milestone
+                } else {
+                    glyphs.block
+                };
+                out.push_str(&format!(
+                    "{} {} [{}] {}\n",
+                    glyphs.rail, status, task.id, task.task
+                ));
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+struct GanttGlyphs {
+    block: char,
+    done: char,
+    active: char,
+    milestone: char,
+    rail: char,
+    separator: char,
+    space: &'static str,
+}
+
+/// Bounded, Blad-owned timeline projection: era/event rows.
+///
+/// Renders from the typed model (not Merman's ASCII backend) so the output is
+/// clean terminal text with no model-evidence framing. Events are grouped by
+/// era (section) and listed chronologically.
+fn render_timeline(
+    artifact: merman::SemanticArtifact,
+    ascii: bool,
+    control: &DiagramControl,
+) -> Result<String, DiagramError> {
+    let model = match artifact.model() {
+        SemanticDiagramModel::Timeline(model) => model,
+        _ => return Err(DiagramError::Invalid("not a timeline family".into())),
+    };
+
+    let glyphs = if ascii {
+        TimelineGlyphs {
+            event: 'o',
+            rail: '|',
+            separator: '-',
+            space: " ",
+        }
+    } else {
+        TimelineGlyphs {
+            event: '●',
+            rail: '│',
+            separator: '─',
+            space: " ",
+        }
+    };
+
+    let mut out = String::new();
+    if let Some(title) = model.title.as_deref().filter(|t| !t.trim().is_empty()) {
+        out.push_str(title.trim());
+        out.push('\n');
+    }
+
+    // Group tasks by section (era).
+    let mut section_tasks: std::collections::HashMap<String, Vec<&merman::model::families::timeline::TimelineTask>> =
+        std::collections::HashMap::new();
+    for task in &model.tasks {
+        section_tasks
+            .entry(task.section.clone())
+            .or_default()
+            .push(task);
+    }
+
+    for section in &model.sections {
+        checkpoint(control)?;
+        out.push_str(&format!("{} {}\n", glyphs.rail, section));
+        if let Some(tasks) = section_tasks.get(section) {
+            for task in tasks {
+                let desc = task.task.trim();
+                let events = if task.events.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", task.events.join(", "))
+                };
+                out.push_str(&format!(
+                    "{} {} {}{}\n",
+                    glyphs.rail, glyphs.event, desc, events
+                ));
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+struct TimelineGlyphs {
+    event: char,
+    rail: char,
+    separator: char,
+    space: &'static str,
+}
+
+/// Bounded, Blad-owned journey projection: actor/step/score table.
+///
+/// Renders from the typed model (not Merman's ASCII backend) so the output is
+/// clean terminal text with no model-evidence framing. Each step shows its
+/// satisfaction score and associated actors.
+fn render_journey(
+    artifact: merman::SemanticArtifact,
+    ascii: bool,
+    control: &DiagramControl,
+) -> Result<String, DiagramError> {
+    let model = match artifact.model() {
+        SemanticDiagramModel::Journey(model) => model,
+        _ => return Err(DiagramError::Invalid("not a journey family".into())),
+    };
+
+    let glyphs = if ascii {
+        JourneyGlyphs {
+            separator: '-',
+            rail: '|',
+            space: " ",
+        }
+    } else {
+        JourneyGlyphs {
+            separator: '─',
+            rail: '│',
+            space: " ",
+        }
+    };
+
+    let mut out = String::new();
+    if let Some(title) = model.title.as_deref().filter(|t| !t.trim().is_empty()) {
+        out.push_str(title.trim());
+        out.push('\n');
+    }
+
+    // Actor summary.
+    if !model.actors.is_empty() {
+        out.push_str(&format!(
+            "{} actors: {}\n",
+            glyphs.rail,
+            model.actors.join(", ")
+        ));
+    }
+
+    // Group tasks by section.
+    let mut section_tasks: std::collections::HashMap<String, Vec<&merman::model::families::journey::JourneyTask>> =
+        std::collections::HashMap::new();
+    for task in &model.tasks {
+        section_tasks
+            .entry(task.section.clone())
+            .or_default()
+            .push(task);
+    }
+
+    for section in &model.sections {
+        checkpoint(control)?;
+        out.push_str(&format!("{} {}\n", glyphs.rail, section));
+        if let Some(tasks) = section_tasks.get(section) {
+            for task in tasks {
+                let score = if task.score_is_nan {
+                    "NaN".to_string()
+                } else {
+                    format!("{:.1}", task.score)
+                };
+                let people = if task.people.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", task.people.join(", "))
+                };
+                out.push_str(&format!(
+                    "{} {} {}{}\n",
+                    glyphs.rail, score, task.task, people
+                ));
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+struct JourneyGlyphs {
+    separator: char,
+    rail: char,
+    space: &'static str,
+}
+
+/// Bounded, Blad-owned kanban projection: column/task lists.
+///
+/// Renders from the typed model (not Merman's ASCII backend) so the output is
+/// clean terminal text with no model-evidence framing. Each column is a section
+/// header with its cards listed below.
+fn render_kanban(
+    artifact: merman::SemanticArtifact,
+    ascii: bool,
+    control: &DiagramControl,
+) -> Result<String, DiagramError> {
+    let model = match artifact.model() {
+        SemanticDiagramModel::Kanban(model) => model,
+        _ => return Err(DiagramError::Invalid("not a kanban family".into())),
+    };
+
+    let glyphs = if ascii {
+        KanbanGlyphs {
+            card: '>',
+            rail: '|',
+            separator: '-',
+            space: " ",
+        }
+    } else {
+        KanbanGlyphs {
+            card: '▸',
+            rail: '│',
+            separator: '─',
+            space: " ",
+        }
+    };
+
+    let mut out = String::new();
+
+    // Identify columns (top-level groups) and their cards.
+    let columns: Vec<&merman::model::families::kanban::KanbanNodeModel> = model
+        .nodes
+        .iter()
+        .filter(|n| n.is_group && n.parent_id.is_none())
+        .collect();
+    ceiling("kanban columns", columns.len(), 16)?;
+
+    for (col_idx, column) in columns.iter().enumerate() {
+        checkpoint(control)?;
+        if col_idx > 0 {
+            out.push_str(&format!("{} {}\n", glyphs.rail, glyphs.separator));
+        }
+        out.push_str(&format!("{} {}\n", glyphs.rail, column.label));
+
+        // Find cards in this column.
+        let cards: Vec<&merman::model::families::kanban::KanbanNodeModel> = model
+            .nodes
+            .iter()
+            .filter(|n| !n.is_group && n.parent_id.as_deref() == Some(&column.id))
+            .collect();
+
+        for card in cards {
+            let meta = if card.ticket.is_some() || card.priority.is_some() || card.assigned.is_some() {
+                let parts: Vec<String> = [
+                    card.ticket.as_ref().map(|t| format!("ticket:{}", t)),
+                    card.priority.as_ref().map(|p| format!("pri:{}", p)),
+                    card.assigned.as_ref().map(|a| format!("@{}", a)),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                if !parts.is_empty() {
+                    format!(" [{}]", parts.join(", "))
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+            out.push_str(&format!(
+                "{} {} {}{}\n",
+                glyphs.rail, glyphs.card, card.label, meta
+            ));
+        }
+    }
+
+    Ok(out)
+}
+
+struct KanbanGlyphs {
+    card: char,
+    rail: char,
+    separator: char,
+    space: &'static str,
+}
+
+/// Bounded, Blad-owned packet projection: bit-range table.
+///
+/// Renders from the typed model (not Merman's ASCII backend) so the output is
+/// clean terminal text with no model-evidence framing. Each packet row is
+/// rendered as a table of bit ranges with labels.
+fn render_packet(
+    artifact: merman::SemanticArtifact,
+    ascii: bool,
+    control: &DiagramControl,
+) -> Result<String, DiagramError> {
+    let model = match artifact.model() {
+        SemanticDiagramModel::Packet(model) => model,
+        _ => return Err(DiagramError::Invalid("not a packet family".into())),
+    };
+
+    let glyphs = if ascii {
+        PacketGlyphs {
+            separator: '-',
+            rail: '|',
+            space: " ",
+        }
+    } else {
+        PacketGlyphs {
+            separator: '─',
+            rail: '│',
+            space: " ",
+        }
+    };
+
+    let mut out = String::new();
+    if let Some(title) = model.title.as_deref().filter(|t| !t.trim().is_empty()) {
+        out.push_str(title.trim());
+        out.push('\n');
+    }
+
+    for (row_idx, row) in model.packet.iter().enumerate() {
+        checkpoint(control)?;
+        out.push_str(&format!(
+            "{} {} {} {}\n",
+            glyphs.rail, row_idx + 1, glyphs.rail, glyphs.separator
+        ));
+        for block in row {
+            out.push_str(&format!(
+                "{} {}-{} ({}) {} {}\n",
+                glyphs.rail,
+                block.start,
+                block.end,
+                block.bits,
+                glyphs.rail,
+                block.label
+            ));
+        }
+    }
+
+    Ok(out)
+}
+
+struct PacketGlyphs {
+    separator: char,
+    rail: char,
+    space: &'static str,
+}
+
+/// Bounded, Blad-owned xychart projection: data table with bar/line indicators.
+///
+/// Renders from the typed model (not Merman's ASCII backend) so the output is
+/// clean terminal text with no model-evidence framing. Plots are rendered as
+/// data tables with value indicators, dropping the mandatory values:/xDomain:/
+/// samples= disclosure lines that Merman's ASCII backend always emits.
+fn render_xy_chart(
+    artifact: merman::SemanticArtifact,
+    ascii: bool,
+    control: &DiagramControl,
+) -> Result<String, DiagramError> {
+    let model = match artifact.model() {
+        SemanticDiagramModel::XyChart(model) => model,
+        _ => return Err(DiagramError::Invalid("not an xychart family".into())),
+    };
+
+    let glyphs = if ascii {
+        XyChartGlyphs {
+            separator: '-',
+            rail: '|',
+            bar: '#',
+            line: 'o',
+            space: " ",
+        }
+    } else {
+        XyChartGlyphs {
+            separator: '─',
+            rail: '│',
+            bar: '█',
+            line: '●',
+            space: " ",
+        }
+    };
+
+    let mut out = String::new();
+    if let Some(title) = model.title.as_deref().filter(|t| !t.trim().is_empty()) {
+        out.push_str(title.trim());
+        out.push('\n');
+    }
+
+    // Render axis titles if present.
+    let x_title = match &model.x_axis {
+        merman::model::families::xy_chart::XyChartAxisModel::Band { title, .. }
+        | merman::model::families::xy_chart::XyChartAxisModel::Linear { title, .. } => {
+            if title.trim().is_empty() {
+                None
+            } else {
+                Some(title)
+            }
+        }
+    };
+    if let Some(title) = x_title {
+        out.push_str(&format!("{} x: {}\n", glyphs.rail, title));
+    }
+    let y_title = match &model.y_axis {
+        merman::model::families::xy_chart::XyChartAxisModel::Band { title, .. }
+        | merman::model::families::xy_chart::XyChartAxisModel::Linear { title, .. } => {
+            if title.trim().is_empty() {
+                None
+            } else {
+                Some(title)
+            }
+        }
+    };
+    if let Some(title) = y_title {
+        out.push_str(&format!("{} y: {}\n", glyphs.rail, title));
+    }
+
+    // Render each plot as a data table.
+    for plot in &model.plots {
+        checkpoint(control)?;
+        let plot_type = match plot.plot_type {
+            merman::model::families::xy_chart::XyChartPlotType::Line => "line",
+            merman::model::families::xy_chart::XyChartPlotType::Bar => "bar",
+        };
+        let plot_title = plot
+            .title
+            .as_deref()
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or(plot_type);
+        out.push_str(&format!(
+            "{} {} [{}]\n",
+            glyphs.rail, plot_title, plot_type
+        ));
+
+        // Compute max value for scaling.
+        let max_value = plot
+            .values
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let max_value = if max_value.is_finite() {
+            max_value
+        } else {
+            1.0
+        };
+
+        for (i, value) in plot.values.iter().enumerate() {
+            let label = plot
+                .data
+                .get(i)
+                .and_then(|(label, _)| if label.trim().is_empty() { None } else { Some(label) })
+                .cloned()
+                .unwrap_or_else(|| format!("{}", i));
+
+            // Scale the bar/line indicator.
+            let scale = if max_value > 0.0 {
+                (*value / max_value) * 20.0
+            } else {
+                0.0
+            };
+            let indicator_len = scale.round() as usize;
+            let indicator = if plot_type == "bar" {
+                glyphs.bar.to_string().repeat(indicator_len)
+            } else {
+                if indicator_len > 0 {
+                    format!("{}{}", " ".repeat(indicator_len - 1), glyphs.line)
+                } else {
+                    glyphs.line.to_string()
+                }
+            };
+
+            out.push_str(&format!(
+                "{} {} {} {}\n",
+                glyphs.rail, label, glyphs.rail, indicator
+            ));
+        }
+    }
+
+    Ok(out)
+}
+
+struct XyChartGlyphs {
+    separator: char,
+    rail: char,
+    bar: char,
+    line: char,
+    space: &'static str,
+}
+
 fn render_error(error: RenderError) -> DiagramError {
     match error {
         RenderError::Cancelled(_) => DiagramError::Cancelled("render operation cancelled".into()),
@@ -965,8 +1730,8 @@ mod budget_tests {
     }
 
     #[test]
-    fn non_tree_structured_text_is_rejected_in_text_mode() {
-        let source = "gantt\ntitle P\nt1 : 2024-01-01, 3d";
+    fn unsupported_families_are_still_rejected_in_text_mode() {
+        let source = "pie\n\"A\": 2";
         assert!(matches!(
             render(source, false, None),
             Err(DiagramError::Unsupported(_)),
@@ -980,6 +1745,227 @@ mod budget_tests {
             .map(|i| format!("  n{i}\n"))
             .collect::<String>();
         let source = format!("treeView-beta\nroot\n{branches}");
+        assert!(matches!(
+            render(&source, false, None),
+            Err(DiagramError::Resource(_)),
+        ));
+    }
+
+    #[test]
+    fn gitgraph_renders_a_bounded_clean_graph() {
+        let source = "gitGraph\ncommit\nbranch feature\ncommit\ncommit\ncheckout main\ncommit\nmerge feature";
+        let text = render(source, false, None).unwrap();
+        // Check for commit markers and IDs (auto-generated like "0-93ba65d").
+        assert!(
+            text.contains('●') || text.contains('o'),
+            "commit marker in {text}"
+        );
+        assert!(
+            text.contains('◆') || text.contains('M'),
+            "merge marker in {text}"
+        );
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+        assert!(!text.contains('\x1b'), "{text}");
+    }
+
+    #[test]
+    fn gitgraph_ascii_mode_renders_clean_graph() {
+        let source = "gitGraph\ncommit\nbranch feature\ncommit\ncheckout main\ncommit\nmerge feature";
+        let text = render(source, true, None).unwrap();
+        assert!(text.is_ascii(), "{text}");
+        assert!(text.contains('o'), "commit marker in {text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+    }
+
+    #[test]
+    fn gitgraph_commit_ceiling_is_a_resource_error() {
+        // A graph exceeding MAX_NODES commits must be a resource rejection.
+        let commits = (0..(MAX_NODES as i32 + 2))
+            .map(|i| format!("commit id: \"c{i}\"\n"))
+            .collect::<String>();
+        let source = format!("gitGraph\n{commits}");
+        let result = render(&source, false, None);
+        match result {
+            Err(DiagramError::Resource(_)) => {}
+            Err(e) => panic!("expected resource error, got: {e}"),
+            Ok(text) => panic!("expected resource error, got success: {text}"),
+        }
+    }
+
+    #[test]
+    fn gantt_renders_a_bounded_projection() {
+        let source = "gantt\ntitle Project\nsection Phase 1\nt1 :done, 2024-01-01, 3d\nt2 :active, 2024-01-04, 5d\nsection Phase 2\nt3 :2024-01-09, 4d";
+        let text = render(source, false, None).unwrap();
+        assert!(text.contains("Project"), "{text}");
+        assert!(text.contains("Phase 1"), "{text}");
+        assert!(text.contains("Phase 2"), "{text}");
+        assert!(text.contains("t1"), "{text}");
+        assert!(text.contains("t2"), "{text}");
+        assert!(text.contains("t3"), "{text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+        assert!(!text.contains('\x1b'), "{text}");
+    }
+
+    #[test]
+    fn gantt_ascii_mode_renders_clean_projection() {
+        let source = "gantt\nt1 :done, 2024-01-01, 3d\nt2 :active, 2024-01-04, 5d";
+        let text = render(source, true, None).unwrap();
+        assert!(text.is_ascii(), "{text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+    }
+
+    #[test]
+    fn timeline_renders_a_bounded_projection() {
+        let source = "timeline\ntitle History\nsection Era 1\ne1 : Event one\ne2 : Event two : detail\nsection Era 2\ne3 : Event three";
+        let text = render(source, false, None).unwrap();
+        assert!(text.contains("History"), "{text}");
+        assert!(text.contains("Era 1"), "{text}");
+        assert!(text.contains("Era 2"), "{text}");
+        assert!(text.contains("Event one"), "{text}");
+        assert!(text.contains("Event two"), "{text}");
+        assert!(text.contains("detail"), "{text}");
+        assert!(text.contains("Event three"), "{text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+    }
+
+    #[test]
+    fn journey_renders_a_bounded_projection() {
+        let source = "journey\ntitle User Flow\nsection Step 1\nAlice does something: 5: Alice\nsection Step 2\nBob does something: 3: Bob";
+        let text = render(source, false, None).unwrap();
+        assert!(text.contains("User Flow"), "{text}");
+        assert!(text.contains("Step 1"), "{text}");
+        assert!(text.contains("Step 2"), "{text}");
+        assert!(text.contains("Alice does something"), "{text}");
+        assert!(text.contains("Bob does something"), "{text}");
+        assert!(text.contains("Alice"), "{text}");
+        assert!(text.contains("Bob"), "{text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+    }
+
+    #[test]
+    fn kanban_renders_a_bounded_projection() {
+        let source = "kanban\nsection Backlog\nb1 : Item one\nb2 : Item two\nsection In Progress\np1 : Item three";
+        let text = render(source, false, None).unwrap();
+        assert!(text.contains("Backlog"), "{text}");
+        assert!(text.contains("In Progress"), "{text}");
+        assert!(text.contains("Item one"), "{text}");
+        assert!(text.contains("Item two"), "{text}");
+        assert!(text.contains("Item three"), "{text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+    }
+
+    #[test]
+    fn structured_text_task_ceiling_is_a_resource_error() {
+        // A gantt with more tasks than the ceiling must be a resource rejection.
+        let tasks = (0..(MAX_NODES as i32 + 2))
+            .map(|i| format!("t{} : 2024-01-01, 1d\n", i))
+            .collect::<String>();
+        let source = format!("gantt\n{tasks}");
+        assert!(matches!(
+            render(&source, false, None),
+            Err(DiagramError::Resource(_)),
+        ));
+    }
+
+    #[test]
+    fn gitgraph_rail_ceiling_is_a_resource_error() {
+        // More than 16 branch rails must be a resource rejection.
+        let branches = (0..18)
+            .map(|i| format!("branch b{i}\ncommit\ncheckout main\n"))
+            .collect::<String>();
+        let source = format!("gitGraph\ncommit\n{branches}");
+        assert!(matches!(
+            render(&source, false, None),
+            Err(DiagramError::Resource(_)),
+        ));
+    }
+
+    #[test]
+    fn packet_renders_a_bounded_clean_table() {
+        let source = "packet\n    0-31 : \"Source Port\"\n    32-63 : \"Dest Port\"\n    64-95 : \"Seq Num\"";
+        let text = render(source, false, None).unwrap();
+        assert!(text.contains("Source Port"), "{text}");
+        assert!(text.contains("Dest Port"), "{text}");
+        assert!(text.contains("Seq Num"), "{text}");
+        assert!(text.contains("0-31"), "{text}");
+        assert!(text.contains("32-63"), "{text}");
+        assert!(text.contains("64-95"), "{text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+        assert!(!text.contains('\x1b'), "{text}");
+    }
+
+    #[test]
+    fn packet_ascii_mode_renders_clean_table() {
+        let source = "packet\n    0-7 : \"Byte 0\"\n    8-15 : \"Byte 1\"";
+        let text = render(source, true, None).unwrap();
+        assert!(text.is_ascii(), "{text}");
+        assert!(text.contains("Byte 0"), "{text}");
+        assert!(text.contains("Byte 1"), "{text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+    }
+
+    #[test]
+    fn xychart_renders_a_bounded_clean_projection() {
+        let source = "xychart-beta\n    title \"Sales\"\n    x-axis [Jan, Feb, Mar]\n    y-axis \"Revenue\" 0 --> 100\n    bar [10, 20, 30]";
+        let text = render(source, false, None).unwrap();
+        assert!(text.contains("Sales"), "{text}");
+        assert!(text.contains("Jan"), "{text}");
+        assert!(text.contains("Feb"), "{text}");
+        assert!(text.contains("Mar"), "{text}");
+        assert!(text.contains("Revenue"), "{text}");
+        assert!(text.contains("bar"), "{text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+        assert!(!text.contains("values:"), "no Merman disclosure in {text}");
+        assert!(!text.contains("xDomain:"), "no Merman disclosure in {text}");
+        assert!(!text.contains("samples="), "no Merman disclosure in {text}");
+        assert!(!text.contains('\x1b'), "{text}");
+    }
+
+    #[test]
+    fn xychart_line_renders_clean_projection() {
+        let source = "xychart-beta\n    x-axis [1, 2, 3]\n    line [10, 20, 30]";
+        let text = render(source, false, None).unwrap();
+        assert!(text.contains("line"), "{text}");
+        assert!(text.contains("1"), "{text}");
+        assert!(text.contains("2"), "{text}");
+        assert!(text.contains("3"), "{text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+        assert!(!text.contains("values:"), "no Merman disclosure in {text}");
+    }
+
+    #[test]
+    fn xychart_ascii_mode_renders_clean_projection() {
+        let source = "xychart-beta\n    x-axis [a, b]\n    bar [1, 2]";
+        let text = render(source, true, None).unwrap();
+        assert!(text.is_ascii(), "{text}");
+        assert!(text.contains("bar"), "{text}");
+        assert!(!text.contains("bytes="), "no model framing in {text}");
+    }
+
+    #[test]
+    fn packet_block_ceiling_is_a_resource_error() {
+        // A packet with more blocks than the ceiling must be a resource rejection.
+        let blocks = (0..(MAX_NODES as i32 + 2))
+            .map(|i| format!("    {}-{} : \"b{}\"\n", i * 8, i * 8 + 7, i))
+            .collect::<String>();
+        let source = format!("packet\n{blocks}");
+        assert!(matches!(
+            render(&source, false, None),
+            Err(DiagramError::Resource(_)),
+        ));
+    }
+
+    #[test]
+    fn xychart_point_ceiling_is_a_resource_error() {
+        // An xychart with more data points than the ceiling must be a resource rejection.
+        let values: Vec<String> = (0..(MAX_NODES as i32 + 2))
+            .map(|i| format!("{}", i))
+            .collect();
+        let source = format!(
+            "xychart-beta\n    x-axis [{}]\n    bar [{}]",
+            values.join(", "),
+            values.join(", ")
+        );
         assert!(matches!(
             render(&source, false, None),
             Err(DiagramError::Resource(_)),

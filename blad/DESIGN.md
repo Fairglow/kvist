@@ -9,6 +9,59 @@ listing, snapshot output, and transcript export, without live following.
 
 ## Design overview
 
+### Bounded Markdown subset intent (2026-11-10)
+
+This user-directed intent bundle defines the six approved 2026-10-27 workstreams
+before tests or code: extended autolinks, table inline-code/link colors,
+bounded HTML text preservation, definition lists, footnote navigation, and
+TOML frontmatter. It preserves text-only, offline, read-only, finite-input and
+no-browser defaults. It excludes full CommonMark/GFM conformance, browser
+engines, CSS/JavaScript, executable MDX/JSX, templates, image protocols,
+merged HTML cells, full TeX/Mermaid compatibility, and other ecosystem
+dialects.
+
+Extended autolinks are recognized only outside code, HTML, math, and existing
+links. Bare `www.` URLs become `https://` destinations; `http://` and
+`https://` URLs keep their schemes; email autolinks remain CommonMark. Labels
+are the bare source text, and navigation uses the existing renderer-owned link
+metadata. Provisional live-stdin snapshots may revise autolinks when later
+input completes or invalidates a URL.
+
+Table inline-code spans use the code-background palette where styling permits,
+without atomic spans, nonbreaking whitespace, or geometry changes. Table link
+labels use the link palette color and compose with emphasis, header reversal,
+row backgrounds, and quote styling. Plain output suppresses both without
+changing text or geometry.
+
+Bounded HTML text preservation remains the existing inert HTML projection:
+details/summary expand, p/div/br/hr produce text boundaries, common inline
+markup applies styles, unsupported markup stays literal or is stripped by the
+explicit option, and no attributes, scripts, resources, or navigation are
+interpreted. The linear scanner and 64-level style bound remain unchanged.
+
+Definition lists use a term paragraph followed by `:`-prefixed definition
+paragraphs. Terms render as bold text and definitions as indented text blocks.
+No nested definition lists, images, executable content, or implicit headings/
+anchors are introduced. Streaming may revise provisional term/definition
+blocks as later input arrives.
+
+Footnote references are inline navigation links to definitions, and footnote
+definitions expose backreference links to their references. Selecting a
+reference jumps to its definition; selecting a backreference returns to the
+first corresponding reference. Missing destinations follow the existing
+missing-destination policy. Footnote prose styling remains R-043.
+
+TOML frontmatter uses `+++` delimiters and is displayed as literal TOML in the
+existing code-panel presentation. It is not parsed, validated, executed, or
+interpreted as configuration. Unclosed TOML candidates remain Markdown until a
+closer arrives. YAML frontmatter keeps its existing `---`/`...` semantics.
+
+This intent change uses a deliberate local advisory-review exception while
+exact-bundle receipt enforcement is unavailable. No advisory review receipt,
+component acceptance, or compliance certification is claimed; independent
+source-only observation and a separate source-blind comparison may follow
+implementation.
+
 ### HTML and inherited-descriptor fixes (2026-10-29)
 
 This user-directed increment uses a deliberate advisory exception while receipt

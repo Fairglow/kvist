@@ -2814,3 +2814,137 @@ fn browser_output_is_captured_and_retained_without_corrupting_the_screen() {
         viewer.quit();
     }
 }
+
+#[test]
+fn footnote_reference_is_navigable_via_tab() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("footnotes.md");
+    std::fs::write(
+        &path,
+        "intro text with footnote[^1] and more text\n\n[^1]: footnote definition here",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 80, 24, false);
+    // Tab should select the footnote reference as a navigable link.
+    viewer.keys_with_frame(b"\t");
+    assert!(
+        viewer.screen.line(23).contains("Links: 1/1"),
+        "footnote reference should be selectable via tab: {}",
+        viewer.screen.line(23)
+    );
+    viewer.quit();
+}
+
+#[test]
+fn enter_follows_footnote_reference_to_definition() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("footnotes.md");
+    std::fs::write(
+        &path,
+        "intro text with footnote[^1]\n\n[^1]: footnote definition here",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 80, 24, false);
+    // Enter in normal mode follows the first link at or below the top of the
+    // viewport. The footnote reference should be followed to its definition.
+    viewer.keys(b"\r");
+    // The definition should now be visible (reversed/highlighted).
+    let definition_visible = (0..24).any(|row| {
+        viewer
+            .screen
+            .line(row)
+            .contains("footnote definition")
+    });
+    assert!(
+        definition_visible,
+        "Enter should navigate to the footnote definition"
+    );
+    viewer.quit();
+}
+
+#[test]
+fn back_returns_from_footnote_definition_to_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("footnotes.md");
+    std::fs::write(
+        &path,
+        "intro text with footnote[^1]\n\n[^1]: footnote definition here",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 80, 24, false);
+    viewer.keys(b"\r");
+    // Back navigation should return to the source location.
+    viewer.keys(b"b");
+    let source_visible = (0..24).any(|row| {
+        viewer
+            .screen
+            .line(row)
+            .contains("intro text")
+    });
+    assert!(
+        source_visible,
+        "back should return to the source location"
+    );
+    viewer.quit();
+}
+
+#[test]
+fn repeated_footnote_references_are_all_navigable() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("footnotes.md");
+    std::fs::write(
+        &path,
+        "first[^1] second[^1] third[^1]\n\n[^1]: single definition",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 80, 24, false);
+    viewer.keys_with_frame(b"\t");
+    // All three references should be navigable.
+    assert!(
+        viewer.screen.line(23).contains("Links: 1/3")
+            || viewer.screen.line(23).contains("Links: 3/3"),
+        "all footnote references should be navigable: {}",
+        viewer.screen.line(23)
+    );
+    viewer.quit();
+}
+
+#[test]
+fn footnote_navigation_does_not_interfere_with_search() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("footnotes.md");
+    std::fs::write(
+        &path,
+        "intro text with footnote[^1]\n\n[^1]: footnote definition here",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 80, 24, false);
+    viewer.keys_with_frame(b"/definition\r");
+    assert!(
+        viewer.screen.line(23).contains("1/1"),
+        "search should still work with footnotes"
+    );
+    viewer.keys_with_frame(b"\x1b");
+    viewer.quit();
+}
+
+#[test]
+fn footnote_navigation_does_not_interfere_with_link_navigation() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("footnotes.md");
+    std::fs::write(
+        &path,
+        "intro[^1] and [link](https://example.com)\n\n[^1]: footnote",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 80, 24, false);
+    viewer.keys_with_frame(b"\t");
+    viewer.keys_with_frame(b"\t");
+    // Should cycle through footnote reference and URL link.
+    assert!(
+        viewer.screen.line(23).contains("Links:"),
+        "link navigation should work with footnotes: {}",
+        viewer.screen.line(23)
+    );
+    viewer.quit();
+}

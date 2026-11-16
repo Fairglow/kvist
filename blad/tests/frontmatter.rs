@@ -182,7 +182,6 @@ fn frontmatter_is_prefix_only_and_unclosed_candidates_stay_markdown() {
         " ---\n**bold**\n---",
         "before\n\n---\n**bold**\n---",
         "> ---\n> **bold**\n> ---",
-        "+++\n**bold**\n+++",
         "---\n**bold**",
         "---\n**bold**\n---not-a-closer",
         "---\n**bold**\n ---",
@@ -194,6 +193,13 @@ fn frontmatter_is_prefix_only_and_unclosed_candidates_stay_markdown() {
             "{source:?}: {output:?}"
         );
     }
+    // ++++++ is not a valid delimiter (must be exactly +++).
+    let source = "++++++\n**bold**\n++++++";
+    let output = render(source, None, RenderOptions::plain());
+    assert!(
+        output.contains("bold") && !output.contains("**bold**"),
+        "{source:?}: {output:?}"
+    );
     let source = "---\nkey: value\n---\n\n---\n**bold**\n---";
     let output = render(source, None, RenderOptions::plain());
     assert!(output.starts_with("---\nkey: value\n---\n"));
@@ -301,6 +307,213 @@ fn frontmatter_cli_is_general_for_files_and_stdin_and_dump_is_escape_free() {
     let source = "---\ncustom-field: \"**literal**\"\n---\n\n# Body\n";
     std::fs::write(&path, source).unwrap();
     let expected = "---\ncustom-field: \"**literal**\"\n---\n\n# Body\n";
+    for dump in [false, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_blad"));
+        command
+            .args(["--color", "always"])
+            .env("COLORTERM", "truecolor");
+        if dump {
+            command.arg("--dump");
+        }
+        let output = command.arg(&path).output().unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let rendered = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(tokens(&rendered).text, expected);
+        assert_eq!(rendered.contains('\x1b'), !dump);
+    }
+    let mut child = Command::new(env!("CARGO_BIN_EXE_blad"))
+        .args(["--dump", "--color", "always"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(source.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
+}
+
+#[test]
+fn toml_frontmatter_is_recognized_at_prefix_with_delimiter_matching() {
+    // Valid TOML frontmatter with matching delimiters.
+    let source = "+++\ntitle = \"My Document\"\nauthor = \"Jane\"\nyear = 2024\n+++\n\n# Body\n";
+    let output = render(source, None, RenderOptions::plain());
+    assert_eq!(output, "+++\ntitle = \"My Document\"\nauthor = \"Jane\"\nyear = 2024\n+++\n\n# Body\n");
+}
+
+#[test]
+fn toml_frontmatter_empty_and_whitespace_delimiters() {
+    // Empty TOML frontmatter.
+    let source = "+++\n+++\n\n# Body\n";
+    let output = render(source, None, RenderOptions::plain());
+    assert_eq!(output, "+++\n+++\n\n# Body\n");
+
+    // Trailing whitespace on delimiter lines.
+    let source = "+++   \ntitle = \"Test\"\n+++  \t\n\n# Body\n";
+    let output = render(source, None, RenderOptions::plain());
+    assert_eq!(output, "+++   \ntitle = \"Test\"\n+++  \t\n\n# Body\n");
+}
+
+#[test]
+fn toml_frontmatter_malformed_is_still_displayed() {
+    // Malformed TOML is still recognized and displayed as-is.
+    let source = "+++\ntitle = \"Unclosed string\nauthor = \"Jane\"\n+++\n\n# Body\n";
+    let output = render(source, None, RenderOptions::plain());
+    assert_eq!(output, "+++\ntitle = \"Unclosed string\nauthor = \"Jane\"\n+++\n\n# Body\n");
+}
+
+#[test]
+fn toml_frontmatter_bom_and_crlf() {
+    // BOM with TOML frontmatter.
+    let source = "\u{feff}+++\ntitle = \"Test\"\n+++\n\n# Body\n";
+    let output = render(source, None, RenderOptions::plain());
+    assert_eq!(output, "+++\ntitle = \"Test\"\n+++\n\n# Body\n");
+
+    // CRLF line endings with TOML frontmatter.
+    let source = "+++\r\ntitle = \"Test\"\r\n+++\r\n\r\n# Body\n";
+    let output = render(source, None, RenderOptions::plain());
+    assert_eq!(output, "+++\ntitle = \"Test\"\n+++\n\n# Body\n");
+}
+
+#[test]
+fn toml_frontmatter_unclosed_and_mismatched_delimiters() {
+    // Unclosed TOML frontmatter is not recognized.
+    let source = "+++\ntitle = \"Test\"\n\n# Body\n";
+    let output = render(source, None, RenderOptions::plain());
+    assert!(output.contains("Test"));
+    // No frontmatter block, so body is parsed as Markdown.
+
+    // Mismatched delimiters: opens with +++, closes with ---.
+    let source = "+++\ntitle = \"Test\"\n---\n\n# Body\n";
+    let output = render(source, None, RenderOptions::plain());
+    assert!(output.contains("Test"));
+    // No frontmatter block.
+
+    // Mismatched: opens with ---, closes with +++.
+    let source = "---\ntitle: Test\n+++\n\n# Body\n";
+    let output = render(source, None, RenderOptions::plain());
+    assert!(output.contains("Test"));
+    // No frontmatter block.
+}
+
+#[test]
+fn toml_frontmatter_not_prefix_only() {
+    // TOML frontmatter must be at the start of the document.
+    let source = "# Title\n\n+++\ntitle = \"Test\"\n+++\n\nBody\n";
+    let output = render(source, None, RenderOptions::plain());
+    assert!(output.contains("Test"));
+    // No frontmatter recognition, just regular Markdown.
+}
+
+#[test]
+fn toml_frontmatter_preserves_source_and_highlights_as_toml() {
+    let source = "+++\ntitle = \"My Document\"\nauthor = \"Jane\"\nyear = 2024\n+++\n\n# Body\n";
+    let expected = render(source, Some(40), RenderOptions::plain());
+
+    for theme in [Theme::Dark, Theme::Light, Theme::Terminal] {
+        for depth in [
+            ColorDepth::None,
+            ColorDepth::Ansi16,
+            ColorDepth::Ansi256,
+            ColorDepth::TrueColor,
+        ] {
+            let options = RenderOptions {
+                theme,
+                color_depth: depth,
+                plain: false,
+                ..RenderOptions::default()
+            };
+            let output = render(source, Some(40), options.clone());
+            // Compare against equivalent TOML code block.
+            let code_block = render(
+                "```toml\n+++\ntitle = \"My Document\"\nauthor = \"Jane\"\nyear = 2024\n+++\n```\n\n# Body\n",
+                Some(40),
+                options,
+            );
+            assert_eq!(output, code_block, "{theme:?}/{depth:?}");
+            let observed = tokens(&output);
+            assert_eq!(observed.text, expected);
+            if depth == ColorDepth::TrueColor {
+                // Verify TOML highlighting is applied (at least one color).
+                let string_pos = observed.text.find("My Document").unwrap();
+                let string_color = observed.colors[string_pos];
+                // At least the string should be colored.
+                assert!(string_color.is_some(), "{theme:?}: {output:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn toml_frontmatter_never_creates_links_or_definitions() {
+    let source = "+++\nurl = \"https://metadata.test\"\nlink = \"[hidden](hidden.md)\"\n[reference]\ntarget = \"hidden.md\"\n+++\n\n# Body\n\n[body](#body) https://body.test\n";
+    let links = blad::links::extract_links(&source);
+    assert_eq!(links.len(), 2, "{links:?}");
+    assert_eq!(links[0].text, "body");
+    assert_eq!(links[0].destination, "#body");
+    assert_eq!(links[1].text, "https://body.test");
+    assert_eq!(links[1].destination, "https://body.test");
+}
+
+#[test]
+fn toml_frontmatter_keeps_invalid_toml_visible() {
+    let source = "+++\ninvalid = [unterminated\nalias = *unknown\nkey = !!custom tag\n+++\n";
+    for options in [RenderOptions::plain(), RenderOptions::default()] {
+        let output = render(source, None, options);
+        let observed = tokens(&output).text;
+        assert_eq!(
+            observed,
+            "+++\ninvalid = [unterminated\nalias = *unknown\nkey = !!custom tag\n+++\n\n"
+        );
+    }
+}
+
+#[test]
+fn toml_frontmatter_propagates_writer_errors_and_cancellation() {
+    struct Failed;
+    impl Write for Failed {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("toml frontmatter writer failed"))
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let renderer = MarkdownRenderer::new();
+    let source = "+++\ntitle = \"Test\"\n+++\n";
+    assert_eq!(
+        renderer
+            .render_markdown(source, &mut Failed)
+            .unwrap_err()
+            .to_string(),
+        "toml frontmatter writer failed"
+    );
+    let cancellation = RenderCancellation::new();
+    cancellation.cancel();
+    let mut output = Vec::new();
+    assert_eq!(
+        renderer
+            .render_markdown_with_cancellation(source, &mut output, &cancellation)
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::Interrupted
+    );
+    assert!(output.is_empty());
+}
+
+#[test]
+fn toml_frontmatter_cli_is_general_for_files_and_stdin() {
+    let temporary = tempfile::tempdir().unwrap();
+    let path = temporary.path().join("unrelated.txt");
+    let source = "+++\ntitle = \"**literal**\"\nauthor = \"Jane\"\n+++\n\n# Body\n";
+    std::fs::write(&path, source).unwrap();
+    let expected = "+++\ntitle = \"**literal**\"\nauthor = \"Jane\"\n+++\n\n# Body\n";
     for dump in [false, true] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_blad"));
         command

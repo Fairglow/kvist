@@ -62,7 +62,7 @@ Blad must provide the following capabilities:
 15. **R-015 GitHub Flavored Markdown:** Support documented extensions including
     tables, strikethrough, task lists, autolinks, footnotes, superscript,
     subscript, and alert blockquotes ([!NOTE], [!TIP], etc.). This is not a
-    full GFM conformance claim; table alignment follows R-073.
+    full GFM conformance claim; table alignment follows R-073. Extended autolinks recognize bare `www.`, `http://`, and `https://` URLs outside code, HTML, math, and existing links; `www.` destinations are normalized to `https://`, and CommonMark email autolinks remain unchanged. Autolink labels are the bare source text, and navigation follows R-041. Definition lists use a term paragraph followed by one or more definition paragraphs whose first non-space character is `:`; render terms as bold text and definitions as indented text blocks, with no nested definition lists, images, executable content, or heading/anchor semantics unless explicitly authored. Streaming snapshots may revise a provisional term/definition as later input completes the block. Verify exact text, styling, wrapping, plain/color policies, and missing/invalid boundary behavior.
 16. **R-016 Syntax highlighting:** Highlight fenced code blocks using
     syntect (50+ languages).
 17. **R-017 Mermaid support:** Render the admitted Mermaid subset as terminal
@@ -198,7 +198,7 @@ select a different configuration. Other local `.config` contents stay ignored.
     separate mode, including left-clicked prose/heading labels; resolve local
     heading fragments (including duplicate headings,
     explicit IDs and file fragments), retain open-file tabs and per-tab scroll
-    positions, and make missing destinations visible without losing the document.
+    positions, and make missing destinations visible without losing the document. Footnote references are inline navigation links to their definitions, and each footnote definition exposes backreference links to its references. Selecting a footnote reference jumps to the corresponding definition; selecting a backreference returns to the first corresponding reference. Missing footnote destinations use the existing missing-destination policy.
 42. **R-042 Theme files:** Load an explicitly selected, bounded JSON theme file
     with strict validation, semantic palette overrides and no implicit discovery.
     Explicit CLI appearance overrides file appearance; color/dump policy remains
@@ -475,8 +475,8 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     excluding padding, after reflow and with quotes/line-number gutters.
     Verify exact styled/plain geometry, default/explicit alignments, empty
     cells, odd padding, Unicode, wrapping, resize, overflow and multiple tables.
-    Document supported alignment, the R-074 emphasis subset and deferred
-    dedicated inline-code styling; HTML tables and merged cells remain outside
+    Document supported alignment, the R-074 emphasis subset and the bounded
+    dedicated inline-code and table link-color semantics in R-074; HTML tables and merged cells remain outside
     the supported Markdown table profile.
 
 ### First inline table styling subset
@@ -492,31 +492,31 @@ standalone source ceiling; earlier explicit-acceptance findings remain retained.
     Keep authored controls inert and propagate writer errors. Verify effective
     attributes, not escape-sequence presence alone, including Unicode,
     normalized spaces, nested/event-split words, plain/color policies and PTYs.
-    Dedicated code appearance, code-specific whitespace/nonbreaking semantics,
-    table link colors and other new inline styles remain deferred. Existing
+    Dedicated inline-code spans in table cells MUST use the code-background palette where styling permits, without atomic spans, nonbreaking whitespace, or geometry changes.
+    Table link labels MUST use the link palette color, composing with bold, italic, strikethrough, header reversal, row backgrounds, and quote styling; plain output suppresses color without changing text or geometry. Other new inline styles remain deferred. Existing
     enclosing emphasis may style their displayed text without adding those
     separate semantics. Terminal/font attribute support is not guaranteed.
 
 ### General YAML frontmatter
 
-75. **R-075 YAML frontmatter:** Recognize a single YAML header at the start of
-    any Markdown document, independent of filename or Agent Skills fields.
+75. **R-075 YAML/TOML frontmatter:** Recognize a single leading YAML or TOML metadata block at the start of
+    any Markdown document, independent of filename or Agent Skills fields. YAML uses an unindented `---` opener and an unindented `---` or `...` closer; TOML uses an unindented `+++` opener and closer.
     Preserve its delimiters, indentation, comments, ordering, blank lines,
-    multiline scalars and literal Markdown as syntax-highlighted YAML in the
+    multiline scalars and literal Markdown as syntax-highlighted YAML or TOML in the
     existing code-panel presentation. Support empty headers, optional initial
     UTF-8 BOM, LF/CRLF, trailing horizontal delimiter whitespace and `---` or
-    `...` closing lines. Only an unindented opening `---` on the first line
-    qualifies. Unclosed candidates retain normal Markdown parsing, including
+    `...` closing lines. Only an unindented opener on the first line
+    qualifies; `+++` is TOML only, and `---`/`...` are YAML only. Unclosed candidates retain normal Markdown parsing, including
     provisional streaming snapshots; later input may complete the header.
-    Do not validate, deserialize, reformat or execute YAML, expand aliases or
-    interpret fields as configuration/permissions. Invalid YAML within a closed
+    Do not validate, deserialize, reformat or execute YAML/TOML, expand aliases or
+    interpret fields as configuration/permissions. Invalid YAML/TOML within a closed
     header remains visible as source. Later separators and fenced/quoted
     examples keep their normal Markdown meaning. Metadata contributes no
     Markdown headings, links, reference definitions or footnotes.
     Preserve body source offsets and navigation, searchability, unwrapped
     horizontal overflow, reflow, theme/color/plain policy, inert controls,
     cancellation and writer-error propagation. Verify exact source/geometry,
-    effective YAML token colors, CLI file/stdin and real streaming/viewer paths,
+    effective YAML/TOML token colors, CLI file/stdin and real streaming/viewer paths,
     including navigation after the header and EOF equivalence.
 
 ### Search-mode feedback and safe exit

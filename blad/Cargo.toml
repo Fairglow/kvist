@@ -81,11 +81,12 @@ merman = { version = "0.10", default-features = false, features = [
     "diagram-journey",
     "diagram-kanban",
     "diagram-packet",
+    "diagram-xychart",
 ] }
 
 [dev-dependencies]
 tempfile = "3.27"
-nix = { version = "0.31", default-features = false, features = [
+nix = { version = "0.31.3", default-features = false, features = [
     "fs",
     "poll",
     "process",

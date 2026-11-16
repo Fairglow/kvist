@@ -230,7 +230,7 @@ Links: `Tab`/`Shift+Tab` select links directly, `Enter` follows the selection
 or the first link at/below the viewport. Left-clicking rendered labels
 follows their destination. There is no link mode; plain `f` has no action.
 Only the active link's rendered spans receive selection emphasis.
-Prose, headings, table cells and repeated bare URLs share renderer-owned
+Prose, headings, table cells, repeated bare URLs, footnote references and footnote backreferences share renderer-owned
 position metadata for keyboard selection and mouse hit testing.
 `Ctrl+Left`/`Right` select a link to the left/right on the same rendered row;
 `Ctrl+Up`/`Down` select the nearest row above/below, then the nearest column.
@@ -316,11 +316,9 @@ Blad does not persist user data; all rendering operates on provided input files.
 CommonMark parsing and documented extensions are terminal projections, not
 full CommonMark/GFM conformance claims. HTML follows the subset below; image alternative
 text remains visible without graphics. Task items retain `[x]` or `[ ]`
-markers. Tables retain source column order and honor delimiter left/center/right
+markers. Extended autolinks render bare `www.`, `http://`, and `https://` URLs as links; `www.` destinations are normalized to `https://`, and CommonMark email autolinks remain unchanged. Definition lists render term paragraphs as bold text and `:`-prefixed definition paragraphs as indented text blocks. Tables retain source column order and honor delimiter left/center/right
 alignment as specified below. Table cells support bold, italic and strikethrough,
-including combinations and emphasis within link labels. Dedicated inline-code
-appearance and nonbreaking/whitespace semantics, and table link colors, remain
-unsupported. HTML tables and merged cells are outside this profile. Script,
+including combinations and emphasis within link labels. Dedicated inline-code spans in table cells use the code-background palette where styling permits, and table link labels use the link palette color; neither changes cell whitespace normalization, wrapping, alignment, geometry, or link hitboxes. HTML tables and merged cells are outside this profile. Script,
 math and alert extensions are Blad's documented dialect.
 
 Footnote definitions use the palette's muted color for ordinary prose and
@@ -354,27 +352,28 @@ markup remains visible even when stripping. Inline style nesting is limited to
 64; unmatched closing or over-limit style tags use unsupported-markup handling.
 Code/frontmatter remain literal. Source controls are inert in either policy.
 
-### YAML frontmatter
+### YAML/TOML frontmatter
 
 All Markdown inputs, including library strings and stdin, recognize one leading
-YAML frontmatter block. The first line MUST be an unindented `---`, optionally
-preceded by a UTF-8 BOM. A subsequent unindented `---` or `...` closes the block;
-delimiter lines MAY have trailing spaces/tabs. LF and CRLF, an empty body or
-leading blank lines within the header, and a closing line without a final
-newline are supported. The BOM is not displayed. No filename or metadata schema
-is required. Blank lines before the opener, indented delimiters and later
-blocks are not frontmatter. `+++` metadata is not supported.
+YAML or TOML metadata block. YAML uses an unindented `---` opener and an
+unindented `---` or `...` closer; TOML uses an unindented `+++` opener and
+closer. Delimiter lines MAY have trailing spaces/tabs. LF and CRLF, an empty
+body or leading blank lines within the header, and a closing line without a
+final newline are supported. The optional UTF-8 BOM is not displayed. No
+filename or metadata schema is required. Blank lines before the opener,
+indented delimiters and later blocks are not frontmatter. `+++` is TOML only,
+and `---`/`...` are YAML only.
 
-The header, including both delimiters, MUST be displayed as literal YAML through
-the same syntax highlighting, background/cap rows, unwrapped overflow and
-color/plain policy as a fenced `yaml` code block. Authored layout and text
-remain intact except existing inert-control and LF output normalization.
-There is no YAML parsing/validation, key sorting, reserialization, alias
-expansion, schema enforcement or configuration/permission effect. Malformed
-YAML in a closed block remains visible. Metadata MUST NOT create Markdown
-headings, links, reference definitions or footnotes; its rendered text remains
-searchable. The following body retains source-owned link/heading offsets and
-normal Markdown semantics.
+The header, including both delimiters, MUST be displayed as literal YAML or
+TOML through the same syntax highlighting, background/cap rows, unwrapped
+overflow and color/plain policy as a fenced `yaml` or `toml` code block.
+Authored layout and text remain intact except existing inert-control and LF
+output normalization. There is no YAML/TOML parsing/validation, key sorting,
+reserialization, alias expansion, schema enforcement or configuration/permission
+effect. Malformed YAML/TOML in a closed block remains visible. Metadata MUST
+NOT create Markdown headings, links, reference definitions or footnotes; its
+rendered text remains searchable. The following body retains source-owned
+link/heading offsets and normal Markdown semantics.
 
 Without a closing delimiter, the entire input retains normal Markdown parsing,
 not an implicitly closed or hidden metadata block. This also applies to live
@@ -487,10 +486,7 @@ Attributes MUST end before alignment padding, column separators and other
 cells/rows, without clearing header reversal, row backgrounds or quote styling.
 Plain output MUST suppress attributes without changing text or geometry.
 Link marks and viewer search/selection overlays MUST remain correct through
-attribute transitions, Unicode, clipping and resize. Existing cell whitespace
-normalization and wrapping also apply to inline-code text; code does not gain
-its own reverse-video styling or atomic spans. Supported enclosing emphasis
-MAY apply to code/math/footnote text without adding their dedicated styling.
+attribute transitions, Unicode, clipping and resize. Existing cell whitespace normalization and wrapping also apply to inline-code text. Inline-code spans in table cells MUST use the code-background palette where styling permits, without atomic spans or nonbreaking whitespace. Table link labels MUST use the link palette color, composing with emphasis, header reversal, row backgrounds, and quote styling. Plain output suppresses these styles without changing text or geometry. Supported enclosing emphasis MAY apply to code/math/footnote text without adding their dedicated styling.
 
 Under the fixed terminal geometry model (display-column width : line height =
 1:2), each cell's width floor MUST come from its own nonempty wrapped text

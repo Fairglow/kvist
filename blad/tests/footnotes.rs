@@ -316,3 +316,104 @@ fn footnote_theme_obeys_palette_and_color_policy_without_geometry_changes() {
         },
     );
 }
+
+// Navigation tests: footnote references are navigable links that jump to
+// their definitions and support back navigation to the source.
+
+#[test]
+fn footnote_references_are_included_in_link_navigation() {
+    let source = "intro[^1] and [link](https://example.com) and [^2]";
+    let links = blad::links::extract_links(source);
+    // The document has one URL link and two footnote reference links.
+    assert_eq!(links.len(), 3);
+    assert_eq!(links[0].destination, "#fn-1");
+    assert!(links[0].is_footnote());
+    assert_eq!(links[1].destination, "https://example.com");
+    assert!(links[1].is_url());
+    assert_eq!(links[2].destination, "#fn-2");
+    assert!(links[2].is_footnote());
+}
+
+#[test]
+fn footnote_link_ids_are_correct() {
+    let source = "text[^1] and [^name]";
+    let links = blad::links::extract_links(source);
+    assert_eq!(links[0].footnote_id(), Some("fn-1"));
+    assert_eq!(links[1].footnote_id(), Some("fn-name"));
+}
+
+#[test]
+fn footnote_definitions_are_not_links() {
+    let source = "text[^1]\n\n[^1]: definition";
+    let links = blad::links::extract_links(source);
+    assert_eq!(links.len(), 0);
+}
+
+#[test]
+fn footnote_reference_inside_link_is_captured() {
+    let source = "[link with footnote[^1]](https://example.com)";
+    let links = blad::links::extract_links(source);
+    assert_eq!(links.len(), 1);
+    assert!(links[0].text.contains("link with footnote"));
+    assert_eq!(links[0].destination, "https://example.com");
+}
+
+#[test]
+fn repeated_footnote_references_render_multiple_markers() {
+    let source = "first[^1] second[^1] third[^1]";
+    let output = render(source, Some(80), RenderOptions::default());
+    // Each reference produces a superscript marker (¹). Three references
+    // produce three markers in the output.
+    let markers = output.matches('\u{00B9}').count();
+    assert_eq!(markers, 3, "expected 3 superscript markers, got {markers}");
+}
+
+#[test]
+fn missing_footnote_definition_still_renders_marker() {
+    let source = "text with missing footnote[^ghost]";
+    let output = render(source, Some(80), RenderOptions::default());
+    // The marker is rendered even without a definition.
+    assert!(output.contains("[ghost]"), "marker should appear for undefined footnote");
+}
+
+#[test]
+fn footnote_with_link_inside_definition() {
+    let source = "text[^1]\n\n[^1]: see [this](https://example.com) for more";
+    let links = blad::links::extract_links(source);
+    // The link inside the footnote definition is extracted.
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].destination, "https://example.com");
+}
+
+#[test]
+fn unicode_footnote_ids_render_markers() {
+    let source = "text[^一] and [^二]";
+    let output = render(source, Some(80), RenderOptions::default());
+    // Unicode ids that don't have superscript equivalents fall back to [id].
+    assert!(output.contains("[一]"), "unicode footnote marker should appear");
+    assert!(output.contains("[二]"), "unicode footnote marker should appear");
+}
+
+#[test]
+fn footnote_in_table_cell() {
+    let source = "| cell[^1] |\n|---------|\n\n[^1]: table footnote";
+    let output = render(source, Some(80), RenderOptions::default());
+    // Footnote marker appears in the table cell.
+    assert!(output.contains("¹"), "footnote marker should appear in table cell");
+}
+
+#[test]
+fn footnote_in_blockquote() {
+    let source = "> quoted[^1]\n\n[^1]: quote footnote";
+    let output = render(source, Some(80), RenderOptions::default());
+    assert!(output.contains("¹"), "footnote marker should appear in blockquote");
+}
+
+#[test]
+fn footnote_plain_output_matches_styled() {
+    let source = "intro[^1]\n\n[^1]: footnote text";
+    let styled = render(source, Some(80), RenderOptions::default());
+    let plain = render(source, Some(80), RenderOptions::plain());
+    assert!(!plain.contains('\x1b'));
+    assert_eq!(StyledText::parse(&styled, false).plain, plain);
+}

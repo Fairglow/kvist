@@ -11,9 +11,14 @@ pub(crate) fn events(
     // Code events share literal rendering and navigation exclusion. The native
     // metadata extension also admits non-prefix blocks and rejects empty ones.
     let metadata = header.into_iter().flat_map(|range| {
+        let language = if source[range.clone()].starts_with("+++") {
+            "toml"
+        } else {
+            "yaml"
+        };
         [
             (
-                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced("yaml".into()))),
+                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(language.into()))),
                 range.clone(),
             ),
             (Event::Text(source[range.clone()].into()), range.clone()),
@@ -35,13 +40,19 @@ fn prefix(source: &str) -> Option<Range<usize>> {
     };
     let mut lines = source[start..].split_inclusive('\n');
     let opening = lines.next()?;
-    if delimiter(opening) != "---" {
+    let opening_delim = delimiter(opening);
+    if opening_delim != "---" && opening_delim != "+++" {
         return None;
     }
     let mut end = start + opening.len();
     for line in lines {
         end += line.len();
-        if matches!(delimiter(line), "---" | "...") {
+        let line_delim = delimiter(line);
+        // YAML accepts "---" or "..." as closer; TOML only accepts "+++".
+        if opening_delim == "---" && (line_delim == "---" || line_delim == "...") {
+            return Some(start..end);
+        }
+        if opening_delim == "+++" && line_delim == "+++" {
             return Some(start..end);
         }
     }

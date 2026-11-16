@@ -8,6 +8,7 @@ A terminal Markdown viewer and streaming pager with tabbed browsing, link naviga
 - **Interactive navigation** — Follow links, jump between headings, spatial link selection
 - **Search** — Forward search with regex support, navigate matches
 - **Rich rendering** — Syntax-highlighted code blocks, math notation, Mermaid diagrams
+- **Extended autolinks** — Bare `http://`, `https://`, `www.`, and email addresses are recognized as clickable links (GFM-style), excluding code blocks and inline code
 - **HTML text** — Expanded details/summary, breaks and inline styles; unknown markup stays visible
 - **YAML frontmatter** — Source-preserving metadata highlighting in any Markdown document
 - **Theming** — Dark, light, and terminal-native themes with custom JSON theme support

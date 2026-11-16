@@ -6,7 +6,7 @@ component:
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-11-13T23:36:02Z"
+    checked_at: "2026-11-16T10:09:00Z"
     stale_since: null
     causes: []
 tasks:
@@ -344,7 +344,7 @@ tasks:
     purpose: "Record actual table-code/link behavior without self-certification."
     expected_outcome: "A source-derived supplement retains risks, behavior and finite evidence limits."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "blad-table-code-links-implement-code"
     requirements:
@@ -353,8 +353,8 @@ tasks:
       - "REQUIREMENTS.md#R-074"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T10:11:19Z"
+      completed_at: "2026-11-16T10:11:19Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-table-code-links-compliance-review"
@@ -364,7 +364,7 @@ tasks:
     purpose: "Keep observed behavior and intended table semantics independently comparable."
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "blad-table-code-links-security-audit"
     requirements:
@@ -375,8 +375,8 @@ tasks:
       - "REQUIREMENTS.md#R-076"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T10:13:59Z"
+      completed_at: "2026-11-16T10:13:59Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-html-text-write-tests"
@@ -386,7 +386,7 @@ tasks:
     purpose: "Recover useful text without introducing a browser, executing active content or silently losing sections."
     expected_outcome: "Fail-first fixtures cover inline/block boundaries, entities, malformed/nested input, controls, resource limits, writer/cancellation errors, navigation, search, plain output, resize and provisional streaming."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "blad-markdown-subset-intent"
     requirements:
@@ -396,8 +396,8 @@ tasks:
       - "REQUIREMENTS.md#R-041"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T10:43:42Z"
+      completed_at: "2026-11-16T10:43:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-html-text-implement-code"
@@ -407,7 +407,7 @@ tasks:
     purpose: "Replace avoidable HTML text loss with predictable terminal projection."
     expected_outcome: "Approved HTML text fixtures pass across library, CLI, viewer and streaming without hidden effects or weakened limits."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "blad-html-text-write-tests"
     requirements:
@@ -417,8 +417,8 @@ tasks:
       - "REQUIREMENTS.md#R-041"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T10:45:51Z"
+      completed_at: "2026-11-16T10:45:51Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-html-text-security-audit"
@@ -428,7 +428,7 @@ tasks:
     purpose: "Make the actual untrusted-HTML boundary independently inspectable."
     expected_outcome: "A source-derived supplement records admitted behavior, failure paths and bounded risk observations."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "blad-html-text-implement-code"
     requirements:
@@ -437,8 +437,8 @@ tasks:
       - "REQUIREMENTS.md#R-038"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T10:47:54Z"
+      completed_at: "2026-11-16T10:47:54Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-html-text-compliance-review"
@@ -448,7 +448,7 @@ tasks:
     purpose: "Verify the bounded text-preservation goal independently of implementation."
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "blad-html-text-security-audit"
     requirements:
@@ -458,8 +458,8 @@ tasks:
       - "REQUIREMENTS.md#R-041"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T10:49:48Z"
+      completed_at: "2026-11-16T10:49:48Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-definition-lists-write-tests"
@@ -469,7 +469,7 @@ tasks:
     purpose: "Define a useful text-first glossary layout without reinterpreting unrelated prose."
     expected_outcome: "Fail-first fixtures cover exact layout, links, search, Unicode, code, tiny widths, plain/color output, resize and streaming."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "blad-markdown-subset-intent"
     requirements:
@@ -478,8 +478,8 @@ tasks:
       - "REQUIREMENTS.md#R-041"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T10:52:19Z"
+      completed_at: "2026-11-16T10:52:19Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-definition-lists-implement-code"
@@ -489,7 +489,7 @@ tasks:
     purpose: "Make technical definitions and glossaries readable in a terminal."
     expected_outcome: "Targeted definition-list and existing list/navigation regressions pass with documented syntax and limitations."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "blad-definition-lists-write-tests"
     requirements:
@@ -498,8 +498,8 @@ tasks:
       - "REQUIREMENTS.md#R-041"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T10:59:45Z"
+      completed_at: "2026-11-16T10:59:45Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-definition-lists-security-audit"
@@ -509,7 +509,7 @@ tasks:
     purpose: "Record actual parsing and layout boundaries independently."
     expected_outcome: "A source-derived supplement records behavior, risks and finite evidence limits."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "blad-definition-lists-implement-code"
     requirements:
@@ -517,8 +517,8 @@ tasks:
       - "REQUIREMENTS.md#R-038"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:01:19Z"
+      completed_at: "2026-11-16T11:01:19Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-definition-lists-compliance-review"
@@ -528,7 +528,7 @@ tasks:
     purpose: "Keep intended definition-list behavior and observed evidence independently comparable."
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "blad-definition-lists-security-audit"
     requirements:
@@ -536,8 +536,8 @@ tasks:
       - "REQUIREMENTS.md#R-041"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:03:40Z"
+      completed_at: "2026-11-16T11:03:40Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-navigation-write-tests"
@@ -547,7 +547,7 @@ tasks:
     purpose: "Make footnotes usable in long documents without regressing safe search and link navigation."
     expected_outcome: "Fail-first renderer/navigation and PTY fixtures cover styled/plain output, quoted/table markers, Unicode, mouse selection, resize, reload and later streamed definitions."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "blad-markdown-subset-intent"
     requirements:
@@ -557,8 +557,8 @@ tasks:
       - "REQUIREMENTS.md#R-076"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:07:12Z"
+      completed_at: "2026-11-16T11:07:12Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-navigation-implement-code"
@@ -568,7 +568,7 @@ tasks:
     purpose: "Provide predictable footnote navigation using the existing viewer model."
     expected_outcome: "Focused fixtures pass with correct jumps/returns and preserved search, link and tab behavior."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "blad-footnote-navigation-write-tests"
     requirements:
@@ -578,8 +578,8 @@ tasks:
       - "REQUIREMENTS.md#R-076"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:20:06Z"
+      completed_at: "2026-11-16T11:20:06Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-navigation-security-audit"
@@ -589,7 +589,7 @@ tasks:
     purpose: "Record actual navigation and recovery behavior independently."
     expected_outcome: "A source-derived supplement records findings, behavior and evidence limits."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "blad-footnote-navigation-implement-code"
     requirements:
@@ -598,8 +598,8 @@ tasks:
       - "REQUIREMENTS.md#R-076"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:22:26Z"
+      completed_at: "2026-11-16T11:22:26Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-footnote-navigation-compliance-review"
@@ -609,7 +609,7 @@ tasks:
     purpose: "Keep footnote implementation observation separate from intent comparison."
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "blad-footnote-navigation-security-audit"
     requirements:
@@ -619,8 +619,8 @@ tasks:
       - "REQUIREMENTS.md#R-076"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:25:35Z"
+      completed_at: "2026-11-16T11:25:35Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-toml-frontmatter-write-tests"
@@ -630,7 +630,7 @@ tasks:
     purpose: "Add a clearly delimited metadata format without configuration effects or ambiguous general JSON detection."
     expected_outcome: "Fail-first library, CLI and PTY fixtures cover effective token styles, plain/color policies, search, horizontal overflow, resize, streaming and writer/cancellation errors."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "blad-markdown-subset-intent"
     requirements:
@@ -640,8 +640,8 @@ tasks:
       - "REQUIREMENTS.md#R-075"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:29:33Z"
+      completed_at: "2026-11-16T11:29:33Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-toml-frontmatter-implement-code"
@@ -651,7 +651,7 @@ tasks:
     purpose: "Support useful TOML frontmatter consistently with general YAML handling."
     expected_outcome: "Focused TOML regressions and existing YAML/navigation fixtures pass with preserved body semantics and no hidden effects."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "blad-toml-frontmatter-write-tests"
     requirements:
@@ -661,8 +661,8 @@ tasks:
       - "REQUIREMENTS.md#R-075"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:31:42Z"
+      completed_at: "2026-11-16T11:31:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-toml-frontmatter-security-audit"
@@ -672,7 +672,7 @@ tasks:
     purpose: "Record actual TOML rendering and navigation isolation independently."
     expected_outcome: "A source-derived supplement records behavior, risks and evidence limits."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "blad-toml-frontmatter-implement-code"
     requirements:
@@ -681,8 +681,8 @@ tasks:
       - "REQUIREMENTS.md#R-075"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:33:15Z"
+      completed_at: "2026-11-16T11:33:15Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-toml-frontmatter-compliance-review"
@@ -692,7 +692,7 @@ tasks:
     purpose: "Keep source observation and intended metadata semantics independently comparable."
     expected_outcome: "A durable scoped comparison records discrepancies and evidence limits."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "blad-toml-frontmatter-security-audit"
     requirements:
@@ -702,8 +702,8 @@ tasks:
       - "REQUIREMENTS.md#R-075"
     timestamps:
       created_at: "2026-10-27T18:34:49Z"
-      updated_at: "2026-10-27T18:34:49Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:34:51Z"
+      completed_at: "2026-11-16T11:34:51Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-search-feedback-tests"
@@ -3080,15 +3080,15 @@ tasks:
     purpose: "Render git history as a bounded terminal graph without model-evidence framing."
     expected_outcome: "gitGraph renders a bounded commit/branch graph; over-complex graphs are resource rejections."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "blad-mermaid-tree-mindmap-implement-code"
     requirements:
       - "REQUIREMENTS.md#R-037"
     timestamps:
       created_at: "2026-11-10T21:00:00Z"
-      updated_at: "2026-11-10T21:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:40:36Z"
+      completed_at: "2026-11-16T11:40:36Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-mermaid-structured-text-gantt-timeline-journey-kanban"
@@ -3098,15 +3098,15 @@ tasks:
     purpose: "Render schedule/queue diagrams as useful bounded terminal text."
     expected_outcome: "Each admitted family renders a bounded projection; over-complex input is a resource rejection; Merman framing never reaches the default output."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "blad-mermaid-tree-mindmap-implement-code"
     requirements:
       - "REQUIREMENTS.md#R-037"
     timestamps:
       created_at: "2026-11-10T21:00:00Z"
-      updated_at: "2026-11-10T21:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T11:47:31Z"
+      completed_at: "2026-11-16T11:47:31Z"
     blocked_reason: null
     recovery_state: null
   - id: "blad-mermaid-structured-text-data-charts"
@@ -3116,14 +3116,14 @@ tasks:
     purpose: "Reach the goal of rendering as much Mermaid as makes sense in a terminal, family by family, with clean bounded output."
     expected_outcome: "Admitted data-chart families render bounded clean projections; Merman framing is never the default output."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "blad-mermaid-tree-mindmap-implement-code"
     requirements:
       - "REQUIREMENTS.md#R-037"
     timestamps:
       created_at: "2026-11-10T21:00:00Z"
-      updated_at: "2026-11-10T21:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T12:15:46Z"
+      completed_at: "2026-11-16T12:15:46Z"
     blocked_reason: null
     recovery_state: null

@@ -81,3 +81,155 @@ This prevents injection of terminal control sequences or bidirectional text conf
 | Implicit launches | None found | Extraction is passive; navigation is caller-initiated |
 | Email recognition | Lenient | 64-char local part heuristic; no domain validation |
 | Scheme handling | Conservative | `www.` → `https://`; `http://` preserved; no enforcement |
+
+## 7. HTML Projection Security Audit
+
+**Date:** 2026-01-15
+**Scope:** Source-only inspection of `blad/src/html.rs` and `blad/tests/html.rs`. No runtime execution, fuzzing, or network interaction.
+
+### 7.1 Parser Bounds
+
+- Tag names validated: must start with ASCII alphabetic, followed by alphanumeric or hyphen
+- Attribute syntax validated: name, optional `=` and quoted/unquoted value
+- Malformed tags (missing `>`, invalid syntax) treated as literal text, not parsed
+- Stack depth bounded to 64 nested style tags
+- Raw elements (`script`, `style`, `textarea`) use case-insensitive close tag search
+- Comment handling: `<!--` ... `-->` recognized; incomplete comments treated as literal text
+- Tokenization handles quoted attributes with embedded `>` and `<`
+
+### 7.2 Malformed Input Handling
+
+- Unmatched closing tags: treated as literal text, do not pop stack
+- Unbalanced nesting: content preserved, extra closers become literal text
+- Missing attribute quotes: `attributes()` fails, tag becomes literal text
+- Incomplete tags: `token_end()` returns None, text becomes literal
+- Double `<` (`<<`) causes `token_end()` to return None, treated as literal
+- Empty or whitespace-only tag content: preserved as-is
+
+### 7.3 Active-Content Isolation
+
+- No script execution: `<script>` content kept as literal text
+- No style interpretation: `<style>` content kept as literal text
+- No DOM manipulation: pure text-to-terminal transformation
+- Style tags (`b`, `i`, `s`, `code`, etc.) map to terminal text attributes only
+- `<br>` and `<hr>` produce terminal newlines/rules, not HTML elements
+- No CSS parsing or application
+- No JavaScript evaluation
+
+### 7.4 Entity and Control Character Handling
+
+- Named entities: `amp`, `lt`, `gt`, `quot`, `apos`, `nbsp` decoded
+- Numeric entities: decimal (`&#65;`) and hex (`&#x41;`) decoded
+- Long zero-padded numeric entities handled (tested with 512 leading zeros)
+- Invalid entities: remain as source text
+- NUL character: filtered from decoded entities
+- Surrogate codepoints (U+D800–U+DFFF): filtered
+- Out-of-range codepoints (> U+10FFFF): filtered
+- Control characters in decoded entities: pass through (e.g., `&#27;` → ESC)
+
+### 7.5 Resource Fetching and Execution
+
+- No network calls: no HTTP requests, no URL fetching
+- No file operations: no file reads or writes
+- No process spawning: no `exec`, `spawn`, or similar
+- No external tool invocation
+- Pure in-memory text transformation
+
+### 7.6 Evidence Limits
+
+- No runtime testing, fuzzing, or network interaction performed
+- No inspection of downstream navigation code
+- Tests reviewed but not executed
+- No verification of terminal emulator behavior for decoded control characters
+- No inspection of browser rendering comparison
+
+### 7.7 Findings Summary
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Parser bounds | Well-defined | Clear validation rules; malformed input becomes literal text |
+| Malformed input | Conservative | Content preserved; no silent dropping or crashes |
+| Active-content isolation | Strong | Script/style/textarea contents kept as literal text |
+| Entity handling | Robust | Wide range of entities decoded; invalid ones preserved |
+| Control characters | Permissive | Decoded entities can produce control characters (e.g., ESC) |
+| Resource fetching | None | Pure text transformation; no I/O or execution |
+| Stack depth | Bounded | 64-level limit prevents unbounded nesting |
+
+## 8. Definition List Handling Audit
+
+**Scope:** Source-only inspection of `blad/src/markdown.rs` definition list normalization and rendering. No runtime execution, fuzzing, or network interaction.
+
+### 8.1 Normalization Bounds
+
+The `normalize_definition_lists()` function preprocesses source before parsing:
+
+- Converts `term\n  definition` to `term\n  : definition` (adds colon separator required by pulldown-cmark)
+- Handles multiple consecutive terms before definitions
+- Handles multiple definitions per term (separated by blank lines)
+- Skips frontmatter blocks (between `---` delimiters)
+- Leaves 4+ space indented lines unchanged (code block detection)
+- Detects ordered list items via digit-dot prefix to avoid false positives
+
+### 8.2 Input Bounds
+
+- No explicit length limits on terms or definitions
+- No nesting depth limit (relies on pulldown-cmark's parser)
+- Blank lines between term and definition are consumed
+- Lines with 4+ spaces of indentation are excluded (treated as code)
+- Block element markers (`#`, `- `, `* `, `>`, etc.) exclude a line from being a term
+
+### 8.3 Resource Use
+
+- `normalize_definition_lists()` allocates a new `String` with capacity equal to input length
+- Lines are processed in a single pass with lookahead
+- No unbounded recursion or stack growth
+- Memory use is O(input size) for the normalized string
+
+### 8.4 Control Character Handling
+
+- Input is passed through `inert_source()` before normalization, which:
+  - Strips `\r` before `\n`
+  - Escapes control characters (except `\n`, `\t`) as `\u{xxxx}`
+  - Escapes bidirectional override characters (U+202A–U+202E, U+2066–U+2069)
+- Normalization operates on the inert source, so control characters are already escaped
+- No additional control character handling in the normalization step
+
+### 8.5 Source Range Handling
+
+- Parser events include byte ranges for each element
+- Definition list events (`DefinitionList`, `DefinitionListTitle`, `DefinitionListDefinition`) include ranges
+- Ranges are used for rule style detection but not specifically for definition list layout
+- No range validation specific to definition lists
+
+### 8.6 Rendering Behavior
+
+- `DefinitionList` start: blank line before (unless at document start), finish inline
+- `DefinitionListTitle`: bold styling, finish inline, newline after
+- `DefinitionListDefinition`: 2-space indent, finish inline, newline after
+- `DefinitionList` end: blank line after
+- Inline writer width tracking is reset at each definition list boundary
+
+### 8.7 Fallible Output
+
+- All write operations return `std::io::Result` and are propagated
+- No silent truncation or error suppression
+- Write failures abort rendering immediately
+
+### 8.8 Evidence Limits
+
+- No runtime testing, fuzzing, or network interaction performed
+- Tests reviewed but not executed
+- No inspection of pulldown-cmark's internal definition list parsing
+- No verification of edge cases in normalization (e.g., very long terms, Unicode in terms)
+- No inspection of downstream navigation code
+
+### 8.9 Findings Summary
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Normalization bounds | Well-defined | Clear term/definition detection; frontmatter and code blocks excluded |
+| Input bounds | Open | No length limits; relies on parser for nesting depth |
+| Resource use | Linear | O(input size) memory; single-pass processing |
+| Control handling | Present | `inert_source()` applied before normalization |
+| Source ranges | Included | Parser provides ranges; not used for DL-specific layout |
+| Fallible output | Yes | All writes return Result; failures propagate |
