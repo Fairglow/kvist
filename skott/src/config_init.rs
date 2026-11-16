@@ -1,12 +1,16 @@
 //! Explicit, offline creation of portable Skott configuration.
 
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::config::{ModelProvider, SCHEMA_VERSION, resolve_working_directory};
 use crate::error::{Error, Result, io_error};
+
+const CONVERSION_METADATA: &str = ".kvist/conversion.json";
 
 #[derive(Serialize)]
 struct InitialConfig {
@@ -41,6 +45,41 @@ const STARTER: &str = r#"
 # skott --init-config --model NAME --registry /absolute/path/providers.toml
 "#;
 
+/// Validates conversion metadata if present, ensuring it is well-formed JSON
+/// with a non-link-like source path.
+fn validate_conversion_metadata(project: &Path) -> Result<()> {
+    let metadata_path = project.join(CONVERSION_METADATA);
+    if !metadata_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&metadata_path).map_err(|source| {
+        io_error(
+            "read conversion metadata",
+            Some(&metadata_path.to_string_lossy()),
+            source,
+        )
+    })?;
+
+    let metadata: Value = serde_json::from_str(&content).map_err(|source| {
+        Error::Config {
+            path: Some(metadata_path.to_string_lossy().to_string()),
+            reason: format!("malformed conversion metadata: {source}"),
+        }
+    })?;
+
+    if let Some(source) = metadata.get("source").and_then(Value::as_str) {
+        if source.starts_with("../") || source.starts_with("./") || source.starts_with("/") {
+            return Err(Error::Config {
+                path: Some(metadata_path.to_string_lossy().to_string()),
+                reason: format!("conversion source is link-like: {source}"),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 /// Creates a private configuration atomically, never replacing a destination.
 ///
 /// The destination parent must exist. `model` selects an enabled native shared
@@ -53,6 +92,7 @@ pub fn create(
     registry: Option<&Path>,
 ) -> Result<()> {
     let project = resolve_working_directory(project)?;
+    validate_conversion_metadata(&project)?;
     let mut config = InitialConfig {
         schema_version: SCHEMA_VERSION,
         default_provider: ModelProvider::LlamaServer,

@@ -9,7 +9,8 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use skott::{
-    Cli, Error, RunLimits, ToolProfile, config::Config, init_logging, tui, tui::Overrides,
+    Cli, Error, RunLimits, ToolProfile, config::Config, init_logging, project_review, tui,
+    tui::Overrides,
 };
 
 fn main() -> ExitCode {
@@ -114,6 +115,72 @@ fn run() -> skott::Result<ExitCode> {
     if cli.list_models {
         return list_models(&config_path, cli.registry.as_deref())
             .map_err(|reason| Error::Config { path: None, reason });
+    }
+
+    // Project document review is a standalone command that operates on
+    // governed paths without requiring model configuration.
+    if cli.project_review {
+        let project_dir = match cli.cwd.clone() {
+            Some(dir) => dir,
+            None => std::env::current_dir().map_err(|e| Error::Io {
+                operation: "resolve current directory".to_string(),
+                path: None,
+                source: e,
+            })?,
+        };
+
+        println!("Project document review for: {}", project_dir.display());
+        println!("Governed documents:");
+        for doc in project_review::GOVERNED_DOCUMENTS {
+            println!("  - {}", doc);
+        }
+        println!("ADR directory: {}", project_review::ADRS_DIR);
+        println!();
+
+        let documents = project_review::discover_governed_documents(&project_dir)?;
+        println!("Discovered {} governed document(s):", documents.len());
+        for doc in &documents {
+            let status = if doc.exists { "exists" } else { "missing" };
+            println!("  - {} ({})", doc.path, status);
+        }
+        println!();
+
+        let statuses = project_review::list_acceptance_status(&project_dir, &documents)?;
+        println!("Acceptance status:");
+        for (path, status) in &statuses {
+            match status {
+                project_review::AcceptanceStatus::Accepted { receipt_id } => {
+                    println!("  - {}: accepted ({})", path, receipt_id);
+                }
+                project_review::AcceptanceStatus::Pending => {
+                    println!("  - {}: pending", path);
+                }
+                project_review::AcceptanceStatus::OptedOut { reason } => {
+                    println!("  - {}: opted out ({})", path, reason);
+                }
+            }
+        }
+        println!();
+
+        // Accept all existing governed documents.
+        let existing_docs: Vec<_> = documents
+            .iter()
+            .filter(|d| d.exists)
+            .cloned()
+            .collect();
+        if !existing_docs.is_empty() {
+            let receipt = project_review::accept_project_documents(
+                &project_dir,
+                &existing_docs,
+                "project document review",
+                None,
+            )?;
+            println!("Accepted {} document(s) with receipt: {}", existing_docs.len(), receipt.id);
+        } else {
+            println!("No existing governed documents to accept.");
+        }
+
+        return Ok(ExitCode::SUCCESS);
     }
 
     let config = Config::load_with_registry(&config_path, cli.registry.as_deref())?;

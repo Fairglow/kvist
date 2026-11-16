@@ -1,16 +1,16 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:3086d1bd8a18b675b1468721f662518abda2fa56473e02eaa032b4cc61d3fda4"
-  contract_revision: "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03"
-  design_revision: "sha256:0c1cfae82b7f2f6819b5a1898fc15a1608e08b91c738fb405507e0b2b458f9fb"
+  requirements_revision: "sha256:fe7dfd69eef4591c32f0e6bb88784844fb88927fa99888baeacdc4667a288481"
+  contract_revision: "sha256:3cebd1db66f0018d9d8a654c9c3b95f39d752cca82ecfec77de4bd596f7aecd8"
+  design_revision: "sha256:5167364da6dbaf7ffe249c83fbc0f7b7af51f210b528fbf105b31cb03275342c"
   parent_contract: null
   revalidation:
-    state: stale
-    checked_at: "2026-11-06T13:12:02Z"
-    stale_since: "2026-11-06T06:54:17Z"
-    causes: [{"kind": "component-requirements-revision-changed", "path": "REQUIREMENTS.md", "expected_revision": "sha256:3086d1bd8a18b675b1468721f662518abda2fa56473e02eaa032b4cc61d3fda4", "observed_revision": "sha256:02b7979e6f81e2815f5503538266d13034718471afe061ee55f71a37a7075ed5"}, {"kind": "component-contract-revision-changed", "path": "CONTRACT.md", "expected_revision": "sha256:4f709324b457031afa897399c8b7cf03e0c079489f24825fe3ce4c191f3bda03", "observed_revision": "sha256:4bec0afba47fcba5472c45f6a3b225cf7920bad53eacf3926f90205b36676f62"}, {"kind": "component-design-revision-changed", "path": "DESIGN.md", "expected_revision": "sha256:0c1cfae82b7f2f6819b5a1898fc15a1608e08b91c738fb405507e0b2b458f9fb", "observed_revision": "sha256:a21376824ea18202c8dbe373530fc9f92b44cc2e01a562ba610a8ac8b55bb93c"}]
+    state: current
+    checked_at: "2026-11-15T09:28:47Z"
+    stale_since: null
+    causes: []
 tasks:
-  - id: native-admission-write-tests
+  - id: "native-admission-write-tests"
     title: "write_tests: exact native Git check admission"
     description: "Cover actual offline Git admission and missing-source failure despite a matching lock-only receipt."
     context: "Human-requested safe admission; explicit scoped advisory exception. Actual local Git --check regression failed before adapter changes with UnsupportedCacheSource."
@@ -19,9 +19,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"]
-    timestamps: {created_at: "2026-11-07T22:04:00Z", updated_at: "2026-11-07T22:05:53Z", completed_at: "2026-11-07T22:05:53Z"}
-  - id: native-admission-implement-code
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"
+    timestamps:
+      created_at: "2026-11-07T22:04:00Z"
+      updated_at: "2026-11-07T22:05:53Z"
+      completed_at: "2026-11-07T22:05:53Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-admission-implement-code"
     title: "implement_code: explicit bounded native source admission"
     description: "Use sources canonical fast path and shared admit for actual Git/alternate checks, with truthful host authority diagnostics and no acquisition or receipt minting."
     context: "All 6 affected vendoring_cli tests pass, including actual Git admission and missing Git data despite a matching native receipt; lock/receipt unchanged. Strict Skott all-target Clippy, scoped rustfmt and whitespace pass using .skott-admission-target with integrated /opt/target/debug/galla-runner. Canonical checks remain process-free; only explicitly disclosed Git/alternate metadata admission resolves host Cargo. Provisioning already uses shared native admission and remains missing-only. Live runtime unchanged; no source-content attestation or global Git blocker. Independent source/security/comparison remains pending."
@@ -29,10 +35,17 @@ tasks:
     expected_outcome: "Affected CLI regressions and scoped lint pass."
     kind: implementation
     status: completed
-    depends_on: [native-admission-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"]
-    timestamps: {created_at: "2026-11-07T22:04:00Z", updated_at: "2026-11-07T22:05:53Z", completed_at: "2026-11-07T22:05:53Z"}
-  - id: native-admission-security-audit
+    depends_on:
+      - "native-admission-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"
+    timestamps:
+      created_at: "2026-11-07T22:04:00Z"
+      updated_at: "2026-11-07T22:05:53Z"
+      completed_at: "2026-11-07T22:05:53Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-admission-security-audit"
     title: "security_audit: independently observe native admission"
     description: "Parent-arranged source/security observation of explicit host metadata authority, safe mapping and acquisition-free failure."
     context: "No implementer certification or IMPL updates."
@@ -40,10 +53,17 @@ tasks:
     expected_outcome: "Independent scoped observations for arbitration."
     kind: security-audit
     status: completed
-    depends_on: [native-admission-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"]
-    timestamps: {created_at: "2026-11-07T22:04:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
-  - id: native-admission-compliance-review
+    depends_on:
+      - "native-admission-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"
+    timestamps:
+      created_at: "2026-11-07T22:04:00Z"
+      updated_at: "2026-11-07T23:21:51Z"
+      completed_at: "2026-11-07T23:21:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-admission-compliance-review"
     title: "compliance_review: compare source admission evidence"
     description: "Parent-arranged separate source-blind comparison of admission intent, independent observations and attributed tests."
     context: "Independent records are linked from IMPL.md; evidence limits and historical arbitration remain, with no acceptance or fabricated receipt."
@@ -51,10 +71,17 @@ tasks:
     expected_outcome: "Independent comparison and concrete evidence limits."
     kind: compliance-review
     status: completed
-    depends_on: [native-admission-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"]
-    timestamps: {created_at: "2026-11-07T22:04:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
-  - id: native-cache-write-tests
+    depends_on:
+      - "native-admission-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-NATIVE-SOURCE-ADMISSION"
+    timestamps:
+      created_at: "2026-11-07T22:04:00Z"
+      updated_at: "2026-11-07T23:21:51Z"
+      completed_at: "2026-11-07T23:21:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-write-tests"
     title: "write_tests: native Cargo cache workspace resources"
     description: "Cover read-only data mounts, credentials/admin privacy, reuse, live roots, missing sources and real offline compilation."
     context: "Approved native-cache reuse; explicit local advisory exception, no acceptance/receipts. Two native resource/wrapper assertions failed before production changes. The CLI fixture was added before adapter edits; its later assertions were corrected to permit the shared provider's minimal native receipt/lock, not legacy vendor state."
@@ -63,9 +90,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T21:48:00Z", completed_at: "2026-11-07T21:48:00Z"}
-  - id: native-cache-implement-code
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:38:00Z"
+      updated_at: "2026-11-07T21:48:00Z"
+      completed_at: "2026-11-07T21:48:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-implement-code"
     title: "implement_code: shared native Cargo cache resources"
     description: "Use shared cache view/provision, private administration, native source mode and refreshed read-only registry/Git roots. Normalize all directly affected current intent/README default-source claims under ADR 0020, leaving prior IMPL historical; remove only owned validation targets after integrated-runner availability."
     context: "18 Rust resource unit, 13 sandbox-selected unit, 24 non-checkout Rust runtime and 6 native cache CLI tests pass; shared Sav 3 script tests pass. Actual registry/Git compilation, private admin writes, source-root replacement/failure/restoration and denied-network/privacy covered. Strict Skott/Sav all-target Clippy, scoped rustfmt and diff whitespace pass. All Cargo checks offline/locked using .skott-native-target; parent-arranged independent reviews remain pending. No runtime operator writes, package copies/inventories or automatic acquisition; explicit native provisioning retains the provider's minimal receipt/operation lock in owned test projects."
@@ -73,10 +106,17 @@ tasks:
     expected_outcome: "Focused regressions and feasible native runtime trial pass."
     kind: implementation
     status: completed
-    depends_on: [native-cache-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T21:48:00Z", completed_at: "2026-11-07T21:48:00Z"}
-  - id: native-cache-security-audit
+    depends_on:
+      - "native-cache-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:38:00Z"
+      updated_at: "2026-11-07T21:48:00Z"
+      completed_at: "2026-11-07T21:48:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-security-audit"
     title: "security_audit: independently inspect native cache resources"
     description: "Parent-arranged independent observation/security review of mounts, private administration and refresh."
     context: "Implementer must not certify its own work or update IMPL."
@@ -84,10 +124,17 @@ tasks:
     expected_outcome: "Independent scoped observations for arbitration."
     kind: security-audit
     status: completed
-    depends_on: [native-cache-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
-  - id: native-cache-compliance-review
+    depends_on:
+      - "native-cache-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:38:00Z"
+      updated_at: "2026-11-07T23:21:51Z"
+      completed_at: "2026-11-07T23:21:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-compliance-review"
     title: "compliance_review: compare native cache intent"
     description: "Parent-arranged source-blind comparison with independent observations and attributed test evidence."
     context: "Independent records are linked from IMPL.md; nested repository-trial qualification and historical arbitration remain separate from scoped correspondence."
@@ -95,10 +142,17 @@ tasks:
     expected_outcome: "Independent comparison and concrete evidence limits."
     kind: compliance-review
     status: completed
-    depends_on: [native-cache-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T23:21:51Z", completed_at: "2026-11-07T23:21:51Z"}
-  - id: live-workspace-write-tests
+    depends_on:
+      - "native-cache-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:38:00Z"
+      updated_at: "2026-11-07T23:21:51Z"
+      completed_at: "2026-11-07T23:21:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "live-workspace-write-tests"
     title: "write_tests: live resources and unrestricted file sizes"
     description: "Pin streaming large files, live read continuation, resumable searches, atomic large-file edits, host resource refresh and native outside-write denial."
     context: "User-directed ADR 0019; explicit local advisory exception. Tests precede production changes."
@@ -107,9 +161,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"]
-    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:00:52Z", completed_at: "2026-11-07T13:00:52Z"}
-  - id: live-workspace-implement-code
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"
+    timestamps:
+      created_at: "2026-11-07T10:20:19Z"
+      updated_at: "2026-11-07T13:00:52Z"
+      completed_at: "2026-11-07T13:00:52Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "live-workspace-implement-code"
     title: "implement_code: one-way workspace tools"
     description: "Stream files, remove implicit freeze and manifest/lease gates, refresh live resources, use offline/unlocked workspace Cargo and OS-enforced scope."
     context: "Skott447/447 non-checkout regressions passed ea8825a2-646e-4645-9a93-32ff0cd2d08d; real isolation passed de3b0f3c-a2f9-4e04-a404-1bcddaa6d1ed and exclusive native checkout passed a16724be-0466-47d2-ba57-3ce6c055cdbf after adding only cached missing uuid1.29.1 to the live project vendor. Affected strict Clippy, workspace all-target check, formatting and matching release binaries passed. Retain bounded memory/results, optional guards and outside origin protection; installed launchers/existing sessions were not updated."
@@ -117,10 +177,17 @@ tasks:
     expected_outcome: "Focused and native regression tests pass without broad authority."
     kind: implementation
     status: completed
-    depends_on: [live-workspace-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"]
-    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:00:52Z", completed_at: "2026-11-07T13:00:52Z"}
-  - id: live-workspace-security-audit
+    depends_on:
+      - "live-workspace-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"
+    timestamps:
+      created_at: "2026-11-07T10:20:19Z"
+      updated_at: "2026-11-07T13:00:52Z"
+      completed_at: "2026-11-07T13:00:52Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "live-workspace-security-audit"
     title: "security_audit: independently observe one-way tools"
     description: "Derive scoped implementation observations from source/tests without intent, queue, old records, reviews or history."
     context: "Independent source-only-live-records excluded intent/queues/old repository IMPL/docs/reviews/chat/Git and ran no tests. Scoped observations and source-only follow-up for vendoring/inventory assertions are published in IMPL; finite refresh, nontransactional mutation and linked-root snapshot limits remain explicit. No implementer self-certification."
@@ -128,10 +195,17 @@ tasks:
     expected_outcome: "Persist independent observations and concrete limitations."
     kind: security-audit
     status: completed
-    depends_on: [live-workspace-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"]
-    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:17:34Z", completed_at: "2026-11-07T13:17:34Z"}
-  - id: live-workspace-compliance-review
+    depends_on:
+      - "live-workspace-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"
+    timestamps:
+      created_at: "2026-11-07T10:20:19Z"
+      updated_at: "2026-11-07T13:17:34Z"
+      completed_at: "2026-11-07T13:17:34Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "live-workspace-compliance-review"
     title: "compliance_review: compare one-way workspace evidence"
     description: "Separately compare intent with independent observations and attributed execution without raw source."
     context: "Separate source-blind-live-comparison read current intent and fresh independent records only, without source/tests/old repository IMPL/queues/Git/history/prior reviews. Scoped correspondence and policy-directed old-prose cleanup are published in IMPL. Lost-update qualification and external-linked snapshot coverage remain unresolved for explicit human arbitration; neither side was automatically changed to conceal them. Completed comparison is not acceptance; recorded revisions/revalidation remain unchanged."
@@ -139,10 +213,17 @@ tasks:
     expected_outcome: "Persist source-blind comparison and evidence limits."
     kind: compliance-review
     status: completed
-    depends_on: [live-workspace-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"]
-    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:21:23Z", completed_at: "2026-11-07T13:21:23Z"}
-  - id: tool-recovery-write-tests
+    depends_on:
+      - "live-workspace-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-LIVE-WORKSPACE"
+    timestamps:
+      created_at: "2026-11-07T10:20:19Z"
+      updated_at: "2026-11-07T13:21:23Z"
+      completed_at: "2026-11-07T13:21:23Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "tool-recovery-write-tests"
     title: "write_tests: useful bounded inspection"
     description: "Reproduce special-entry aborts and discarded scan results; cover exact bounds, partial pagination, narrowed recovery, sandbox execution and agent instructions."
     context: "User requested investigation of session-2026-11-07T09-38-11Z-3216821-1; explicit local advisory exception. Five regressions failed before repair (a4fb732b-1f07-4e66-bc72-0e93cc3a12ca); supplementary prerequisite presentation failed before its repair (6100a788-4e82-48cd-b50d-b7d29928e989)."
@@ -151,9 +232,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"]
-    timestamps: {created_at: "2026-11-07T09:49:56Z", updated_at: "2026-11-07T10:01:18Z", completed_at: "2026-11-07T10:01:18Z"}
-  - id: tool-recovery-implement-code
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"
+    timestamps:
+      created_at: "2026-11-07T09:49:56Z"
+      updated_at: "2026-11-07T10:01:18Z"
+      completed_at: "2026-11-07T10:01:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "tool-recovery-implement-code"
     title: "implement_code: diagnostic-driven recovery"
     description: "Count unopened special entries, retain bounded partial search matches and add exact narrowing guidance; replace overbroad agent restrictions with operation-specific recovery."
     context: "Final nextest f0a3ccc3-e546-4629-97eb-ec683be1a973 passed 67 selected tests; strict all-target Clippy, formatting and release build passed. Actual checkout discovery and bounded/narrowed search succeeded. No relaxed grants, acquisition, lock regeneration or replay; stale vendor readiness remains a build prerequisite."
@@ -161,10 +248,17 @@ tasks:
     expected_outcome: "Focused tests and actual sandbox recovery pass."
     kind: implementation
     status: completed
-    depends_on: [tool-recovery-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"]
-    timestamps: {created_at: "2026-11-07T09:49:56Z", updated_at: "2026-11-07T10:01:18Z", completed_at: "2026-11-07T10:01:18Z"}
-  - id: tool-recovery-security-audit
+    depends_on:
+      - "tool-recovery-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"
+    timestamps:
+      created_at: "2026-11-07T09:49:56Z"
+      updated_at: "2026-11-07T10:01:18Z"
+      completed_at: "2026-11-07T10:01:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "tool-recovery-security-audit"
     title: "security_audit: independently observe recovery"
     description: "Derive a scoped IMPL supplement from current source/tests without intent, queue, prior records, reviews, chat or history."
     context: "tool-recovery-source-observer independently observed current scoped source/test assertions; prerequisite-source-observer separately observed only the final error presentation amendment. Neither read intent/history, ran tests or established a deterministic high-confidence defect. IMPL retains race and model-behavior limits; no self-certification."
@@ -172,10 +266,17 @@ tasks:
     expected_outcome: "Persist attributed independent observations and discrepancies."
     kind: security-audit
     status: completed
-    depends_on: [tool-recovery-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"]
-    timestamps: {created_at: "2026-11-07T09:49:56Z", updated_at: "2026-11-07T10:01:18Z", completed_at: "2026-11-07T10:01:18Z"}
-  - id: tool-recovery-compliance-review
+    depends_on:
+      - "tool-recovery-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"
+    timestamps:
+      created_at: "2026-11-07T09:49:56Z"
+      updated_at: "2026-11-07T10:01:18Z"
+      completed_at: "2026-11-07T10:01:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "tool-recovery-compliance-review"
     title: "compliance_review: compare recovery evidence"
     description: "Separately compare scoped intent with independently observed behavior and test evidence without raw source."
     context: "Separate tool-recovery-source-blind-comparator reported correspondence and retained unconditional no-open wording versus concurrent substitution, cooperative/race and real-model evidence limits for arbitration. Its initial oversized IMPL read exposed older observation sections, excluded from comparison; strict record-scope isolation was not achieved. Persisted in IMPL without acceptance/certification."
@@ -183,10 +284,17 @@ tasks:
     expected_outcome: "Persist source-blind correspondence and finite evidence limits."
     kind: compliance-review
     status: completed
-    depends_on: [tool-recovery-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"]
-    timestamps: {created_at: "2026-11-07T09:49:56Z", updated_at: "2026-11-07T10:03:12Z", completed_at: "2026-11-07T10:03:12Z"}
-  - id: shared-area-write-tests
+    depends_on:
+      - "tool-recovery-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOL-RECOVERY"
+    timestamps:
+      created_at: "2026-11-07T09:49:56Z"
+      updated_at: "2026-11-07T10:03:12Z"
+      completed_at: "2026-11-07T10:03:12Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shared-area-write-tests"
     title: "write_tests: no vendor package copy"
     description: "Pin direct shared-directory grants, masked writable aliases, per-call ownership and lightweight checks."
     context: "User explicitly requests one shared area; deliberate local advisory exception."
@@ -195,9 +303,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
-  - id: shared-area-implement-code
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T00:05:25Z"
+      updated_at: "2026-11-07T01:03:30Z"
+      completed_at: "2026-11-07T01:03:30Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shared-area-implement-code"
     title: "implement_code: direct shared vendor view"
     description: "Remove package snapshots; retain only directory/lock identity and small runtime configuration with per-call read ownership."
     context: "Only the exact read-only vendor source may overlap the writable workspace; native masking remains required."
@@ -205,10 +319,17 @@ tasks:
     expected_outcome: "Native tooling uses the host shared tree without writable aliases."
     kind: implementation
     status: completed
-    depends_on: [shared-area-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
-  - id: shared-area-security-audit
+    depends_on:
+      - "shared-area-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T00:05:25Z"
+      updated_at: "2026-11-07T01:03:30Z"
+      completed_at: "2026-11-07T01:03:30Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shared-area-security-audit"
     title: "security_audit: direct shared vendor view"
     description: "Independently observe source grants, masking, reader lifetime and drift handling."
     context: "Source-only observation excludes intent, queue, old observations and history."
@@ -216,10 +337,17 @@ tasks:
     expected_outcome: "Persist bounded observations and concrete limitations."
     kind: security-audit
     status: completed
-    depends_on: [shared-area-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:03:30Z", completed_at: "2026-11-07T01:03:30Z"}
-  - id: shared-area-compliance-review
+    depends_on:
+      - "shared-area-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T00:05:25Z"
+      updated_at: "2026-11-07T01:03:30Z"
+      completed_at: "2026-11-07T01:03:30Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shared-area-compliance-review"
     title: "compliance_review: useful shared vendor view"
     description: "Compare scoped intent with independent observations and native evidence without raw source."
     context: "No acceptance/certification; retain finite performance and concurrency evidence."
@@ -227,97 +355,158 @@ tasks:
     expected_outcome: "Persist source-blind comparison with limits."
     kind: compliance-review
     status: completed
-    depends_on: [shared-area-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
-    timestamps: {created_at: "2026-11-07T00:05:25Z", updated_at: "2026-11-07T01:06:47Z", completed_at: "2026-11-07T01:06:47Z"}
+    depends_on:
+      - "shared-area-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-07T00:05:25Z"
+      updated_at: "2026-11-07T01:06:47Z"
+      completed_at: "2026-11-07T01:06:47Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "scope-reliability-write-tests"
     title: "write_tests: first-tool preflight budget"
     description: "Pin preparation beyond 30 seconds, exact and smaller effective budgets, unchanged stage/cancellation behavior and fresh escape detection; exercise initial Git inspection and native root listing."
     context: "The reported private journal records zero executed tools and workspace_scope timeout at 30029 ms; warm actual-checkout inspection sees 225862 entries and 9890 directories. On 2026-11-06T22:09Z, all three new regressions failed before production changes: two 45-second simulated elapsed scans hit the old 30-second guard, and a requested 1-ms budget incorrectly returned a request. Native timestamps for the four scope-reliability entries were initialized during the 2026-11-06T22:30:46Z precommit schema repair; earlier execution chronology remains in their contexts and IMPL."
     purpose: "Expose the hard-coded preparation/execution budget mismatch without weakening confinement."
-    kind: test
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"]
-    depends_on: []
-    status: completed
     expected_outcome: "New beyond-30-second and smaller-budget regressions fail before production changes."
-    timestamps: {created_at: "2026-11-06T22:30:46Z", updated_at: "2026-11-06T22:30:46Z", completed_at: "2026-11-06T22:30:46Z"}
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"
+    timestamps:
+      created_at: "2026-11-06T22:30:46Z"
+      updated_at: "2026-11-06T22:30:46Z"
+      completed_at: "2026-11-06T22:30:46Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "scope-reliability-implement-code"
     title: "implement_code: bound resource-aligned preflight"
     description: "Use the existing requested tool wall time capped at 120 seconds across preparation, with effective-budget and stage-duration diagnostics."
     context: "Resource-aligned capped preparation and total/stage budget diagnostics implemented. Three red-first regressions and exact-boundary coverage pass; nextest 30d33440-cc1b-4822-94dc-5a258ade31bb passed all 344 selected tests, including initial Git inspection, native root listing and existing offline nested Cargo on the actual checkout. Three warm scans covered 225862 entries and 9890 directories in 101/64/82 ms; original cold contention remains unproven. Strict scoped Clippy, formatting, whitespace and release build passed. Subsequent run 27d66dd7-3ae1-4054-95f5-37ca97ee2bb0 passed five actual-checkout repetitions with the configured production runner. Only installed Skott was atomically updated and byte/version verified at 2026-11-06T22:16:55Z; running sessions were not stopped."
     purpose: "Allow safe preparation beyond the unrelated 30-second limit without unlimited waits."
-    kind: implementation
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"]
-    depends_on: ["scope-reliability-write-tests"]
-    status: completed
     expected_outcome: "Focused regressions and enforced actual-checkout initial tools pass."
-    timestamps: {created_at: "2026-11-06T22:30:46Z", updated_at: "2026-11-06T22:30:46Z", completed_at: "2026-11-06T22:30:46Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "scope-reliability-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"
+    timestamps:
+      created_at: "2026-11-06T22:30:46Z"
+      updated_at: "2026-11-06T22:30:46Z"
+      completed_at: "2026-11-06T22:30:46Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "scope-reliability-security-audit"
     title: "security_audit: observe preflight reliability"
     description: "Independently inspect scoped source/tests and derive an IMPL supplement without intent, queue, prior records, reviews or history."
     context: "Fresh scope-budget-source-observer read only scoped current source/test assertions, excluding intent, queues, prior records/reviews, chat/history and peers. It executed no tests and found no high-confidence scoped correctness/security defect. Its independent IMPL supplement records full traversal, bounded/shared timing and workers, payload-free diagnostics and cooperative/mutable-filesystem limits."
     purpose: "Retain independent source-derived observations rather than self-certify the repair."
-    kind: security-audit
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"]
-    depends_on: ["scope-reliability-implement-code"]
-    status: completed
     expected_outcome: "Persist attributed scoped observations and evidence limitations."
-    timestamps: {created_at: "2026-11-06T22:30:46Z", updated_at: "2026-11-06T22:30:46Z", completed_at: "2026-11-06T22:30:46Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "scope-reliability-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"
+    timestamps:
+      created_at: "2026-11-06T22:30:46Z"
+      updated_at: "2026-11-06T22:30:46Z"
+      completed_at: "2026-11-06T22:30:46Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "scope-reliability-compliance-review"
     title: "compliance_review: compare preflight reliability evidence"
     description: "Separately compare scoped intent with independent observations and attributed test evidence, without source access."
     context: "Separate scope-budget-source-blind-comparator compared only scoped intent with fresh independent observations and attributed test evidence. No concrete contradiction established; exact-case itemization, absent-cache/replay/fallback observation limits and historical cold contention remain explicitly unverified. Synthetic elapsed tests are not physical prolonged scans. Comparison/limits are persisted in IMPL for human arbitration, not acceptance, certification or a fabricated receipt."
     purpose: "Retain discrepancies and evidence limits for human arbitration."
-    kind: compliance-review
-    requirements: ["REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"]
-    depends_on: ["scope-reliability-security-audit"]
-    status: completed
     expected_outcome: "Record source-blind comparison without acceptance or certification."
-    timestamps: {created_at: "2026-11-06T22:30:46Z", updated_at: "2026-11-06T22:30:46Z", completed_at: "2026-11-06T22:30:46Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "scope-reliability-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-SCOPE-PREFLIGHT-RELIABILITY"
+    timestamps:
+      created_at: "2026-11-06T22:30:46Z"
+      updated_at: "2026-11-06T22:30:46Z"
+      completed_at: "2026-11-06T22:30:46Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "offline-dependencies-write-tests"
     title: "write_tests: shared offline Rust dependencies"
     description: "RUN-REQ-OFFLINE-DEPENDENCIES: standalone flags, read-only checks, transactions and real offline Git dependency sandbox."
     context: "Human requested standalone Rust-first offline dependency provisioning and complete native Rust toolchain verification. Timeout and snapshot-growth regressions failed before repairs; final affected suite passed 389 cases and the final byte guard passed all 15 Rust-environment units. Reopened timestamp bookkeeping reconciled at actual 2026-11-06T23:34:10Z; detailed chronology and finite I/O evidence remain in IMPL."
     purpose: "Verify explicit acquisition and immutable network-denied consumption."
-    kind: test
-    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
-    depends_on: []
-    status: completed
     expected_outcome: "New vendoring_cli regressions fail on unsupported --vendor before production changes."
-    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-06T20:10:03Z"
+      updated_at: "2026-11-06T23:34:10Z"
+      completed_at: "2026-11-06T23:34:10Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "offline-dependencies-implement-code"
     title: "implement_code: shared offline Rust dependencies"
     description: "Integrate the common provider, early explicit operator command and safe immutable source resolver."
     context: "Rust-first shared provider with operator-only acquisition."
     purpose: "Keep Skott independent of maerg while consolidating mechanics."
-    kind: implementation
-    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
-    depends_on: ["offline-dependencies-write-tests"]
-    status: completed
     expected_outcome: "Standalone provisioning and subsequent offline sandbox consumption pass."
-    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "offline-dependencies-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-06T20:10:03Z"
+      updated_at: "2026-11-06T23:34:10Z"
+      completed_at: "2026-11-06T23:34:10Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "offline-dependencies-security-audit"
     title: "security_audit: shared offline Rust dependencies"
     description: "Independently inspect acquisition authority, input bounds, publication and sandbox resolver behavior."
     context: "Filesystem/package inputs and subprocess output are untrusted. Independent source-only main observations and narrow final snapshot-bound amendments are retained in IMPL; no broad certification."
     purpose: "Avoid self-certification of authority and integrity."
-    kind: security-audit
-    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
-    depends_on: ["offline-dependencies-implement-code"]
-    status: completed
     expected_outcome: "Record independent scoped findings without self-certification."
-    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:34:10Z", completed_at: "2026-11-06T23:34:10Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "offline-dependencies-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-06T20:10:03Z"
+      updated_at: "2026-11-06T23:34:10Z"
+      completed_at: "2026-11-06T23:34:10Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "offline-dependencies-compliance-review"
     title: "compliance_review: shared offline Rust dependencies"
     description: "Source-only observation followed by separate source-blind comparison with local intent."
     context: "Separate rust-source-blind-comparator found scoped correspondence and retained the older representative-hardware 30-second performance target versus measured shared-host startup/180-second budget for human arbitration, plus finite native/race coverage limits. Report is in IMPL; no acceptance or certification."
     purpose: "Retain discrepancies and evidence limits for human arbitration."
-    kind: compliance-review
-    requirements: ["REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"]
-    depends_on: ["offline-dependencies-security-audit"]
-    status: completed
     expected_outcome: "Record discrepancies and evidence limitations explicitly."
-    timestamps: {created_at: "2026-11-06T20:10:03Z", updated_at: "2026-11-06T23:37:01Z", completed_at: "2026-11-06T23:37:01Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "offline-dependencies-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-OFFLINE-DEPENDENCIES"
+    timestamps:
+      created_at: "2026-11-06T20:10:03Z"
+      updated_at: "2026-11-06T23:37:01Z"
+      completed_at: "2026-11-06T23:37:01Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "standalone-write-tests"
     title: "write_tests: standalone bootstrap and root discovery"
     description: "Reproduce missing-config guidance and initialization failures, exact-root mapping, and sandbox discovery in a directory without Kvist artifacts."
@@ -327,8 +516,12 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"]
-    timestamps: {created_at: "2026-11-06T15:32:41Z", updated_at: "2026-11-06T20:38:01Z", completed_at: "2026-11-06T20:38:01Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"
+    timestamps:
+      created_at: "2026-11-06T15:32:41Z"
+      updated_at: "2026-11-06T20:38:01Z"
+      completed_at: "2026-11-06T20:38:01Z"
     blocked_reason: null
     recovery_state: null
   - id: "standalone-implement-code"
@@ -339,9 +532,14 @@ tasks:
     expected_outcome: "Focused regressions, actual native sandbox root discovery and related startup behavior pass."
     kind: implementation
     status: completed
-    depends_on: ["standalone-write-tests"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"]
-    timestamps: {created_at: "2026-11-06T15:32:41Z", updated_at: "2026-11-06T15:39:08Z", completed_at: "2026-11-06T15:39:08Z"}
+    depends_on:
+      - "standalone-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"
+    timestamps:
+      created_at: "2026-11-06T15:32:41Z"
+      updated_at: "2026-11-06T15:39:08Z"
+      completed_at: "2026-11-06T15:39:08Z"
     blocked_reason: null
     recovery_state: null
   - id: "standalone-security-audit"
@@ -352,9 +550,14 @@ tasks:
     expected_outcome: "Attributed scoped observations and limitations persist in IMPL.md."
     kind: security-audit
     status: completed
-    depends_on: ["standalone-implement-code"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"]
-    timestamps: {created_at: "2026-11-06T15:32:41Z", updated_at: "2026-11-06T15:39:08Z", completed_at: "2026-11-06T15:39:08Z"}
+    depends_on:
+      - "standalone-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"
+    timestamps:
+      created_at: "2026-11-06T15:32:41Z"
+      updated_at: "2026-11-06T15:39:08Z"
+      completed_at: "2026-11-06T15:39:08Z"
     blocked_reason: null
     recovery_state: null
   - id: "standalone-compliance-review"
@@ -365,9 +568,14 @@ tasks:
     expected_outcome: "A separate scoped comparison and its limits are recorded."
     kind: compliance-review
     status: completed
-    depends_on: ["standalone-security-audit"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"]
-    timestamps: {created_at: "2026-11-06T15:32:41Z", updated_at: "2026-11-06T15:42:07Z", completed_at: "2026-11-06T15:42:07Z"}
+    depends_on:
+      - "standalone-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-STANDALONE-BOOTSTRAP"
+    timestamps:
+      created_at: "2026-11-06T15:32:41Z"
+      updated_at: "2026-11-06T15:42:07Z"
+      completed_at: "2026-11-06T15:42:07Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-write-tests"
@@ -376,11 +584,15 @@ tasks:
     context: "Three adapter generation tests plus shared red-first regressions cover native recovery/exception. Full-suite queue fixture reproduced detector interruption before required 128-slot fill."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Required behavioral regressions fail against the prior implementation."
-    kind: "test"
-    status: "completed"
+    kind: test
+    status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:21:22Z", "completed_at": "2026-11-06T09:21:22Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T09:21:22Z"
+      completed_at: "2026-11-06T09:21:22Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-implement-code"
@@ -389,11 +601,16 @@ tasks:
     context: "Default-on shared native forwarding and narrow builder exception; 50 integration cases and strict all-target lint passed. Backpressure fixture uses novel counters without weakening bounds."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
-    kind: "implementation"
-    status: "completed"
-    depends_on: ["resilience-p2-write-tests"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:21:22Z", "completed_at": "2026-11-06T09:21:22Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "resilience-p2-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T09:21:22Z"
+      completed_at: "2026-11-06T09:21:22Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-security-audit"
@@ -402,11 +619,16 @@ tasks:
     context: "Independent local source-only adapter observation and scoped security review recorded; no vulnerabilities/high-confidence generation adapter defects found."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
-    kind: "security-audit"
-    status: "completed"
-    depends_on: ["resilience-p2-implement-code"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:21:22Z", "completed_at": "2026-11-06T09:21:22Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "resilience-p2-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T09:21:22Z"
+      completed_at: "2026-11-06T09:21:22Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p2-compliance-review"
@@ -415,11 +637,16 @@ tasks:
     context: "Separate source-blind comparator found no established adapter contradiction; assertion/access limits recorded in IMPL, no acceptance/certification."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
-    kind: "compliance-review"
-    status: "completed"
-    depends_on: ["resilience-p2-security-audit"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T09:21:22Z", "completed_at": "2026-11-06T09:21:22Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "resilience-p2-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T09:21:22Z"
+      completed_at: "2026-11-06T09:21:22Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-write-tests"
@@ -428,11 +655,16 @@ tasks:
     context: "Initial progress regressions plus nine host identity/rebinding/cancellation and three sandbox prepared-scope red failures reproduced; exact new cases independently green."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Required behavioral regressions fail against the prior implementation."
-    kind: "test"
-    status: "completed"
-    depends_on: ["resilience-p2-compliance-review"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:49:40Z", "completed_at": "2026-11-06T10:49:40Z"}
+    kind: test
+    status: completed
+    depends_on:
+      - "resilience-p2-compliance-review"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T10:49:40Z"
+      completed_at: "2026-11-06T10:49:40Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-implement-code"
@@ -441,11 +673,16 @@ tasks:
     context: "Validated native byte/prior-read progress, bounded unambiguous pending identity, cancellation, prepared host/sandbox scope binding. Independent123 prefinal+15 final selected cases pass; strict lint and formatting pass."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
-    kind: "implementation"
-    status: "completed"
-    depends_on: ["resilience-p3-write-tests"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:49:40Z", "completed_at": "2026-11-06T10:49:40Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "resilience-p3-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T10:49:40Z"
+      completed_at: "2026-11-06T10:49:40Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-security-audit"
@@ -454,11 +691,16 @@ tasks:
     context: "Fresh full and narrow prepared-scope source-only records persisted; separate scoped and final mapping security reviews report no vulnerabilities, retaining non-atomic/uninspected-backend limits."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
-    kind: "security-audit"
-    status: "completed"
-    depends_on: ["resilience-p3-implement-code"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:49:40Z", "completed_at": "2026-11-06T10:49:40Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "resilience-p3-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T10:49:40Z"
+      completed_at: "2026-11-06T10:49:40Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p3-compliance-review"
@@ -467,11 +709,16 @@ tasks:
     context: "Fresh explicit-range source-blind comparison established no concrete phase3 contradiction, retaining imported/closure/non-atomic/test-overlap limits. Earlier broad locator exposure is excluded; no certification/acceptance."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
-    kind: "compliance-review"
-    status: "completed"
-    depends_on: ["resilience-p3-security-audit"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T10:54:13Z", "completed_at": "2026-11-06T10:54:13Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "resilience-p3-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T10:54:13Z"
+      completed_at: "2026-11-06T10:54:13Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p4-write-tests"
@@ -480,11 +727,16 @@ tasks:
     context: "Genuine initial reds plus final reproduced direct-domain/cross-device fixture failures; fixed without weakened checks. Independent37+14 scoped tests and parentfull876 Sav/Skott tests pass, threeexisting ignores."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Required behavioral regressions fail against the prior implementation."
-    kind: "test"
-    status: "completed"
-    depends_on: ["resilience-p3-compliance-review"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T12:17:55Z", "completed_at": "2026-11-06T12:17:55Z"}
+    kind: test
+    status: completed
+    depends_on:
+      - "resilience-p3-compliance-review"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T12:17:55Z"
+      completed_at: "2026-11-06T12:17:55Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p4-implement-code"
@@ -493,11 +745,16 @@ tasks:
     context: "Typed failures/stops,128event/fourhandoff,cancellation,read/count retention, nativeCLIexception,opaqueexternal disclosure,literalprivatescripting; final directdomain/portablefixture corrections passfull876 shared/native cases."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Regressions pass without weakening grants, evidence or productive defaults."
-    kind: "implementation"
-    status: "completed"
-    depends_on: ["resilience-p4-write-tests"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T12:17:55Z", "completed_at": "2026-11-06T12:17:55Z"}
+    kind: implementation
+    status: completed
+    depends_on:
+      - "resilience-p4-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T12:17:55Z"
+      completed_at: "2026-11-06T12:17:55Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p4-security-audit"
@@ -506,11 +763,16 @@ tasks:
     context: "Fresh initial/narrow local-only source records persisted,37+14 independent tests; separate initial/final scoped security reviewers report no vulnerabilities, preserving imported/cooperative/privacy/bytecount/assertion limits."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Boundedness, authority, replay safety and failure findings have explicit dispositions."
-    kind: "security-audit"
-    status: "completed"
-    depends_on: ["resilience-p4-implement-code"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T12:17:55Z", "completed_at": "2026-11-06T12:17:55Z"}
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "resilience-p4-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T12:17:55Z"
+      completed_at: "2026-11-06T12:17:55Z"
     blocked_reason: null
     recovery_state: null
   - id: "resilience-p4-compliance-review"
@@ -519,11 +781,16 @@ tasks:
     context: "Separate initial/final exact-range source-blind comparisons establish no concrete scoped contradiction. Permission actual0600/0700 evidence, fixed directdomain and copiedownedPTYfixture qualifications retained; partialcontract/exhaustiveevidence limits explicit. No certification/acceptance."
     purpose: "Enable useful finite recovery while preserving authority and honest task evidence."
     expected_outcome: "Independent source-blind discrepancies and limitations are recorded for human arbitration."
-    kind: "compliance-review"
-    status: "completed"
-    depends_on: ["resilience-p4-security-audit"]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESILIENCE"]
-    timestamps: {"created_at": "2026-11-06T06:47:48Z", "updated_at": "2026-11-06T12:17:55Z", "completed_at": "2026-11-06T12:17:55Z"}
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "resilience-p4-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-06T06:47:48Z"
+      updated_at: "2026-11-06T12:17:55Z"
+      completed_at: "2026-11-06T12:17:55Z"
     blocked_reason: null
     recovery_state: null
   - id: "capacity-fixtures-write-tests"

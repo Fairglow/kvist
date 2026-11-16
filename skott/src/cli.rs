@@ -130,6 +130,10 @@ pub struct Cli {
     #[arg(long, requires = "prompt", conflicts_with_all = ["allow_host_execution", "host_turns", "no_logs", "list_models", "setup"])]
     pub headless: bool,
 
+    /// Review and accept governed project documents.
+    #[arg(long)]
+    pub project_review: bool,
+
     /// Emit version-one NDJSON events rather than only the final answer.
     #[arg(long, requires = "headless")]
     pub json: bool,

@@ -148,6 +148,21 @@ pub enum Error {
         /// The process/recording failure, not a native model error.
         source: sav::Error,
     },
+    /// Review evidence is malformed, has the wrong version, or is otherwise invalid.
+    InvalidReviewEvidence {
+        /// Why the evidence is invalid.
+        reason: String,
+    },
+    /// Review evidence has become stale (target files changed since the review).
+    StaleReviewEvidence {
+        /// Why the evidence is stale.
+        reason: String,
+    },
+    /// Review evidence was not found at the expected path.
+    ReviewEvidenceNotFound {
+        /// The path where evidence was expected.
+        path: std::path::PathBuf,
+    },
 }
 
 /// The convenience `Result` alias for this crate.
@@ -177,6 +192,9 @@ impl Error {
             Error::ToolPolicy { .. } => 3,
             Error::ToolchainUnavailable { .. } => 2,
             Error::HostTurns { .. } => 2,
+            Error::InvalidReviewEvidence { .. } => 2,
+            Error::StaleReviewEvidence { .. } => 2,
+            Error::ReviewEvidenceNotFound { .. } => 2,
             _ => 1,
         }
     }
@@ -273,6 +291,11 @@ impl Error {
             }
             Error::Control { reason } => format!("runtime control rejected: {reason}"),
             Error::ExternalAgent { source } => format!("external agent failed: {source}"),
+            Error::InvalidReviewEvidence { reason } => format!("invalid review evidence: {reason}"),
+            Error::StaleReviewEvidence { reason } => format!("stale review evidence: {reason}"),
+            Error::ReviewEvidenceNotFound { path } => {
+                format!("review evidence not found at {}", path.display())
+            }
         }
     }
 }

@@ -2139,3 +2139,104 @@ or production limits. Fresh source-only and separate source-blind resolver
 supplements are retained in the linked reports; final implementer-attributed
 execution passes all 25 Rust-environment cases. Historical arbitration and the
 broader dogfood failures remain unaffected.
+
+## Compliance review: embedded skott reachability and steering - 2026-11-07
+
+This source-blind comparison separates intended behavior from the compliance
+judgment. It compares the intended agent-integration and multi-turn-execution
+behavior with independent source observations and executed tests, retaining
+limitations.
+
+### Intended behavior (from REQUIREMENTS.md)
+
+- When a user submits a prompt while an autonomous task is running, the submission
+  must be treated as steering guidance for the active task, not a replacement task.
+- The original task objective, conversation context, completed filesystem effects,
+  observed tool results, and per-prompt budgets must be preserved.
+- The steering message must be delivered to the model at the next safe interruption
+  point during generation, backoff waits, or between tool calls.
+- Tool execution itself is not interrupted.
+- The UI must report separate acceptance, interruption, and model-context-delivery
+  states.
+- Steering during shutdown is not delivered.
+- Steering must never create a new session or use the new-session replacement path.
+- Rapid consecutive steering submissions must be delivered in submission order.
+- The real interactive submission path and in-process headless/library controls
+  must use the same bounded mailbox.
+- Tests must demonstrate running submissions do not become a second task after
+  completion, and post-completion submissions are separately classified.
+
+### Observed behavior (from IMPL.md)
+
+- `AgentSession` wraps/dereferences Sav's session; `ContextManager` similarly
+  wraps Sav's context manager; events, guidance states, mailbox, limits,
+  summaries and retry policy are shared types.
+- The worker owns conversation, transport, context and recorder across prompts.
+  It obtains tasks from one shared mailbox, records the prompt before running,
+  invokes the shared controlled runtime, resets cancellation after an ordinary
+  run and terminates on recording/channel/runtime errors.
+- Submission classification belongs to the mailbox/run owner, not the UI's
+  potentially stale `running` flag.
+- The TUI sends to the current worker's `PromptSender::send`; while active,
+  accepted text is supplemental guidance.
+- If the selected model/effort changed, it first uses guidance-only `steer`;
+  idle rejection permits replacement with the explicitly selected worker,
+  rather than accidentally starting a new task on the former model.
+- Rejected input is restored to the editor.
+- Model/effort changes alone do not replace an active task.
+- The local worker test
+  `real_submission_path_interrupts_active_generation_instead_of_queuing_a_task`
+  asserts cancellation of a quiet generation, a second request containing the
+  original task and guidance, accepted/claimed/delivered notices, idle
+  guidance rejection and no replacement task.
+
+### Correspondence
+
+- The intended "steering guidance for the active task, not a replacement task"
+  corresponds to the observed "accepted text is supplemental guidance" and
+  "idle rejection permits replacement with the explicitly selected worker,
+  rather than accidentally starting a new task."
+- The intended "original task objective, conversation context, completed
+  filesystem effects, observed tool results, and per-prompt budgets must be
+  preserved" corresponds to the observed "worker owns conversation, transport,
+  context and recorder across prompts."
+- The intended "steering must never create a new session or use the
+  new-session replacement path" corresponds to the observed "idle rejection
+  permits replacement with the explicitly selected worker, rather than
+  accidentally starting a new task on the former model."
+- The intended "tests must demonstrate running submissions do not become a
+  second task after completion" corresponds to the observed test
+  `real_submission_path_interrupts_active_generation_instead_of_queuing_a_task`.
+
+### Discrepancies and limitations
+
+- The observed test is described as "test SOURCE evidence, not an executed
+  result." The executed evidence (1687 passed, 0 failed, 14 ignored) is
+  workspace totals, not Skott-only counts, and the quiet log does not name
+  all individual targets/tests.
+- The observed behavior describes "accepted text is supplemental guidance"
+  but does not explicitly describe the "next safe interruption point during
+  generation, backoff waits, or between tool calls" delivery mechanism.
+- The observed behavior describes "idle guidance rejection" but does not
+  explicitly describe the "UI must report separate acceptance, interruption,
+  and model-context-delivery states" requirement.
+- The observed behavior does not explicitly describe "rapid consecutive
+  steering submissions must be delivered in submission order."
+- The observed behavior does not explicitly describe "steering during
+  shutdown is not delivered."
+- The observed behavior describes "model/effort changes alone do not replace
+  an active task" but the intended behavior does not explicitly address
+  model/effort changes during active tasks.
+
+### Conclusion
+
+The observed implementation behavior corresponds to the intended behavior for
+the core steering requirements: submissions during active tasks are treated as
+guidance, not replacement tasks; the original task context is preserved; and
+tests exist to verify this behavior. However, several specific intended
+behaviors (delivery at safe interruption points, UI state reporting, rapid
+consecutive submission ordering, shutdown delivery behavior) are not
+explicitly observed in the implementation record. The executed test evidence
+is workspace totals, not Skott-only counts, and the specific steering test is
+described as source evidence rather than executed result. These discrepancies
+and limitations are retained for human arbitration without acceptance.

@@ -34,7 +34,7 @@ serde_json = "1.0"
 toml = "1.2"
 sha2 = "0.11"
 hex = "0.4"
-nix = { version = "0.31", default-features = false, features = ["fs", "poll", "process", "signal", "term"] }
+nix = { version = "0.31.3", default-features = false, features = ["fs", "poll", "process", "signal", "term"] }
 thiserror = "2.0"
 tracing = "0.1"
 # Private host-owned request staging outside the writable workspace.
