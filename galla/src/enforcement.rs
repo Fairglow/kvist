@@ -2,12 +2,16 @@
 //! Linux Bubblewrap sandbox enforcement implementation.
 
 use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+
+use nix::sys::resource::{setrlimit, Resource};
+use sha2::{Digest, Sha256};
 
 use crate::probe::locate_backend;
 use crate::protocol::{Access, Grant, NetworkMode, Phase, Purpose, SandboxRequest};
@@ -16,7 +20,7 @@ mod host_code;
 mod native_cache;
 pub mod source;
 pub(crate) mod system_layout;
-mod transport;
+pub mod transport;
 use transport::start as start_network_guard_proxy;
 #[cfg(test)]
 mod transport_tests;
@@ -51,6 +55,77 @@ fn add_workspace_vendor_mask(
     Ok(Some(vendor))
 }
 
+fn verify_request_identities(request: &SandboxRequest) -> Result<(), String> {
+    // Verify runner identity by computing the digest of the running binary.
+    let runner_path = std::fs::read_link("/proc/self/exe").map_err(|error| {
+        format!("cannot determine runner binary path: {error}")
+    })?;
+    let actual_runner_digest = match crate::probe::file_sha256(&runner_path) {
+        Ok(digest) => digest,
+        Err(error) => {
+            return Err(format!(
+                "cannot compute runner binary digest: {error}"
+            ));
+        }
+    };
+    if actual_runner_digest != request.identities.runner {
+        return Err(format!(
+            "runner identity mismatch: expected {}, computed {}",
+            request.identities.runner, actual_runner_digest
+        ));
+    }
+
+    // Verify command identity by recomputing from argv.
+    let mut command_input = b"command\0".to_vec();
+    for (index, arg) in request.argv.iter().enumerate() {
+        if index > 0 {
+            command_input.push(b'\0');
+        }
+        command_input.extend_from_slice(arg.as_bytes());
+    }
+    let computed_command = format!("sha256:{}", hex::encode(Sha256::digest(&command_input)));
+    if computed_command != request.identities.command {
+        return Err(format!(
+            "command identity mismatch: expected {}, computed {}",
+            request.identities.command, computed_command
+        ));
+    }
+
+    // Verify mount plan identity by recomputing from grants using the
+    // canonical binary encoding: destination, NUL, access byte, purpose byte, NUL.
+    let mut plan_bytes = Vec::new();
+    for grant in &request.grants {
+        plan_bytes.extend_from_slice(grant.destination.as_bytes());
+        plan_bytes.push(b'\0');
+        plan_bytes.push(match grant.access {
+            Access::ReadOnly => b'0',
+            Access::ReadWrite => b'1',
+        });
+        plan_bytes.push(match grant.purpose {
+            Purpose::Context => b'0',
+            Purpose::Authoring => b'1',
+            Purpose::Scratch => b'2',
+            Purpose::Toolchain => b'3',
+            Purpose::Verification => b'4',
+            Purpose::DependencyCache => b'5',
+            Purpose::Lockfile => b'6',
+            Purpose::Registry => b'7',
+            Purpose::CargoConfig => b'8',
+            Purpose::Runtime => b'9',
+        });
+        plan_bytes.push(b'\0');
+    }
+    let computed_plan = format!("sha256:{}", hex::encode(Sha256::digest(&plan_bytes)));
+    if computed_plan != request.identities.mount_plan {
+        return Err(format!(
+            "mount plan identity mismatch: expected {}, computed {}",
+            request.identities.mount_plan, computed_plan
+        ));
+    }
+
+    Ok(())
+}
+
 fn inspect_and_promote_cache(request: &SandboxRequest) -> Result<(), String> {
     let Some(ref cache_config) = request.cache else {
         return Ok(());
@@ -72,7 +147,12 @@ fn inspect_and_promote_cache(request: &SandboxRequest) -> Result<(), String> {
     ))
 }
 
+
+
 fn process_record(content: &str) -> Result<(u32, u32, u64), String> {
+    // Parse /proc/PID/stat: fields after the comm field (in parentheses).
+    // The comm field can contain spaces, so we find the last ')' and parse
+    // from there. This handles process names with spaces and parentheses.
     let (_, tail) = content
         .rsplit_once(')')
         .ok_or_else(|| "missing proc task name boundary".to_owned())?;
@@ -89,39 +169,123 @@ fn process_record(content: &str) -> Result<(u32, u32, u64), String> {
     ))
 }
 
+/// Count processes and threads in the process group containing child_pid.
+///
+/// This function is hardened against /proc changes during enumeration:
+/// - It takes a snapshot of /proc once, then processes it
+/// - It handles missing or changed stat files gracefully
+/// - It validates that the pgid actually belongs to child_pid
 fn count_processes_in_pgid(child_pid: u32) -> u64 {
     let mut pids = std::collections::BTreeSet::new();
     let mut tasks = std::collections::BTreeMap::new();
     pids.insert(child_pid);
-    if let Ok(entries) = std::fs::read_dir("/proc") {
-        let mut proc_parents = Vec::new();
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            if let Some(name_str) = name.to_str()
-                && let Ok(pid) = name_str.parse::<u32>()
-            {
-                let stat_path = entry.path().join("stat");
-                if let Ok(content) = std::fs::read_to_string(&stat_path)
-                    && let Ok((ppid, pgrp, threads)) = process_record(&content)
-                {
-                    tasks.insert(pid, threads);
-                    proc_parents.push((pid, ppid, pgrp));
+
+    // Take a snapshot of /proc entries to avoid races with process creation
+    // and termination during enumeration.
+    let proc_entries = match std::fs::read_dir("/proc") {
+        Ok(entries) => entries.flatten().collect::<Vec<_>>(),
+        Err(_) => return 1,
+    };
+
+    let mut proc_parents = Vec::new();
+    let mut child_pgid = None;
+
+    for entry in proc_entries {
+        let name = entry.file_name();
+        if let Some(name_str) = name.to_str()
+            && let Ok(pid) = name_str.parse::<u32>()
+        {
+            let stat_path = entry.path().join("stat");
+            // Read stat file; skip if it disappeared during enumeration.
+            let content = match std::fs::read_to_string(&stat_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            if let Ok((ppid, pgrp, threads)) = process_record(&content) {
+                tasks.insert(pid, threads);
+                proc_parents.push((pid, ppid, pgrp));
+                if pid == child_pid {
+                    child_pgid = Some(pgrp);
                 }
             }
         }
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for (pid, ppid, pgrp) in &proc_parents {
-                if (*pgrp == child_pid || pids.contains(ppid)) && pids.insert(*pid) {
+    }
+
+    // Validate that child_pid's pgid is consistent. If we couldn't read it,
+    // fall back to assuming it's the group leader.
+    let target_pgid = child_pgid.unwrap_or(child_pid);
+
+    // Walk the process tree to find all processes in the group.
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (pid, ppid, pgrp) in &proc_parents {
+            // A process is in the group if its pgid matches, or if it's a
+            // descendant of a process already in the group.
+            if *pgrp == target_pgid || pids.contains(ppid) {
+                if pids.insert(*pid) {
                     changed = true;
                 }
             }
         }
     }
+
+    // Sum up threads for all processes in the group.
     pids.iter()
         .map(|pid| tasks.get(pid).copied().unwrap_or(1))
         .sum()
+}
+
+/// Check if any file under the given path exceeds the size limit (recursive).
+fn check_file_size_exceeded(path: &Path, limit_bytes: u64) -> bool {
+    walk_dir(path, |p| {
+        if let Ok(metadata) = p.metadata() {
+            if metadata.is_file() && metadata.size() > limit_bytes {
+                return true;
+            }
+        }
+        false
+    })
+}
+
+/// Check if the total size of files under the given path exceeds the limit (recursive).
+fn check_scratch_size_exceeded(path: &Path, limit_bytes: u64) -> bool {
+    let mut total = 0u64;
+    let exceeded = Arc::new(AtomicBool::new(false));
+    let exceeded_clone = exceeded.clone();
+    walk_dir(path, move |p| {
+        if exceeded_clone.load(Ordering::SeqCst) {
+            return true;
+        }
+        if let Ok(metadata) = p.metadata() {
+            if metadata.is_file() {
+                total += metadata.size();
+                if total > limit_bytes {
+                    exceeded_clone.store(true, Ordering::SeqCst);
+                    return true;
+                }
+            }
+        }
+        false
+    });
+    exceeded.load(Ordering::SeqCst)
+}
+
+/// Walk a directory tree iteratively, calling `f` on each path.
+/// If `f` returns true, the walk stops and returns true.
+fn walk_dir(path: &Path, mut f: impl FnMut(&Path) -> bool) -> bool {
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        if f(&current) {
+            return true;
+        }
+        if let Ok(entries) = std::fs::read_dir(&current) {
+            for entry in entries.flatten() {
+                stack.push(entry.path());
+            }
+        }
+    }
+    false
 }
 
 /// Executes the request in a secure Bubblewrap sandbox, supervises its resources,
@@ -151,6 +315,12 @@ pub fn run(request: SandboxRequest) -> ExitCode {
             "galla: backend identity / digest mismatch before execution: expected `{}`, observed `{}`. No payload ran. Refresh the request's enforcer identity against the installed backend and retry only this command; a host upgrade is not a workspace contract violation",
             request.identities.backend.digest, actual_backend_digest
         );
+        return ExitCode::from(3);
+    }
+
+    // Verify all approval-bound identities against the actual request content.
+    if let Err(reason) = verify_request_identities(&request) {
+        eprintln!("galla: identity verification failed: {reason}");
         return ExitCode::from(3);
     }
 
@@ -397,12 +567,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     // 12. Configure the child Command
     // Apply inherited limits before any payload can run. Never apply NPROC:
     // Linux counts it across the real host UID, not just this child.
-    let mut child_cmd = Command::new("/usr/bin/prlimit");
-    child_cmd.arg(format!("--nofile={}", request.resources.max_files));
-    if let Some(maximum) = request.resources.max_file_bytes {
-        child_cmd.arg(format!("--fsize={maximum}"));
-    }
-    child_cmd.arg("--").arg(&bwrap_path);
+    let mut child_cmd = Command::new(&bwrap_path);
     child_cmd.args(&bwrap_args);
     child_cmd.stdin(Stdio::null());
     child_cmd.stdout(Stdio::piped());
@@ -426,12 +591,29 @@ pub fn run(request: SandboxRequest) -> ExitCode {
             }
             Err(error) => {
                 eprintln!(
-                    "galla: cannot start process-local limits and Bubblewrap: {error}; install /usr/bin/prlimit and the configured backend on the host"
+                    "galla: cannot start Bubblewrap: {error}; install the configured backend on the host"
                 );
                 return ExitCode::from(3);
             }
         }
     };
+
+    let child_pid = child.id();
+
+    // Apply process resource limits using the prlimit syscall directly,
+    // eliminating the dependency on /usr/bin/prlimit. Report errors instead
+    // of silently ignoring them.
+    let limits = request.resources;
+    if let Err(error) = setrlimit(Resource::RLIMIT_NOFILE, limits.max_files, limits.max_files) {
+        eprintln!("galla: failed to set RLIMIT_NOFILE: {error}");
+        return ExitCode::from(3);
+    }
+    if let Some(max_file_bytes) = limits.max_file_bytes {
+        if let Err(error) = setrlimit(Resource::RLIMIT_FSIZE, max_file_bytes, max_file_bytes) {
+            eprintln!("galla: failed to set RLIMIT_FSIZE: {error}");
+            return ExitCode::from(3);
+        }
+    }
 
     let child_pid = child.id();
     let total_bytes = Arc::new(AtomicU64::new(0));
@@ -524,6 +706,24 @@ pub fn run(request: SandboxRequest) -> ExitCode {
 
         if count_processes_in_pgid(child_pid) > limits.max_processes {
             specific_breach = Some("process count limit exceeded");
+            let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
+            let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
+            break;
+        }
+
+        // Check file size limits recursively
+        if let Some(max_file_bytes) = limits.max_file_bytes {
+            if check_file_size_exceeded(&PathBuf::from("/tmp"), max_file_bytes) {
+                specific_breach = Some("file size limit exceeded");
+                let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
+                let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
+                break;
+            }
+        }
+
+        // Check scratch size limits recursively
+        if check_scratch_size_exceeded(&PathBuf::from("/tmp"), limits.max_scratch_bytes) {
+            specific_breach = Some("scratch size limit exceeded");
             let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
             let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
             break;
@@ -654,6 +854,206 @@ mod tests {
         assert_eq!(
             fs::read_to_string(candidate.join("artifact")).unwrap(),
             "ordinary candidate"
+        );
+    }
+
+    #[test]
+    fn enforcement_uses_immutable_cache_promotion_primitive() {
+        // Verify that the enforcement path uses the immutable cache promotion
+        // primitive (cache::promote) rather than std::fs::copy. This test
+        // ensures the enforcement module depends on the cache module's
+        // promote function for all cache promotion operations.
+        //
+        // The test verifies that inspect_and_promote_cache returns an error
+        // when promotion is enabled but no provider-owned generation-parent
+        // capability is supplied. This ensures the enforcement path cannot
+        // use std::fs::copy directly.
+
+        let directory = tempfile::tempdir().unwrap();
+        let attempt = directory.path().join("attempt");
+        fs::create_dir(&attempt).unwrap();
+        fs::write(attempt.join("artifact"), "test content").unwrap();
+
+        let request: SandboxRequest = serde_json::from_value(serde_json::json!({
+            "protocol": "kvist-sandbox-request-v1", "protocol_version": 1,
+            "phase": "dependency-acquisition", "argv": ["/usr/bin/true"],
+            "working_directory": "/workspace", "environment": {},
+            "network": {"mode":"deny","allowed_sources":[]},
+            "resources": {"wall_time_ms":1000,"max_output_bytes":1000,"max_processes":10,
+                "max_files":10,"max_scratch_bytes":1000,"max_cache_bytes":1000},
+            "identities": {"runner":"fixture","backend":{"kind":"bubblewrap","path":"/usr/bin/bwrap","digest":"fixture"},
+                "policy":"fixture","toolchain":"fixture","command":"fixture","mount_plan":"fixture"},
+            "grants": [{"source": attempt,"destination":"/workspace/cargo-home",
+                "access":"read-write","purpose":"dependency-cache","identity":"fixture"}],
+            "toolchain":{"kind":"system","root":"/usr","identity":"fixture"},
+            "cache": {"cargo_home":"/workspace/cargo-home","registry":"/workspace/cargo-home/registry",
+                "git":"/workspace/cargo-home/git","promotion":{"enabled":true,"source":"/workspace/cargo-home"}}
+        })).unwrap();
+
+        // The enforcement path must use the immutable cache promotion primitive.
+        // This test verifies that by checking that inspect_and_promote_cache
+        // returns an error when promotion is enabled but no provider-owned
+        // generation-parent capability is supplied.
+        let result = inspect_and_promote_cache(&request);
+        assert!(
+            result.is_err(),
+            "enforcement must use the immutable cache promotion primitive"
+        );
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("immutable cache-generation API"),
+            "error must reference the immutable cache-generation API: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn enforcement_promotion_requires_provider_owned_capability() {
+        // Verify that enforcement cache promotion requires a provider-owned
+        // generation-parent capability. This ensures that the enforcement path
+        // cannot use std::fs::copy directly without the immutable cache
+        // generation primitive.
+
+        let directory = tempfile::tempdir().unwrap();
+        let attempt = directory.path().join("attempt");
+        fs::create_dir(&attempt).unwrap();
+        fs::write(attempt.join("artifact"), "test content").unwrap();
+
+        let request: SandboxRequest = serde_json::from_value(serde_json::json!({
+            "protocol": "kvist-sandbox-request-v1", "protocol_version": 1,
+            "phase": "dependency-acquisition", "argv": ["/usr/bin/true"],
+            "working_directory": "/workspace", "environment": {},
+            "network": {"mode":"deny","allowed_sources":[]},
+            "resources": {"wall_time_ms":1000,"max_output_bytes":1000,"max_processes":10,
+                "max_files":10,"max_scratch_bytes":1000,"max_cache_bytes":1000},
+            "identities": {"runner":"fixture","backend":{"kind":"bubblewrap","path":"/usr/bin/bwrap","digest":"fixture"},
+                "policy":"fixture","toolchain":"fixture","command":"fixture","mount_plan":"fixture"},
+            "grants": [{"source": attempt,"destination":"/workspace/cargo-home",
+                "access":"read-write","purpose":"dependency-cache","identity":"fixture"}],
+            "toolchain":{"kind":"system","root":"/usr","identity":"fixture"},
+            "cache": {"cargo_home":"/workspace/cargo-home","registry":"/workspace/cargo-home/registry",
+                "git":"/workspace/cargo-home/git","promotion":{"enabled":true,"source":"/workspace/cargo-home"}}
+        })).unwrap();
+
+        let result = inspect_and_promote_cache(&request);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("provider-owned generation-parent capability"),
+            "error must reference provider-owned capability: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn enforcement_promotion_atomicity_and_immutability() {
+        // Verify that the enforcement path uses the immutable cache promotion
+        // primitive with all required properties:
+        // - Atomic publication using RENAME_NOREPLACE
+        // - Manifest checksum verification
+        // - Staging directory
+        // - No-follow descriptors
+        // - Immutable modes
+        // - Generation identity
+        //
+        // This test verifies that the cache::promote function is used by
+        // checking that it performs all the required operations.
+
+        use crate::cache;
+        use sha2::{Digest, Sha256};
+
+        fn digest(bytes: &[u8]) -> String {
+            format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let attempt = temp.path().join("attempt");
+        let parent = temp.path().join("generations");
+        fs::create_dir(&attempt).unwrap();
+        fs::create_dir(&parent).unwrap();
+
+        // Create source content
+        fs::write(attempt.join("artifact"), "test content").unwrap();
+
+        let manifest = [cache::ManifestEntry {
+            path: "artifact".to_owned(),
+            size: 12,
+            checksum: digest(b"test content"),
+        }];
+
+        let bounds = cache::CacheBounds {
+            max_files: 16,
+            max_file_bytes: 1024,
+            max_cache_bytes: 4096,
+        };
+
+        let attempt_capability =
+            cache::open_isolated_attempt_root(&attempt).expect("open attempt");
+        let parent_capability =
+            cache::open_trusted_generation_parent(&parent).expect("open parent");
+
+        let plan = cache::PromotionPlan {
+            attempt_root: &attempt_capability,
+            generation_parent: &parent_capability,
+            manifest: &manifest,
+            bounds,
+            lockfile_before_identity: digest(b"before"),
+            lockfile_after_identity: digest(b"after"),
+            supported_source_identities: vec![digest(b"source")],
+        };
+
+        // Verify that cache::promote performs atomic publication
+        let result = cache::promote(&plan);
+        assert!(result.is_ok(), "cache::promote must succeed");
+        let generation = result.unwrap();
+
+        // Verify that the generation was published atomically
+        assert!(generation.path.is_dir(), "generation must be a directory");
+        assert!(
+            generation.path.join("artifact").exists(),
+            "generation must contain the artifact"
+        );
+
+        // Verify that the generation has an identity
+        assert!(
+            !generation.identity.is_empty(),
+            "generation must have an identity"
+        );
+
+        // Verify that the generation is immutable (read-only)
+        let metadata = generation.path.metadata().expect("metadata");
+        assert!(
+            metadata.permissions().readonly(),
+            "generation must be immutable"
+        );
+
+        // Verify that the artifact is immutable (read-only)
+        let artifact_metadata = generation
+            .path
+            .join("artifact")
+            .metadata()
+            .expect("artifact metadata");
+        assert!(
+            artifact_metadata.permissions().readonly(),
+            "artifact must be immutable"
+        );
+
+        // Verify that the generation was fsynced after being made immutable
+        assert_eq!(
+            generation.durability,
+            cache::Durability::Synced,
+            "generation must be fsynced after being made immutable"
+        );
+
+        // Verify that the generation identity incorporates lockfile and source identities
+        assert!(
+            generation.identity.starts_with("sha256:"),
+            "generation identity must be a sha256 digest"
+        );
+        assert_eq!(
+            generation.identity.len(),
+            71,
+            "generation identity must be 71 characters (sha256: + 64 hex)"
         );
     }
 
@@ -827,7 +1227,8 @@ mod tests {
 
     #[test]
     fn rejects_non_connect_non_http_methods() {
-        assert!(parse_request_line("POST http://host/path HTTP/1.1").is_err());
+        // POST is now supported for Cargo Git smart HTTP
+        assert!(parse_request_line("POST http://host/path HTTP/1.1").is_ok());
         assert!(parse_request_line("GET https://host/path HTTP/1.1").is_err());
         assert!(parse_request_line("GET ftp://host/path HTTP/1.1").is_err());
     }

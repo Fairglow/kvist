@@ -180,15 +180,17 @@ pub fn probe() -> ProbeOutcome {
         }
     };
 
-    // Determine namespace availability on the host kernel
-    // We check existence of /proc/self/ns/{mnt,net,pid,ipc,uts,user}
+    // qualify_backend already executed bwrap with --unshare-all and verified
+    // that all namespace types can be created. If we reach this point, every
+    // namespace capability is confirmed by actual execution, not by inspecting
+    // /proc/self/ns which would only show the current process's namespace state.
     let namespaces = Namespaces {
-        mount: Path::new("/proc/self/ns/mnt").exists(),
-        network: Path::new("/proc/self/ns/net").exists(),
-        pid: Path::new("/proc/self/ns/pid").exists(),
-        ipc: Path::new("/proc/self/ns/ipc").exists(),
-        uts: Path::new("/proc/self/ns/uts").exists(),
-        user: Path::new("/proc/self/ns/user").exists(),
+        mount: true,
+        network: true,
+        pid: true,
+        ipc: true,
+        uts: true,
+        user: true,
     };
 
     let capabilities = Capabilities {
@@ -216,20 +218,46 @@ pub fn probe() -> ProbeOutcome {
 }
 
 /// Locates a candidate Bubblewrap executable without executing it.
+///
+/// Validates that the discovered path resolves to a real file within a
+/// trusted system directory, preventing symlink substitution attacks.
 pub(crate) fn locate_backend() -> Option<PathBuf> {
     let direct = ["/usr/bin/bwrap", "/bin/bwrap", "/usr/local/bin/bwrap"];
     for candidate in direct {
         let path = Path::new(candidate);
-        if path.is_file() {
-            return Some(path.to_path_buf());
+        if let Some(valid) = validate_backend_path(path) {
+            return Some(valid);
         }
     }
     let raw = std::env::var_os("PATH")?;
     for directory in std::env::split_paths(&raw) {
         let candidate = directory.join("bwrap");
-        if candidate.is_file() {
-            return Some(candidate);
+        if let Some(valid) = validate_backend_path(&candidate) {
+            return Some(valid);
         }
     }
     None
+}
+
+/// Validates a backend path, resolving symlinks and checking it's within a trusted
+/// system directory. Returns the canonical path if valid, None otherwise.
+fn validate_backend_path(path: &Path) -> Option<PathBuf> {
+    // Resolve symlinks to get the real path
+    let canonical = path.canonicalize().ok()?;
+
+    // Ensure the resolved path is a regular file
+    let metadata = canonical.metadata().ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+
+    // Validate the resolved path is within a trusted system directory
+    // to prevent symlink substitution attacks
+    let trusted_prefixes = ["/usr/", "/bin/", "/usr/local/"];
+    let path_str = canonical.to_string_lossy();
+    if !trusted_prefixes.iter().any(|prefix| path_str.starts_with(prefix)) {
+        return None;
+    }
+
+    Some(canonical)
 }

@@ -348,3 +348,119 @@ fn test_many_small_files_size_accounting() {
         Err(e) => panic!("Expected FileCount, got: {:?}", e),
     }
 }
+
+/// Test that immutable tree durability is ensured by fsync after fchmod.
+/// The generation must be durable (fsynced) after being made immutable.
+#[test]
+fn test_immutable_tree_durability_fsync_after_fchmod() {
+    let (temp, attempt, parent) = roots();
+
+    // Create source content
+    fs::write(temp.path().join("attempt/crate"), b"crate content").expect("source");
+    let manifest = [entry("crate", b"crate content")];
+
+    // Promote the generation
+    let generation = promote(&plan(&attempt, &parent, &manifest)).expect("promote");
+
+    // Verify the generation was published with Synced durability
+    assert_eq!(
+        generation.durability,
+        galla::cache::Durability::Synced,
+        "generation must be fsynced after being made immutable"
+    );
+
+    // Verify the generation is immutable (read-only permissions)
+    let metadata = fs::metadata(&generation.path).expect("metadata");
+    assert!(
+        metadata.permissions().readonly(),
+        "generation must be immutable after fsync"
+    );
+
+    // Verify content is readable after fsync
+    let content = fs::read(generation.path.join("crate")).expect("read after fsync");
+    assert_eq!(content, b"crate content");
+}
+
+/// Test that lockfile_after_identity and supported_source_identities are
+/// computed and incorporated into the generation identity.
+#[test]
+fn test_identity_computation_includes_lockfile_and_sources() {
+    let (temp, attempt, parent) = roots();
+
+    // Create source content
+    fs::write(temp.path().join("attempt/crate"), b"crate content").expect("source");
+    let manifest = [entry("crate", b"crate content")];
+
+    // Promote with specific lockfile and source identities
+    let mut plan1 = plan(&attempt, &parent, &manifest);
+    plan1.lockfile_after_identity = digest(b"lockfile-v1");
+    plan1.supported_source_identities = vec![digest(b"source-v1")];
+    let gen1 = promote(&plan1).expect("promote with identities v1");
+
+    // Verify the generation identity is a valid sha256 digest
+    assert!(
+        gen1.identity.starts_with("sha256:"),
+        "generation identity must be a sha256 digest"
+    );
+    assert_eq!(
+        gen1.identity.len(),
+        71,
+        "generation identity must be 71 characters (sha256: + 64 hex)"
+    );
+
+    // Now promote again with different lockfile identity
+    let (temp2, attempt2, parent2) = roots();
+    fs::write(temp2.path().join("attempt/crate"), b"crate content").expect("source2");
+    let manifest2 = [entry("crate", b"crate content")];
+    let mut plan2 = plan(&attempt2, &parent2, &manifest2);
+    plan2.lockfile_after_identity = digest(b"lockfile-v2");
+    plan2.supported_source_identities = vec![digest(b"source-v1")];
+    let gen2 = promote(&plan2).expect("promote with identities v2");
+
+    // Different lockfile identity should produce a different generation identity
+    assert_ne!(
+        gen1.identity, gen2.identity,
+        "different lockfile_after_identity must produce different generation identity"
+    );
+
+    // Promote with different source identity
+    let (temp3, attempt3, parent3) = roots();
+    fs::write(temp3.path().join("attempt/crate"), b"crate content").expect("source3");
+    let manifest3 = [entry("crate", b"crate content")];
+    let mut plan3 = plan(&attempt3, &parent3, &manifest3);
+    plan3.lockfile_after_identity = digest(b"lockfile-v1");
+    plan3.supported_source_identities = vec![digest(b"source-v2")];
+    let gen3 = promote(&plan3).expect("promote with different source identity");
+
+    // Different source identity should produce a different generation identity
+    assert_ne!(
+        gen1.identity, gen3.identity,
+        "different supported_source_identities must produce different generation identity"
+    );
+}
+
+/// Test that identical identities produce the same generation identity (reusability).
+#[test]
+fn test_identity_determinism_enables_reuse() {
+    let (temp, attempt, parent) = roots();
+
+    // Create source content
+    fs::write(temp.path().join("attempt/crate"), b"crate content").expect("source");
+    let manifest = [entry("crate", b"crate content")];
+
+    // First promotion
+    let mut plan1 = plan(&attempt, &parent, &manifest);
+    plan1.lockfile_after_identity = digest(b"lockfile");
+    plan1.supported_source_identities = vec![digest(b"source")];
+    let gen1 = promote(&plan1).expect("first promote");
+
+    // Second promotion with identical identities should reuse
+    let mut plan2 = plan(&attempt, &parent, &manifest);
+    plan2.lockfile_after_identity = digest(b"lockfile");
+    plan2.supported_source_identities = vec![digest(b"source")];
+    let gen2 = promote(&plan2).expect("second promote");
+
+    assert!(gen2.reused, "identical identities must enable generation reuse");
+    assert_eq!(gen1.identity, gen2.identity);
+    assert_eq!(gen1.path, gen2.path);
+}

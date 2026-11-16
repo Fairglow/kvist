@@ -18,7 +18,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(5);
 const DIAGNOSTIC_LIMIT: u64 = 16;
 
 /// CONNECT authorizes an opaque HTTPS authority; HTTP retains its visible path.
-pub(super) enum ParsedRequestLine {
+pub enum ParsedRequestLine {
     HttpAbsolute {
         host: String,
         port: u16,
@@ -30,7 +30,7 @@ pub(super) enum ParsedRequestLine {
     },
 }
 
-pub(super) fn parse_request_line(first_line: &str) -> Result<ParsedRequestLine, ()> {
+pub fn parse_request_line(first_line: &str) -> Result<ParsedRequestLine, ()> {
     let parts: Vec<&str> = first_line.split_whitespace().collect();
     if parts.len() != 3 {
         return Err(());
@@ -56,7 +56,9 @@ pub(super) fn parse_request_line(first_line: &str) -> Result<ParsedRequestLine, 
         };
         return Ok(ParsedRequestLine::ConnectTunnel { host, port });
     }
-    if (method.eq_ignore_ascii_case("GET") || method.eq_ignore_ascii_case("HEAD"))
+    if (method.eq_ignore_ascii_case("GET")
+        || method.eq_ignore_ascii_case("HEAD")
+        || method.eq_ignore_ascii_case("POST"))
         && let Some(stripped) = target.strip_prefix("http://")
     {
         let (authority, path) = match stripped.split_once('/') {
@@ -95,7 +97,7 @@ fn validate_connect_host(host: &str) -> Result<(), ()> {
 }
 
 impl ParsedRequestLine {
-    pub(super) fn policy_target(&self) -> String {
+    pub fn policy_target(&self) -> String {
         match self {
             Self::ConnectTunnel { host, port } => format!("https://{host}:{port}/"),
             Self::HttpAbsolute { host, port, path } => {
@@ -111,7 +113,7 @@ impl ParsedRequestLine {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct Limits {
+pub struct Limits {
     pub clients: usize,
     pub header: Duration,
     pub resolve: Duration,
@@ -131,7 +133,7 @@ impl Default for Limits {
     }
 }
 
-pub(super) struct Guard {
+pub struct Guard {
     port: u16,
     cancelled: Arc<AtomicBool>,
     listener: Option<JoinHandle<()>>,
@@ -292,11 +294,11 @@ fn wait_for_resolution(
     }
 }
 
-pub(super) fn start(sources: &[AllowedSource]) -> Result<Guard, String> {
+pub fn start(sources: &[AllowedSource]) -> Result<Guard, String> {
     start_with_limits(sources, Limits::default())
 }
 
-pub(super) fn start_with_limits(
+pub fn start_with_limits(
     sources: &[AllowedSource],
     limits: Limits,
 ) -> Result<Guard, String> {

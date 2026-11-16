@@ -1,16 +1,16 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:d846fa3e810e2faee74824d13031e4202da0e37bdf407a891b20a0d4aab3fd95"
-  contract_revision: "sha256:ac446c07f06f127e854760044b7c7595a8c512ab13a060451f4c9fa4961e47c7"
-  design_revision: "sha256:fac93c3855b2117896a14afd8f05b7519f291100f7e7d4d4e6f4a77a08d7bb02"
+  requirements_revision: "sha256:ad1011ba0620d93ab543e02f15fe6d8d29804198e828a79881ec96d0e7e04be3"
+  contract_revision: "sha256:bd2e3c4571e3dd8d4f8fdc58961d24ab6994011405c56412ff842896781aeda7"
+  design_revision: "sha256:7389aafcd87cd91c500c039c74c9070e224b6686ce0d1f45ab4d3ef3448aab91"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-11-05T15:10:26Z"
+    checked_at: "2026-11-15T22:15:44Z"
     stale_since: null
     causes: []
 tasks:
-  - id: diagnostic-deadlock-write-tests
+  - id: "diagnostic-deadlock-write-tests"
     title: "write_tests: payload and proxy stderr deadlock"
     description: "Reproduce the real-runner source denial stalled behind payload stderr forwarding."
     context: "Executed source-aware denial failed in nextest 3d718dbe-6d0d-4591-8a8f-707d2b305ddf; explicit scoped advisory exception."
@@ -19,9 +19,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
-    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:44:02Z", completed_at: "2026-11-08T18:44:02Z"}
-  - id: diagnostic-deadlock-implement-code
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-08T18:44:02Z"
+      updated_at: "2026-11-08T18:44:02Z"
+      completed_at: "2026-11-08T18:44:02Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "diagnostic-deadlock-implement-code"
     title: "implement_code: chunk-scoped output locks"
     description: "Release host output locks while waiting for payload bytes and remove temporary proxy debugging."
     context: "Output budget and transport authorization remain unchanged."
@@ -29,10 +35,17 @@ tasks:
     expected_outcome: "Source denial and existing output-limit/native runner cases pass."
     kind: implementation
     status: completed
-    depends_on: [diagnostic-deadlock-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
-    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
-  - id: diagnostic-deadlock-security-audit
+    depends_on:
+      - "diagnostic-deadlock-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-08T18:44:02Z"
+      updated_at: "2026-11-08T18:54:13Z"
+      completed_at: "2026-11-08T18:54:13Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "diagnostic-deadlock-security-audit"
     title: "security_audit: output and transport ownership"
     description: "Independently observe output lock ownership and retained transport/resource boundaries."
     context: "Clean-slate source-only context; no intent or prior record."
@@ -40,10 +53,17 @@ tasks:
     expected_outcome: "Scoped source-derived observations are retained in IMPL."
     kind: security-audit
     status: completed
-    depends_on: [diagnostic-deadlock-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
-    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
-  - id: diagnostic-deadlock-compliance-review
+    depends_on:
+      - "diagnostic-deadlock-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-08T18:44:02Z"
+      updated_at: "2026-11-08T18:54:13Z"
+      completed_at: "2026-11-08T18:54:13Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "diagnostic-deadlock-compliance-review"
     title: "compliance_review: independent deadlock evidence"
     description: "Compare intent with clean-slate source observations and attributed real-runner evidence."
     context: "Separate source-blind context; passing tests do not certify enforcement."
@@ -51,10 +71,17 @@ tasks:
     expected_outcome: "Independent comparison is recorded without acceptance."
     kind: compliance-review
     status: completed
-    depends_on: [diagnostic-deadlock-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
-    timestamps: {created_at: "2026-11-08T18:44:02Z", updated_at: "2026-11-08T18:54:13Z", completed_at: "2026-11-08T18:54:13Z"}
-  - id: transport-write-tests
+    depends_on:
+      - "diagnostic-deadlock-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-08T18:44:02Z"
+      updated_at: "2026-11-08T18:54:13Z"
+      completed_at: "2026-11-08T18:54:13Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "transport-write-tests"
     title: "write_tests: reproduce client-first CONNECT deadlock and transport bounds"
     description: "Add real-socket bidirectional CONNECT, parallel/idle-client, half-close, bounded header/inactivity, overload, upstream failure and cancellation regressions; record failures before transport repair."
     context: "Initial real-socket suite failed all five cases before production repair: client-first/coalesced records and half-close timed out, denial terminated the listener, and an idle client blocked the next CONNECT. Command: CARGO_TARGET_DIR=/opt/proj/kvist/.transport-target cargo test --offline --locked -p galla --lib enforcement::transport_tests -- --test-threads=1 (exit 101). Explicit scoped advisory exception, no acceptance or minted receipt."
@@ -63,38 +90,33 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
-    timestamps: {created_at: "2026-11-07T21:30:40Z", updated_at: "2026-11-07T21:44:00Z", completed_at: "2026-11-07T21:44:00Z"}
-  - id: transport-implement-code
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-07T21:30:40Z"
+      updated_at: "2026-11-07T21:44:00Z"
+      completed_at: "2026-11-07T21:44:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "transport-implement-code"
     title: "implement_code: full-duplex bounded package-source transport"
     description: "Extract a private owned proxy with bounded concurrency, cancellable header/relay deadlines, bounded resolution and connect waits, independent directional buffers, and explicit error handling; retain source authorization and denied other tiers."
-    context: >-
-      Transport only; parent owns Cargo topology, protocol, cache and publication
-      authority. Implementer-attributed validation, not independent certification:
-      CARGO_TARGET_DIR=/opt/proj/kvist/.transport-target cargo test --offline --locked
-      -p galla --lib enforcement::transport passed 21 tests, including three
-      consecutive final parallel runs. With TMPDIR=/opt/proj/kvist/.transport-test-files
-      and the same target, cargo test --offline --locked -p galla passed 155 tests
-      and ignored two owned fixture entry points before the final four regressions;
-      native system/Rust inventory trials ran and passed. Final cargo test --offline
-      --locked -p galla --lib --test conformance --test scaffold passed 145 tests
-      with the same two fixture entry points ignored. Final cargo clippy --offline
-      --locked -p galla --all-targets -- -D warnings passed. rustfmt --check --edition
-      2024 --config skip_children=true galla/src/enforcement.rs
-      galla/src/enforcement/transport.rs galla/src/enforcement/transport_tests.rs
-      and git diff --check -- galla passed. Scope remains socket transport;
-      fixtures exchange TLS-shaped bytes, not certificate-authenticated TLS.
-      Standard DNS helper cancellation and five-second in-flight connect limits
-      remain documented; no installed-runner replacement or network-namespace
-      redesign was performed. Independent review tasks remain pending.
+    context: "Transport only; parent owns Cargo topology, protocol, cache and publication authority. Implementer-attributed validation, not independent certification: CARGO_TARGET_DIR=/opt/proj/kvist/.transport-target cargo test --offline --locked -p galla --lib enforcement::transport passed 21 tests, including three consecutive final parallel runs. With TMPDIR=/opt/proj/kvist/.transport-test-files and the same target, cargo test --offline --locked -p galla passed 155 tests and ignored two owned fixture entry points before the final four regressions; native system/Rust inventory trials ran and passed. Final cargo test --offline --locked -p galla --lib --test conformance --test scaffold passed 145 tests with the same two fixture entry points ignored. Final cargo clippy --offline --locked -p galla --all-targets -- -D warnings passed. rustfmt --check --edition 2024 --config skip_children=true galla/src/enforcement.rs galla/src/enforcement/transport.rs galla/src/enforcement/transport_tests.rs and git diff --check -- galla passed. Scope remains socket transport; fixtures exchange TLS-shaped bytes, not certificate-authenticated TLS. Standard DNS helper cancellation and five-second in-flight connect limits remain documented; no installed-runner replacement or network-namespace redesign was performed. Independent review tasks remain pending."
     purpose: "Make authorized acquisition progress without serial blocking."
     expected_outcome: "Focused transport regressions and existing Galla tests pass."
     kind: implementation
     status: completed
-    depends_on: [transport-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
-    timestamps: {created_at: "2026-11-07T21:30:40Z", updated_at: "2026-11-07T21:44:00Z", completed_at: "2026-11-07T21:44:00Z"}
-  - id: transport-security-audit
+    depends_on:
+      - "transport-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-07T21:30:40Z"
+      updated_at: "2026-11-07T21:44:00Z"
+      completed_at: "2026-11-07T21:44:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "transport-security-audit"
     title: "security_audit: independently review bounded transport authority"
     description: "Review socket ownership, cancellation, resource bounds and exact source checks in a separate context; retain DNS and existing namespace limitations without blanket certification."
     context: "Independent scoped audit and source-only observations are linked from IMPL.md; DNS/network and resource limits remain explicit, without certification."
@@ -102,10 +124,17 @@ tasks:
     expected_outcome: "Independent scoped findings and limitations are retained."
     kind: security-audit
     status: completed
-    depends_on: [transport-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
-    timestamps: {created_at: "2026-11-07T21:30:40Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: transport-compliance-review
+    depends_on:
+      - "transport-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-07T21:30:40Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "transport-compliance-review"
     title: "compliance_review: compare independent transport observations"
     description: "Arrange clean-slate source/test derivation separately from source-blind intent comparison, with attributed execution evidence; leave arbitration to the human."
     context: "Independent source-only and separate source-blind records are linked from IMPL.md. Hermetic named resolution closes the nested repository fixture failure; broad legacy failures remain visible. No acceptance."
@@ -113,10 +142,17 @@ tasks:
     expected_outcome: "Source-blind correspondence and residual discrepancies are explicit."
     kind: compliance-review
     status: completed
-    depends_on: [transport-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"]
-    timestamps: {created_at: "2026-11-07T21:30:40Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: one-way-write-tests
+    depends_on:
+      - "transport-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BOUNDED-TRANSPORT"
+    timestamps:
+      created_at: "2026-11-07T21:30:40Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "one-way-write-tests"
     title: "write_tests: live mounts and optional payload file caps"
     description: "Reproduce host-file deletion/polling, test uncapped files, live read-only updates and administrative tools without outside writes; reproduce missing host-enforcer dependencies, direct writable inode aliases, hidden writable ancestor selectors and unlinked/replaced live runner images."
     context: "User-directed ADR 0019; explicit local advisory exception."
@@ -125,9 +161,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"]
-    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:00:52Z", completed_at: "2026-11-07T13:00:52Z"}
-  - id: one-way-implement-code
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"
+    timestamps:
+      created_at: "2026-11-07T10:20:19Z"
+      updated_at: "2026-11-07T13:00:52Z"
+      completed_at: "2026-11-07T13:00:52Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "one-way-implement-code"
     title: "implement_code: one-way process and mount enforcement"
     description: "Make file-write caps optional, remove host polling/deletion and expose system trees read-only without categorical sbin denial; protect bounded host-enforcer loader/dependency and ancestor-selector closure and pinned direct-file aliases while retaining live running/replacement images."
     context: "Galla+Sav450/450 passed 917ee588-8ea5-4486-9953-e1c055a63091; host-code focused10 tests passed three consecutive runs, with red evidence 75953307-332d-468e-8e24-6613ccce016a. Native Skott isolation and exclusive checkout passed. Strict affected Clippy, workspace all-target check, formatting and release runner build passed. Cache promotion reports the missing provider-owned publication capability and preserves attempt data without inferred sibling writes. Process accounting remains sampled, not a hard kernel admission ceiling."
@@ -135,10 +177,17 @@ tasks:
     expected_outcome: "Native isolation and regression cases pass."
     kind: implementation
     status: completed
-    depends_on: [one-way-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"]
-    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:00:52Z", completed_at: "2026-11-07T13:00:52Z"}
-  - id: one-way-security-audit
+    depends_on:
+      - "one-way-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"
+    timestamps:
+      created_at: "2026-11-07T10:20:19Z"
+      updated_at: "2026-11-07T13:00:52Z"
+      completed_at: "2026-11-07T13:00:52Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "one-way-security-audit"
     title: "security_audit: independently observe one-way enforcement"
     description: "Derive scoped source/test observations without intent, queue, prior records/reviews or history."
     context: "Independent source-only-live-records excluded intent/queues/old repository IMPL/docs/reviews/chat/Git and ran no tests; scoped observations and final host-code source-only follow-up are published in IMPL. A separate security reviewer marked all four original findings and the related ancestor-selector gap fixed. Retain sampled accounting, alias/launch transaction and pre-existing package-network/schema/output limitations; no certification."
@@ -146,10 +195,17 @@ tasks:
     expected_outcome: "Persist independent record and limitations."
     kind: security-audit
     status: completed
-    depends_on: [one-way-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"]
-    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:17:34Z", completed_at: "2026-11-07T13:17:34Z"}
-  - id: one-way-compliance-review
+    depends_on:
+      - "one-way-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"
+    timestamps:
+      created_at: "2026-11-07T10:20:19Z"
+      updated_at: "2026-11-07T13:17:34Z"
+      completed_at: "2026-11-07T13:17:34Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "one-way-compliance-review"
     title: "compliance_review: compare one-way enforcement evidence"
     description: "Compare scoped intent and independent record with attributed test evidence without source."
     context: "Separate source-blind-live-comparison read current scoped intent and fresh independent records without source/tests/old repository IMPL/queues/Git/history/prior reviews. Scoped correspondence and narrow superseded vendor-prose cleanup are published in IMPL; alias/launch limits and pre-existing package-network/resource/schema limitations prevent blanket certification. Skott arbitration findings remain separate. Recorded revisions/revalidation were not updated or accepted."
@@ -157,9 +213,16 @@ tasks:
     expected_outcome: "Persist source-blind correspondence and gaps."
     kind: compliance-review
     status: completed
-    depends_on: [one-way-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"]
-    timestamps: {created_at: "2026-11-07T10:20:19Z", updated_at: "2026-11-07T13:21:23Z", completed_at: "2026-11-07T13:21:23Z"}
+    depends_on:
+      - "one-way-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-ONE-WAY-ISOLATION"
+    timestamps:
+      created_at: "2026-11-07T10:20:19Z"
+      updated_at: "2026-11-07T13:21:23Z"
+      completed_at: "2026-11-07T13:21:23Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "ci-system-path-write-tests"
     title: "write_tests: reproduce native CI PATH rejection"
     description: "Run the native system trial with GitHub runner PATH entries and retain the existing grant-validation failure."
@@ -887,14 +950,14 @@ tasks:
     purpose: "Ensure enforcement cache promotion is atomic, immutable, and verified."
     expected_outcome: "Tests fail if enforcement does not use cache::promote with all required properties."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T12:32:29Z"
+      completed_at: "2026-11-16T12:32:29Z"
     blocked_reason: null
     recovery_state: null
   - id: "enforcement-cache-promotion-implement-code"
@@ -904,15 +967,15 @@ tasks:
     purpose: "Make enforcement cache promotion atomic and immutable."
     expected_outcome: "Enforcement uses cache::promote with all required properties."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "enforcement-cache-promotion-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T12:49:34Z"
+      completed_at: "2026-11-16T12:49:34Z"
     blocked_reason: null
     recovery_state: null
   - id: "network-isolation-hardening-write-tests"
@@ -922,14 +985,14 @@ tasks:
     purpose: "Ensure comprehensive network isolation and proxy correctness."
     expected_outcome: "Tests fail if network isolation is advisory, CONNECT paths are not authorized, DNS is not pinned, or proxy lacks required HTTP methods."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T13:00:27Z"
+      completed_at: "2026-11-16T13:00:27Z"
     blocked_reason: null
     recovery_state: null
   - id: "network-isolation-hardening-implement-code"
@@ -939,15 +1002,15 @@ tasks:
     purpose: "Make network isolation comprehensive and enforceable."
     expected_outcome: "Network isolation is enforced with namespace, path authorization, DNS pinning, and complete HTTP method support."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "network-isolation-hardening-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T13:51:33Z"
+      completed_at: "2026-11-16T13:51:33Z"
     blocked_reason: null
     recovery_state: null
   - id: "schema-and-identity-write-tests"
@@ -957,14 +1020,14 @@ tasks:
     purpose: "Ensure schema completeness and runtime identity verification."
     expected_outcome: "Tests fail if schema is incomplete or identities are not verified at runtime."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PROTOCOL-BOUNDARY"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T13:57:56Z"
+      completed_at: "2026-11-16T13:57:56Z"
     blocked_reason: null
     recovery_state: null
   - id: "schema-and-identity-implement-code"
@@ -974,15 +1037,15 @@ tasks:
     purpose: "Make schema complete and verify identities at runtime."
     expected_outcome: "Schema matches protocol parser and all identities are verified at runtime."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "schema-and-identity-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PROTOCOL-BOUNDARY"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T14:11:38Z"
+      completed_at: "2026-11-16T14:11:38Z"
     blocked_reason: null
     recovery_state: null
   - id: "probe-and-backend-write-tests"
@@ -992,14 +1055,14 @@ tasks:
     purpose: "Ensure probe tests actual namespace creation and backend location is secure."
     expected_outcome: "Tests fail if probe does not execute bwrap or backend location is vulnerable to symlink substitution."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T14:20:43Z"
+      completed_at: "2026-11-16T14:20:43Z"
     blocked_reason: null
     recovery_state: null
   - id: "probe-and-backend-implement-code"
@@ -1009,15 +1072,15 @@ tasks:
     purpose: "Make probe test actual capabilities and secure backend location."
     expected_outcome: "Probe executes bwrap to test namespace creation and backend location is secure."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "probe-and-backend-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T14:25:19Z"
+      completed_at: "2026-11-16T14:25:19Z"
     blocked_reason: null
     recovery_state: null
   - id: "symlink-validation-write-tests"
@@ -1027,14 +1090,14 @@ tasks:
     purpose: "Ensure symlink targets are validated to prevent escape."
     expected_outcome: "Tests fail if symlink targets are not validated or recursive symlinks are not checked."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T14:28:37Z"
+      completed_at: "2026-11-16T14:28:37Z"
     blocked_reason: null
     recovery_state: null
   - id: "symlink-validation-implement-code"
@@ -1044,15 +1107,15 @@ tasks:
     purpose: "Validate symlink targets to prevent escape."
     expected_outcome: "Symlink targets are validated and recursive symlinks are checked."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "symlink-validation-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T14:39:00Z"
+      completed_at: "2026-11-16T14:39:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "resource-monitoring-write-tests"
@@ -1062,14 +1125,14 @@ tasks:
     purpose: "Ensure resource monitoring is correct and robust."
     expected_outcome: "Tests fail if prlimit errors are ignored, file size monitoring is non-recursive, or process count monitoring is fragile."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T14:46:46Z"
+      completed_at: "2026-11-16T14:46:46Z"
     blocked_reason: null
     recovery_state: null
   - id: "resource-monitoring-implement-code"
@@ -1079,15 +1142,15 @@ tasks:
     purpose: "Make resource monitoring correct and robust."
     expected_outcome: "Resource monitoring handles errors, is recursive, and is robust."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "resource-monitoring-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T14:54:12Z"
+      completed_at: "2026-11-16T14:54:12Z"
     blocked_reason: null
     recovery_state: null
   - id: "durability-and-identity-computation-write-tests"
@@ -1097,14 +1160,14 @@ tasks:
     purpose: "Ensure immutable tree durability and complete identity computation."
     expected_outcome: "Tests fail if fsync is not performed or identities are not computed."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:04:48Z"
+      completed_at: "2026-11-16T15:04:48Z"
     blocked_reason: null
     recovery_state: null
   - id: "durability-and-identity-computation-implement-code"
@@ -1114,15 +1177,15 @@ tasks:
     purpose: "Ensure durability and complete identity computation."
     expected_outcome: "File metadata is fsynced and all identities are computed."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "durability-and-identity-computation-write-tests"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-ACQUISITION-POLICY"
     timestamps:
       created_at: "2026-11-05T15:10:26Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:15:18Z"
+      completed_at: "2026-11-16T15:15:18Z"
     blocked_reason: null
     recovery_state: null
   - id: "enable-native-e2e-security-audit"
@@ -1132,7 +1195,7 @@ tasks:
     purpose: "Verify that enabling the tests does not introduce security issues and that the enforcement evidence is valid."
     expected_outcome: "Security audit records findings about the enabled tests and their enforcement evidence."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "durability-and-identity-computation-implement-code"
       - "durability-and-identity-computation-write-tests"
@@ -1153,8 +1216,8 @@ tasks:
       - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
     timestamps:
       created_at: "2026-11-03T18:40:59Z"
-      updated_at: "2026-11-05T15:10:26Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:20:20Z"
+      completed_at: "2026-11-16T15:20:20Z"
     blocked_reason: null
     recovery_state: null
   - id: "enable-native-e2e-compliance-review"
@@ -1164,15 +1227,15 @@ tasks:
     purpose: "Verify that the enabled tests comply with requirements and provide valid enforcement evidence."
     expected_outcome: "Compliance review records findings about the enabled tests' compliance and enforcement evidence validity."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "enable-native-e2e-security-audit"
     requirements:
       - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
     timestamps:
       created_at: "2026-11-03T18:40:59Z"
-      updated_at: "2026-11-03T18:40:59Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:22:30Z"
+      completed_at: "2026-11-16T15:22:30Z"
     blocked_reason: null
     recovery_state: null
   - id: "galla-reverification-security-audit"
@@ -1182,7 +1245,7 @@ tasks:
     purpose: "Replace the placeholder-era security receipts with genuine independent findings before the runner is trusted as the enforcement boundary."
     expected_outcome: "A genuine independent audit records or remediates every high-confidence finding, and its disposition is retained for human arbitration against the placeholder-era receipts."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "cache-promotion-atomicity-implement-code"
       - "cache-promotion-atomicity-write-tests"
@@ -1203,8 +1266,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-11-03T18:40:59Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:25:31Z"
+      completed_at: "2026-11-16T15:25:31Z"
     blocked_reason: null
     recovery_state: null
   - id: "galla-reverification-compliance-review"
@@ -1214,7 +1277,7 @@ tasks:
     purpose: "Retain an independent disposition for every protocol, isolation, resource, and failure guarantee."
     expected_outcome: "A clean-slate record and source-blind comparison classify every clause, retaining discrepancies for explicit human arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "galla-reverification-security-audit"
     requirements:
@@ -1223,8 +1286,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:29:28Z"
+      completed_at: "2026-11-16T15:29:28Z"
     blocked_reason: null
     recovery_state: null
   - id: "galla-toolchain-write-tests"
@@ -1272,7 +1335,7 @@ tasks:
     purpose: "Check that the new native tests do not provision or mutate host installations."
     expected_outcome: "Independent findings and remaining limits are retained for human disposition."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "galla-toolchain-implement-code"
     requirements:
@@ -1280,8 +1343,8 @@ tasks:
       - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
     timestamps:
       created_at: "2026-10-10T16:09:07Z"
-      updated_at: "2026-10-10T16:15:17Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:31:03Z"
+      completed_at: "2026-11-16T15:31:03Z"
     blocked_reason: null
     recovery_state: null
   - id: "galla-toolchain-compliance-review"
@@ -1291,7 +1354,7 @@ tasks:
     purpose: "Retain independent discrepancies rather than having the test implementer certify its own work."
     expected_outcome: "Coverage, unsupported installation shapes, host non-mutation limits and consumer-profile distinctions receive an independent disposition."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "galla-toolchain-security-audit"
     requirements:
@@ -1299,11 +1362,11 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-10T16:09:07Z"
-      updated_at: "2026-10-10T16:15:17Z"
-      completed_at: null
+      updated_at: "2026-11-16T15:32:27Z"
+      completed_at: "2026-11-16T15:32:27Z"
     blocked_reason: null
     recovery_state: null
-  - id: native-cache-write-tests
+  - id: "native-cache-write-tests"
     title: "write_tests: native Cargo cache topology and private admin"
     description: "Pin accepted verification/acquisition, optional data roots, rejected writable verification/readonly acquisition, exact environment/locked argv, exclusive source modes and no inferred promotion; execute offline Cargo against read-only native data."
     context: "Explicit local advisory exception; no acceptance or receipt. Initial native suite failed accepted topology (unknown native field) and schema tests before code. Real cached-hex runner failed offline resolution before admin/link hook. Further native trials reproduced missing restrictive absent-data directories, unmatched before identity accepted as status 0, and a native file origin reaching Cargo status 101 before their focused repairs."
@@ -1312,39 +1375,33 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T21:48:00Z", completed_at: "2026-11-07T21:48:00Z"}
-  - id: native-cache-implement-code
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:38:00Z"
+      updated_at: "2026-11-07T21:48:00Z"
+      completed_at: "2026-11-07T21:48:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-implement-code"
     title: "implement_code: enforce persistent native Cargo data grants"
     description: "Add closed native cache wire/schema and validation plus private sandbox admin/link construction after binds; preserve explicit export mode and source pinning, with direct approved acquisition data writes."
-    context: >-
-      Implementer-attributed validation with CARGO_TARGET_DIR=/opt/proj/kvist/.galla-native-target
-      and TMPDIR=/opt/proj/kvist/.galla-native-fixtures: cargo test --offline --locked
-      -p galla --lib --test conformance --test native_cache -- --test-threads=1 passed
-      147 tests (four fixture/native entry points ignored); explicit --test native_cache
-      native_runner -- --ignored --test-threads=1 passed two real Cargo trials.
-      Strict Galla all-target Clippy, scoped rustfmt and diff check passed.
-      Native cache data is not copied or inventoried; private admin is namespace-local
-      tmpfs. Absent endpoints are empty read-only data directories. The current
-      lockfile-before digest is checked through a pinned no-follow file before
-      scratch initialization. Host/provider guards, approved root selection and
-      incremental invocation selection belong to the caller; concurrent host
-      mutation is not a frozen cache/lock guarantee. Existing package-source
-      namespace/CONNECT limitations are not repaired by this topology increment.
-      Follow-up source-mode clarification replaces blanket whole-home defaults
-      in local requirements/contract/design and README with explicit native versus
-      deliberate portable-export behavior. Native writer/GC coordination remains
-      provider-owned. Owned test fixtures and build target are removed after the
-      coordinator's current debug runner is ready; no operator stages are cleaned.
-      Transport is separately owned; independent review remains pending.
+    context: "Implementer-attributed validation with CARGO_TARGET_DIR=/opt/proj/kvist/.galla-native-target and TMPDIR=/opt/proj/kvist/.galla-native-fixtures: cargo test --offline --locked -p galla --lib --test conformance --test native_cache -- --test-threads=1 passed 147 tests (four fixture/native entry points ignored); explicit --test native_cache native_runner -- --ignored --test-threads=1 passed two real Cargo trials. Strict Galla all-target Clippy, scoped rustfmt and diff check passed. Native cache data is not copied or inventoried; private admin is namespace-local tmpfs. Absent endpoints are empty read-only data directories. The current lockfile-before digest is checked through a pinned no-follow file before scratch initialization. Host/provider guards, approved root selection and incremental invocation selection belong to the caller; concurrent host mutation is not a frozen cache/lock guarantee. Existing package-source namespace/CONNECT limitations are not repaired by this topology increment. Follow-up source-mode clarification replaces blanket whole-home defaults in local requirements/contract/design and README with explicit native versus deliberate portable-export behavior. Native writer/GC coordination remains provider-owned. Owned test fixtures and build target are removed after the coordinator's current debug runner is ready; no operator stages are cleaned. Transport is separately owned; independent review remains pending."
     purpose: "Permit incremental offline Cargo reuse without host configuration authority."
     expected_outcome: "Focused native tests and related Galla validation pass."
     kind: implementation
     status: completed
-    depends_on: [native-cache-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T21:48:00Z", completed_at: "2026-11-07T21:48:00Z"}
-  - id: native-cache-security-audit
+    depends_on:
+      - "native-cache-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:38:00Z"
+      updated_at: "2026-11-07T21:48:00Z"
+      completed_at: "2026-11-07T21:48:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-security-audit"
     title: "security_audit: independently inspect native cache grants"
     description: "Independently inspect endpoint identity/access, source pinning, private admin conflicts, credential exclusion and direct persistent acquisition writes."
     context: "Independent scoped audit and source-only observations are linked from IMPL.md; no implementer certification."
@@ -1352,10 +1409,17 @@ tasks:
     expected_outcome: "Independent findings and residual limitations remain explicit."
     kind: security-audit
     status: completed
-    depends_on: [native-cache-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-cache-compliance-review
+    depends_on:
+      - "native-cache-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:38:00Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cache-compliance-review"
     title: "compliance_review: compare independent native cache observations"
     description: "Arrange clean-slate source/test IMPL derivation separately from source-blind comparison with native intent and attributed execution evidence."
     context: "No implementer IMPL, acceptance or self-certification."
@@ -1363,10 +1427,17 @@ tasks:
     expected_outcome: "Independent correspondence and discrepancies are retained for arbitration."
     kind: compliance-review
     status: completed
-    depends_on: [native-cache-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"]
-    timestamps: {created_at: "2026-11-07T21:38:00Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-admission-write-tests
+    depends_on:
+      - "native-cache-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-07T21:38:00Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-admission-write-tests"
     title: "write_tests: exact native offline Cargo metadata admission"
     description: "Add accepted native metadata requests and rejected argv/phase/environment/access/whole-home mutations; exercise real cached metadata with a build script that must not run."
     context: "Human-approved metadata operation; explicit scoped advisory exception, no acceptance or receipt. Before code the accepted native metadata test and cached-registry metadata producer failed the old exact-test-only argv validation (exit 101). The real trial later exposed Cargo's private-home manifest alias and allowed compiler-query scratch metadata; tests/docs record actual paths and prohibit compiled output/build-script execution rather than assuming empty scratch."
@@ -1375,35 +1446,33 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-ADMISSION"]
-    timestamps: {created_at: "2026-11-07T22:10:00Z", updated_at: "2026-11-07T22:13:36Z", completed_at: "2026-11-07T22:13:36Z"}
-  - id: native-admission-implement-code
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-ADMISSION"
+    timestamps:
+      created_at: "2026-11-07T22:10:00Z"
+      updated_at: "2026-11-07T22:13:36Z"
+      completed_at: "2026-11-07T22:13:36Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-admission-implement-code"
     title: "implement_code: native-only metadata verification operation"
     description: "Accept only the exact offline locked format-version-one all-features metadata argv with unchanged native verification topology and payload output semantics; preserve test/fetch/export behavior."
-    context: >-
-      Parent produces/supervises the exact seven-element native metadata request
-      and validates actual bounded metadata stdout through shared provider callbacks.
-      Implementer-attributed final tests with TMPDIR=/opt/proj/kvist/.galla-admission-fixtures
-      and CARGO_TARGET_DIR=/opt/proj/kvist/.galla-admission-target:
-      cargo test --quiet --offline --locked -p galla --test native_cache --test conformance
-      -- --test-threads=1 passed 62 tests, with two explicit native trials ignored.
-      The native_runner selector with --ignored --test-threads=1 passed both actual
-      Cargo trials (metadata plus existing offline test and locked local fetch).
-      Strict Galla all-target Clippy, scoped rustfmt and diff checks passed.
-      Metadata reports registry manifests through scratch/cargo-home/registry/src;
-      caller must normalize only request-bound native aliases to approved mounts.
-      No Galla output rewrite, report wrapper, source inventory, new grant/environment,
-      compilation, acquisition or build-script execution is added. Current tested
-      runner is retained in .galla-admission-target/debug/galla-runner for coordinator
-      rebuild/integration; no operator stages are cleaned. Independent review remains pending.
+    context: "Parent produces/supervises the exact seven-element native metadata request and validates actual bounded metadata stdout through shared provider callbacks. Implementer-attributed final tests with TMPDIR=/opt/proj/kvist/.galla-admission-fixtures and CARGO_TARGET_DIR=/opt/proj/kvist/.galla-admission-target: cargo test --quiet --offline --locked -p galla --test native_cache --test conformance -- --test-threads=1 passed 62 tests, with two explicit native trials ignored. The native_runner selector with --ignored --test-threads=1 passed both actual Cargo trials (metadata plus existing offline test and locked local fetch). Strict Galla all-target Clippy, scoped rustfmt and diff checks passed. Metadata reports registry manifests through scratch/cargo-home/registry/src; caller must normalize only request-bound native aliases to approved mounts. No Galla output rewrite, report wrapper, source inventory, new grant/environment, compilation, acquisition or build-script execution is added. Current tested runner is retained in .galla-admission-target/debug/galla-runner for coordinator rebuild/integration; no operator stages are cleaned. Independent review remains pending."
     purpose: "Permit configured Git/alternate source admission without ambient host Cargo authority."
     expected_outcome: "Focused validator and real Cargo metadata tests and scoped strict lint pass."
     kind: implementation
     status: completed
-    depends_on: [native-admission-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-ADMISSION"]
-    timestamps: {created_at: "2026-11-07T22:10:00Z", updated_at: "2026-11-07T22:13:36Z", completed_at: "2026-11-07T22:13:36Z"}
-  - id: native-admission-security-audit
+    depends_on:
+      - "native-admission-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-ADMISSION"
+    timestamps:
+      created_at: "2026-11-07T22:10:00Z"
+      updated_at: "2026-11-07T22:13:36Z"
+      completed_at: "2026-11-07T22:13:36Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-admission-security-audit"
     title: "security_audit: independently inspect metadata admission authority"
     description: "Review exact argv/native-mode gating, read-only endpoints, denied network, private admin and no compilation/acquisition or ambient config authority."
     context: "Independent scoped audit and source-only observations are linked from IMPL.md; no new compilation, config or credential authority was inferred."
@@ -1411,10 +1480,17 @@ tasks:
     expected_outcome: "Independent findings and limitations are retained."
     kind: security-audit
     status: completed
-    depends_on: [native-admission-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-ADMISSION"]
-    timestamps: {created_at: "2026-11-07T22:10:00Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-admission-compliance-review
+    depends_on:
+      - "native-admission-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-ADMISSION"
+    timestamps:
+      created_at: "2026-11-07T22:10:00Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-admission-compliance-review"
     title: "compliance_review: compare independent metadata admission evidence"
     description: "Arrange clean-slate source/test observation and separate source-blind comparison against the scoped admission intent and attributed execution evidence."
     context: "Independent observations/comparison are linked from IMPL.md; real Maerg-to-Galla cached-Git admission passed. No global certification or acceptance."
@@ -1422,10 +1498,17 @@ tasks:
     expected_outcome: "Independent correspondence/discrepancies remain explicit for arbitration."
     kind: compliance-review
     status: completed
-    depends_on: [native-admission-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-ADMISSION"]
-    timestamps: {created_at: "2026-11-07T22:10:00Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-alias-write-tests
+    depends_on:
+      - "native-admission-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-ADMISSION"
+    timestamps:
+      created_at: "2026-11-07T22:10:00Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-alias-write-tests"
     title: "write_tests: bounded approved native named registry aliases"
     description: "Pin accepted aliases, malformed/credential/forged/unbound acquisition rejection, unchanged alias-free requests, and real offline named-registry metadata without host config."
     context: "Red before code: unknown alias field and real alias-free Cargo101 named-registry failure. Cargo-invalid dotted name rejection also failed before its validator change. Green: 56 conformance + 8 default native cases and 3 explicit real native Cargo trials. Named trial uses an alias to existing crates.io sparse data, not a complete private alternate registry."
@@ -1434,9 +1517,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T22:22:00Z", updated_at: "2026-11-07T22:33:25Z", completed_at: "2026-11-07T22:33:25Z"}
-  - id: native-alias-implement-code
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T22:22:00Z"
+      updated_at: "2026-11-07T22:33:25Z"
+      completed_at: "2026-11-07T22:33:25Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-alias-implement-code"
     title: "implement_code: materialize only approved sparse registry names"
     description: "Add closed optional native registry alias descriptors/schema, exact source-bound acquisition validation and namespace-local read-only generated index configuration."
     context: "All 64 selected conformance/default tests and 3 explicit real Cargo trials pass; strict all-target Galla Clippy, scoped rustfmt and diff whitespace checks pass. No source replacement, host cfg/credentials mount, extra environment/argv or cache inventory. Rebuilt owned .galla-admission-target/debug/galla-runner retained; independent reviews pending."
@@ -1444,10 +1533,17 @@ tasks:
     expected_outcome: "Focused native alias tests and scoped strict lint pass."
     kind: implementation
     status: completed
-    depends_on: [native-alias-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T22:22:00Z", updated_at: "2026-11-07T22:33:25Z", completed_at: "2026-11-07T22:33:25Z"}
-  - id: native-alias-security-audit
+    depends_on:
+      - "native-alias-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T22:22:00Z"
+      updated_at: "2026-11-07T22:33:25Z"
+      completed_at: "2026-11-07T22:33:25Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-alias-security-audit"
     title: "security_audit: independently inspect named registry configuration"
     description: "Inspect bounded encoding, exact source binding, read-only private config and descriptor handoff without source replacement or credential authority."
     context: "Independent scoped audit/source observations are linked from IMPL.md; authority-level HTTPS limitations remain explicit."
@@ -1455,10 +1551,17 @@ tasks:
     expected_outcome: "Independent findings and limitations remain explicit."
     kind: security-audit
     status: completed
-    depends_on: [native-alias-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T22:22:00Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-alias-compliance-review
+    depends_on:
+      - "native-alias-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T22:22:00Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-alias-compliance-review"
     title: "compliance_review: compare independent named alias evidence"
     description: "Arrange clean-slate source/test observation and separate source-blind comparison with the scoped alias intent and execution evidence."
     context: "No implementer IMPL, acceptance or certification."
@@ -1466,10 +1569,17 @@ tasks:
     expected_outcome: "Independent correspondence/discrepancies are retained."
     kind: compliance-review
     status: completed
-    depends_on: [native-alias-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T22:22:00Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-alias-protocol-write-tests
+    depends_on:
+      - "native-alias-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T22:22:00Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-alias-protocol-write-tests"
     title: "write_tests: preserve Git and sparse registry index identities"
     description: "Pin accepted Git HTTPS origins without trailing slash, closed protocol values, unchanged origin/source authority, and generated Git versus default sparse index settings."
     context: "Red before code: unknown protocol rejected; after decoding existed, materialization still forced sparse+ onto the Git URL. Green: 3 default alias cases, 1 Git/default-sparse configuration case and 1 real named sparse metadata trial. Full Git-index integration remains parent-owned."
@@ -1478,9 +1588,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T22:36:07Z", updated_at: "2026-11-07T22:39:09Z", completed_at: "2026-11-07T22:39:09Z"}
-  - id: native-alias-protocol-implement-code
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T22:36:07Z"
+      updated_at: "2026-11-07T22:39:09Z"
+      completed_at: "2026-11-07T22:39:09Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-alias-protocol-implement-code"
     title: "implement_code: distinguish approved Git and sparse alias protocols"
     description: "Add closed default-sparse protocol enum/schema and preserve exact Git HTTPS origins in namespace-local registry configuration."
     context: "All 5 focused cases pass; strict all-target Galla Clippy, scoped rustfmt, schema JSON parse and whitespace checks pass. Existing argv, environment, grant topology and exact acquisition name/origin comparison remain unchanged. Owned current runner retained; independent reviews pending."
@@ -1488,10 +1604,17 @@ tasks:
     expected_outcome: "Current alias tests and focused Git cases pass."
     kind: implementation
     status: completed
-    depends_on: [native-alias-protocol-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T22:36:07Z", updated_at: "2026-11-07T22:39:09Z", completed_at: "2026-11-07T22:39:09Z"}
-  - id: native-alias-protocol-security-audit
+    depends_on:
+      - "native-alias-protocol-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T22:36:07Z"
+      updated_at: "2026-11-07T22:39:09Z"
+      completed_at: "2026-11-07T22:39:09Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-alias-protocol-security-audit"
     title: "security_audit: independently inspect registry protocol authority"
     description: "Inspect closed enum handling, origin restrictions, exact acquisition binding and generated configuration without new authority."
     context: "Independent scoped audit/source observations are linked from IMPL.md; the real Git-index fixture received an additional independent read-only review."
@@ -1499,10 +1622,17 @@ tasks:
     expected_outcome: "Independent findings and limitations remain explicit."
     kind: security-audit
     status: completed
-    depends_on: [native-alias-protocol-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T22:36:07Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-alias-protocol-compliance-review
+    depends_on:
+      - "native-alias-protocol-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T22:36:07Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-alias-protocol-compliance-review"
     title: "compliance_review: compare independent Git index identity evidence"
     description: "Arrange clean-slate observation and separate source-blind comparison for the scoped protocol distinction."
     context: "No implementer IMPL, acceptance or certification."
@@ -1510,10 +1640,17 @@ tasks:
     expected_outcome: "Independent correspondence/discrepancies remain explicit."
     kind: compliance-review
     status: completed
-    depends_on: [native-alias-protocol-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T22:36:07Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-git-registry-write-tests
+    depends_on:
+      - "native-alias-protocol-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T22:36:07Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-git-registry-write-tests"
     title: "write_tests: execute real native Git-index registry metadata"
     description: "Publish an owned Cargo package into a genuine Git registry fixture, let Cargo populate native data, and resolve exact offline/locked metadata through Galla with read-only registry data and generated Git alias config."
     context: "Real trial passed twice: Cargo-populated Git index native-git-registry.example.invalid-7997e58b080d09f8, payload exit0 and registry+https://native-git-registry.example.invalid/index.git source. Read-only native data/private generated config/denied network; selected archive, expanded manifest and lock unchanged, no build output. Actual Cargo package checksum and Cargo-authored lock, no source inventory. Fixture-only file Git/loopback bootstrap is not HTTPS acquisition or Maerg normalization evidence."
@@ -1522,9 +1659,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T23:02:17Z", updated_at: "2026-11-07T23:09:48Z", completed_at: "2026-11-07T23:09:48Z"}
-  - id: native-git-registry-implement-code
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T23:02:17Z"
+      updated_at: "2026-11-07T23:09:48Z"
+      completed_at: "2026-11-07T23:09:48Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-git-registry-implement-code"
     title: "implement_code: address only observed Git-index enforcement regressions"
     description: "Change production Galla behavior only if the real Git-index trial demonstrates a coupled regression; otherwise retain the existing explicit Git alias topology unchanged."
     context: "No production regression observed; existing Git protocol path needed no code change. Focused real trial, targeted strict native-cache Clippy, scoped rustfmt and whitespace checks pass. All builds used owned .galla-admission-target, not concurrent /opt/target. Owned fixture cleaned by RAII; target retained; independent reviews pending."
@@ -1532,10 +1675,17 @@ tasks:
     expected_outcome: "The real trial passes without unrelated production changes."
     kind: implementation
     status: completed
-    depends_on: [native-git-registry-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T23:02:17Z", updated_at: "2026-11-07T23:09:48Z", completed_at: "2026-11-07T23:09:48Z"}
-  - id: native-git-registry-security-audit
+    depends_on:
+      - "native-git-registry-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T23:02:17Z"
+      updated_at: "2026-11-07T23:09:48Z"
+      completed_at: "2026-11-07T23:09:48Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-git-registry-security-audit"
     title: "security_audit: independently inspect Git-index trial authority"
     description: "Inspect fixture versus protected authority separation, generated config and read-only native data with denied network."
     context: "Independent reviewer bf1b95b7-8a98-4777-b332-d8740de4e31f inspected owned bootstrap versus protected request separation; no additional finding. Fixture subprocess deadlines remain unqualified."
@@ -1543,10 +1693,17 @@ tasks:
     expected_outcome: "Independent findings and limitations remain explicit."
     kind: security-audit
     status: completed
-    depends_on: [native-git-registry-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T23:02:17Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
-  - id: native-git-registry-compliance-review
+    depends_on:
+      - "native-git-registry-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T23:02:17Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-git-registry-compliance-review"
     title: "compliance_review: compare independent real Git-index evidence"
     description: "Arrange clean-slate source/test observation and separate source-blind comparison of the Git-index requirement and actual execution evidence."
     context: "No implementer IMPL, acceptance or certification."
@@ -1554,6 +1711,13 @@ tasks:
     expected_outcome: "Independent correspondence/discrepancies remain explicit."
     kind: compliance-review
     status: completed
-    depends_on: [native-git-registry-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"]
-    timestamps: {created_at: "2026-11-07T23:02:17Z", updated_at: "2026-11-07T23:31:18Z", completed_at: "2026-11-07T23:31:18Z"}
+    depends_on:
+      - "native-git-registry-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-REGISTRY-ALIASES"
+    timestamps:
+      created_at: "2026-11-07T23:02:17Z"
+      updated_at: "2026-11-07T23:31:18Z"
+      completed_at: "2026-11-07T23:31:18Z"
+    blocked_reason: null
+    recovery_state: null

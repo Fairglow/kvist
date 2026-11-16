@@ -1164,6 +1164,9 @@ fn make_immutable_tree(root: std::os::fd::BorrowedFd<'_>) -> Result<(), CacheErr
                 stat::fchmod(&child, immutable_directory_mode()).map_err(|error| {
                     nix_error("make staged directory immutable", Path::new(&name), error)
                 })?;
+                unistd::fsync(&child).map_err(|error| {
+                    nix_error("fsync staged directory", Path::new(&name), error)
+                })?;
             }
             SFlag::S_IFREG => {
                 // Files were already normalized to their safe immutable mode when
@@ -1178,6 +1181,9 @@ fn make_immutable_tree(root: std::os::fd::BorrowedFd<'_>) -> Result<(), CacheErr
                 .map_err(|error| nix_error("open staged file", Path::new(&name), error))?;
                 stat::fchmod(&file, immutable_file_mode(executable)).map_err(|error| {
                     nix_error("make staged file immutable", Path::new(&name), error)
+                })?;
+                unistd::fsync(&file).map_err(|error| {
+                    nix_error("fsync staged file", Path::new(&name), error)
                 })?;
             }
             _ => {
