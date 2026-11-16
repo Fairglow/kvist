@@ -695,12 +695,36 @@ impl Workspace {
                                 budget_exhausted: false,
                                 failure: result.failure.clone(),
                             };
-                            let message = self
+                            // Kvist owns the queue teardown. In continuous mode a
+                            // broken or invalid task must not halt the run: record
+                            // the failure and let the loop move on to the next
+                            // ready task or component. The failed task stays in
+                            // its current state (in-progress) and is skipped by
+                            // the ready-task selection, so it is retried only on
+                            // an explicit, later run.
+                            let task_run_failed = self.task_run_continuous;
+                            let message = match self
                                 .task_run_prep
                                 .as_mut()
                                 .expect("task run preparation present")
                                 .complete(&summary, result.answer.clone())
-                                .map_err(|error| io::Error::other(error.to_string()))?;
+                            {
+                                Ok(message) => message,
+                                Err(error) if task_run_failed => {
+                                    let error = error.to_string();
+                                    self.append(&format!(
+                                        "\n\n## Continuous mode\n\nTask `{task}` could not be finalized ({error}); continuing with the next ready task.\n\n",
+                                        task = self
+                                            .task_run_component
+                                            .as_deref()
+                                            .unwrap_or("<component>")
+                                    ))?;
+                                    format!("Task run failed: {error}")
+                                }
+                                Err(error) => {
+                                    return Err(io::Error::other(error.to_string()))
+                                }
+                            };
                             self.append(&format!("\n\n{message}\n"))?;
                             // The task run reached a terminal state (completed,
                             // blocked, or awaiting-decision); release the

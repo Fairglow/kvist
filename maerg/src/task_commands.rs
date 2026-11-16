@@ -4761,6 +4761,12 @@ pub(crate) struct TaskRunPrep {
     pub(crate) journal: PathBuf,
     /// The pre-run queue digest.
     pub(crate) pre_queue_digest: String,
+    /// The pre-run queue contents, captured after Kvist transitions the task to
+    /// InProgress. Kvist owns the queue: if the agent modifies `TODOS.yaml`
+    /// directly (outside the approved write scope), Kvist restores this exact
+    /// pre-run state before transitioning, so the agent's untrusted edits never
+    /// reach the durable queue and timestamps are always set by Kvist.
+    pub(crate) pre_queue_contents: String,
 }
 
 /// Prepares a protected task run: validates the context, loads configuration,
@@ -4880,6 +4886,21 @@ pub(crate) fn prepare_task_run(
     let attempt_id = next_attempt_id(&agent_attempt_path)?;
     let write_scope = approved_write_scope(project_dir, &context, &config)?;
     let pre_queue_digest = current_queue_digest(&context.component_dir)?;
+    // Kvist owns the queue: capture the exact pre-run contents so an agent that
+    // edits `TODOS.yaml` directly (outside the approved write scope) cannot
+    // corrupt the durable state. The run restores this before transitioning.
+    let pre_queue_contents = fs::read_to_string(
+        &context
+            .component_dir
+            .join(ComponentArtifact::TaskQueue.filename()),
+    )
+    .map_err(|source| KvistError::Io {
+        operation: "capture pre-run TODO queue for agent-write protection",
+        path: context
+            .component_dir
+            .join(ComponentArtifact::TaskQueue.filename()),
+        source,
+    })?;
     let mut prepared = PreparedAttempt {
         schema_version: ATTEMPT_SCHEMA_VERSION,
         attempt_id: attempt_id.clone(),
@@ -4901,11 +4922,15 @@ pub(crate) fn prepare_task_run(
         &prepared,
         "append prepared run_task attempt",
     )?;
+    // The queue (`TODOS.yaml`) is intentionally NOT mounted into the agent's
+    // context: Kvist owns it, the prompt already carries the task's full
+    // definition, and exposing the queue invites the agent to edit it directly
+    // (setting `status` without the matching `completed_at`), which corrupts
+    // the durable state and halts continuous execution.
     let mut context_files = vec![
         PathBuf::from("/workspace/component/REQUIREMENTS.md"),
         PathBuf::from("/workspace/component/CONTRACT.md"),
         PathBuf::from("/workspace/component/DESIGN.md"),
-        PathBuf::from("/workspace/component/TODOS.yaml"),
         PathBuf::from("/workspace/component/IMPL.md"),
         PathBuf::from("/workspace/context/ROOT_CONTRACT.md"),
     ];
@@ -4938,6 +4963,7 @@ pub(crate) fn prepare_task_run(
         redactions,
         journal: agent_attempt_path,
         pre_queue_digest,
+        pre_queue_contents,
     })
 }
 
@@ -4953,12 +4979,23 @@ impl TaskRunPrep {
     ///   -> task blocks with the failure reason.
     /// - `NoWork` -> not an allowed outcome; the caller should push back to
     ///   Skott with guidance via [`TaskRunPrep::push_back`].
+    ///
+    /// Kvist owns the task queue. The agent runs with a bounded write scope
+    /// (`src`/`tests`) and must never edit `TODOS.yaml` itself. If it does —
+    /// setting `status: completed` while leaving `completed_at: null`, for
+    /// example — the durable queue becomes invalid and every later revalidation
+    /// fails, halting continuous execution. Before Kvist records the terminal
+    /// transition it therefore restores the exact pre-run queue it captured at
+    /// prepare time, discarding any agent write to the queue. The restore is
+    /// silent on the happy path (the agent left the queue alone) and only
+    /// rewrites the file when the agent actually modified it.
     pub fn complete(
         &self,
         summary: &sav::runtime::RunSummary,
         answer: Option<String>,
     ) -> Result<String> {
         use sav::runtime::StopReason;
+        self.restore_queue_if_modified()?;
         let at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
         let success = summary.success() && answer.is_some();
         let stdout = answer.unwrap_or_default();
@@ -5061,6 +5098,40 @@ impl TaskRunPrep {
             )?;
             Ok(format!("Task `{}` blocked: {}", self.task_id, reason))
         }
+    }
+
+    /// Restores the pre-run queue if the agent modified `TODOS.yaml` directly.
+    ///
+    /// Kvist owns the queue: the agent's write scope is `src`/`tests` only, and
+    /// the queue is never part of it. If the agent nonetheless edits the queue
+    /// (for example setting `status: completed` while leaving
+    /// `completed_at: null`), the durable state becomes invalid and every later
+    /// revalidation fails, halting continuous execution. Restoring the exact
+    /// pre-run contents discards the agent's untrusted write so Kvist's own
+    /// transition — which sets `completed_at` correctly — is the only writer.
+    /// The happy path (agent left the queue alone) is a silent no-op.
+    fn restore_queue_if_modified(&self) -> Result<()> {
+        let queue_path = self
+            .context
+            .component_dir
+            .join(ComponentArtifact::TaskQueue.filename());
+        let current = fs::read_to_string(&queue_path).map_err(|source| KvistError::Io {
+            operation: "re-read TODO queue after agent run",
+            path: queue_path.clone(),
+            source,
+        })?;
+        if current == self.pre_queue_contents {
+            return Ok(());
+        }
+        // The agent modified the queue. Restore the pre-run state atomically so
+        // the agent's untrusted edit never reaches the durable queue.
+        replace_file_atomically(&queue_path, &self.pre_queue_contents)?;
+        tracing::warn!(
+            task_id = %self.task_id,
+            component = %self.context.component_path.display(),
+            "agent modified TODOS.yaml directly; restored pre-run queue state"
+        );
+        Ok(())
     }
 
     /// Records a continuation in the attempt journal without transitioning the
