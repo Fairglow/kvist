@@ -28,6 +28,7 @@ pub mod registry;
 pub mod runtime;
 mod setup;
 mod supervisor;
+pub mod security_audit;
 pub mod trajectory;
 
 pub use catalog::{
