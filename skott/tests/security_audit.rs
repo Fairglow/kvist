@@ -4,9 +4,9 @@
 //! prompt injection resistance, uncertainty retention, contract laundering
 //! prevention, and comparison-output authority.
 
-use skott::file_tools::{canonical_path, FileRequest};
-use skott::tools::ToolPolicy;
 use sha2::Digest;
+use skott::file_tools::{FileRequest, canonical_path};
+use skott::tools::ToolPolicy;
 use std::fs;
 use tempfile::TempDir;
 
@@ -87,10 +87,14 @@ fn write_file_requires_canonical_path() {
     let tmp = TempDir::new().unwrap();
     let workdir = tmp.path().to_str().unwrap();
     // A relative path should fail validation.
-    let request = FileRequest::new(workdir, "write_file", serde_json::json!({
-        "path": "src/main.rs",
-        "content": "fn main() {}"
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "write_file",
+        serde_json::json!({
+            "path": "src/main.rs",
+            "content": "fn main() {}"
+        }),
+    );
     assert!(request.is_err());
 }
 
@@ -99,10 +103,14 @@ fn write_file_escapes_write_root() {
     let tmp = TempDir::new().unwrap();
     let workdir = tmp.path().to_str().unwrap();
     // A path outside the write root should fail.
-    let request = FileRequest::new(workdir, "write_file", serde_json::json!({
-        "path": "/other/src/main.rs",
-        "content": "fn main() {}"
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "write_file",
+        serde_json::json!({
+            "path": "/other/src/main.rs",
+            "content": "fn main() {}"
+        }),
+    );
     assert!(request.is_err());
 }
 
@@ -111,10 +119,14 @@ fn write_file_at_write_root_is_forbidden() {
     let tmp = TempDir::new().unwrap();
     let workdir = tmp.path().to_str().unwrap();
     // Writing directly to the write root (not a file inside it) should fail.
-    let request = FileRequest::new(workdir, "write_file", serde_json::json!({
-        "path": workdir,
-        "content": "fn main() {}"
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "write_file",
+        serde_json::json!({
+            "path": workdir,
+            "content": "fn main() {}"
+        }),
+    );
     assert!(request.is_err());
 }
 
@@ -131,11 +143,15 @@ fn edit_requires_exactly_one_occurrence() {
     fs::write(&file_path, "let x = 1;\nlet x = 2;\n").unwrap();
 
     // Edit with an old_text that appears twice should fail.
-    let request = FileRequest::new(workdir, "edit_file", serde_json::json!({
-        "path": &file_path,
-        "old_text": "let x = ",
-        "new_text": "let y = "
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "edit_file",
+        serde_json::json!({
+            "path": &file_path,
+            "old_text": "let x = ",
+            "new_text": "let y = "
+        }),
+    );
     assert!(request.is_ok());
     let outcome = skott::file_tools::execute_file_request(&request.unwrap());
     assert!(outcome.is_err());
@@ -152,11 +168,15 @@ fn edit_requires_old_text_to_exist() {
     fs::write(&file_path, "let x = 1;\n").unwrap();
 
     // Edit with an old_text that doesn't exist should fail.
-    let request = FileRequest::new(workdir, "edit_file", serde_json::json!({
-        "path": &file_path,
-        "old_text": "let y = ",
-        "new_text": "let z = "
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "edit_file",
+        serde_json::json!({
+            "path": &file_path,
+            "old_text": "let y = ",
+            "new_text": "let z = "
+        }),
+    );
     assert!(request.is_ok());
     let outcome = skott::file_tools::execute_file_request(&request.unwrap());
     assert!(outcome.is_err());
@@ -175,11 +195,15 @@ fn expected_sha256_protects_against_stale_edits() {
     let actual_digest = format!("sha256:{}", hex::encode(sha2::Sha256::digest(content)));
 
     // Write with a stale digest should fail.
-    let request = FileRequest::new(workdir, "write_file", serde_json::json!({
-        "path": &file_path,
-        "content": "let x = 2;\n",
-        "expected_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "write_file",
+        serde_json::json!({
+            "path": &file_path,
+            "content": "let x = 2;\n",
+            "expected_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }),
+    );
     assert!(request.is_ok());
     let outcome = skott::file_tools::execute_file_request(&request.unwrap());
     assert!(outcome.is_err());
@@ -187,11 +211,15 @@ fn expected_sha256_protects_against_stale_edits() {
     assert!(error.contains("stale expected_sha256"));
 
     // Write with the correct digest should succeed.
-    let request = FileRequest::new(workdir, "write_file", serde_json::json!({
-        "path": &file_path,
-        "content": "let x = 2;\n",
-        "expected_sha256": &actual_digest
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "write_file",
+        serde_json::json!({
+            "path": &file_path,
+            "content": "let x = 2;\n",
+            "expected_sha256": &actual_digest
+        }),
+    );
     assert!(request.is_ok());
     let outcome = skott::file_tools::execute_file_request(&request.unwrap());
     assert!(outcome.is_ok());
@@ -207,10 +235,14 @@ fn patch_must_change_the_file() {
     fs::write(&file_path, content).unwrap();
 
     // A no-op patch should fail.
-    let request = FileRequest::new(workdir, "apply_patch", serde_json::json!({
-        "path": &file_path,
-        "patch": "@@ -1,1 +1,1 @@\n-let x = 1;\n+let x = 1;\n"
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "apply_patch",
+        serde_json::json!({
+            "path": &file_path,
+            "patch": "@@ -1,1 +1,1 @@\n-let x = 1;\n+let x = 1;\n"
+        }),
+    );
     assert!(request.is_ok());
     let outcome = skott::file_tools::execute_file_request(&request.unwrap());
     assert!(outcome.is_err());
@@ -232,9 +264,13 @@ fn output_is_bounded() {
     fs::create_dir_all(format!("{}/src", workdir)).unwrap();
     fs::write(&file_path, "fn main() {}").unwrap();
 
-    let request = FileRequest::new(workdir, "read_file", serde_json::json!({
-        "path": &file_path
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "read_file",
+        serde_json::json!({
+            "path": &file_path
+        }),
+    );
     assert!(request.is_ok());
     let outcome = skott::file_tools::execute_file_request(&request.unwrap());
     assert!(outcome.is_ok());
@@ -281,7 +317,11 @@ fn preflight_failures_are_explicit() {
         backend: std::path::PathBuf::from("/nonexistent/backend"),
     };
     let workdir = std::path::PathBuf::from("/tmp");
-    let argv = vec!["/bin/bash".to_string(), "-c".to_string(), "true".to_string()];
+    let argv = vec![
+        "/bin/bash".to_string(),
+        "-c".to_string(),
+        "true".to_string(),
+    ];
     let request = skott::sandbox::BuildRequest {
         argv: &argv,
         working_directory: &workdir,
@@ -333,11 +373,15 @@ fn file_comparison_uses_exact_byte_matching() {
     fs::write(&file_path, "let x = 1;\n").unwrap();
 
     // Edit with exact match should succeed.
-    let request = FileRequest::new(workdir, "edit_file", serde_json::json!({
-        "path": &file_path,
-        "old_text": "let x = 1;\n",
-        "new_text": "let x = 2;\n"
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "edit_file",
+        serde_json::json!({
+            "path": &file_path,
+            "old_text": "let x = 1;\n",
+            "new_text": "let x = 2;\n"
+        }),
+    );
     assert!(request.is_ok());
     let outcome = skott::file_tools::execute_file_request(&request.unwrap());
     assert!(outcome.is_ok());
@@ -359,33 +403,49 @@ fn digests_are_computed_and_validated() {
 
     // A valid digest format is accepted.
     let actual_digest = format!("sha256:{}", hex::encode(sha2::Sha256::digest(content)));
-    let request = FileRequest::new(workdir, "write_file", serde_json::json!({
-        "path": &file_path,
-        "content": "let x = 2;\n",
-        "expected_sha256": &actual_digest
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "write_file",
+        serde_json::json!({
+            "path": &file_path,
+            "content": "let x = 2;\n",
+            "expected_sha256": &actual_digest
+        }),
+    );
     assert!(request.is_ok());
 
     // Invalid digests are rejected by request validation.
-    let request = FileRequest::new(workdir, "write_file", serde_json::json!({
-        "path": &file_path,
-        "content": "let x = 2;\n",
-        "expected_sha256": "invalid"
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "write_file",
+        serde_json::json!({
+            "path": &file_path,
+            "content": "let x = 2;\n",
+            "expected_sha256": "invalid"
+        }),
+    );
     assert!(request.is_err());
 
-    let request = FileRequest::new(workdir, "write_file", serde_json::json!({
-        "path": &file_path,
-        "content": "let x = 2;\n",
-        "expected_sha256": "sha256:"
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "write_file",
+        serde_json::json!({
+            "path": &file_path,
+            "content": "let x = 2;\n",
+            "expected_sha256": "sha256:"
+        }),
+    );
     assert!(request.is_err());
 
-    let request = FileRequest::new(workdir, "write_file", serde_json::json!({
-        "path": &file_path,
-        "content": "let x = 2;\n",
-        "expected_sha256": "sha256:0000"
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "write_file",
+        serde_json::json!({
+            "path": &file_path,
+            "content": "let x = 2;\n",
+            "expected_sha256": "sha256:0000"
+        }),
+    );
     assert!(request.is_err());
 }
 
@@ -399,10 +459,14 @@ fn patch_application_is_exact() {
     fs::write(&file_path, "let x = 1;\nlet y = 2;\n").unwrap();
 
     // Patch with wrong context should fail.
-    let request = FileRequest::new(workdir, "apply_patch", serde_json::json!({
-        "path": &file_path,
-        "patch": "@@ -1,1 +1,1 @@\n-let x = 99;\n+let x = 2;\n"
-    }));
+    let request = FileRequest::new(
+        workdir,
+        "apply_patch",
+        serde_json::json!({
+            "path": &file_path,
+            "patch": "@@ -1,1 +1,1 @@\n-let x = 99;\n+let x = 2;\n"
+        }),
+    );
     assert!(request.is_ok());
     let outcome = skott::file_tools::execute_file_request(&request.unwrap());
     assert!(outcome.is_err());

@@ -295,26 +295,32 @@ fn read_manifest(project_dir: &Path) -> Result<Manifest> {
 /// draft generation. Identical inputs produce identical timestamps.
 fn deterministic_timestamp(manifest: &Manifest) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(format!("{}:{}:{}", manifest.name, manifest.version, manifest.description).as_bytes());
+    hasher.update(
+        format!(
+            "{}:{}:{}",
+            manifest.name, manifest.version, manifest.description
+        )
+        .as_bytes(),
+    );
     let digest = hasher.finalize();
     // Use first 8 bytes to derive a Unix timestamp in a reasonable range
     let bytes = &digest[..8];
     let mut value: u64 = 0;
     for (i, byte) in bytes.iter().enumerate() {
-        value = value | ((*byte as u64) << (i * 8));
+        value |= (*byte as u64) << (i * 8);
     }
     // Map to a timestamp between 2020-01-01 and 2030-01-01
     let base: u64 = 1577836800; // 2020-01-01T00:00:00Z
     let range: u64 = 315360000; // 10 years in seconds
     let timestamp = base + (value % range);
-    
+
     // Convert to ISO 8601 format
     let days = timestamp / 86400;
     let rem = timestamp % 86400;
     let hours = rem / 3600;
     let mins = (rem % 3600) / 60;
     let secs = rem % 60;
-    
+
     // Days since epoch to date
     let mut year = 1970;
     let mut remaining_days = days as i64;
@@ -365,15 +371,27 @@ fn draft_documents(manifest: &Manifest) -> (String, String, String) {
     let version = bounded_field(&manifest.version);
     let description = bounded_field(&manifest.description);
     let authors = {
-        let bounded: Vec<String> = manifest.authors.iter().map(|s| bounded_field(s.as_str())).collect();
+        let bounded: Vec<String> = manifest
+            .authors
+            .iter()
+            .map(|s| bounded_field(s.as_str()))
+            .collect();
         list_or_none(&bounded)
     };
     let dependencies = {
-        let bounded: Vec<String> = manifest.dependencies.iter().map(|s| bounded_field(s.as_str())).collect();
+        let bounded: Vec<String> = manifest
+            .dependencies
+            .iter()
+            .map(|s| bounded_field(s.as_str()))
+            .collect();
         list_or_none(&bounded)
     };
     let features = {
-        let bounded: Vec<String> = manifest.features.iter().map(|s| bounded_field(s.as_str())).collect();
+        let bounded: Vec<String> = manifest
+            .features
+            .iter()
+            .map(|s| bounded_field(s.as_str()))
+            .collect();
         list_or_none(&bounded)
     };
 
@@ -647,7 +665,12 @@ fn walk_rust_files(base: &Path, current: &Path, out: &mut Vec<String>) -> Result
             let relative = path
                 .strip_prefix(base)
                 .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| path.file_name().unwrap_or_default().to_string_lossy().into_owned());
+                .unwrap_or_else(|_| {
+                    path.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                });
             out.push(relative);
         }
     }
@@ -749,7 +772,10 @@ mod tests {
         let m2 = test_manifest("pkg-b", "1.0", "desc");
         let t1 = deterministic_timestamp(&m1);
         let t2 = deterministic_timestamp(&m2);
-        assert_ne!(t1, t2, "different inputs should produce different timestamps");
+        assert_ne!(
+            t1, t2,
+            "different inputs should produce different timestamps"
+        );
     }
 
     #[test]

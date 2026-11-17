@@ -518,11 +518,7 @@ impl Workspace {
     /// the Skott view (alone or side-by-side) is the active pane.
     fn skott_viewport_scroll_active(&self) -> bool {
         self.skott.as_ref().is_some_and(|skott| {
-            skott.is_active()
-                && matches!(
-                    skott.active_pane(),
-                    ActivePane::Skott | ActivePane::Both
-                )
+            skott.is_active() && matches!(skott.active_pane(), ActivePane::Skott | ActivePane::Both)
         })
     }
 
@@ -721,9 +717,7 @@ impl Workspace {
                                     ))?;
                                     format!("Task run failed: {error}")
                                 }
-                                Err(error) => {
-                                    return Err(io::Error::other(error.to_string()))
-                                }
+                                Err(error) => return Err(io::Error::other(error.to_string())),
                             };
                             self.append(&format!("\n\n{message}\n"))?;
                             // The task run reached a terminal state (completed,
@@ -745,7 +739,8 @@ impl Workspace {
                                     "\n\nWarning: the task run finished but its component lock could not be released ({error}); run `kvist task unlock` if a later run reports the component is locked.\n",
                                 ))?;
                                 self.notice =
-                                    "Task lock release failed; run `kvist task unlock` if needed".into();
+                                    "Task lock release failed; run `kvist task unlock` if needed"
+                                        .into();
                             }
                             // Close the transcript entry with the same footer a
                             // subprocess command produces, so a task run never
@@ -775,7 +770,13 @@ impl Workspace {
                                     self.task_run_prep = None;
                                     self.skott = None;
                                     self.skott_result_reported = false;
-                                    self.start_task_run(&component, &next_task, false, true, self.task_run_all_components)?;
+                                    self.start_task_run(
+                                        &component,
+                                        &next_task,
+                                        false,
+                                        true,
+                                        self.task_run_all_components,
+                                    )?;
                                 } else if self.task_run_all_components {
                                     // Try the next component
                                     self.try_next_component()?;
@@ -908,11 +909,7 @@ impl Workspace {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         if control && key.code == KeyCode::Char('a') {
             // Ctrl+A: start an interactive agent session when idle.
-            if self.running.is_none()
-                && !self
-                    .skott
-                    .as_ref()
-                    .is_some_and(|skott| skott.is_active())
+            if self.running.is_none() && !self.skott.as_ref().is_some_and(|skott| skott.is_active())
             {
                 self.start_agent_session("")?;
             }
@@ -978,14 +975,10 @@ impl Workspace {
             // (not the Kvist transcript). Scrolling back unpins auto-follow so
             // a long run's agent work stays reviewable; reaching the bottom
             // re-pins it. (Ctrl+PageUp / Ctrl+PageDown still switch views.)
-            KeyCode::PageUp
-                if self.skott_viewport_scroll_active() =>
-            {
+            KeyCode::PageUp if self.skott_viewport_scroll_active() => {
                 self.skott_scroll_page(-(self.skott_viewport.max(1) as isize));
             }
-            KeyCode::PageDown
-                if self.skott_viewport_scroll_active() =>
-            {
+            KeyCode::PageDown if self.skott_viewport_scroll_active() => {
                 self.skott_scroll_page(self.skott_viewport.max(1) as isize);
             }
             KeyCode::PageUp => self.navigate(-(self.viewport.max(1) as isize))?,

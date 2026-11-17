@@ -115,9 +115,7 @@ impl Workspace {
         // When the Skott view is active, the bottom row is a guidance area for
         // steering the agent, not the Kvist command area. The user can submit
         // their own steering input to an active Skott session.
-        let in_skott_steering = skott_active
-            && pane == ActivePane::Skott
-            && self.overlay.is_none();
+        let in_skott_steering = skott_active && pane == ActivePane::Skott && self.overlay.is_none();
         let label = if self.running.is_some() && !in_skott_steering {
             "answer> "
         } else if in_skott_steering {

@@ -31,17 +31,24 @@ fn review_bundle_requires_exact_digest() {
         report: "All clear.".to_string(),
     };
     let result = register_review(project.path(), bundle);
-    assert!(result.is_ok(), "bundle with exact digest should be accepted");
+    assert!(
+        result.is_ok(),
+        "bundle with exact digest should be accepted"
+    );
 
     // Bundle with wrong digest should be rejected
     let bad_bundle = ReviewBundle {
-        document_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+        document_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            .to_string(),
         document: doc.to_vec(),
         agent: Some("claude".to_string()),
         report: "All clear.".to_string(),
     };
     let bad_result = register_review(project.path(), bad_bundle);
-    assert!(bad_result.is_err(), "bundle with wrong digest should be rejected");
+    assert!(
+        bad_result.is_err(),
+        "bundle with wrong digest should be rejected"
+    );
 }
 
 #[test]
@@ -81,8 +88,10 @@ fn review_report_is_bounded() {
         agent: Some("test-agent".to_string()),
         report: "x".repeat(100_000),
     };
-    assert!(register_review(project.path(), big_bundle).is_err(),
-        "oversized report should be rejected");
+    assert!(
+        register_review(project.path(), big_bundle).is_err(),
+        "oversized report should be rejected"
+    );
 }
 
 #[test]
@@ -92,7 +101,7 @@ fn review_report_is_redacted_for_storage() {
     let digest = document_digest(doc);
 
     let bundle = ReviewBundle {
-        document_digest: digest,
+        document_digest: digest.clone(),
         document: doc.to_vec(),
         agent: Some("claude-sonnet".to_string()),
         report: "Found issues: path /workspace/src/main.rs line 42".to_string(),
@@ -101,8 +110,10 @@ fn review_report_is_redacted_for_storage() {
 
     // Stored report should not contain project paths
     let stored = load_review(project.path(), digest).unwrap();
-    assert!(!stored.report.contains("/workspace"),
-        "stored report should be redacted of project paths");
+    assert!(
+        !stored.report.contains("/workspace"),
+        "stored report should be redacted of project paths"
+    );
 }
 
 // --- Explicit acknowledgement ---
@@ -124,16 +135,22 @@ fn review_requires_explicit_acknowledgement() {
 
     // Should not be considered acknowledged yet
     let status = review_status(project.path(), digest.clone());
-    assert_eq!(status, ReviewStatus::Registered,
-        "review should be Registered before acknowledgement");
+    assert_eq!(
+        status,
+        ReviewStatus::Registered,
+        "review should be Registered before acknowledgement"
+    );
 
     // Acknowledge explicitly
     acknowledge_review(project.path(), digest.clone(), "ack by human").unwrap();
 
     // Now should be acknowledged
     let status = review_status(project.path(), digest);
-    assert_eq!(status, ReviewStatus::Acknowledged,
-        "review should be Acknowledged after explicit acknowledgement");
+    assert_eq!(
+        status,
+        ReviewStatus::Acknowledged,
+        "review should be Acknowledged after explicit acknowledgement"
+    );
 }
 
 #[test]
@@ -152,7 +169,10 @@ fn acknowledgement_requires_identity() {
 
     // Empty identity should fail
     let result = acknowledge_review(project.path(), digest, "");
-    assert!(result.is_err(), "empty acknowledgement identity should fail");
+    assert!(
+        result.is_err(),
+        "empty acknowledgement identity should fail"
+    );
 }
 
 // --- Per-bundle exceptions ---
@@ -170,8 +190,11 @@ fn per_bundle_exception_can_override_review_requirement() {
     // With exception, review is not required for this bundle
     add_review_exception(project.path(), digest.clone(), "known safe").unwrap();
     let status = review_status(project.path(), digest);
-    assert_eq!(status, ReviewStatus::Excepted,
-        "excepted bundle should show Excepted status");
+    assert_eq!(
+        status,
+        ReviewStatus::Excepted,
+        "excepted bundle should show Excepted status"
+    );
 }
 
 #[test]
@@ -188,8 +211,11 @@ fn exception_is_digest_specific() {
     let status2 = review_status(project.path(), digest2);
 
     assert_eq!(status1, ReviewStatus::Excepted);
-    assert_ne!(status2, ReviewStatus::Excepted,
-        "exception should not apply to other documents");
+    assert_ne!(
+        status2,
+        ReviewStatus::Excepted,
+        "exception should not apply to other documents"
+    );
 }
 
 // --- Default-on configuration and project opt-out ---
@@ -198,14 +224,16 @@ fn exception_is_digest_specific() {
 fn review_is_default_on() {
     let project = test_project();
     let config = ReviewConfig::default();
-    assert!(config.review_required(project.path()),
-        "review should be required by default");
+    assert!(
+        config.review_required(project.path()),
+        "review should be required by default"
+    );
 }
 
 #[test]
 fn project_can_opt_out_of_review() {
     let project = test_project();
-    let config = ReviewConfig::default();
+    let mut config = ReviewConfig::default();
 
     // Initially required
     assert!(config.review_required(project.path()));
@@ -214,8 +242,10 @@ fn project_can_opt_out_of_review() {
     config.opt_out_project(project.path());
 
     // Now not required
-    assert!(!config.review_required(project.path()),
-        "project should not require review after opt-out");
+    assert!(
+        !config.review_required(project.path()),
+        "project should not require review after opt-out"
+    );
 }
 
 #[test]
@@ -228,8 +258,10 @@ fn opt_out_requires_persistent_configuration() {
     config.save(project.path()).unwrap();
     let reloaded = ReviewConfig::load(project.path()).unwrap();
 
-    assert!(!reloaded.review_required(project.path()),
-        "opt-out should persist across reloads");
+    assert!(
+        !reloaded.review_required(project.path()),
+        "opt-out should persist across reloads"
+    );
 }
 
 // --- Unavailable agents ---
@@ -248,8 +280,10 @@ fn review_can_be_registered_without_agent() {
         report: "Human reviewed without agent assistance.".to_string(),
     };
     let result = register_review(project.path(), bundle);
-    assert!(result.is_ok(),
-        "review should be registrable without an agent");
+    assert!(
+        result.is_ok(),
+        "review should be registrable without an agent"
+    );
 }
 
 #[test]
@@ -289,8 +323,10 @@ fn review_evidence_projects_to_task() {
 
     // Query task projection
     let projection = review_task_projection(project.path(), digest);
-    assert!(projection.is_some(),
-        "acknowledged review should project to task");
+    assert!(
+        projection.is_some(),
+        "acknowledged review should project to task"
+    );
     let proj = projection.unwrap();
     assert_eq!(proj.status, "acknowledged");
 }
@@ -333,8 +369,10 @@ fn review_paths_are_governed_by_project() {
 
     // Review data should be stored under .kvist/review
     let review_dir = project.path().join(".kvist/review");
-    assert!(review_dir.exists(),
-        "review data should be stored under governed .kvist/review path");
+    assert!(
+        review_dir.exists(),
+        "review data should be stored under governed .kvist/review path"
+    );
 }
 
 // --- Stale review evidence ---
@@ -356,7 +394,7 @@ fn review_becomes_stale_when_document_changes() {
     acknowledge_review(project.path(), digest_v1.clone(), "human").unwrap();
 
     // Review is current for v1
-    let status_v1 = review_status(project.path(), digest_v1);
+    let status_v1 = review_status(project.path(), digest_v1.clone());
     assert_eq!(status_v1, ReviewStatus::Acknowledged);
 
     // Register review for v2
@@ -371,8 +409,11 @@ fn review_becomes_stale_when_document_changes() {
 
     // v1 review is now stale (superseded)
     let stale_status = review_status(project.path(), digest_v1);
-    assert_eq!(stale_status, ReviewStatus::Stale,
-        "previous review should become stale when new version is reviewed");
+    assert_eq!(
+        stale_status,
+        ReviewStatus::Stale,
+        "previous review should become stale when new version is reviewed"
+    );
 }
 
 // --- Review evidence vs findings ---
@@ -415,6 +456,8 @@ fn review_findings_do_not_block_acceptance() {
 
     // Human can still acknowledge despite negative findings
     let result = acknowledge_review(project.path(), digest, "human override");
-    assert!(result.is_ok(),
-        "human acknowledgement should succeed regardless of agent findings");
+    assert!(
+        result.is_ok(),
+        "human acknowledgement should succeed regardless of agent findings"
+    );
 }

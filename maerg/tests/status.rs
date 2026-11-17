@@ -92,14 +92,25 @@ fn status_reports_a_current_initialized_project_in_stable_text_and_json() {
     assert!(output.starts_with("{\"format_version\":1,\"project_path\":"));
     assert!(output.contains("\"project_state\":\"current\""));
     assert!(output.contains("\"component_root\":\"src\""));
-    assert!(output.contains("\"path\":\"kvist.toml\",\"status\":\"valid (configuration version 1)\""));
+    assert!(
+        output.contains("\"path\":\"kvist.toml\",\"status\":\"valid (configuration version 1)\"")
+    );
     assert!(output.contains("\"path\":\"VISION.md\",\"status\":\"valid (version 1)\""));
     assert!(output.contains("\"path\":\"ARCHITECTURE.md\",\"status\":\"valid (version 1)\""));
     assert!(output.contains("\"path\":\"ROOT_CONTRACT.md\",\"status\":\"valid (version 1)\""));
-    assert!(output.contains("\"path\":\"src/REQUIREMENTS.md\",\"status\":\"valid (REQUIREMENTS.md version 1)\""));
-    assert!(output.contains("\"path\":\"src/CONTRACT.md\",\"status\":\"valid (CONTRACT.md version 1)\""));
-    assert!(output.contains("\"path\":\"src/DESIGN.md\",\"status\":\"valid (DESIGN.md version 1)\""));
-    assert!(output.contains("\"path\":\"src/TODOS.yaml\",\"status\":\"valid (TODO queue version 1)\""));
+    assert!(output.contains(
+        "\"path\":\"src/REQUIREMENTS.md\",\"status\":\"valid (REQUIREMENTS.md version 1)\""
+    ));
+    assert!(
+        output
+            .contains("\"path\":\"src/CONTRACT.md\",\"status\":\"valid (CONTRACT.md version 1)\"")
+    );
+    assert!(
+        output.contains("\"path\":\"src/DESIGN.md\",\"status\":\"valid (DESIGN.md version 1)\"")
+    );
+    assert!(
+        output.contains("\"path\":\"src/TODOS.yaml\",\"status\":\"valid (TODO queue version 1)\"")
+    );
     assert!(output.contains("\"path\":\"src/IMPL.md\",\"status\":\"valid (version 1)\""));
     assert!(output.contains("\"root_diagnostic\":null"));
     assert!(output.contains("\"guidance\":\"project is ready for Phase 1 read-only commands\""));

@@ -23,6 +23,10 @@ pub enum LinkKind {
     File,
 }
 
+/// Prefix of a footnote reference anchor. A destination of `#fn-…` is a
+/// footnote reference that navigates to its definition.
+pub(crate) const FOOTNOTE_ANCHOR_PREFIX: &str = "fn-";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum NavigationId {
     Source(usize),
@@ -82,6 +86,21 @@ impl Link {
     /// True when the destination is a file path.
     pub fn is_file(&self) -> bool {
         self.kind == LinkKind::File
+    }
+
+    /// True when the destination is a footnote reference anchor (`#fn-…`).
+    pub fn is_footnote(&self) -> bool {
+        self.destination
+            .strip_prefix('#')
+            .is_some_and(|rest| rest.starts_with(FOOTNOTE_ANCHOR_PREFIX))
+    }
+
+    /// The footnote id (the destination minus its leading `#`) when this link
+    /// is a footnote reference, otherwise `None`.
+    pub fn footnote_id(&self) -> Option<&str> {
+        self.destination
+            .strip_prefix('#')
+            .filter(|rest| rest.starts_with(FOOTNOTE_ANCHOR_PREFIX))
     }
 
     pub(crate) fn navigation_id(&self) -> NavigationId {
@@ -150,7 +169,11 @@ pub fn extract_links(source: &str) -> Vec<Link> {
 }
 
 pub(crate) fn extract_links_with_html(source: &str, strip_html: bool) -> Vec<Link> {
-    let parser = crate::frontmatter::events(source, parser_options());
+    let events = crate::html::events(crate::scripts::events(
+        source,
+        crate::frontmatter::events(source, parser_options()),
+    ))
+    .collect::<Vec<_>>();
     let mut html = crate::html::Html::default();
     let mut links = Vec::new();
     let mut current_text = String::new();
@@ -159,8 +182,45 @@ pub(crate) fn extract_links_with_html(source: &str, strip_html: bool) -> Vec<Lin
     let mut link_destination = String::new();
     let mut link_line = 0;
     let mut link_offset = 0;
+    let mut defined_footnotes = std::collections::HashSet::new();
+    // Source spans that are not navigable as footnote references: links, code
+    // blocks, inline code, and footnote definitions. A footnote reference
+    // inside any of these is not a standalone navigable link.
+    let mut excluded: Vec<std::ops::Range<usize>> = Vec::new();
+    // Pending start spans awaiting their matching End event.
+    let mut pending_link: Option<std::ops::Range<usize>> = None;
+    let mut pending_code_block: Option<std::ops::Range<usize>> = None;
+    let mut pending_definition: Option<std::ops::Range<usize>> = None;
 
-    for (event, range) in crate::html::events(crate::scripts::events(source, parser)) {
+    for (event, range) in &events {
+        match event {
+            Event::Start(Tag::Link { .. }) => pending_link = Some(range.clone()),
+            Event::Start(Tag::CodeBlock(_)) => pending_code_block = Some(range.clone()),
+            Event::Start(Tag::FootnoteDefinition(id)) => {
+                defined_footnotes.insert(id.to_string());
+                pending_definition = Some(range.clone());
+            }
+            Event::End(TagEnd::Link) => {
+                if let Some(start) = pending_link.take() {
+                    excluded.push(start.start..range.end);
+                }
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some(start) = pending_code_block.take() {
+                    excluded.push(start.start..range.end);
+                }
+            }
+            Event::End(TagEnd::FootnoteDefinition) => {
+                if let Some(start) = pending_definition.take() {
+                    excluded.push(start.start..range.end);
+                }
+            }
+            Event::Code(_) => excluded.push(range.clone()),
+            _ => {}
+        }
+    }
+
+    for (event, range) in events {
         match event {
             Event::Start(Tag::Link { dest_url, .. }) => {
                 in_link = true;
@@ -192,6 +252,18 @@ pub(crate) fn extract_links_with_html(source: &str, strip_html: bool) -> Vec<Lin
             {
                 current_text.push_str(&text);
             }
+            // A footnote reference outside a link is navigable when no
+            // definition exists; the destination is the `#fn-…` anchor.
+            Event::FootnoteReference(text) if !in_link && !in_code => {
+                if !defined_footnotes.contains(text.as_ref()) {
+                    let id = crate::terminal_text::inert_source(text.as_ref());
+                    let destination = format!("#{FOOTNOTE_ANCHOR_PREFIX}{id}");
+                    let mut link = Link::new(id.into(), destination)
+                        .with_source_line(line_of(source, range.start));
+                    link.source_offset = range.start;
+                    links.push(link);
+                }
+            }
             Event::SoftBreak | Event::HardBreak if in_link => current_text.push(' '),
             Event::Html(source) | Event::InlineHtml(source) => {
                 for piece in html.project(&source, strip_html) {
@@ -209,7 +281,15 @@ pub(crate) fn extract_links_with_html(source: &str, strip_html: bool) -> Vec<Lin
                 let projected = crate::scripts::text(&text, source, range.clone());
                 let text = crate::terminal_text::inert_source(&projected);
                 for url in bare_urls(&text) {
-                    let mut link = Link::new(text[url.clone()].into(), text[url.clone()].into())
+                    let raw = &text[url.clone()];
+                    let destination = if raw.starts_with("http://") || raw.starts_with("https://") {
+                        raw.to_string()
+                    } else if raw.starts_with("www.") {
+                        format!("https://{raw}")
+                    } else {
+                        format!("mailto:{raw}")
+                    };
+                    let mut link = Link::new(raw.to_string(), destination)
                         .with_source_line(line_of(source, range.start));
                     link.source_offset = range.start;
                     link.bare_offset = Some(url.start);
@@ -222,7 +302,69 @@ pub(crate) fn extract_links_with_html(source: &str, strip_html: bool) -> Vec<Lin
         }
     }
 
+    // Undefined footnote references arrive as plain text (the parser only
+    // emits FootnoteReference events for defined footnotes). Scan the raw
+    // source for `[^id]` patterns and emit a navigable link for each one that
+    // is not inside a link, code block, or definition.
+    for (id, offset) in footnote_references(source) {
+        if defined_footnotes.contains(&id) {
+            continue;
+        }
+        let span = offset..offset + id.len() + 3;
+        if excluded.iter().any(|ex| spans_overlap(ex, &span)) {
+            continue;
+        }
+        let destination = format!("#{FOOTNOTE_ANCHOR_PREFIX}{id}");
+        let mut link = Link::new(id, destination).with_source_line(line_of(source, offset));
+        link.source_offset = offset;
+        links.push(link);
+    }
+
+    links.sort_by_key(|link| link.source_offset);
     links
+}
+
+/// Whether two source spans overlap.
+fn spans_overlap(a: &std::ops::Range<usize>, b: &std::ops::Range<usize>) -> bool {
+    a.start < b.end && b.start < a.end
+}
+
+/// Find footnote reference patterns `[^id]` in a source string.
+///
+/// Returns the footnote id and the byte offset of the `[^` marker. A
+/// reference is a `[` followed by `^`, a non-empty id of characters that are
+/// not whitespace or brackets, and a closing `]`.
+pub(crate) fn footnote_references(text: &str) -> Vec<(String, usize)> {
+    let bytes = text.as_bytes();
+    let mut refs = Vec::new();
+    let mut i = 0;
+    while i < text.len() {
+        if bytes[i] == b'[' && i + 1 < text.len() && bytes[i + 1] == b'^' {
+            let start = i;
+            let id_start = i + 2;
+            let mut j = id_start;
+            while j < text.len() {
+                let c = bytes[j];
+                if c == b']' {
+                    break;
+                }
+                if c.is_ascii_whitespace() || c == b'[' || c == b']' || c == b'^' {
+                    break;
+                }
+                j += 1;
+            }
+            if j > id_start && j < text.len() && bytes[j] == b']' {
+                let id = text[id_start..j].to_string();
+                refs.push((id, start));
+                i = j + 1;
+            } else {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    refs
 }
 
 /// The zero-based line containing byte offset `pos`.
@@ -230,43 +372,154 @@ fn line_of(source: &str, pos: usize) -> usize {
     source[..pos.min(source.len())].matches('\n').count()
 }
 
-/// Find bare `http://` and `https://` URLs in a plain-text run, trimming
-/// trailing punctuation that is not part of the URL.
-pub(crate) fn bare_urls(text: &str) -> Vec<std::ops::Range<usize>> {
+/// Find bare autolinks in a plain-text run.
+///
+/// Recognises `http://`/`https://` URLs, bare `www.` URLs, and bare email
+/// addresses, trimming trailing sentence punctuation and balancing
+/// parentheses. Returns the source ranges of each recognised autolink.
+pub fn bare_urls(text: &str) -> Vec<std::ops::Range<usize>> {
+    let bytes = text.as_bytes();
     let mut urls = Vec::new();
     let mut i = 0;
     while i < text.len() {
-        if text.as_bytes()[i..].starts_with(b"https://")
-            || text.as_bytes()[i..].starts_with(b"http://")
+        if bytes[i..].starts_with(b"https://") || bytes[i..].starts_with(b"http://") {
+            // A URL that is a markdown link destination (`](url)`) is not a
+            // bare autolink; the link itself is extracted by the parser.
+            let is_link_destination = i >= 2 && bytes[i - 2] == b']' && bytes[i - 1] == b'(';
+            if !is_link_destination {
+                let start = i;
+                let end = trim_trailing_punctuation(text, start, scan_url_end(text, i));
+                if end > start {
+                    urls.push(start..end);
+                }
+                i = end.max(i + 1);
+            } else {
+                i += 1;
+            }
+        } else if bytes[i..].starts_with(b"www.")
+            && (i == 0 || !matches!(bytes[i - 1], b'.' | b'-'))
         {
-            let start = i;
-            let mut end = i;
-            while end < text.len() {
-                let c = text.as_bytes()[end];
-                if c.is_ascii_whitespace() || matches!(c, b'"' | b'\'' | b'<' | b'>' | b'(' | b')')
-                {
-                    break;
+            // The host label after `www.` must begin with an alphanumeric, so
+            // `www..host` and `www-host` are not bare autolinks.
+            let label_start = i + 4;
+            if label_start < text.len() && bytes[label_start].is_ascii_alphanumeric() {
+                let start = i;
+                let end = trim_trailing_punctuation(text, start, scan_url_end(text, i));
+                if end > start {
+                    urls.push(start..end);
                 }
-                end += 1;
+                i = end.max(i + 1);
+            } else {
+                i += 1;
             }
-            // Trim trailing sentence punctuation that is not part of the URL.
-            while end > start {
-                let c = text.as_bytes()[end - 1];
-                if matches!(c, b'.' | b',' | b';' | b'!' | b'?' | b':') {
-                    end -= 1;
+        } else if bytes[i] == b'@' {
+            // A bare email address: a local part, an `@`, and a domain with at
+            // least one dot. A scheme prefix such as `mailto:` already claims
+            // the address, so the local part must not be preceded by a colon.
+            let mut local_start = i;
+            while local_start > 0 && is_email_local(bytes[local_start - 1]) {
+                local_start -= 1;
+            }
+            let bare = local_start > 0 && bytes[local_start - 1] != b':' && local_start < i;
+            if bare {
+                let mut j = i + 1;
+                let mut dot_seen = false;
+                while j < text.len() {
+                    let c = bytes[j];
+                    if c.is_ascii_alphanumeric() || c == b'-' {
+                        j += 1;
+                    } else if c == b'.' {
+                        dot_seen = true;
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if dot_seen && j > i + 1 {
+                    let end = trim_trailing_punctuation(text, local_start, j);
+                    if end > local_start {
+                        urls.push(local_start..end);
+                    }
+                    i = end.max(i + 1);
                 } else {
-                    break;
+                    i += 1;
                 }
+            } else {
+                i += 1;
             }
-            if end > start {
-                urls.push(start..end);
-            }
-            i = end;
         } else {
             i += 1;
         }
     }
     urls
+}
+
+/// True when `c` may appear in the local part of an email address.
+fn is_email_local(c: u8) -> bool {
+    c.is_ascii_alphanumeric()
+        || matches!(
+            c,
+            b'.' | b'_' | b'%' | b'+' | b'-' | b'=' | b'~' | b'[' | b']' | b'"'
+        )
+}
+
+/// Scan a URL from `start`, including balanced parentheses, stopping at
+/// whitespace and unbalanced closing parentheses.
+fn scan_url_end(text: &str, start: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut end = start;
+    let mut depth = 0usize;
+    while end < text.len() {
+        let c = bytes[end];
+        if c.is_ascii_whitespace() {
+            break;
+        }
+        match c {
+            b'(' => {
+                depth += 1;
+                end += 1;
+            }
+            b')' => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+                end += 1;
+            }
+            b'"' | b'\'' | b'<' | b'>' => break,
+            _ => end += 1,
+        }
+    }
+    end
+}
+
+/// Trim trailing sentence punctuation that is not part of the URL, preserving
+/// a balanced closing parenthesis.
+fn trim_trailing_punctuation(text: &str, start: usize, mut end: usize) -> usize {
+    let bytes = text.as_bytes();
+    while end > start {
+        let c = bytes[end - 1];
+        if matches!(c, b'.' | b',' | b';' | b'!' | b'?' | b':') {
+            end -= 1;
+        } else if c == b')' {
+            // Keep only when the parentheses are balanced within the span.
+            let mut depth = 0usize;
+            for &b in &bytes[start..end] {
+                if b == b'(' {
+                    depth += 1;
+                } else if b == b')' {
+                    depth = depth.saturating_sub(1);
+                }
+            }
+            if depth == 0 {
+                break;
+            }
+            end -= 1;
+        } else {
+            break;
+        }
+    }
+    end
 }
 
 pub(crate) fn parser_options() -> Options {

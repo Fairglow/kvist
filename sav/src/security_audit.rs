@@ -41,8 +41,7 @@ pub const GUIDANCE_CLASSIFICATION_ATOMIC: &str =
 ///
 /// **Assessment:** Correct. This prevents mid-execution tampering with
 /// guidance that the worker has already begun processing.
-pub const GUIDANCE_IMMUTABLE_AFTER_CLAIM: &str =
-    "Guidance cannot be edited/withdrawn after claim";
+pub const GUIDANCE_IMMUTABLE_AFTER_CLAIM: &str = "Guidance cannot be edited/withdrawn after claim";
 
 /// **Finding:** External process output does not become native tool intent.
 /// The supervisor captures output from external agents but does not
@@ -115,8 +114,7 @@ pub const OPERATION_TOKENS_FRESH: &str =
 /// Source: `src/runtime/driver.rs` — `PromptBudget`, `AttemptUsage`
 ///
 /// **Assessment:** Correct. This prevents budget evasion through retries.
-pub const BUDGETS_CUMULATIVE: &str =
-    "Wall time and token budgets are cumulative across retries";
+pub const BUDGETS_CUMULATIVE: &str = "Wall time and token budgets are cumulative across retries";
 
 // === PATH AND INPUT GUARDS ===
 
@@ -150,8 +148,7 @@ pub const COMMAND_RENDERING_BOUNDED: &str =
 ///
 /// **Assessment:** Correct. This prevents unbounded journal growth from
 /// single oversized records.
-pub const JOURNAL_RECORDS_BOUNDED: &str =
-    "Journal records bounded to 64 KiB, segments to 64 MiB";
+pub const JOURNAL_RECORDS_BOUNDED: &str = "Journal records bounded to 64 KiB, segments to 64 MiB";
 
 /// **Finding:** Control socket messages are bounded.
 /// Socket messages are limited to 20 KiB, with individual I/O waits and
@@ -231,8 +228,7 @@ pub const JOURNAL_WRITE_POISONING: &str =
 /// Source: `src/observation/journal.rs` — `RunJournal::drop`
 ///
 /// **Assessment:** Correct. This prevents false completion records.
-pub const JOURNAL_NO_FAKE_TERMINATION: &str =
-    "Dropping journal does not fabricate terminal result";
+pub const JOURNAL_NO_FAKE_TERMINATION: &str = "Dropping journal does not fabricate terminal result";
 
 // === REMAINING LIMITATIONS ===
 
@@ -266,8 +262,7 @@ pub const TOOL_LOOP_NO_FILESYSTEM_OBSERVATION: &str =
 ///
 /// **Impact:** Long sessions with many prompts may use more recovery steps
 /// than intended.
-pub const RECOVERY_BUDGET_PER_PROMPT: &str =
-    "Recovery budget resets per prompt, not per session";
+pub const RECOVERY_BUDGET_PER_PROMPT: &str = "Recovery budget resets per prompt, not per session";
 
 /// **Limitation:** Guidance text is not validated for structure.
 /// Guidance messages are validated for size and NUL bytes, but not for

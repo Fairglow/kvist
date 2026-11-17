@@ -376,10 +376,7 @@ fn completion_message_includes_full_answer() {
 
     // Generate a response longer than 500 characters
     let long_answer = "A".repeat(600);
-    let gateway = MockGateway::spawn(
-        &gateway_text_body(&long_answer),
-        std::time::Duration::ZERO,
-    );
+    let gateway = MockGateway::spawn(&gateway_text_body(&long_answer), std::time::Duration::ZERO);
     let config_toml = format!(
         r#"schema_version = 1
 component_root = "src"
@@ -498,7 +495,9 @@ command = "/usr/bin/echo 'mocking verify'"
             .unwrap_or(false);
 
     // Check for an unresolved attempt record
-    let attempt_path = project.path().join("src/.kvist-attempts/implement-code.jsonl");
+    let attempt_path = project
+        .path()
+        .join("src/.kvist-attempts/implement-code.jsonl");
     let has_attempt = attempt_path.exists();
 
     assert!(

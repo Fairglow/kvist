@@ -12,18 +12,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
-use crate::review_evidence::{
-    EVIDENCE_SCHEMA_VERSION, ReviewTarget, TargetDigest, write_receipt,
-};
 use crate::review_evidence::Receipt;
+use crate::review_evidence::{EVIDENCE_SCHEMA_VERSION, ReviewTarget, TargetDigest, write_receipt};
 
 /// The governed project documents that participate in project acceptance.
 /// Only these paths are validated; arbitrary repository documentation is excluded.
-pub const GOVERNED_DOCUMENTS: &[&str] = &[
-    "VISION.md",
-    "ARCHITECTURE.md",
-    "ROOT_CONTRACT.md",
-];
+pub const GOVERNED_DOCUMENTS: &[&str] = &["VISION.md", "ARCHITECTURE.md", "ROOT_CONTRACT.md"];
 
 /// Directory name for ADRs (Architecture Decision Records).
 pub const ADRS_DIR: &str = "docs/adr";
@@ -121,10 +115,7 @@ pub fn discover_governed_documents(project_path: &Path) -> Result<Vec<GovernedDo
                 source,
             })?;
             if entry.path().is_file() {
-                let filename = entry
-                    .file_name()
-                    .to_string_lossy()
-                    .to_string();
+                let filename = entry.file_name().to_string_lossy().to_string();
                 let relative = format!("{}/{}", ADRS_DIR, filename);
                 let digest = TargetDigest::compute_file(&entry.path())?;
                 documents.push(GovernedDocument {
@@ -142,9 +133,7 @@ pub fn discover_governed_documents(project_path: &Path) -> Result<Vec<GovernedDo
 /// Validate that a set of documents matches the expected governed set.
 pub fn validate_governed_paths(paths: &[String]) -> Result<()> {
     for path in paths {
-        let is_governed = GOVERNED_DOCUMENTS
-            .iter()
-            .any(|doc| *path == *doc)
+        let is_governed = GOVERNED_DOCUMENTS.iter().any(|doc| *path == *doc)
             || path.starts_with(&format!("{}/", ADRS_DIR));
         if !is_governed {
             return Err(Error::InvalidPath {
@@ -284,21 +273,18 @@ pub fn list_acceptance_status(
                 if filename.starts_with("receipt-") && filename.ends_with(".json") {
                     // Check if this receipt covers this document.
                     let receipt_path = entry.path();
-                    let content = fs::read_to_string(&receipt_path).map_err(|source| Error::Io {
-                        operation: "read receipt".to_string(),
-                        path: Some(receipt_path.to_string_lossy().to_string()),
-                        source,
-                    })?;
+                    let content =
+                        fs::read_to_string(&receipt_path).map_err(|source| Error::Io {
+                            operation: "read receipt".to_string(),
+                            path: Some(receipt_path.to_string_lossy().to_string()),
+                            source,
+                        })?;
                     let receipt: Receipt = serde_json::from_str(&content).map_err(|source| {
                         Error::InvalidReviewEvidence {
                             reason: format!("cannot parse receipt: {source}"),
                         }
                     })?;
-                    if receipt
-                        .targets
-                        .iter()
-                        .any(|t| t.path == doc.path)
-                    {
+                    if receipt.targets.iter().any(|t| t.path == doc.path) {
                         statuses.push((
                             doc.path.clone(),
                             AcceptanceStatus::Accepted {
@@ -312,10 +298,7 @@ pub fn list_acceptance_status(
         }
 
         // If no receipt found, status is pending.
-        if statuses
-            .iter()
-            .all(|(path, _)| path != &doc.path)
-        {
+        if statuses.iter().all(|(path, _)| path != &doc.path) {
             statuses.push((doc.path.clone(), AcceptanceStatus::Pending));
         }
     }

@@ -112,7 +112,8 @@ pub fn inspect(project_dir: &Path) -> Result<ConversionInspection> {
                         "conversion metadata directory is a link: {}",
                         metadata_dir.display()
                     )),
-                    guidance: "the conversion metadata directory must be a real directory".to_owned(),
+                    guidance: "the conversion metadata directory must be a real directory"
+                        .to_owned(),
                 });
             }
             metadata.file_type().is_dir()
@@ -218,10 +219,7 @@ pub fn inspect(project_dir: &Path) -> Result<ConversionInspection> {
             None,
             "review and accept the draft artifacts with `kvist component accept .`".to_owned(),
         ),
-        ConversionState::Accepted => (
-            None,
-            "conversion is complete and accepted".to_owned(),
-        ),
+        ConversionState::Accepted => (None, "conversion is complete and accepted".to_owned()),
         _ => (None, String::new()),
     };
 
@@ -259,7 +257,11 @@ fn inspect_conversion_artifact(
 ) -> ConversionArtifactStatus {
     if !path.exists() {
         return ConversionArtifactStatus {
-            filename: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+            filename: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
             exists: false,
             valid: false,
             diagnostic: Some("artifact does not exist".to_owned()),
@@ -269,17 +271,27 @@ fn inspect_conversion_artifact(
     match kind {
         Some(kind) => match component_documents::validate_file(kind, path) {
             Ok(validation) => ConversionArtifactStatus {
-                filename: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                filename: path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
                 exists: true,
                 valid: validation.is_valid(),
                 diagnostic: if validation.is_valid() {
                     None
                 } else {
-                    Some(component_documents::format_diagnostics(&validation.diagnostics))
+                    Some(component_documents::format_diagnostics(
+                        &validation.diagnostics,
+                    ))
                 },
             },
             Err(error) => ConversionArtifactStatus {
-                filename: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                filename: path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
                 exists: true,
                 valid: false,
                 diagnostic: Some(format!("failed to validate: {error}")),
@@ -288,7 +300,11 @@ fn inspect_conversion_artifact(
         None => {
             // For non-document artifacts, just check existence
             ConversionArtifactStatus {
-                filename: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                filename: path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
                 exists: true,
                 valid: true,
                 diagnostic: None,

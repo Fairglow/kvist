@@ -47,7 +47,6 @@
 #[test]
 fn finding_1_live_stats_bar() {
     // Documented finding: live stats bar matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -76,7 +75,6 @@ fn finding_1_live_stats_bar() {
 #[test]
 fn finding_2_compaction_progress_and_eta() {
     // Documented finding: compaction progress and ETA match design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -102,7 +100,6 @@ fn finding_2_compaction_progress_and_eta() {
 #[test]
 fn finding_3_event_progress_emission() {
     // Documented finding: Event::Progress emission matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -127,7 +124,6 @@ fn finding_3_event_progress_emission() {
 #[test]
 fn finding_4_agent_integration_headless() {
     // Documented finding: headless mode matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -153,7 +149,6 @@ fn finding_4_agent_integration_headless() {
 #[test]
 fn finding_5_progress_display_security() {
     // Documented finding: progress display security matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -174,7 +169,6 @@ fn finding_5_progress_display_security() {
 #[test]
 fn finding_6_stats_line_empty_until_progress() {
     // Documented finding: stats line behavior matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -197,7 +191,6 @@ fn finding_6_stats_line_empty_until_progress() {
 #[test]
 fn finding_7_token_accounting_modes() {
     // Documented finding: token accounting modes match design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -218,7 +211,6 @@ fn finding_7_token_accounting_modes() {
 #[test]
 fn finding_8_context_utilization_display() {
     // Documented finding: context utilization display matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -239,7 +231,6 @@ fn finding_8_context_utilization_display() {
 #[test]
 fn finding_9_elapsed_time_formatting() {
     // Documented finding: elapsed time formatting matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -261,7 +252,6 @@ fn finding_9_elapsed_time_formatting() {
 #[test]
 fn finding_10_compaction_count_display() {
     // Documented finding: compaction count display matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -281,7 +271,6 @@ fn finding_10_compaction_count_display() {
 #[test]
 fn finding_11_progress_does_not_clutter_transcript() {
     // Documented finding: progress display separation matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -303,7 +292,6 @@ fn finding_11_progress_does_not_clutter_transcript() {
 #[test]
 fn finding_12_stats_line_unit_tested_without_terminal() {
     // Documented finding: stats line testability matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -324,7 +312,6 @@ fn finding_12_stats_line_unit_tested_without_terminal() {
 #[test]
 fn finding_13_event_progress_retained_during_cancellation() {
     // Documented finding: event retention matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -344,7 +331,6 @@ fn finding_13_event_progress_retained_during_cancellation() {
 #[test]
 fn finding_14_agent_integration_event_sink() {
     // Documented finding: shared event infrastructure matches design intent
-    assert!(true);
 }
 
 // ============================================================================
@@ -367,7 +353,6 @@ fn finding_14_agent_integration_event_sink() {
 #[test]
 fn finding_15_progress_evidence_in_loop() {
     // Documented finding: progress evidence infrastructure matches design intent
-    assert!(true);
 }
 
 // ============================================================================

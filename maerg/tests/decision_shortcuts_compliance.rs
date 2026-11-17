@@ -13,10 +13,7 @@ use std::collections::BTreeMap;
 /// Not derived from prior test runs or diagnostic records.
 fn source_record() -> BTreeMap<String, String> {
     let mut record = BTreeMap::new();
-    record.insert(
-        "component".to_owned(),
-        "decision-shortcuts".to_owned(),
-    );
+    record.insert("component".to_owned(), "decision-shortcuts".to_owned());
     record.insert(
         "source_file".to_owned(),
         "src/task_commands/decisions/engine/shortcuts.rs".to_owned(),
@@ -25,10 +22,7 @@ fn source_record() -> BTreeMap<String, String> {
         "registry_path".to_owned(),
         ".kvist/decisions/shortcuts.json".to_owned(),
     );
-    record.insert(
-        "max_actions".to_owned(),
-        "2048".to_owned(),
-    );
+    record.insert("max_actions".to_owned(), "2048".to_owned());
     record.insert(
         "authentication".to_owned(),
         "HMAC-SHA256 tag on registry".to_owned(),
@@ -57,7 +51,8 @@ fn intent() -> BTreeMap<String, String> {
     );
     intent.insert(
         "demonstration".to_owned(),
-        "Unit tests verify security properties; integration tests verify end-to-end behavior".to_owned(),
+        "Unit tests verify security properties; integration tests verify end-to-end behavior"
+            .to_owned(),
     );
     intent.insert(
         "scope".to_owned(),
@@ -85,16 +80,16 @@ fn observed_behavior() -> BTreeMap<String, String> {
         "recovery".to_owned(),
         "actions_discovers_preexisting_authenticated_plans_without_inference verifies discover() rebuilds registry".to_owned(),
     );
-    observed.insert(
-        "passed".to_owned(),
-        "true".to_owned(),
-    );
+    observed.insert("passed".to_owned(), "true".to_owned());
     observed
 }
 
 /// Compare shortcut evidence against actual test evidence.
 /// Returns discrepancies found between intent and observation.
-fn compare(shortcut_intent: &BTreeMap<String, String>, actual: &BTreeMap<String, String>) -> Vec<String> {
+fn compare(
+    shortcut_intent: &BTreeMap<String, String>,
+    actual: &BTreeMap<String, String>,
+) -> Vec<String> {
     let mut discrepancies = Vec::new();
 
     // Check property alignment
@@ -109,7 +104,9 @@ fn compare(shortcut_intent: &BTreeMap<String, String>, actual: &BTreeMap<String,
     // Check demonstration method
     let intent_demonstration = shortcut_intent.get("demonstration").unwrap();
     let observed_integration = actual.get("integration_tests").unwrap();
-    if intent_demonstration.contains("integration tests") && !observed_integration.contains("2 tests") {
+    if intent_demonstration.contains("integration tests")
+        && !observed_integration.contains("2 tests")
+    {
         discrepancies.push(format!(
             "demonstration method mismatch: expected 2 integration tests, found: {}",
             observed_integration

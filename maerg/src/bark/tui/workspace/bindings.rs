@@ -33,7 +33,11 @@ const BINDINGS: &[(&str, &str, Option<&str>)] = &[
         None,
     ),
     ("Alt+Left / Right", "Horizontal transcript scroll", None),
-    ("F3", "Cycle agent view: Kvist / Skott / side by side", Some("view")),
+    (
+        "F3",
+        "Cycle agent view: Kvist / Skott / side by side",
+        Some("view"),
+    ),
     ("F4", "Kvist metrics view", None),
     ("F5", "Skott detail view", None),
     (

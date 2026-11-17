@@ -2112,8 +2112,10 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 let project = context::ProjectContext::resolve(None)?;
                 let component = project.resolve_component(component_dir.as_deref())?;
                 let config = config::load(&project.project_dir)?;
-                let context = task_commands::validate_accept_context(&project.project_dir, &component)?;
-                let (receipt_path, report) = task_commands::review::review_intent(&context, &config)?;
+                let context =
+                    task_commands::validate_accept_context(&project.project_dir, &component)?;
+                let (receipt_path, report) =
+                    task_commands::review::review_intent(&context, &config)?;
                 let receipt_rel = receipt_path
                     .strip_prefix(&project.project_dir)
                     .unwrap_or(&receipt_path);
@@ -3179,7 +3181,8 @@ mod tests {
 
     #[test]
     fn task_run_without_component_is_continuous() {
-        let cli = Cli::try_parse_from(["kvist", "task", "run"]).expect("task run without component is valid");
+        let cli = Cli::try_parse_from(["kvist", "task", "run"])
+            .expect("task run without component is valid");
         let Some(Command::Task {
             command:
                 TaskCommand::Run {

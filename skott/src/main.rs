@@ -163,11 +163,7 @@ fn run() -> skott::Result<ExitCode> {
         println!();
 
         // Accept all existing governed documents.
-        let existing_docs: Vec<_> = documents
-            .iter()
-            .filter(|d| d.exists)
-            .cloned()
-            .collect();
+        let existing_docs: Vec<_> = documents.iter().filter(|d| d.exists).cloned().collect();
         if !existing_docs.is_empty() {
             let receipt = project_review::accept_project_documents(
                 &project_dir,
@@ -175,7 +171,11 @@ fn run() -> skott::Result<ExitCode> {
                 "project document review",
                 None,
             )?;
-            println!("Accepted {} document(s) with receipt: {}", existing_docs.len(), receipt.id);
+            println!(
+                "Accepted {} document(s) with receipt: {}",
+                existing_docs.len(),
+                receipt.id
+            );
         } else {
             println!("No existing governed documents to accept.");
         }

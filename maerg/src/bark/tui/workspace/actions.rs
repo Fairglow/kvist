@@ -22,12 +22,12 @@ impl Workspace {
             && self.overlay.is_none();
         if in_skott_steering {
             let guidance = self.input.text.trim().to_owned();
-            if !guidance.is_empty() {
-                if let Some(skott) = &mut self.skott {
-                    skott.submit(guidance.clone()).map_err(|error| {
-                        io::Error::other(format!("failed to send guidance to Skott: {error}"))
-                    })?;
-                }
+            if !guidance.is_empty()
+                && let Some(skott) = &mut self.skott
+            {
+                skott.submit(guidance.clone()).map_err(|error| {
+                    io::Error::other(format!("failed to send guidance to Skott: {error}"))
+                })?;
             }
             self.input.set("");
             return Ok(());
@@ -76,8 +76,15 @@ impl Workspace {
                     [component] if component == "-" => None,
                     [component] => {
                         let normalized = component.strip_prefix("./").unwrap_or(component);
-                        if !self.state.components().iter().any(|known| known == normalized) {
-                            return Err(io::Error::other(format!("unknown component `{component}`; use Tab to choose a discovered component")));
+                        if !self
+                            .state
+                            .components()
+                            .iter()
+                            .any(|known| known == normalized)
+                        {
+                            return Err(io::Error::other(format!(
+                                "unknown component `{component}`; use Tab to choose a discovered component"
+                            )));
                         }
                         Some(normalized.to_owned())
                     }
@@ -87,8 +94,13 @@ impl Workspace {
             }
             "tasks" => {
                 let parsed = bark::parse_tasks_args(&arguments).map_err(io::Error::other)?;
-                let component = parsed.component.or_else(|| self.focus()).unwrap_or_else(|| ".".into());
-                let scope = self.state.scopes.get(&component).ok_or_else(|| io::Error::other(format!("no readable queue for `{component}`; run doctor")))?;
+                let component = parsed
+                    .component
+                    .or_else(|| self.focus())
+                    .unwrap_or_else(|| ".".into());
+                let scope = self.state.scopes.get(&component).ok_or_else(|| {
+                    io::Error::other(format!("no readable queue for `{component}`; run doctor"))
+                })?;
                 let total = scope.tasks.len();
                 let ready_ids = crate::task_queue::ready_task_ids(&scope.tasks);
                 // Ready tasks are the default view; `--all` or an explicit
@@ -121,20 +133,41 @@ impl Workspace {
                             total - rows.len()
                         ));
                         for (index, task) in rows.iter().enumerate() {
-                            markdown.push_str(&format!("| {} | {} | {} | {} |\n", index + 1, presentation::literal(&task.id), bark::kind_label(task.kind), presentation::literal(&task.title)));
+                            markdown.push_str(&format!(
+                                "| {} | {} | {} | {} |\n",
+                                index + 1,
+                                presentation::literal(&task.id),
+                                bark::kind_label(task.kind),
+                                presentation::literal(&task.title)
+                            ));
                         }
                     }
                 } else {
-                    markdown.push_str("| Task | State | Kind | Title |\n| --- | --- | --- | --- |\n");
+                    markdown
+                        .push_str("| Task | State | Kind | Title |\n| --- | --- | --- | --- |\n");
                     for task in rows.iter() {
-                        markdown.push_str(&format!("| {} | {} | {} | {} |\n", presentation::literal(&task.id), bark::status_label(task.status), bark::kind_label(task.kind), presentation::literal(&task.title)));
+                        markdown.push_str(&format!(
+                            "| {} | {} | {} | {} |\n",
+                            presentation::literal(&task.id),
+                            bark::status_label(task.status),
+                            bark::kind_label(task.kind),
+                            presentation::literal(&task.title)
+                        ));
                     }
                     for task in rows.iter() {
                         if let Some(reason) = &task.blocked_reason {
-                            markdown.push_str(&format!("\n## {}\n\n{}\n\n", presentation::literal(&task.id), presentation::fence(reason, "text")));
+                            markdown.push_str(&format!(
+                                "\n## {}\n\n{}\n\n",
+                                presentation::literal(&task.id),
+                                presentation::fence(reason, "text")
+                            ));
                         }
                         if let Some(next) = bark::next_command_for(task, &scope.tasks, &component) {
-                            markdown.push_str(&format!("\n**Next for {}:** {}\n", presentation::literal(&task.id), presentation::fence(&next, "text")));
+                            markdown.push_str(&format!(
+                                "\n**Next for {}:** {}\n",
+                                presentation::literal(&task.id),
+                                presentation::fence(&next, "text")
+                            ));
                         }
                     }
                 }
@@ -150,14 +183,25 @@ impl Workspace {
                 let markdown = "# Kvist workspace\n\n";
                 let mut rows = String::new();
                 for command in &self.tree.subcommands {
-                    rows.push_str(&format!("| {} | {} |\n", presentation::literal(&command.name), presentation::literal(command.help.as_deref().unwrap_or(""))));
+                    rows.push_str(&format!(
+                        "| {} | {} |\n",
+                        presentation::literal(&command.name),
+                        presentation::literal(command.help.as_deref().unwrap_or(""))
+                    ));
                 }
                 let header = "Commands use the same grammar as `kvist COMMAND`. Component focus is inserted into the editable buffer, including `status`, but never `cd`. Bare `cd` (or `cd -`) returns to the project.\n\n| Command | Purpose |\n| --- | --- |\n";
                 self.append(&format!("{markdown}{header}{rows}\n\n{}", view_help()))?;
             }
             "history" => {
-                let count = bark::parse_count("history", &arguments, 20).map_err(io::Error::other)?;
-                let text = self.history.iter().rev().take(count).map(|line| format!("- {}\n", presentation::literal(line))).collect::<String>();
+                let count =
+                    bark::parse_count("history", &arguments, 20).map_err(io::Error::other)?;
+                let text = self
+                    .history
+                    .iter()
+                    .rev()
+                    .take(count)
+                    .map(|line| format!("- {}\n", presentation::literal(line)))
+                    .collect::<String>();
                 self.append(&format!("# Command history\n\n{text}"))?;
             }
             "journal" if arguments.is_empty() => {
@@ -178,27 +222,51 @@ impl Workspace {
                 let runs = bark::runs::scan_recent_runs(&self.project, count);
                 let mut text = "# Recent runs\n\n| Component | Task | Result | Tokens in/out |\n| --- | --- | --- | --- |\n".to_owned();
                 for run in runs {
-                    text.push_str(&format!("| {} | {} | {:?} | {:?}/{:?} |\n", presentation::literal(run.component.as_deref().unwrap_or(".")), presentation::literal(run.task_id.as_deref().unwrap_or("unknown")), run.success, run.tokens_input, run.tokens_output));
+                    text.push_str(&format!(
+                        "| {} | {} | {:?} | {:?}/{:?} |\n",
+                        presentation::literal(run.component.as_deref().unwrap_or(".")),
+                        presentation::literal(run.task_id.as_deref().unwrap_or("unknown")),
+                        run.success,
+                        run.tokens_input,
+                        run.tokens_output
+                    ));
                 }
                 self.append(&text)?;
             }
             "locks" if arguments.is_empty() || arguments == ["clean"] => {
-                let removed = if arguments.is_empty() { Vec::new() } else { bark::locks::clean_stale() };
+                let removed = if arguments.is_empty() {
+                    Vec::new()
+                } else {
+                    bark::locks::clean_stale()
+                };
                 let entries = bark::locks::scan();
-                let mut text = format!("# Task locks\n\n{} stale locks removed.\n\n| Path | Task | State |\n| --- | --- | --- |\n", removed.len());
+                let mut text = format!(
+                    "# Task locks\n\n{} stale locks removed.\n\n| Path | Task | State |\n| --- | --- | --- |\n",
+                    removed.len()
+                );
                 for entry in entries {
-                    text.push_str(&format!("| {} | {} | {} |\n", presentation::literal(&entry.path.display().to_string()), presentation::literal(entry.task_id.as_deref().unwrap_or("unknown")), if entry.live { "live" } else { "stale" }));
+                    text.push_str(&format!(
+                        "| {} | {} | {} |\n",
+                        presentation::literal(&entry.path.display().to_string()),
+                        presentation::literal(entry.task_id.as_deref().unwrap_or("unknown")),
+                        if entry.live { "live" } else { "stale" }
+                    ));
                 }
                 self.append(&text)?;
                 self.refresh();
             }
             "theme" => match arguments.as_slice() {
-                _ if arguments.is_empty() || arguments == ["list"] => self.open_menu(Page::Theme)?,
+                _ if arguments.is_empty() || arguments == ["list"] => {
+                    self.open_menu(Page::Theme)?
+                }
                 [set, value] if set == "set" => self.set_theme(value)?,
                 _ => return Err(io::Error::other("usage: theme [list|set NAME|PATH]")),
             },
             "prompt" if arguments.len() == 1 && self.state.find_task(&arguments[0]).is_some() => {
-                let (_, task) = self.state.find_task(&arguments[0]).ok_or_else(|| io::Error::other("task disappeared"))?;
+                let (_, task) = self
+                    .state
+                    .find_task(&arguments[0])
+                    .ok_or_else(|| io::Error::other("task disappeared"))?;
                 let seed = bark::build_prompt_seed(task);
                 self.edit_prompt(&seed, vec!["prompt".into()], terminal)?;
             }
@@ -208,8 +276,14 @@ impl Workspace {
                 let is_agent_subcommand = arguments.first().map(|arg| {
                     matches!(
                         arg.as_str(),
-                        "list" | "show" | "setup" | "enable" | "disable"
-                            | "remove" | "check" | "role"
+                        "list"
+                            | "show"
+                            | "setup"
+                            | "enable"
+                            | "disable"
+                            | "remove"
+                            | "check"
+                            | "role"
                     )
                 });
                 if is_agent_subcommand == Some(true) {
@@ -333,7 +407,9 @@ impl Workspace {
         } = &command
         {
             let all_components = component_dir.is_none()
-                || component_dir.as_ref().map_or(false, |p| p == std::path::Path::new("."));
+                || component_dir
+                    .as_ref()
+                    .is_some_and(|p| p == std::path::Path::new("."));
             let component = if let Some(dir) = component_dir {
                 if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
                     self.focus()
@@ -347,9 +423,7 @@ impl Workspace {
                     .map(|f| f.to_owned())
                     .unwrap_or_else(|| ".".to_owned())
             };
-            let task_id = task_id
-                .clone()
-                .or_else(|| self.next_ready_task(&component));
+            let task_id = task_id.clone().or_else(|| self.next_ready_task(&component));
             if let Some(id) = task_id {
                 return self.start_task_run(&component, &id, *allow_control, true, all_components);
             }
@@ -451,7 +525,11 @@ impl Workspace {
         self.skott_follow = true;
         self.task_run_prep = Some(prep);
         self.task_run_continuous = continuous;
-        self.task_run_component = if continuous { Some(component.to_owned()) } else { None };
+        self.task_run_component = if continuous {
+            Some(component.to_owned())
+        } else {
+            None
+        };
         self.task_run_all_components = all_components;
         self.skott = Some(session);
         self.append(&format!(
@@ -468,7 +546,7 @@ impl Workspace {
         let inspection = crate::project_state::inspect(&self.project)
             .map_err(|e| io::Error::other(e.to_string()))?;
         let current_component = self.task_run_component.clone().unwrap_or_default();
-        
+
         // Try all components
         for comp in &inspection.components {
             if comp.state != crate::project_state::ComponentState::Current {
@@ -486,14 +564,20 @@ impl Workspace {
                 self.task_run_prep = None;
                 self.skott = None;
                 self.skott_result_reported = false;
-                return self.start_task_run(&comp.path.to_string_lossy(), &next_task, false, true, self.task_run_all_components);
+                return self.start_task_run(
+                    &comp.path.to_string_lossy(),
+                    &next_task,
+                    false,
+                    true,
+                    self.task_run_all_components,
+                );
             }
         }
-        
+
         // No more components with ready tasks
-        self.append(&format!(
-            "\n\n## Continuous mode\n\nAll components processed. No more ready tasks.\n\n"
-        ))?;
+        self.append(
+            "\n\n## Continuous mode\n\nAll components processed. No more ready tasks.\n\n",
+        )?;
         self.task_run_continuous = false;
         self.task_run_component = None;
         Ok(())

@@ -40,11 +40,9 @@ fn test_impl_only_input() {
 
     // Expected API: derive_intent_proposal(impl_path, root)
     // This should produce a proposal with candidate requirement and contract
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal from IMPL.md");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal from IMPL.md");
 
     // Proposal should be derived from IMPL.md only
     assert_eq!(proposal.derived_from, "IMPL.md");
@@ -66,14 +64,13 @@ fn test_no_clobber_draft_requirements() {
     )
     .expect("write requirements");
 
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal");
 
     // Original requirements should be unchanged
-    let requirements = fs::read_to_string(root_path.join("REQUIREMENTS.md")).expect("read requirements");
+    let requirements =
+        fs::read_to_string(root_path.join("REQUIREMENTS.md")).expect("read requirements");
     assert!(requirements.contains("REQ-001"));
     assert!(requirements.contains("Existing requirement that should not be overwritten"));
 
@@ -88,18 +85,28 @@ fn test_design_output_separate() {
     let root_path = root.path();
     create_test_component(root_path).expect("create component");
 
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal");
 
     // Proposal should have separate fields for requirement and contract
     assert!(proposal.candidate_requirement.is_some());
     assert!(proposal.candidate_contract.is_some());
     // Design should not be mixed in
-    assert!(proposal.candidate_requirement.as_ref().unwrap().contains("requirement"));
-    assert!(proposal.candidate_contract.as_ref().unwrap().contains("contract"));
+    assert!(
+        proposal
+            .candidate_requirement
+            .as_ref()
+            .unwrap()
+            .contains("requirement")
+    );
+    assert!(
+        proposal
+            .candidate_contract
+            .as_ref()
+            .unwrap()
+            .contains("contract")
+    );
 }
 
 /// Test: Proposal should include uncertainty markers.
@@ -109,11 +116,9 @@ fn test_uncertainty_markers() {
     let root_path = root.path();
     create_test_component(root_path).expect("create component");
 
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal");
 
     // Proposal should indicate uncertainty
     assert!(!proposal.uncertainty_markers.is_empty());
@@ -133,14 +138,12 @@ fn test_advisory_comparison() {
     )
     .expect("write requirements");
 
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal");
 
-    let comparison = maerg::observed_intent::compare_proposal(&proposal, root_path)
-        .expect("compare proposal");
+    let comparison =
+        maerg::observed_intent::compare_proposal(&proposal, root_path).expect("compare proposal");
 
     // Comparison should be advisory
     assert!(comparison.advisory);
@@ -155,16 +158,26 @@ fn test_context_exclusion() {
     create_test_component(root_path).expect("create component");
 
     // Write various context artifacts that should be excluded
-    fs::write(root_path.join("VISION.md"), "# Vision\nProduct vision text.\n").expect("write vision");
-    fs::write(root_path.join("ARCHITECTURE.md"), "# Architecture\nArchitecture text.\n").expect("write architecture");
-    fs::write(root_path.join("CONTRACT.md"), "# Contract\nContract text.\n").expect("write contract");
+    fs::write(
+        root_path.join("VISION.md"),
+        "# Vision\nProduct vision text.\n",
+    )
+    .expect("write vision");
+    fs::write(
+        root_path.join("ARCHITECTURE.md"),
+        "# Architecture\nArchitecture text.\n",
+    )
+    .expect("write architecture");
+    fs::write(
+        root_path.join("CONTRACT.md"),
+        "# Contract\nContract text.\n",
+    )
+    .expect("write contract");
     fs::write(root_path.join("DESIGN.md"), "# Design\nDesign text.\n").expect("write design");
 
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal");
 
     // Proposal should not contain excluded context
     assert!(!proposal.derived_from.contains("vision"));
@@ -180,11 +193,9 @@ fn test_no_compliance_verdicts() {
     let root_path = root.path();
     create_test_component(root_path).expect("create component");
 
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal");
 
     // Proposal should not claim compliance
     assert!(!proposal.compliant);
@@ -198,11 +209,9 @@ fn test_no_normative_contracts() {
     let root_path = root.path();
     create_test_component(root_path).expect("create component");
 
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal");
 
     // Proposal should be advisory, not normative
     assert!(proposal.advisory);
@@ -217,15 +226,24 @@ fn test_proposal_preserves_all_artifacts() {
     create_test_component(root_path).expect("create component");
 
     // Write all intent artifacts
-    fs::write(root_path.join("REQUIREMENTS.md"), "# Requirements\nREQ-001: Requirement.\n").expect("write req");
-    fs::write(root_path.join("CONTRACT.md"), "# Contract\nProvides: add(a, b)\n").expect("write contract");
+    fs::write(
+        root_path.join("REQUIREMENTS.md"),
+        "# Requirements\nREQ-001: Requirement.\n",
+    )
+    .expect("write req");
+    fs::write(
+        root_path.join("CONTRACT.md"),
+        "# Contract\nProvides: add(a, b)\n",
+    )
+    .expect("write contract");
     fs::write(root_path.join("DESIGN.md"), "# Design\nSimple addition.\n").expect("write design");
 
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal");
+
+    // Deriving a proposal is advisory and must not touch existing artifacts.
+    assert!(proposal.advisory);
 
     // All original artifacts should be unchanged
     let req = fs::read_to_string(root_path.join("REQUIREMENTS.md")).expect("read req");
@@ -251,14 +269,19 @@ fn test_uncertainty_preserved_in_proposal() {
     )
     .expect("write impl");
 
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal");
 
     // Uncertainty should be carried into proposal
-    assert!(proposal.uncertainty_markers.contains("overflow"));
+    assert!(
+        proposal
+            .uncertainty_markers
+            .iter()
+            .any(|marker| marker.contains("overflow")),
+        "overflow uncertainty should be preserved: {:?}",
+        proposal.uncertainty_markers
+    );
 }
 
 /// Test: Proposal should be marked as advisory.
@@ -268,11 +291,9 @@ fn test_proposal_is_advisory() {
     let root_path = root.path();
     create_test_component(root_path).expect("create component");
 
-    let proposal = maerg::observed_intent::derive_intent_proposal(
-        root_path.join("IMPL.md"),
-        root_path,
-    )
-    .expect("derive proposal");
+    let proposal =
+        maerg::observed_intent::derive_intent_proposal(root_path.join("IMPL.md"), root_path)
+            .expect("derive proposal");
 
     assert!(proposal.advisory);
 }

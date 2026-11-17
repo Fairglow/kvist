@@ -373,7 +373,10 @@ fn missing_footnote_definition_still_renders_marker() {
     let source = "text with missing footnote[^ghost]";
     let output = render(source, Some(80), RenderOptions::default());
     // The marker is rendered even without a definition.
-    assert!(output.contains("[ghost]"), "marker should appear for undefined footnote");
+    assert!(
+        output.contains("[ghost]"),
+        "marker should appear for undefined footnote"
+    );
 }
 
 #[test]
@@ -390,8 +393,14 @@ fn unicode_footnote_ids_render_markers() {
     let source = "text[^一] and [^二]";
     let output = render(source, Some(80), RenderOptions::default());
     // Unicode ids that don't have superscript equivalents fall back to [id].
-    assert!(output.contains("[一]"), "unicode footnote marker should appear");
-    assert!(output.contains("[二]"), "unicode footnote marker should appear");
+    assert!(
+        output.contains("[一]"),
+        "unicode footnote marker should appear"
+    );
+    assert!(
+        output.contains("[二]"),
+        "unicode footnote marker should appear"
+    );
 }
 
 #[test]
@@ -399,14 +408,20 @@ fn footnote_in_table_cell() {
     let source = "| cell[^1] |\n|---------|\n\n[^1]: table footnote";
     let output = render(source, Some(80), RenderOptions::default());
     // Footnote marker appears in the table cell.
-    assert!(output.contains("¹"), "footnote marker should appear in table cell");
+    assert!(
+        output.contains("¹"),
+        "footnote marker should appear in table cell"
+    );
 }
 
 #[test]
 fn footnote_in_blockquote() {
     let source = "> quoted[^1]\n\n[^1]: quote footnote";
     let output = render(source, Some(80), RenderOptions::default());
-    assert!(output.contains("¹"), "footnote marker should appear in blockquote");
+    assert!(
+        output.contains("¹"),
+        "footnote marker should appear in blockquote"
+    );
 }
 
 #[test]

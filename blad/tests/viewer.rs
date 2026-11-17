@@ -2849,12 +2849,8 @@ fn enter_follows_footnote_reference_to_definition() {
     // viewport. The footnote reference should be followed to its definition.
     viewer.keys(b"\r");
     // The definition should now be visible (reversed/highlighted).
-    let definition_visible = (0..24).any(|row| {
-        viewer
-            .screen
-            .line(row)
-            .contains("footnote definition")
-    });
+    let definition_visible =
+        (0..24).any(|row| viewer.screen.line(row).contains("footnote definition"));
     assert!(
         definition_visible,
         "Enter should navigate to the footnote definition"
@@ -2875,16 +2871,8 @@ fn back_returns_from_footnote_definition_to_source() {
     viewer.keys(b"\r");
     // Back navigation should return to the source location.
     viewer.keys(b"b");
-    let source_visible = (0..24).any(|row| {
-        viewer
-            .screen
-            .line(row)
-            .contains("intro text")
-    });
-    assert!(
-        source_visible,
-        "back should return to the source location"
-    );
+    let source_visible = (0..24).any(|row| viewer.screen.line(row).contains("intro text"));
+    assert!(source_visible, "back should return to the source location");
     viewer.quit();
 }
 

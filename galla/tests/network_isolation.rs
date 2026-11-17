@@ -127,7 +127,9 @@ fn connect_path_authorization_is_enforced() {
     // Verify relay works
     client.write_all(CLIENT_HELLO).unwrap();
     let mut reply = [0; SERVER_HELLO.len()];
-    client.read_exact(&mut reply).expect("server-first response");
+    client
+        .read_exact(&mut reply)
+        .expect("server-first response");
     assert_eq!(reply, SERVER_HELLO);
 
     server.join().unwrap();
@@ -163,12 +165,11 @@ fn dns_resolution_is_pinned_to_public_addresses() {
 
     // Verify loopback-only policy for test mode
     let mut test_policy = origin::OriginPolicy::test_loopback();
-    test_policy.allow_url("https://127.0.0.1:8080/index/").unwrap();
+    test_policy
+        .allow_url("https://127.0.0.1:8080/index/")
+        .unwrap();
     let loopback_ok = test_policy.authorizes_authority("https://127.0.0.1:8080/index/");
-    assert!(
-        loopback_ok,
-        "Loopback should be authorized in test mode"
-    );
+    assert!(loopback_ok, "Loopback should be authorized in test mode");
 }
 
 // Test 4: Proxy supports required HTTP methods including POST
@@ -229,7 +230,9 @@ fn proxy_handles_connect_for_https_tunneling() {
     // Send TLS ClientHello through tunnel
     client.write_all(CLIENT_HELLO).unwrap();
     let mut reply = [0; SERVER_HELLO.len()];
-    client.read_exact(&mut reply).expect("server-first response");
+    client
+        .read_exact(&mut reply)
+        .expect("server-first response");
     assert_eq!(reply, SERVER_HELLO);
 
     server.join().unwrap();
@@ -250,7 +253,9 @@ fn unauthorized_sources_are_rejected() {
     set_timeouts(&client);
 
     // Try to CONNECT to unauthorized host
-    client.write_all(b"CONNECT unapproved.invalid:443 HTTP/1.1\r\n\r\n").unwrap();
+    client
+        .write_all(b"CONNECT unapproved.invalid:443 HTTP/1.1\r\n\r\n")
+        .unwrap();
     let response = status(&mut client);
     assert!(
         response.starts_with("HTTP/1.1 403"),

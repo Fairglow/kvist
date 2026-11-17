@@ -8,6 +8,7 @@ mod integrity;
 mod limits;
 mod publication;
 mod resolver;
+pub mod review;
 pub mod rust;
 pub mod vendoring;
 

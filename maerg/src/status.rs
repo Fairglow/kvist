@@ -62,14 +62,14 @@ fn render_text(
         output.push_str("\ndiscovery-error: ");
         output.push_str(&escape_text(error));
     }
-    if let Some(conversion) = &inspection.conversion {
-        if conversion.state != crate::conversion_state::ConversionState::NotConverted {
-            output.push_str("\nconversion-state: ");
-            output.push_str(&escape_text(conversion.state.name()));
-            if let Some(diagnostic) = &conversion.diagnostic {
-                output.push_str("\nconversion-diagnostic: ");
-                output.push_str(&escape_text(diagnostic));
-            }
+    if let Some(conversion) = &inspection.conversion
+        && conversion.state != crate::conversion_state::ConversionState::NotConverted
+    {
+        output.push_str("\nconversion-state: ");
+        output.push_str(&escape_text(conversion.state.name()));
+        if let Some(diagnostic) = &conversion.diagnostic {
+            output.push_str("\nconversion-diagnostic: ");
+            output.push_str(&escape_text(diagnostic));
         }
     }
     for artifact in &inspection.artifacts {

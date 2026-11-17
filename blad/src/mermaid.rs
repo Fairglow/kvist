@@ -551,22 +551,14 @@ fn admit_model(model: &SemanticDiagramModel) -> Result<(), DiagramError> {
             return Ok(());
         }
         SemanticDiagramModel::Packet(model) => {
-            let total = model
-                .packet
-                .iter()
-                .map(|row| row.len())
-                .sum::<usize>();
+            let total = model.packet.iter().map(|row| row.len()).sum::<usize>();
             ceiling("packet blocks", total, MAX_NODES)?;
             ceiling("packet rows", model.packet.len(), 64)?;
             return Ok(());
         }
         SemanticDiagramModel::XyChart(model) => {
             ceiling("xychart plots", model.plots.len(), 16)?;
-            let total = model
-                .plots
-                .iter()
-                .map(|p| p.values.len())
-                .sum::<usize>();
+            let total = model.plots.iter().map(|p| p.values.len()).sum::<usize>();
             ceiling("xychart data points", total, MAX_NODES)?;
             return Ok(());
         }
@@ -923,10 +915,6 @@ fn render_git_graph(
             rail: '|',
             join: '+',
             space: " ",
-            horizontal: "-",
-            branch_label: "branch ",
-            commit_label: "commit ",
-            tag_label: "tag ",
         }
     } else {
         GitGraphGlyphs {
@@ -935,10 +923,6 @@ fn render_git_graph(
             rail: '│',
             join: '┼',
             space: " ",
-            horizontal: "─",
-            branch_label: "branch ",
-            commit_label: "commit ",
-            tag_label: "tag ",
         }
     };
 
@@ -1000,10 +984,12 @@ fn render_git_graph(
                 ));
             } else if active_rails.contains_key(&rail_idx) {
                 // Active rail but not the commit rail.
-                if is_merge && commit.parents.iter().any(|p| {
-                    // Check if this rail has a commit that is a parent.
-                    false
-                }) {
+                if is_merge
+                    && commit.parents.iter().any(|_p| {
+                        // Check if this rail has a commit that is a parent.
+                        false
+                    })
+                {
                     line.push(glyphs.join);
                 } else {
                     line.push(glyphs.rail);
@@ -1023,10 +1009,6 @@ struct GitGraphGlyphs {
     rail: char,
     join: char,
     space: &'static str,
-    horizontal: &'static str,
-    branch_label: &'static str,
-    commit_label: &'static str,
-    tag_label: &'static str,
 }
 
 /// Bounded, Blad-owned gantt projection: section rows with time-axis task blocks.
@@ -1051,8 +1033,6 @@ fn render_gantt(
             active: '>',
             milestone: '*',
             rail: '|',
-            separator: '-',
-            space: " ",
         }
     } else {
         GanttGlyphs {
@@ -1061,8 +1041,6 @@ fn render_gantt(
             active: '▒',
             milestone: '◆',
             rail: '│',
-            separator: '─',
-            space: " ",
         }
     };
 
@@ -1073,8 +1051,10 @@ fn render_gantt(
     }
 
     // Group tasks by section.
-    let mut section_tasks: std::collections::HashMap<String, Vec<&merman::model::families::gantt::GanttTask>> =
-        std::collections::HashMap::new();
+    let mut section_tasks: std::collections::HashMap<
+        String,
+        Vec<&merman::model::families::gantt::GanttTask>,
+    > = std::collections::HashMap::new();
     for task in &model.tasks {
         section_tasks
             .entry(task.section.clone())
@@ -1114,8 +1094,6 @@ struct GanttGlyphs {
     active: char,
     milestone: char,
     rail: char,
-    separator: char,
-    space: &'static str,
 }
 
 /// Bounded, Blad-owned timeline projection: era/event rows.
@@ -1137,15 +1115,11 @@ fn render_timeline(
         TimelineGlyphs {
             event: 'o',
             rail: '|',
-            separator: '-',
-            space: " ",
         }
     } else {
         TimelineGlyphs {
             event: '●',
             rail: '│',
-            separator: '─',
-            space: " ",
         }
     };
 
@@ -1156,8 +1130,10 @@ fn render_timeline(
     }
 
     // Group tasks by section (era).
-    let mut section_tasks: std::collections::HashMap<String, Vec<&merman::model::families::timeline::TimelineTask>> =
-        std::collections::HashMap::new();
+    let mut section_tasks: std::collections::HashMap<
+        String,
+        Vec<&merman::model::families::timeline::TimelineTask>,
+    > = std::collections::HashMap::new();
     for task in &model.tasks {
         section_tasks
             .entry(task.section.clone())
@@ -1190,8 +1166,6 @@ fn render_timeline(
 struct TimelineGlyphs {
     event: char,
     rail: char,
-    separator: char,
-    space: &'static str,
 }
 
 /// Bounded, Blad-owned journey projection: actor/step/score table.
@@ -1210,17 +1184,9 @@ fn render_journey(
     };
 
     let glyphs = if ascii {
-        JourneyGlyphs {
-            separator: '-',
-            rail: '|',
-            space: " ",
-        }
+        JourneyGlyphs { rail: '|' }
     } else {
-        JourneyGlyphs {
-            separator: '─',
-            rail: '│',
-            space: " ",
-        }
+        JourneyGlyphs { rail: '│' }
     };
 
     let mut out = String::new();
@@ -1239,8 +1205,10 @@ fn render_journey(
     }
 
     // Group tasks by section.
-    let mut section_tasks: std::collections::HashMap<String, Vec<&merman::model::families::journey::JourneyTask>> =
-        std::collections::HashMap::new();
+    let mut section_tasks: std::collections::HashMap<
+        String,
+        Vec<&merman::model::families::journey::JourneyTask>,
+    > = std::collections::HashMap::new();
     for task in &model.tasks {
         section_tasks
             .entry(task.section.clone())
@@ -1275,9 +1243,7 @@ fn render_journey(
 }
 
 struct JourneyGlyphs {
-    separator: char,
     rail: char,
-    space: &'static str,
 }
 
 /// Bounded, Blad-owned kanban projection: column/task lists.
@@ -1300,14 +1266,12 @@ fn render_kanban(
             card: '>',
             rail: '|',
             separator: '-',
-            space: " ",
         }
     } else {
         KanbanGlyphs {
             card: '▸',
             rail: '│',
             separator: '─',
-            space: " ",
         }
     };
 
@@ -1336,23 +1300,24 @@ fn render_kanban(
             .collect();
 
         for card in cards {
-            let meta = if card.ticket.is_some() || card.priority.is_some() || card.assigned.is_some() {
-                let parts: Vec<String> = [
-                    card.ticket.as_ref().map(|t| format!("ticket:{}", t)),
-                    card.priority.as_ref().map(|p| format!("pri:{}", p)),
-                    card.assigned.as_ref().map(|a| format!("@{}", a)),
-                ]
-                .into_iter()
-                .flatten()
-                .collect();
-                if !parts.is_empty() {
-                    format!(" [{}]", parts.join(", "))
+            let meta =
+                if card.ticket.is_some() || card.priority.is_some() || card.assigned.is_some() {
+                    let parts: Vec<String> = [
+                        card.ticket.as_ref().map(|t| format!("ticket:{}", t)),
+                        card.priority.as_ref().map(|p| format!("pri:{}", p)),
+                        card.assigned.as_ref().map(|a| format!("@{}", a)),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                    if !parts.is_empty() {
+                        format!(" [{}]", parts.join(", "))
+                    } else {
+                        String::new()
+                    }
                 } else {
                     String::new()
-                }
-            } else {
-                String::new()
-            };
+                };
             out.push_str(&format!(
                 "{} {} {}{}\n",
                 glyphs.rail, glyphs.card, card.label, meta
@@ -1367,7 +1332,6 @@ struct KanbanGlyphs {
     card: char,
     rail: char,
     separator: char,
-    space: &'static str,
 }
 
 /// Bounded, Blad-owned packet projection: bit-range table.
@@ -1389,13 +1353,11 @@ fn render_packet(
         PacketGlyphs {
             separator: '-',
             rail: '|',
-            space: " ",
         }
     } else {
         PacketGlyphs {
             separator: '─',
             rail: '│',
-            space: " ",
         }
     };
 
@@ -1409,17 +1371,15 @@ fn render_packet(
         checkpoint(control)?;
         out.push_str(&format!(
             "{} {} {} {}\n",
-            glyphs.rail, row_idx + 1, glyphs.rail, glyphs.separator
+            glyphs.rail,
+            row_idx + 1,
+            glyphs.rail,
+            glyphs.separator
         ));
         for block in row {
             out.push_str(&format!(
                 "{} {}-{} ({}) {} {}\n",
-                glyphs.rail,
-                block.start,
-                block.end,
-                block.bits,
-                glyphs.rail,
-                block.label
+                glyphs.rail, block.start, block.end, block.bits, glyphs.rail, block.label
             ));
         }
     }
@@ -1430,7 +1390,6 @@ fn render_packet(
 struct PacketGlyphs {
     separator: char,
     rail: char,
-    space: &'static str,
 }
 
 /// Bounded, Blad-owned xychart projection: data table with bar/line indicators.
@@ -1451,19 +1410,15 @@ fn render_xy_chart(
 
     let glyphs = if ascii {
         XyChartGlyphs {
-            separator: '-',
             rail: '|',
             bar: '#',
             line: 'o',
-            space: " ",
         }
     } else {
         XyChartGlyphs {
-            separator: '─',
             rail: '│',
             bar: '█',
             line: '●',
-            space: " ",
         }
     };
 
@@ -1513,10 +1468,7 @@ fn render_xy_chart(
             .as_deref()
             .filter(|t| !t.trim().is_empty())
             .unwrap_or(plot_type);
-        out.push_str(&format!(
-            "{} {} [{}]\n",
-            glyphs.rail, plot_title, plot_type
-        ));
+        out.push_str(&format!("{} {} [{}]\n", glyphs.rail, plot_title, plot_type));
 
         // Compute max value for scaling.
         let max_value = plot
@@ -1534,7 +1486,13 @@ fn render_xy_chart(
             let label = plot
                 .data
                 .get(i)
-                .and_then(|(label, _)| if label.trim().is_empty() { None } else { Some(label) })
+                .and_then(|(label, _)| {
+                    if label.trim().is_empty() {
+                        None
+                    } else {
+                        Some(label)
+                    }
+                })
                 .cloned()
                 .unwrap_or_else(|| format!("{}", i));
 
@@ -1566,11 +1524,9 @@ fn render_xy_chart(
 }
 
 struct XyChartGlyphs {
-    separator: char,
     rail: char,
     bar: char,
     line: char,
-    space: &'static str,
 }
 
 fn render_error(error: RenderError) -> DiagramError {
@@ -1770,7 +1726,8 @@ mod budget_tests {
 
     #[test]
     fn gitgraph_ascii_mode_renders_clean_graph() {
-        let source = "gitGraph\ncommit\nbranch feature\ncommit\ncheckout main\ncommit\nmerge feature";
+        let source =
+            "gitGraph\ncommit\nbranch feature\ncommit\ncheckout main\ncommit\nmerge feature";
         let text = render(source, true, None).unwrap();
         assert!(text.is_ascii(), "{text}");
         assert!(text.contains('o'), "commit marker in {text}");

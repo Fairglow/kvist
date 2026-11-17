@@ -26,19 +26,12 @@ fn resolve_symlink_target(source: &Path, target: &Path) -> PathBuf {
     if target.is_absolute() {
         target.to_path_buf()
     } else {
-        source
-            .parent()
-            .unwrap_or(Path::new("/"))
-            .join(target)
+        source.parent().unwrap_or(Path::new("/")).join(target)
     }
 }
 
 /// Validate a symlink target and return an error if it escapes the system layout.
-fn validate_symlink_target(
-    host_root: &Path,
-    source: &Path,
-    target: &Path,
-) -> Result<(), String> {
+fn validate_symlink_target(host_root: &Path, source: &Path, target: &Path) -> Result<(), String> {
     let resolved = resolve_symlink_target(source, target);
 
     // Check for recursive symlinks by following the chain with a bounded depth.
@@ -139,7 +132,12 @@ pub(crate) fn add_host_system_layout(arguments: &mut Vec<String>) -> Result<(), 
 
 fn add_layout(arguments: &mut Vec<String>, host: &Path) -> Result<(), String> {
     for relative in ["usr", "lib", "lib64", "bin", "sbin", "etc/alternatives"] {
-        add_entry(arguments, host, &host.join(relative), &format!("/{relative}"))?;
+        add_entry(
+            arguments,
+            host,
+            &host.join(relative),
+            &format!("/{relative}"),
+        )?;
     }
     arguments.extend(["--cap-drop".to_owned(), "ALL".to_owned()]);
     Ok(())

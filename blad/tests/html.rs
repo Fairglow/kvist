@@ -182,7 +182,8 @@ fn hr_creates_text_rule() {
 
 #[test]
 fn malformed_html_remains_visible() {
-    let source = "<unclosed tag\n<missing-quote attr=value>\n<<double-lt>>\n<tag attr=value missing-eq";
+    let source =
+        "<unclosed tag\n<missing-quote attr=value>\n<<double-lt>>\n<tag attr=value missing-eq";
     let text = render(source, None);
     // Malformed tags should remain as literal text, not hide content
     assert!(text.contains("<unclosed tag"), "{text:?}");
@@ -207,9 +208,8 @@ fn nested_html_is_bounded() {
 #[test]
 fn unmatched_closing_tags_do_not_crash() {
     let source = "</b></i></em></strong></s></del></code></kbd></samp>";
-    let text = render(source, None);
     // Should not crash; unmatched closers are treated as literal
-    assert!(true); // If we get here, it didn't crash
+    render(source, None);
 }
 
 #[test]
@@ -239,7 +239,8 @@ fn unknown_entities_remain_source() {
 
 #[test]
 fn html_in_table_cells() {
-    let source = "| Header |\n|--------|\n| Cell with <b>bold</b> and <br> break |\n| Cell &amp; entities |";
+    let source =
+        "| Header |\n|--------|\n| Cell with <b>bold</b> and <br> break |\n| Cell &amp; entities |";
     let text = render(source, Some(80));
     assert!(text.contains("bold"), "{text:?}");
     assert!(text.contains("break"), "{text:?}");
@@ -402,9 +403,8 @@ fn html_empty_tags() {
 #[test]
 fn html_malformed_attribute_values() {
     let source = "<tag attr=\"unterminated>content</tag>";
-    let text = render(source, None);
     // Should not crash
-    assert!(true);
+    render(source, None);
 }
 
 #[test]
@@ -453,11 +453,17 @@ fn html_entity_boundary_conditions() {
 fn html_numeric_entity_boundary_conditions() {
     // Max valid codepoint (U+10FFFF)
     let text1 = render("&#1114111;", None);
-    assert!(!text1.contains("&#1114111;"), "max codepoint should be decoded: {text1:?}");
+    assert!(
+        !text1.contains("&#1114111;"),
+        "max codepoint should be decoded: {text1:?}"
+    );
 
     // Invalid: too large (> 0x10FFFF) - becomes replacement character
     let text2 = render("&#1114112;", None);
-    assert!(text2.contains('\u{FFFD}'), "too-large entity should become replacement: {text2:?}");
+    assert!(
+        text2.contains('\u{FFFD}'),
+        "too-large entity should become replacement: {text2:?}"
+    );
 }
 
 #[test]
@@ -918,9 +924,8 @@ fn html_entity_whitespace_in_attributes() {
 #[test]
 fn html_entity_whitespace_in_tag_name() {
     let source = "<b &amp;>text</b>";
-    let text = render(source, None);
     // Malformed tag, should not crash
-    assert!(true);
+    render(source, None);
 }
 
 #[test]
@@ -933,9 +938,8 @@ fn html_entity_whitespace_in_closing_tag() {
 #[test]
 fn html_entity_whitespace_in_self_closing() {
     let source = "<br &amp;/>";
-    let text = render(source, None);
     // Malformed, should not crash
-    assert!(true);
+    render(source, None);
 }
 
 #[test]
@@ -1489,7 +1493,8 @@ fn html_entity_whitespace_in_aside() {
 
 #[test]
 fn html_entity_whitespace_in_figure() {
-    let source = "<figure><img src=\"pic.png\" alt=\"pic\"/><figcaption>Caption</figcaption></figure>";
+    let source =
+        "<figure><img src=\"pic.png\" alt=\"pic\"/><figcaption>Caption</figcaption></figure>";
     let text = render(source, None);
     // Figure is unsupported, literal
     assert!(text.contains("<figure>"), "{text:?}");

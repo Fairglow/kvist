@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use nix::sys::resource::{setrlimit, Resource};
+use nix::sys::resource::{Resource, setrlimit};
 use sha2::{Digest, Sha256};
 
 use crate::probe::locate_backend;
@@ -57,15 +57,12 @@ fn add_workspace_vendor_mask(
 
 fn verify_request_identities(request: &SandboxRequest) -> Result<(), String> {
     // Verify runner identity by computing the digest of the running binary.
-    let runner_path = std::fs::read_link("/proc/self/exe").map_err(|error| {
-        format!("cannot determine runner binary path: {error}")
-    })?;
+    let runner_path = std::fs::read_link("/proc/self/exe")
+        .map_err(|error| format!("cannot determine runner binary path: {error}"))?;
     let actual_runner_digest = match crate::probe::file_sha256(&runner_path) {
         Ok(digest) => digest,
         Err(error) => {
-            return Err(format!(
-                "cannot compute runner binary digest: {error}"
-            ));
+            return Err(format!("cannot compute runner binary digest: {error}"));
         }
     };
     if actual_runner_digest != request.identities.runner {
@@ -147,8 +144,6 @@ fn inspect_and_promote_cache(request: &SandboxRequest) -> Result<(), String> {
     ))
 }
 
-
-
 fn process_record(content: &str) -> Result<(u32, u32, u64), String> {
     // Parse /proc/PID/stat: fields after the comm field (in parentheses).
     // The comm field can contain spaces, so we find the last ')' and parse
@@ -222,10 +217,8 @@ fn count_processes_in_pgid(child_pid: u32) -> u64 {
         for (pid, ppid, pgrp) in &proc_parents {
             // A process is in the group if its pgid matches, or if it's a
             // descendant of a process already in the group.
-            if *pgrp == target_pgid || pids.contains(ppid) {
-                if pids.insert(*pid) {
-                    changed = true;
-                }
+            if (*pgrp == target_pgid || pids.contains(ppid)) && pids.insert(*pid) {
+                changed = true;
             }
         }
     }
@@ -239,10 +232,11 @@ fn count_processes_in_pgid(child_pid: u32) -> u64 {
 /// Check if any file under the given path exceeds the size limit (recursive).
 fn check_file_size_exceeded(path: &Path, limit_bytes: u64) -> bool {
     walk_dir(path, |p| {
-        if let Ok(metadata) = p.metadata() {
-            if metadata.is_file() && metadata.size() > limit_bytes {
-                return true;
-            }
+        if let Ok(metadata) = p.metadata()
+            && metadata.is_file()
+            && metadata.size() > limit_bytes
+        {
+            return true;
         }
         false
     })
@@ -257,13 +251,13 @@ fn check_scratch_size_exceeded(path: &Path, limit_bytes: u64) -> bool {
         if exceeded_clone.load(Ordering::SeqCst) {
             return true;
         }
-        if let Ok(metadata) = p.metadata() {
-            if metadata.is_file() {
-                total += metadata.size();
-                if total > limit_bytes {
-                    exceeded_clone.store(true, Ordering::SeqCst);
-                    return true;
-                }
+        if let Ok(metadata) = p.metadata()
+            && metadata.is_file()
+        {
+            total += metadata.size();
+            if total > limit_bytes {
+                exceeded_clone.store(true, Ordering::SeqCst);
+                return true;
             }
         }
         false
@@ -598,7 +592,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         }
     };
 
-    let child_pid = child.id();
+    let _child_pid = child.id();
 
     // Apply process resource limits using the prlimit syscall directly,
     // eliminating the dependency on /usr/bin/prlimit. Report errors instead
@@ -608,11 +602,11 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         eprintln!("galla: failed to set RLIMIT_NOFILE: {error}");
         return ExitCode::from(3);
     }
-    if let Some(max_file_bytes) = limits.max_file_bytes {
-        if let Err(error) = setrlimit(Resource::RLIMIT_FSIZE, max_file_bytes, max_file_bytes) {
-            eprintln!("galla: failed to set RLIMIT_FSIZE: {error}");
-            return ExitCode::from(3);
-        }
+    if let Some(max_file_bytes) = limits.max_file_bytes
+        && let Err(error) = setrlimit(Resource::RLIMIT_FSIZE, max_file_bytes, max_file_bytes)
+    {
+        eprintln!("galla: failed to set RLIMIT_FSIZE: {error}");
+        return ExitCode::from(3);
     }
 
     let child_pid = child.id();
@@ -712,13 +706,13 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         }
 
         // Check file size limits recursively
-        if let Some(max_file_bytes) = limits.max_file_bytes {
-            if check_file_size_exceeded(&PathBuf::from("/tmp"), max_file_bytes) {
-                specific_breach = Some("file size limit exceeded");
-                let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
-                let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
-                break;
-            }
+        if let Some(max_file_bytes) = limits.max_file_bytes
+            && check_file_size_exceeded(&PathBuf::from("/tmp"), max_file_bytes)
+        {
+            specific_breach = Some("file size limit exceeded");
+            let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
+            let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
+            break;
         }
 
         // Check scratch size limits recursively
@@ -987,8 +981,7 @@ mod tests {
             max_cache_bytes: 4096,
         };
 
-        let attempt_capability =
-            cache::open_isolated_attempt_root(&attempt).expect("open attempt");
+        let attempt_capability = cache::open_isolated_attempt_root(&attempt).expect("open attempt");
         let parent_capability =
             cache::open_trusted_generation_parent(&parent).expect("open parent");
 

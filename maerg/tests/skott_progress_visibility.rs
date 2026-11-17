@@ -26,8 +26,14 @@ fn metrics_line_reflects_live_progress() {
 
     // Verify the summary line format captures all progress fields.
     assert!(initial.contains("/"), "summary should show token counts");
-    assert!(initial.contains("context"), "summary should show context usage");
-    assert!(initial.contains("compactions"), "summary should show compaction count");
+    assert!(
+        initial.contains("context"),
+        "summary should show context usage"
+    );
+    assert!(
+        initial.contains("compactions"),
+        "summary should show compaction count"
+    );
     assert!(initial.contains("s"), "summary should show elapsed time");
 }
 
@@ -43,9 +49,14 @@ fn skott_pane_accumulates_progress_lines() {
     assert!(initial_count >= 1, "app starts with a welcome note");
 
     // Submit a note event directly through the app to simulate progress.
-    skott.app_mut().push_event(Event::Note("test progress".to_string()));
+    skott
+        .app_mut()
+        .push_event(Event::Note("test progress".to_string()));
     let after_count = skott.app().lines.len();
-    assert!(after_count > initial_count, "app lines should grow with events");
+    assert!(
+        after_count > initial_count,
+        "app lines should grow with events"
+    );
 }
 
 /// The event log (used by tests and the compact view) captures all progress
@@ -77,8 +88,14 @@ fn kvist_view_shows_progress_via_metrics() {
     // Verify it exists and has the expected format.
     let summary = skott.metrics().summary_line();
     assert!(!summary.is_empty(), "metrics summary should not be empty");
-    assert!(summary.contains("turns"), "summary should include turn count");
-    assert!(summary.contains("tools"), "summary should include tool count");
+    assert!(
+        summary.contains("turns"),
+        "summary should include turn count"
+    );
+    assert!(
+        summary.contains("tools"),
+        "summary should include tool count"
+    );
 }
 
 /// When the operator switches to the Skott detail pane during a run, they see
@@ -88,8 +105,12 @@ fn switching_to_skott_pane_shows_accumulated_progress() {
     let mut skott = EmbeddedSkott::new();
 
     // Simulate work by adding events to the app.
-    skott.app_mut().push_event(Event::Note("work started".to_string()));
-    skott.app_mut().push_event(Event::Text("processing...".to_string()));
+    skott
+        .app_mut()
+        .push_event(Event::Note("work started".to_string()));
+    skott
+        .app_mut()
+        .push_event(Event::Text("processing...".to_string()));
 
     // Switch to the Skott detail pane.
     skott.set_active_pane(ActivePane::Skott);
@@ -130,9 +151,15 @@ fn skott_app_auto_follows_new_output() {
     // Add multiple events. App starts with a welcome note (which wraps), so
     // we track the initial count and verify growth.
     let before = skott.app().lines.len();
-    skott.app_mut().push_event(Event::Note("event 1".to_string()));
-    skott.app_mut().push_event(Event::Note("event 2".to_string()));
-    skott.app_mut().push_event(Event::Note("event 3".to_string()));
+    skott
+        .app_mut()
+        .push_event(Event::Note("event 1".to_string()));
+    skott
+        .app_mut()
+        .push_event(Event::Note("event 2".to_string()));
+    skott
+        .app_mut()
+        .push_event(Event::Note("event 3".to_string()));
 
     // Each event adds at least one line.
     let after = skott.app().lines.len();

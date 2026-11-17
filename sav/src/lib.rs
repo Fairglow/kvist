@@ -26,9 +26,9 @@ mod profile;
 mod prompt;
 pub mod registry;
 pub mod runtime;
+pub mod security_audit;
 mod setup;
 mod supervisor;
-pub mod security_audit;
 pub mod trajectory;
 
 pub use catalog::{

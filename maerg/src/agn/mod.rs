@@ -12,9 +12,9 @@
 
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
 use sav::ToolIntent;
 use sav::runtime::Event;
+use serde::{Deserialize, Serialize};
 
 use crate::authoring::AuthoringPlan;
 
@@ -66,7 +66,6 @@ pub struct TaskPolicy {
 /// An authorization context bound to a specific task.
 pub struct TaskAuthorization {
     task_id: String,
-    root: std::path::PathBuf,
     grants: Vec<ToolGrant>,
     policy: Option<TaskPolicy>,
 }
@@ -74,7 +73,7 @@ pub struct TaskAuthorization {
 impl TaskAuthorization {
     /// Create an authorization context with a list of granted tool names.
     /// Grants are bound to policy revision 1 and workspace revision 1.
-    pub fn new(task_id: &str, root: &Path, granted_tools: Vec<&str>) -> Self {
+    pub fn new(task_id: &str, _root: &Path, granted_tools: Vec<&str>) -> Self {
         let grants = granted_tools
             .into_iter()
             .map(|tool| ToolGrant {
@@ -87,17 +86,15 @@ impl TaskAuthorization {
             .collect();
         Self {
             task_id: task_id.to_owned(),
-            root: root.to_owned(),
             grants,
             policy: None,
         }
     }
 
     /// Create an authorization context with a single canonical grant.
-    pub fn with_grant(task_id: &str, root: &Path, grant: ToolGrant) -> Self {
+    pub fn with_grant(task_id: &str, _root: &Path, grant: ToolGrant) -> Self {
         Self {
             task_id: task_id.to_owned(),
-            root: root.to_owned(),
             grants: vec![grant],
             policy: None,
         }
@@ -105,10 +102,9 @@ impl TaskAuthorization {
 
     /// Create an authorization context with task policy.
     /// Grants all tools (open policy) with the specified execution tier.
-    pub fn with_policy(task_id: &str, root: &Path, policy: TaskPolicy) -> Self {
+    pub fn with_policy(task_id: &str, _root: &Path, policy: TaskPolicy) -> Self {
         Self {
             task_id: task_id.to_owned(),
-            root: root.to_owned(),
             grants: vec![ToolGrant {
                 task_id: task_id.to_owned(),
                 tool: "*".to_owned(),
@@ -123,13 +119,12 @@ impl TaskAuthorization {
     /// Create an authorization context with both a grant and task policy.
     pub fn with_grant_and_policy(
         task_id: &str,
-        root: &Path,
+        _root: &Path,
         grant: ToolGrant,
         policy: TaskPolicy,
     ) -> Self {
         Self {
             task_id: task_id.to_owned(),
-            root: root.to_owned(),
             grants: vec![grant],
             policy: Some(policy),
         }
@@ -161,10 +156,7 @@ impl TaskAuthorization {
                         plan.dropped.push(crate::authoring::DroppedIntent {
                             call_id: intent.id.clone(),
                             tool: intent.name.clone(),
-                            reason: format!(
-                                "path '{}' not within bound '{}'",
-                                path, binding.value
-                            ),
+                            reason: format!("path '{}' not within bound '{}'", path, binding.value),
                         });
                         return plan;
                     }
@@ -396,7 +388,8 @@ mod tests {
         let root = std::path::Path::new("/tmp/test");
         let secret = "sk-1234567890abcdef";
         let mut sink = RedactedEventSink::new(root, vec![secret.to_owned()]);
-        sink.ingest(&Event::Text(format!("API key: {}", secret)));
+        sink.ingest(&Event::Text(format!("API key: {}", secret)))
+            .expect("ingest");
         let redacted = sink.redacted_output();
         assert!(!redacted.contains(secret));
         assert!(redacted.contains("[REDACTED]"));

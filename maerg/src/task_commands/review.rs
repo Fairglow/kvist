@@ -21,16 +21,16 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+use hmac::{KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
-use hmac::{KeyInit, Mac};
 
 use crate::config::ProjectConfig;
 use crate::discovery::ComponentArtifact;
 use crate::error::KvistError;
 use crate::task_commands::TaskContext;
-use crate::task_queue::{parse as parse_queue, TaskQueue};
+use crate::task_queue::{TaskQueue, parse as parse_queue};
 
 /// Maximum review report size in bytes.
 const MAX_REPORT_BYTES: usize = 64 * 1024;
@@ -104,7 +104,9 @@ pub(crate) fn review_intent(
 ) -> Result<(PathBuf, String), KvistError> {
     // Read the intent bundle
     let requirements = fs::read_to_string(
-        &context.component_dir.join(ComponentArtifact::Requirements.filename()),
+        context
+            .component_dir
+            .join(ComponentArtifact::Requirements.filename()),
     )
     .map_err(|source| KvistError::Io {
         operation: "read REQUIREMENTS.md for review",
@@ -115,7 +117,9 @@ pub(crate) fn review_intent(
     })?;
 
     let contract = fs::read_to_string(
-        &context.component_dir.join(ComponentArtifact::Contract.filename()),
+        context
+            .component_dir
+            .join(ComponentArtifact::Contract.filename()),
     )
     .map_err(|source| KvistError::Io {
         operation: "read CONTRACT.md for review",
@@ -126,7 +130,9 @@ pub(crate) fn review_intent(
     })?;
 
     let design = fs::read_to_string(
-        &context.component_dir.join(ComponentArtifact::Design.filename()),
+        context
+            .component_dir
+            .join(ComponentArtifact::Design.filename()),
     )
     .map_err(|source| KvistError::Io {
         operation: "read DESIGN.md for review",
@@ -144,10 +150,11 @@ pub(crate) fn review_intent(
         path: queue_path.clone(),
         source,
     })?;
-    let queue: TaskQueue = parse_queue(&queue_content).map_err(|source| KvistError::TaskQueueUnavailable {
-        path: queue_path,
-        reason: source.to_string(),
-    })?;
+    let queue: TaskQueue =
+        parse_queue(&queue_content).map_err(|source| KvistError::TaskQueueUnavailable {
+            path: queue_path,
+            reason: source.to_string(),
+        })?;
 
     // Compute digests
     let requirements_digest = sha256_hex(requirements.as_bytes());
@@ -180,11 +187,12 @@ pub(crate) fn review_intent(
 
     // Read ROOT_CONTRACT.md
     let root_contract_path = context.project_dir.join("ROOT_CONTRACT.md");
-    let root_contract = fs::read_to_string(&root_contract_path).map_err(|source| KvistError::Io {
-        operation: "read ROOT_CONTRACT.md for review context",
-        path: root_contract_path,
-        source,
-    })?;
+    let root_contract =
+        fs::read_to_string(&root_contract_path).map_err(|source| KvistError::Io {
+            operation: "read ROOT_CONTRACT.md for review context",
+            path: root_contract_path,
+            source,
+        })?;
     let root_contract_digest = sha256_hex(root_contract.as_bytes());
 
     // Read immediate parent CONTRACT.md if present
@@ -220,7 +228,10 @@ pub(crate) fn review_intent(
             path: parent_path,
             source,
         })?;
-        documents.insert(format!("PARENT_CONTRACT.md ({})", parent.path), parent_content);
+        documents.insert(
+            format!("PARENT_CONTRACT.md ({})", parent.path),
+            parent_content,
+        );
     }
 
     // Build evidence with explicit structural separation to mitigate
@@ -256,11 +267,8 @@ pub(crate) fn review_intent(
 
     // Redact the report before storage to prevent context leakage of
     // sensitive values that may have been included in the evidence.
-    let redacted_report = super::redact_bounded(
-        report.report.clone(),
-        &redactions,
-        MAX_REPORT_BYTES,
-    );
+    let redacted_report =
+        super::redact_bounded(report.report.clone(), &redactions, MAX_REPORT_BYTES);
 
     // Write the redacted report
     let reviews_dir = context.component_dir.join(".kvist").join("reviews");
@@ -363,8 +371,8 @@ fn derive_hmac_key(project_dir: &std::path::Path) -> [u8; HMAC_KEY_SIZE] {
 /// Computes HMAC-SHA256 authentication for a receipt.
 fn compute_receipt_hmac(receipt_json: &str, project_dir: &std::path::Path) -> String {
     let key = derive_hmac_key(project_dir);
-    let mut mac = hmac::Hmac::<Sha256>::new_from_slice(&key)
-        .expect("HMAC-SHA256 accepts any key size");
+    let mut mac =
+        hmac::Hmac::<Sha256>::new_from_slice(&key).expect("HMAC-SHA256 accepts any key size");
     mac.update(receipt_json.as_bytes());
     let result = mac.finalize();
     format!("hmac-sha256:{}", hex::encode(result.into_bytes()))

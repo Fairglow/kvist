@@ -476,5 +476,8 @@ tasks:
             break;
         }
     }
-    assert_eq!(found, Some(("comp-b".to_string(), "implement-code".to_string())));
+    assert_eq!(
+        found,
+        Some(("comp-b".to_string(), "implement-code".to_string()))
+    );
 }

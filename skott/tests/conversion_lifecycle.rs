@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn skott() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_skott"));
@@ -113,11 +113,14 @@ fn converted_project_inspection_reads_kvist_artifacts() {
     setup_project(root);
 
     // Write conversion metadata
-    write_conversion_metadata(root, &json!({
-        "version": 1,
-        "source": "existing-project",
-        "converted_at": "2026-11-15T00:00:00Z"
-    }));
+    write_conversion_metadata(
+        root,
+        &json!({
+            "version": 1,
+            "source": "existing-project",
+            "converted_at": "2026-11-15T00:00:00Z"
+        }),
+    );
 
     // Inspection should recognize the converted project
     let output = skott()
@@ -161,11 +164,14 @@ fn conversion_metadata_link_like_path_fails_validation() {
     let root = dir.path();
     setup_project(root);
 
-    write_conversion_metadata(root, &json!({
-        "version": 1,
-        "source": "../outside-project",
-        "converted_at": "2026-11-15T00:00:00Z"
-    }));
+    write_conversion_metadata(
+        root,
+        &json!({
+            "version": 1,
+            "source": "../outside-project",
+            "converted_at": "2026-11-15T00:00:00Z"
+        }),
+    );
 
     let output = skott()
         .arg("--cwd")
@@ -333,11 +339,14 @@ fn acceptance_invalidation_on_metadata_change() {
     write_review_receipt(root, "test-invalid-1", &["VISION.md"]);
 
     // Change conversion metadata
-    write_conversion_metadata(root, &json!({
-        "version": 1,
-        "source": "changed-source",
-        "converted_at": "2026-11-15T01:00:00Z"
-    }));
+    write_conversion_metadata(
+        root,
+        &json!({
+            "version": 1,
+            "source": "changed-source",
+            "converted_at": "2026-11-15T01:00:00Z"
+        }),
+    );
 
     let output = skott()
         .arg("--cwd")
@@ -484,11 +493,14 @@ fn conversion_lifecycle_logs_to_kvist_logs() {
     let kvist_dir = root.join(".kvist");
     fs::create_dir_all(&kvist_dir).unwrap();
 
-    write_conversion_metadata(root, &json!({
-        "version": 1,
-        "source": "test-project",
-        "converted_at": "2026-11-15T00:00:00Z"
-    }));
+    write_conversion_metadata(
+        root,
+        &json!({
+            "version": 1,
+            "source": "test-project",
+            "converted_at": "2026-11-15T00:00:00Z"
+        }),
+    );
 
     let output = skott()
         .arg("--cwd")

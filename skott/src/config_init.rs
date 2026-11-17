@@ -61,20 +61,18 @@ fn validate_conversion_metadata(project: &Path) -> Result<()> {
         )
     })?;
 
-    let metadata: Value = serde_json::from_str(&content).map_err(|source| {
-        Error::Config {
-            path: Some(metadata_path.to_string_lossy().to_string()),
-            reason: format!("malformed conversion metadata: {source}"),
-        }
+    let metadata: Value = serde_json::from_str(&content).map_err(|source| Error::Config {
+        path: Some(metadata_path.to_string_lossy().to_string()),
+        reason: format!("malformed conversion metadata: {source}"),
     })?;
 
-    if let Some(source) = metadata.get("source").and_then(Value::as_str) {
-        if source.starts_with("../") || source.starts_with("./") || source.starts_with("/") {
-            return Err(Error::Config {
-                path: Some(metadata_path.to_string_lossy().to_string()),
-                reason: format!("conversion source is link-like: {source}"),
-            });
-        }
+    if let Some(source) = metadata.get("source").and_then(Value::as_str)
+        && (source.starts_with("../") || source.starts_with("./") || source.starts_with("/"))
+    {
+        return Err(Error::Config {
+            path: Some(metadata_path.to_string_lossy().to_string()),
+            reason: format!("conversion source is link-like: {source}"),
+        });
     }
 
     Ok(())

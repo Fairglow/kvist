@@ -74,9 +74,11 @@ fn tokens(output: &str) -> Tokens {
 fn frontmatter_preserves_yaml_layout_and_literal_markdown() {
     let header = "---\n# authored comment\nname: general-document\nmetadata:\n  author: \"Someone\"\n  version: '1.0'\n  active: true\n  count: 42\nitems:\n  - one\n  - two\n\nliteral: |+\n  **bold** &amp; <tag> `code`\n  H~2~O x^2^ $x^2$ [link](target.md)\nfolded: >-\n  first line\n  second line\n[ref]: target.md\n[^1]: not a Markdown definition\n---\n";
     let source = format!("{header}# Body\n\n[ref] and [^1].\n");
+    // An undefined footnote reference renders as a marker (the renderer
+    // treats `[^id]` as a footnote reference even without a definition).
     assert_eq!(
         render(&source, None, RenderOptions::plain()),
-        format!("{header}\n# Body\n\n[ref] and [^1].\n")
+        format!("{header}\n# Body\n\n[ref] and \u{00B9}.\n")
     );
     for width in [None, Some(0), Some(1), Some(25), Some(100)] {
         let actual = render(&source, width, RenderOptions::plain());
@@ -344,7 +346,10 @@ fn toml_frontmatter_is_recognized_at_prefix_with_delimiter_matching() {
     // Valid TOML frontmatter with matching delimiters.
     let source = "+++\ntitle = \"My Document\"\nauthor = \"Jane\"\nyear = 2024\n+++\n\n# Body\n";
     let output = render(source, None, RenderOptions::plain());
-    assert_eq!(output, "+++\ntitle = \"My Document\"\nauthor = \"Jane\"\nyear = 2024\n+++\n\n# Body\n");
+    assert_eq!(
+        output,
+        "+++\ntitle = \"My Document\"\nauthor = \"Jane\"\nyear = 2024\n+++\n\n# Body\n"
+    );
 }
 
 #[test]
@@ -365,7 +370,10 @@ fn toml_frontmatter_malformed_is_still_displayed() {
     // Malformed TOML is still recognized and displayed as-is.
     let source = "+++\ntitle = \"Unclosed string\nauthor = \"Jane\"\n+++\n\n# Body\n";
     let output = render(source, None, RenderOptions::plain());
-    assert_eq!(output, "+++\ntitle = \"Unclosed string\nauthor = \"Jane\"\n+++\n\n# Body\n");
+    assert_eq!(
+        output,
+        "+++\ntitle = \"Unclosed string\nauthor = \"Jane\"\n+++\n\n# Body\n"
+    );
 }
 
 #[test]
@@ -453,7 +461,7 @@ fn toml_frontmatter_preserves_source_and_highlights_as_toml() {
 #[test]
 fn toml_frontmatter_never_creates_links_or_definitions() {
     let source = "+++\nurl = \"https://metadata.test\"\nlink = \"[hidden](hidden.md)\"\n[reference]\ntarget = \"hidden.md\"\n+++\n\n# Body\n\n[body](#body) https://body.test\n";
-    let links = blad::links::extract_links(&source);
+    let links = blad::links::extract_links(source);
     assert_eq!(links.len(), 2, "{links:?}");
     assert_eq!(links[0].text, "body");
     assert_eq!(links[0].destination, "#body");

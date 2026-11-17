@@ -27,8 +27,7 @@ fn run_probe() -> Result<serde_json::Value, String> {
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("failed to parse probe output: {e}"))
+    serde_json::from_slice(&output.stdout).map_err(|e| format!("failed to parse probe output: {e}"))
 }
 
 /// Verify that the probe actually executes bwrap to test namespace creation.
@@ -108,7 +107,10 @@ fn probe_succeeds_with_working_bwrap() {
         .get("network")
         .and_then(|n| n.as_bool())
         .unwrap_or(false);
-    let pid = namespaces.get("pid").and_then(|p| p.as_bool()).unwrap_or(false);
+    let pid = namespaces
+        .get("pid")
+        .and_then(|p| p.as_bool())
+        .unwrap_or(false);
 
     assert!(
         mount || network || pid,

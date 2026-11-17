@@ -13,26 +13,8 @@ use std::process::{Command, Stdio};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use galla::validation;
-
 fn digest_bytes(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
-}
-
-fn registry_identity(name: &str, index: &str, download: &str) -> String {
-    validation::registry_identity(name, index, download)
-}
-
-fn crates_io() -> Value {
-    let index = "https://index.crates.io/";
-    let download = "https://static.crates.io/";
-    json!({
-        "kind": "cargo-registry",
-        "name": "crates-io",
-        "index_origin": index,
-        "download_origin": download,
-        "identity": registry_identity("crates-io", index, download)
-    })
 }
 
 fn valid_request() -> Value {

@@ -171,10 +171,7 @@ impl Workspace {
                 // Always offer to start an agent session when idle (no running
                 // command and no active Skott session).
                 if self.running.is_none()
-                    && !self
-                        .skott
-                        .as_ref()
-                        .is_some_and(|skott| skott.is_active())
+                    && !self.skott.as_ref().is_some_and(|skott| skott.is_active())
                 {
                     entries.push(Entry::new(
                         "Start agent session (Ctrl+A)",

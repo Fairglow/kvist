@@ -7,7 +7,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 fn digest(bytes: &[u8]) -> String {
@@ -146,7 +146,10 @@ fn prlimit_failure_is_reported() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
         assert!(
-            stderr.contains("prlimit") || stderr.contains("limits") || stderr.contains("fsize") || stderr.contains("nofile"),
+            stderr.contains("prlimit")
+                || stderr.contains("limits")
+                || stderr.contains("fsize")
+                || stderr.contains("nofile"),
             "prlimit failure not properly reported: {}",
             stderr
         );
@@ -191,11 +194,7 @@ fn process_count_limit_enforced() {
     let mut request = valid_request();
     request["resources"]["max_processes"] = json!(1);
     // Spawn multiple background processes to exceed the limit
-    request["argv"] = json!([
-        "/bin/sh",
-        "-c",
-        "sleep 10 & sleep 10 & sleep 10 & wait"
-    ]);
+    request["argv"] = json!(["/bin/sh", "-c", "sleep 10 & sleep 10 & sleep 10 & wait"]);
 
     let bytes = encode(&request);
     let output = run_runner(&bytes);
@@ -203,7 +202,9 @@ fn process_count_limit_enforced() {
 
     // The runner should detect the process count breach and kill the group
     assert!(
-        !output.status.success() || stderr.contains("process count") || stderr.contains("processes"),
+        !output.status.success()
+            || stderr.contains("process count")
+            || stderr.contains("processes"),
         "process count limit not enforced: exit={:?} stderr={}",
         output.status.code(),
         stderr
@@ -218,11 +219,7 @@ fn output_limit_enforced() {
     let mut request = valid_request();
     request["resources"]["max_output_bytes"] = json!(100);
     // Print more than 100 bytes
-    request["argv"] = json!([
-        "/bin/sh",
-        "-c",
-        "printf '%0.s=' {1..200}"
-    ]);
+    request["argv"] = json!(["/bin/sh", "-c", "printf '%0.s=' {1..200}"]);
 
     let bytes = encode(&request);
     let output = run_runner(&bytes);
@@ -244,10 +241,7 @@ fn wall_time_limit_enforced() {
     let mut request = valid_request();
     request["resources"]["wall_time_ms"] = json!(100);
     // Sleep longer than the limit
-    request["argv"] = json!([
-        "/bin/sleep",
-        "10"
-    ]);
+    request["argv"] = json!(["/bin/sleep", "10"]);
 
     let bytes = encode(&request);
     let output = run_runner(&bytes);

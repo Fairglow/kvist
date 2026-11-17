@@ -407,21 +407,19 @@ mod tests {
         // Many small appends, each well under the segment bound
         let small = "## status\n\nok\n\n";
         for i in 0..150_000 {
-            transcript
-                .append(&format!("[{i}] {small}"))
-                .unwrap();
+            transcript.append(&format!("[{i}] {small}")).unwrap();
         }
 
         // Should have rotated at least once once total exceeds SEGMENT_BYTES
-        assert!(transcript.latest() > 0, "should have rotated past segment 0");
+        assert!(
+            transcript.latest() > 0,
+            "should have rotated past segment 0"
+        );
 
         // All segments individually bounded
         for i in 0..=transcript.latest() {
             let seg = transcript.read(i).unwrap();
-            assert!(
-                seg.len() <= DOCUMENT_BYTES,
-                "segment {i} exceeds 16 MiB"
-            );
+            assert!(seg.len() <= DOCUMENT_BYTES, "segment {i} exceeds 16 MiB");
         }
 
         // Content is reconstructible from segments (not concatenated into one)

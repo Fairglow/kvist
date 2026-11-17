@@ -8,7 +8,7 @@
 //! run starts and issues bounded automatic continuations (MAX_SKOTT_CONTINUATIONS).
 //! There is no operator-initiated session and no operator steering path.
 
-use maerg::skott_embedded::{EmbeddedSkott, ActivePane};
+use maerg::skott_embedded::{ActivePane, EmbeddedSkott};
 
 /// An embedded Skott session starts idle; it cannot be started by the operator
 /// at an arbitrary time. The session lifecycle is entirely owned by Kvist's

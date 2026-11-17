@@ -9,25 +9,8 @@
 //! The tests are failing because the host authority interfaces are not yet
 //! implemented. They define the expected behavior for the implementation.
 
-use std::path::Path;
-
-use sav::{ToolDefinition, ToolIntent};
+use sav::ToolIntent;
 use sav::runtime::Event;
-
-/// Build a minimal tool definition for testing.
-fn tool_def(name: &str) -> ToolDefinition {
-    ToolDefinition {
-        name: name.to_owned(),
-        description: format!("test tool {name}"),
-        parameters: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string" },
-                "content": { "type": "string" }
-            }
-        }),
-    }
-}
 
 /// Test: task-bound tool authorization restricts tools to the task's grant.
 ///
@@ -42,11 +25,7 @@ fn task_bound_tool_authorization() {
     let granted_tools = vec!["write_file", "edit_file"];
 
     // Expected API: create task authorization context
-    let auth = maerg::agn::TaskAuthorization::new(
-        "test-task",
-        root_path,
-        granted_tools.clone(),
-    );
+    let auth = maerg::agn::TaskAuthorization::new("test-task", root_path, granted_tools.clone());
 
     // Model proposes a granted tool: authorized
     let write_intent = ToolIntent {
@@ -254,7 +233,10 @@ fn denial_recorded_as_evidence() {
         .iter()
         .find(|d| d.call_id == "call-1")
         .expect("denial should be recorded");
-    assert!(!dropped.reason.is_empty(), "denial reason must be non-empty");
+    assert!(
+        !dropped.reason.is_empty(),
+        "denial reason must be non-empty"
+    );
     assert!(
         dropped.reason.contains("not granted") || dropped.reason.contains("unauthorized"),
         "denial reason should explain the authorization failure"
@@ -315,11 +297,8 @@ fn artifact_promotion_requires_kvist_decision() {
     };
 
     // Task grants only write tools, not promotion
-    let auth = maerg::agn::TaskAuthorization::new(
-        "test-task",
-        root_path,
-        vec!["write_file", "edit_file"],
-    );
+    let auth =
+        maerg::agn::TaskAuthorization::new("test-task", root_path, vec!["write_file", "edit_file"]);
     let plan = auth.authorize_turn(&intent);
 
     // Promotion is not authorized by the task grant
@@ -354,10 +333,7 @@ fn append_only_compliance_evidence() {
 
     // Cannot delete existing evidence
     let result = store.delete("event-1");
-    assert!(
-        result.is_err(),
-        "existing evidence should not be deletable"
-    );
+    assert!(result.is_err(), "existing evidence should not be deletable");
 
     // Can read all evidence in order
     let events = store.all();
@@ -375,11 +351,8 @@ fn model_cannot_broaden_task_scope() {
     let root_path = root.path();
 
     // Task grants read-only access
-    let auth = maerg::agn::TaskAuthorization::new(
-        "test-task",
-        root_path,
-        vec!["read_file", "list_files"],
-    );
+    let auth =
+        maerg::agn::TaskAuthorization::new("test-task", root_path, vec!["read_file", "list_files"]);
 
     // Model proposes to write (broadening scope)
     let write_intent = ToolIntent {
@@ -455,11 +428,7 @@ fn evidence_cannot_be_forged_by_model() {
     };
 
     // Task grants only write tools
-    let auth = maerg::agn::TaskAuthorization::new(
-        "test-task",
-        root_path,
-        vec!["write_file"],
-    );
+    let auth = maerg::agn::TaskAuthorization::new("test-task", root_path, vec!["write_file"]);
     let plan = auth.authorize_turn(&intent);
 
     // Evidence recording is not authorized

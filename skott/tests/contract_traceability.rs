@@ -79,7 +79,7 @@ impl TraceabilityReport {
     /// Check for clauses with no test mappings.
     fn uncovered(&self, all_clauses: &[ClauseId]) -> Vec<ClauseId> {
         let mapped: HashMap<&ClauseId, ()> =
-            self.mappings.iter().map(|m| (&m.clause, ()).into()).collect();
+            self.mappings.iter().map(|m| (&m.clause, ())).collect();
         all_clauses
             .iter()
             .filter(|clause| !mapped.contains_key(clause))

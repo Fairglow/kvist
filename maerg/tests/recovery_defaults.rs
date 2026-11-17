@@ -406,7 +406,7 @@ fn fenced_sections_are_preserved_and_real_empty_sections_become_valid_blocked_dr
     let inspection = project_state::inspect(project.path()).expect("inspect");
     assert_eq!(inspection.components[0].state.name(), "blocked");
     assert!(
-        task_commands::accept(project.path(), Path::new("."), false, None, false).is_err(),
+        task_commands::accept(project.path(), Path::new("."), false, None, None, false).is_err(),
         "accept must not clear unresolved intent"
     );
     let error = task_commands::next(project.path(), Path::new(".")).expect_err("blocked intent");
@@ -422,7 +422,7 @@ fn fenced_sections_are_preserved_and_real_empty_sections_become_valid_blocked_dr
         .join("\n");
     fs::write(&path, resolved).expect("human resolves draft");
     track(project.path());
-    task_commands::accept(project.path(), Path::new("."), false, None, false)
+    task_commands::accept(project.path(), Path::new("."), false, None, None, false)
         .expect("explicit acceptance after resolving markers");
 }
 
@@ -435,7 +435,7 @@ fn marker_examples_in_code_fences_are_inert_but_root_drafts_block_readiness() {
     );
     fs::write(project.path().join("src/DESIGN.md"), design).expect("example");
     track(project.path());
-    task_commands::accept(project.path(), Path::new("."), false, None, false)
+    task_commands::accept(project.path(), Path::new("."), false, None, None, false)
         .expect("fenced example is not an active blocker");
     let (_, preview) = repair(project.path(), &["--reset", "ROOT_CONTRACT.md"]);
     let token = preview["approval"].as_str().expect("token");
@@ -452,7 +452,9 @@ fn marker_examples_in_code_fences_are_inert_but_root_drafts_block_readiness() {
             .name(),
         "blocked"
     );
-    assert!(task_commands::accept(project.path(), Path::new("."), false, None, false).is_err());
+    assert!(
+        task_commands::accept(project.path(), Path::new("."), false, None, None, false).is_err()
+    );
     assert!(task_commands::next(project.path(), Path::new(".")).is_err());
 }
 
@@ -468,7 +470,7 @@ fn recovered_timestamp_provenance_survives_explicit_resumption() {
     let (ok, report) = repair(project.path(), &[]);
     assert!(ok, "{report}");
     track(project.path());
-    task_commands::accept(project.path(), Path::new("."), false, None, false)
+    task_commands::accept(project.path(), Path::new("."), false, None, None, false)
         .expect("accept structurally valid blocked queue");
     task_commands::transition(
         project.path(),
@@ -511,6 +513,7 @@ fn parent_contract_blockers_cross_namespaces_but_parent_private_intent_does_not(
         project.path(),
         Path::new("namespace/child"),
         false,
+        None,
         None,
         false,
     )
@@ -562,6 +565,7 @@ fn parent_contract_blockers_cross_namespaces_but_parent_private_intent_does_not(
             project.path(),
             Path::new("namespace/child"),
             false,
+            None,
             None,
             false
         )

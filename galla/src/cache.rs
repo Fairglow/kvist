@@ -1182,9 +1182,8 @@ fn make_immutable_tree(root: std::os::fd::BorrowedFd<'_>) -> Result<(), CacheErr
                 stat::fchmod(&file, immutable_file_mode(executable)).map_err(|error| {
                     nix_error("make staged file immutable", Path::new(&name), error)
                 })?;
-                unistd::fsync(&file).map_err(|error| {
-                    nix_error("fsync staged file", Path::new(&name), error)
-                })?;
+                unistd::fsync(&file)
+                    .map_err(|error| nix_error("fsync staged file", Path::new(&name), error))?;
             }
             _ => {
                 return Err(CacheError::StagedChecksumMismatch { path: name });

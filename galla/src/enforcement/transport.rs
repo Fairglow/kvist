@@ -30,10 +30,10 @@ pub enum ParsedRequestLine {
     },
 }
 
-pub fn parse_request_line(first_line: &str) -> Result<ParsedRequestLine, ()> {
+pub fn parse_request_line(first_line: &str) -> Result<ParsedRequestLine, Failure> {
     let parts: Vec<&str> = first_line.split_whitespace().collect();
     if parts.len() != 3 {
-        return Err(());
+        return Err(Failure::BadRequest);
     }
     let method = parts[0];
     let target = parts[1];
@@ -41,10 +41,10 @@ pub fn parse_request_line(first_line: &str) -> Result<ParsedRequestLine, ()> {
         let (host, port) = match target.split_once(':') {
             Some((host, port)) => {
                 if host.is_empty() {
-                    return Err(());
+                    return Err(Failure::BadRequest);
                 }
                 let Ok(port) = port.parse::<u16>() else {
-                    return Err(());
+                    return Err(Failure::BadRequest);
                 };
                 validate_connect_host(host)?;
                 (host.to_owned(), port)
@@ -68,30 +68,30 @@ pub fn parse_request_line(first_line: &str) -> Result<ParsedRequestLine, ()> {
         let (host, port) = match authority.split_once(':') {
             Some((host, port)) if !host.is_empty() => {
                 let Ok(port) = port.parse::<u16>() else {
-                    return Err(());
+                    return Err(Failure::BadRequest);
                 };
                 (host.to_owned(), port)
             }
             _ if !authority.is_empty() => (authority.to_owned(), 80),
-            _ => return Err(()),
+            _ => return Err(Failure::BadRequest),
         };
         return Ok(ParsedRequestLine::HttpAbsolute { host, port, path });
     }
-    Err(())
+    Err(Failure::BadRequest)
 }
 
-fn validate_connect_host(host: &str) -> Result<(), ()> {
+fn validate_connect_host(host: &str) -> Result<(), Failure> {
     if host.is_empty() || host.contains(['/', '@', ' ', ':']) {
-        return Err(());
+        return Err(Failure::BadRequest);
     }
     if !host
         .bytes()
         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
     {
-        return Err(());
+        return Err(Failure::BadRequest);
     }
     if host.starts_with('.') || host.ends_with('.') || host.contains("..") {
-        return Err(());
+        return Err(Failure::BadRequest);
     }
     Ok(())
 }
@@ -157,7 +157,7 @@ impl Drop for Guard {
 }
 
 #[derive(Debug)]
-enum Failure {
+pub enum Failure {
     BadRequest,
     Forbidden,
     HeaderTooLarge,
@@ -298,10 +298,7 @@ pub fn start(sources: &[AllowedSource]) -> Result<Guard, String> {
     start_with_limits(sources, Limits::default())
 }
 
-pub fn start_with_limits(
-    sources: &[AllowedSource],
-    limits: Limits,
-) -> Result<Guard, String> {
+pub fn start_with_limits(sources: &[AllowedSource], limits: Limits) -> Result<Guard, String> {
     start_with_lookup(sources, limits, native_address_lookup)
 }
 
@@ -631,7 +628,7 @@ fn handle_client(
     let (header, end) = read_header(client, stop, admitted + limits.header)?;
     let text = std::str::from_utf8(&header[..end]).map_err(|_| Failure::BadRequest)?;
     let first_line = text.lines().next().ok_or(Failure::BadRequest)?;
-    let parsed = parse_request_line(first_line).map_err(|_| Failure::BadRequest)?;
+    let parsed = parse_request_line(first_line)?;
     let target = parsed.policy_target();
     let (host, port, authorized) = match &parsed {
         ParsedRequestLine::ConnectTunnel { host, port } => {

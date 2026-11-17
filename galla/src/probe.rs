@@ -255,7 +255,10 @@ fn validate_backend_path(path: &Path) -> Option<PathBuf> {
     // to prevent symlink substitution attacks
     let trusted_prefixes = ["/usr/", "/bin/", "/usr/local/"];
     let path_str = canonical.to_string_lossy();
-    if !trusted_prefixes.iter().any(|prefix| path_str.starts_with(prefix)) {
+    if !trusted_prefixes
+        .iter()
+        .any(|prefix| path_str.starts_with(prefix))
+    {
         return None;
     }
 

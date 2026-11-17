@@ -460,7 +460,10 @@ fn test_identity_determinism_enables_reuse() {
     plan2.supported_source_identities = vec![digest(b"source")];
     let gen2 = promote(&plan2).expect("second promote");
 
-    assert!(gen2.reused, "identical identities must enable generation reuse");
+    assert!(
+        gen2.reused,
+        "identical identities must enable generation reuse"
+    );
     assert_eq!(gen1.identity, gen2.identity);
     assert_eq!(gen1.path, gen2.path);
 }

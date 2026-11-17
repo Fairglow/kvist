@@ -466,24 +466,51 @@ fn render_markdown_theme(
                         );
                     }
                 } else {
-                    let mut end = 0;
+                    // Render the text in order, styling bare URLs and
+                    // undefined footnote references. Undefined references
+                    // arrive as plain text (the parser only emits
+                    // FootnoteReference events for defined footnotes), so
+                    // scan the text for `[^id]` patterns and render each as a
+                    // marker.
+                    let mut tokens: Vec<(usize, usize, bool)> = Vec::new();
                     if links == 0 {
                         for url in crate::links::bare_urls(&text) {
-                            inline.text(w, &text[end..url.start], style)?;
+                            tokens.push((url.start, url.end, true));
+                        }
+                        for (id, offset) in crate::links::footnote_references(&text) {
+                            tokens.push((offset, offset + id.len() + 3, false));
+                        }
+                    }
+                    tokens.sort_by_key(|token| token.0);
+                    let mut end = 0;
+                    for (start, token_end, is_url) in tokens {
+                        if start > end {
+                            inline.text(w, &text[end..start], style)?;
+                        }
+                        if is_url {
                             inline.text(
                                 w,
-                                &text[url.clone()],
+                                &text[start..token_end],
                                 Style {
                                     link: Some(crate::links::NavigationId::Bare {
                                         event: range.start,
-                                        offset: url.start,
+                                        offset: start,
                                     }),
                                     color: Some(palette.link),
                                     ..style
                                 },
                             )?;
-                            end = url.end;
+                        } else {
+                            let id = text[start + 2..token_end - 1].to_string();
+                            inline.code(
+                                &footnote_marker(&id),
+                                Style {
+                                    color: Some(palette.link),
+                                    ..style
+                                },
+                            );
                         }
+                        end = token_end;
                     }
                     inline.text(w, &text[end..], style)?;
                 }
