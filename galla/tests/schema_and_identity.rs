@@ -99,6 +99,17 @@ fn encode(value: &Value) -> Vec<u8> {
     serde_json::to_vec(value).expect("encode request")
 }
 
+/// Recompute the approval-bound command and mount-plan identities from the
+/// request's actual argv and grants so a request that passes the strict
+/// parser also satisfies the runner's runtime identity verification.
+fn finalize_identities(request: &mut Value) {
+    let parsed: galla::protocol::SandboxRequest =
+        serde_json::from_value(request.clone()).expect("request parses to typed shape");
+    request["identities"]["command"] = json!(galla::protocol::command_identity(&parsed.argv));
+    request["identities"]["mount_plan"] =
+        json!(galla::protocol::mount_plan_identity(&parsed.grants));
+}
+
 fn run_runner(request: &[u8]) -> std::process::Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-request-v1")
@@ -389,11 +400,25 @@ fn runtime_verifies_runner_identity() {
     assert!(probe_output.status.success());
     let probe: Value = serde_json::from_slice(&probe_output.stdout).expect("valid probe JSON");
 
+    // Real host origins so the runner can authorize the mount sources after
+    // the identity checks pass.
+    let temp = tempfile::tempdir().unwrap();
+    let req_file = temp.path().join("REQUIREMENTS.md");
+    std::fs::write(&req_file, "intent").unwrap();
+    let tests_dir = temp.path().join("tests");
+    std::fs::create_dir(&tests_dir).unwrap();
+    let scratch_dir = temp.path().join("scratch");
+    std::fs::create_dir(&scratch_dir).unwrap();
+
     // First, verify with the correct runner identity.
     let mut correct = valid_request();
     correct["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
     correct["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
     correct["identities"]["runner"] = json!(runner_digest());
+    correct["grants"][0]["source"] = json!(req_file.to_string_lossy());
+    correct["grants"][1]["source"] = json!(tests_dir.to_string_lossy());
+    correct["grants"][3]["source"] = json!(scratch_dir.to_string_lossy());
+    finalize_identities(&mut correct);
 
     let output = run_runner(&encode(&correct));
     assert!(

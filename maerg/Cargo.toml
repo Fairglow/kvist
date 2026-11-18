@@ -47,7 +47,11 @@ unicode-segmentation = "1.13"
 unicode-width = "0.2"
 vte = "0.15"
 pulldown-cmark = "0.13"
+galla = { package = "kvist-galla", version = "0.3", path = "../galla" }
 
 [dev-dependencies]
+# Re-declared so the test harness's CARGO_BIN_EXE_galla points at the freshly
+# built runner; the boundary tests stage that exact binary rather than a stale
+# target/debug copy.
 galla = { package = "kvist-galla", version = "0.3", path = "../galla" }
 uuid = { version = "1.29", features = ["v4"] }

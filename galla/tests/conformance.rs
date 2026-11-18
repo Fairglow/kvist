@@ -20,6 +20,13 @@ fn digest(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
+/// The digest of the running galla runner binary, matching what the runner
+/// computes from `/proc/self/exe`. Used to bind a request that runs the
+/// runner itself (the nested-sandbox guard test).
+fn runner_digest() -> String {
+    digest(&std::fs::read(env!("CARGO_BIN_EXE_galla")).expect("read galla binary"))
+}
+
 fn registry_identity(name: &str, index: &str, download: &str) -> String {
     validation::registry_identity(name, index, download)
 }
@@ -162,6 +169,7 @@ fn native_existing_host_files_are_not_payload_size_violations() {
     let mut request = valid_request();
     request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
     request["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
+    request["identities"]["runner"] = json!(runner_digest());
     request["grants"][0]["source"] = json!(context);
     request["grants"][1]["source"] = json!(work);
     request["grants"][3]["source"] = json!(scratch);
@@ -171,6 +179,7 @@ fn native_existing_host_files_are_not_payload_size_violations() {
         "-c",
         "sleep 0.2; test -r tests/operator-data; if printf bad >tests/external/secret; then exit 1; fi; printf 'inspection complete'"
     ]);
+    finalize_identities(&mut request);
     let output = run_runner(&encode(&request));
     assert_eq!(
         std::fs::read(&existing).unwrap(),
@@ -211,6 +220,7 @@ fn native_host_updates_are_live_and_do_not_block_unrelated_tools() {
     let mut request = valid_request();
     request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
     request["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
+    request["identities"]["runner"] = json!(runner_digest());
     request["grants"][0]["source"] = json!(context);
     request["grants"][1]["source"] = json!(work);
     request["grants"][3]["source"] = json!(scratch);
@@ -220,6 +230,7 @@ fn native_host_updates_are_live_and_do_not_block_unrelated_tools() {
         "-c",
         "set -eu; touch tests/ready; while ! test -e tests/updated; do sleep 0.01; done; test \"$(cat REQUIREMENTS.md)\" = 'host updated'; test \"$(wc -c <tests/operator-data)\" = 4096; if printf bad >REQUIREMENTS.md; then exit 1; fi; printf 'live host inputs retained'"
     ]);
+    finalize_identities(&mut request);
     let bytes = encode(&request);
     let output = std::thread::scope(|scope| {
         let worker = scope.spawn(|| run_runner_from(&bytes, Some(temp.path())));
@@ -271,6 +282,7 @@ fn native_source_ancestor_links_cannot_expand_host_grants() {
     request["grants"][1]["source"] = json!(work);
     request["grants"][3]["source"] = json!(scratch);
     request["argv"] = json!(["/usr/bin/cat", "/workspace/component/REQUIREMENTS.md"]);
+    finalize_identities(&mut request);
     let output = run_runner(&encode(&request));
     assert!(
         !output.status.success(),
@@ -296,10 +308,12 @@ fn native_enforcers_cannot_be_regranted_through_a_writable_alias() {
     let mut request = valid_request();
     request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
     request["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
+    request["identities"]["runner"] = json!(runner_digest());
     request["grants"][0]["source"] = json!(context);
     request["grants"][1]["source"] = json!("/usr");
     request["grants"][3]["source"] = json!(scratch);
     request["argv"] = json!(["/usr/bin/true"]);
+    finalize_identities(&mut request);
     let output = run_runner(&encode(&request));
     assert!(
         !output.status.success(),
@@ -352,11 +366,13 @@ fn authoring_loader_environment_does_not_run_in_host_enforcers() {
     let mut request = valid_request();
     request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
     request["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
+    request["identities"]["runner"] = json!(runner_digest());
     request["grants"][0]["source"] = json!(context);
     request["grants"][1]["source"] = json!(work);
     request["grants"][3]["source"] = json!(scratch);
     request["environment"]["LD_PRELOAD"] = json!(library);
     request["argv"] = json!(["/usr/bin/true"]);
+    finalize_identities(&mut request);
     let output = run_runner(&encode(&request));
     assert!(
         output.status.success(),
@@ -385,6 +401,7 @@ fn authoring_loader_environment_does_not_run_in_host_enforcers() {
         "purpose": "context", "identity": digest(b"payload-library")
     }));
     request["environment"]["LD_PRELOAD"] = json!("/fixture.so");
+    finalize_identities(&mut request);
     let output = run_runner(&encode(&request));
     assert!(
         output.status.success(),
@@ -630,6 +647,19 @@ fn portable_export_verification_does_not_authorize_metadata() {
 
 fn encode(value: &Value) -> Vec<u8> {
     serde_json::to_vec(value).expect("encode request")
+}
+
+/// Recompute the approval-bound command and mount-plan identities from the
+/// request's actual argv and grants, so a request that passes the strict
+/// parser also satisfies the runner's runtime identity verification. The
+/// encoding is shared with the runner via `galla::protocol`, so a test that
+/// mutates argv or grants stays consistent without hand-rolling digests.
+fn finalize_identities(request: &mut Value) {
+    let parsed: SandboxRequest =
+        serde_json::from_value(request.clone()).expect("request parses to typed shape");
+    request["identities"]["command"] = json!(galla::protocol::command_identity(&parsed.argv));
+    request["identities"]["mount_plan"] =
+        json!(galla::protocol::mount_plan_identity(&parsed.grants));
 }
 
 // -- Baseline strict-shape, serialization, and legacy rejection ---------------
@@ -1439,6 +1469,7 @@ fn executable_executes_successfully_on_valid_request() {
     request["grants"][0]["source"] = serde_json::json!(req_file.to_string_lossy());
     request["grants"][1]["source"] = serde_json::json!(tests_dir.to_string_lossy());
     request["grants"][3]["source"] = serde_json::json!(scratch_dir.to_string_lossy());
+    finalize_identities(&mut request);
 
     let output = run_runner(&encode(&request));
     assert!(
@@ -1467,6 +1498,7 @@ fn executable_executes_successfully_on_valid_request() {
             request["grants"][1]["purpose"] = json!("verification");
             request["grants"][1]["access"] = json!("read-only");
         }
+        finalize_identities(&mut request);
         let output = run_runner(&encode(&request));
         assert!(
             output.status.success(),
@@ -1490,6 +1522,7 @@ fn executable_executes_successfully_on_valid_request() {
         "purpose": "toolchain",
         "identity": digest(b"nested-runner")
     }));
+    request["identities"]["runner"] = json!(runner_digest());
     // An open pipe with no data must not delay the request-mode guard.
     let mut failures = Vec::new();
     for mode in ["probe", "request"] {
@@ -1500,6 +1533,7 @@ fn executable_executes_successfully_on_valid_request() {
                 "import subprocess\np = subprocess.Popen(['/tooling/galla', '--kvist-sandbox-{mode}-v1'], env={{}}, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)\ntry:\n p.wait(timeout=2)\nexcept subprocess.TimeoutExpired:\n p.kill(); p.wait(); raise\nassert p.returncode == 3, p.returncode\nassert p.stdout.read() == b''\nmessage = p.stderr.read()\nassert b'already inside a Galla sandbox' in message, message\nassert b'unnecessary' in message, message\n"
             )
         ]);
+        finalize_identities(&mut request);
         let output = run_runner(&encode(&request));
         if !output.status.success() {
             failures.push(format!(

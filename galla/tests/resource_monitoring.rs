@@ -21,6 +21,29 @@ fn encode(value: &Value) -> Vec<u8> {
 }
 
 fn run_runner(request: &[u8]) -> std::process::Output {
+    // The runner verifies its own identity against /proc/self/exe, the
+    // backend against the installed bwrap, and recomputes the command and
+    // mount-plan identities from argv and grants. The fixture placeholders
+    // never match, so bind the request to the actual binary and backend and
+    // recompute the content-bound identities before sending. This file has no
+    // negative identity tests, so auto-finalizing is safe.
+    let mut value: Value = serde_json::from_slice(request).expect("request is valid JSON");
+    value["identities"]["runner"] = json!(digest(
+        &std::fs::read(env!("CARGO_BIN_EXE_galla")).expect("read galla binary")
+    ));
+    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
+        .arg("--kvist-sandbox-probe-v1")
+        .env_clear()
+        .output()
+        .expect("run probe");
+    let probe: Value = serde_json::from_slice(&probe_output.stdout).expect("valid probe JSON");
+    value["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
+    value["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
+    let parsed: galla::protocol::SandboxRequest =
+        serde_json::from_value(value.clone()).expect("request parses to typed shape");
+    value["identities"]["command"] = json!(galla::protocol::command_identity(&parsed.argv));
+    value["identities"]["mount_plan"] = json!(galla::protocol::mount_plan_identity(&parsed.grants));
+    let request = encode(&value);
     let mut child = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-request-v1")
         .env_clear()
@@ -33,7 +56,7 @@ fn run_runner(request: &[u8]) -> std::process::Output {
         .stdin
         .take()
         .expect("stdin")
-        .write_all(request)
+        .write_all(&request)
         .expect("write request");
     child.wait_with_output().expect("wait for runner")
 }
@@ -139,8 +162,23 @@ fn prlimit_failure_is_reported() {
         return;
     }
 
-    // Outside a sandbox, verify prlimit errors are reported
-    let request = valid_request();
+    // Outside a sandbox, verify prlimit errors are reported. Use real host
+    // origins so the runner authorizes the mount sources and reaches the
+    // limit-setting stage; on a normal host the limits are set successfully
+    // and the command succeeds, so the failure-reporting assertion is only
+    // exercised when a limit genuinely cannot be applied.
+    let temp = tempfile::tempdir().unwrap();
+    let req_file = temp.path().join("REQUIREMENTS.md");
+    std::fs::write(&req_file, "intent").unwrap();
+    let tests_dir = temp.path().join("tests");
+    std::fs::create_dir(&tests_dir).unwrap();
+    let scratch_dir = temp.path().join("scratch");
+    std::fs::create_dir(&scratch_dir).unwrap();
+
+    let mut request = valid_request();
+    request["grants"][0]["source"] = json!(req_file.to_string_lossy());
+    request["grants"][1]["source"] = json!(tests_dir.to_string_lossy());
+    request["grants"][3]["source"] = json!(scratch_dir.to_string_lossy());
     let bytes = encode(&request);
     let output = run_runner(&bytes);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -264,7 +302,19 @@ fn successful_execution_within_limits() {
         return;
     }
 
-    let request = valid_request();
+    // Real host origins so the runner authorizes the mount sources.
+    let temp = tempfile::tempdir().unwrap();
+    let req_file = temp.path().join("REQUIREMENTS.md");
+    std::fs::write(&req_file, "intent").unwrap();
+    let tests_dir = temp.path().join("tests");
+    std::fs::create_dir(&tests_dir).unwrap();
+    let scratch_dir = temp.path().join("scratch");
+    std::fs::create_dir(&scratch_dir).unwrap();
+
+    let mut request = valid_request();
+    request["grants"][0]["source"] = json!(req_file.to_string_lossy());
+    request["grants"][1]["source"] = json!(tests_dir.to_string_lossy());
+    request["grants"][3]["source"] = json!(scratch_dir.to_string_lossy());
     let bytes = encode(&request);
     let output = run_runner(&bytes);
 

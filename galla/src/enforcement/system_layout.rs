@@ -183,7 +183,9 @@ mod tests {
         let host = tempfile::tempdir().unwrap();
         fs::create_dir_all(host.path().join("usr/bin")).unwrap();
         fs::write(host.path().join("usr/bin/tool"), "compiler").unwrap();
-        // Create a symlink within the read-only system layout
+        // Create a symlink within the read-only system layout. The parent
+        // directory must exist before the symlink can be created.
+        fs::create_dir_all(host.path().join("usr/sbin")).unwrap();
         symlink("../usr/bin/tool", host.path().join("usr/sbin/tool")).unwrap();
         let mut arguments = Vec::new();
         let result = add_entry(

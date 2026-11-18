@@ -445,7 +445,13 @@ mod tests {
     #[test]
     fn footnote_rows_restore_prose_color_after_link_and_search_overlays_on_reflow() {
         let source = "intro[^1]\n\n[^1]: muted words [linked label](#target) restored prose with enough words to wrap\n\nordinary\n\n# target";
-        let link = crate::links::extract_links(source).remove(0);
+        // Defined footnote references are navigable links, so the document
+        // holds the footnote marker and the explicit `#target` link; select
+        // the explicit link by destination.
+        let link = crate::links::extract_links(source)
+            .into_iter()
+            .find(|link| link.destination == "#target")
+            .expect("the explicit #target link is extracted");
         for columns in [14, 30, 80] {
             for numbers in [false, true] {
                 let document = Document::render(source, columns, numbers, None).unwrap();

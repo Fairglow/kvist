@@ -221,16 +221,13 @@ impl Request<'_> {
                 )
             }
         };
-        let command =
-            serde_json::to_vec(&arguments).map_err(|error| KvistError::SandboxUnavailable {
-                runner: self.config.runner.clone(),
-                reason: format!("cannot encode native Cargo command: {error}"),
-            })?;
-        let mounts =
-            serde_json::to_vec(&grants).map_err(|error| KvistError::SandboxUnavailable {
-                runner: self.config.runner.clone(),
-                reason: format!("cannot encode native Cargo grants: {error}"),
-            })?;
+        // The command and mount-plan identities must match the runner's
+        // canonical recomputation exactly, so derive them with the shared
+        // helpers rather than a locally invented JSON encoding.
+        let command_identity = galla::protocol::command_identity(&arguments);
+        let mount_plan_identity = galla::protocol::mount_plan_identity(
+            &grants.iter().map(wire_grant).collect::<Vec<_>>(),
+        );
         let request = SandboxRequest {
             protocol: REQUEST_PROTOCOL,
             protocol_version: PROTOCOL_VERSION,
@@ -257,8 +254,8 @@ impl Request<'_> {
                 },
                 policy: self.policy_identity.into(),
                 toolchain: self.toolchain_identity.into(),
-                command: digest_label(&command),
-                mount_plan: digest_label(&mounts),
+                command: command_identity,
+                mount_plan: mount_plan_identity,
             },
             grants: &grants,
             toolchain: SandboxToolchain::Cargo {

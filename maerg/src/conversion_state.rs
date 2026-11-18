@@ -194,8 +194,15 @@ pub fn inspect(project_dir: &Path) -> Result<ConversionInspection> {
         false
     };
 
-    // Determine conversion state
-    let state = if has_invalid {
+    // A `.kvist` directory that holds only local configuration (for example
+    // `config.toml`) and no conversion artifact is not a conversion at all;
+    // reporting it as partial would block task execution on a project that was
+    // never converted. Only a directory that actually contains at least one
+    // conversion artifact is a genuine (possibly incomplete) conversion.
+    let has_any_artifact = artifacts.iter().any(|artifact| artifact.exists);
+    let state = if !has_any_artifact {
+        ConversionState::NotConverted
+    } else if has_invalid {
         ConversionState::Invalid
     } else if has_missing {
         ConversionState::Partial
@@ -337,6 +344,26 @@ mod tests {
         let inspection = inspect(project.path()).expect("inspect project");
         assert_eq!(inspection.state, ConversionState::NotConverted);
         assert!(inspection.metadata_dir.is_none());
+    }
+
+    #[test]
+    fn a_kvist_directory_holding_only_local_config_is_not_a_conversion() {
+        let project = create_test_project();
+        // A local agent configuration lives in `.kvist/config.toml`; its mere
+        // presence must not be mistaken for a (partial) existing-project
+        // conversion, which would block task execution.
+        fs::create_dir_all(project.path().join(CONVERSION_METADATA_DIRECTORY))
+            .expect("create .kvist directory");
+        fs::write(
+            project
+                .path()
+                .join(CONVERSION_METADATA_DIRECTORY)
+                .join("config.toml"),
+            "[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo agent\"\n",
+        )
+        .expect("write local config");
+        let inspection = inspect(project.path()).expect("inspect project");
+        assert_eq!(inspection.state, ConversionState::NotConverted);
     }
 
     #[test]

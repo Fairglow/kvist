@@ -255,6 +255,13 @@ impl Sandbox {
     fn run(&self, argv: &[&str]) -> Output {
         let mut request = self.request.clone();
         request["argv"] = json!(argv);
+        // The runner verifies the command and mount-plan identities against
+        // the actual argv and grants, so recompute them from the final shape.
+        let parsed: galla::protocol::SandboxRequest =
+            serde_json::from_value(request.clone()).unwrap();
+        request["identities"]["command"] = json!(galla::protocol::command_identity(&parsed.argv));
+        request["identities"]["mount_plan"] =
+            json!(galla::protocol::mount_plan_identity(&parsed.grants));
         let bytes = serde_json::to_vec(&request).unwrap();
         galla::validation::parse_and_validate(&bytes).unwrap();
         let mut child = Command::new(&self.runner)

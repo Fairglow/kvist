@@ -51,10 +51,13 @@ fn probe_executes_bwrap_to_test_namespaces() {
     fs::set_permissions(&fake_bwrap, std::fs::Permissions::from_mode(0o755))
         .expect("make fake bwrap executable");
 
-    // Use a PATH that only includes our temp dir (no direct paths to real bwrap)
-    let temp_path = temp.path().to_string_lossy();
+    // Point the probe at the stub through the test-only backend override.
+    // The secure locator rejects a /tmp backend, so PATH alone would never
+    // select it; the override exists so the test can prove the probe
+    // executes the backend rather than inferring capabilities from
+    // /proc/self/ns.
     let output = probe_cmd()
-        .env("PATH", temp_path.to_string())
+        .env("GALLA_TEST_BACKEND", &fake_bwrap)
         .output()
         .expect("run probe with fake bwrap");
 

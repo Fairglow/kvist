@@ -7,7 +7,9 @@
 
 use std::collections::BTreeMap;
 
+use hex::encode as hex_encode;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// The exact accepted request protocol identifier.
 pub const REQUEST_PROTOCOL: &str = "kvist-sandbox-request-v1";
@@ -99,6 +101,26 @@ pub enum Purpose {
     Runtime,
 }
 
+impl Purpose {
+    /// The canonical mount-plan byte for this purpose. The byte values are
+    /// the stable encoding the runner re-digests to bind an approved mount
+    /// plan to the grants that actually mount.
+    pub fn byte(self) -> u8 {
+        match self {
+            Purpose::Context => b'0',
+            Purpose::Authoring => b'1',
+            Purpose::Scratch => b'2',
+            Purpose::Toolchain => b'3',
+            Purpose::Verification => b'4',
+            Purpose::DependencyCache => b'5',
+            Purpose::Lockfile => b'6',
+            Purpose::Registry => b'7',
+            Purpose::CargoConfig => b'8',
+            Purpose::Runtime => b'9',
+        }
+    }
+}
+
 /// Network authority requested by the phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -188,6 +210,42 @@ pub struct Identities {
     pub toolchain: String,
     pub command: String,
     pub mount_plan: String,
+}
+
+/// The canonical digest of an approval-bound command, recomputed from the
+/// request argv. The encoding is `command` followed by a NUL, then each argv
+/// element joined by NUL separators (the first element is not preceded by a
+/// separator). This is the exact byte sequence the runner re-digests to bind
+/// an approved command to the argv that actually runs.
+pub fn command_identity(argv: &[String]) -> String {
+    let mut input = b"command\0".to_vec();
+    for (index, argument) in argv.iter().enumerate() {
+        if index > 0 {
+            input.push(b'\0');
+        }
+        input.extend_from_slice(argument.as_bytes());
+    }
+    format!("sha256:{}", hex_encode(Sha256::digest(&input)))
+}
+
+/// The canonical digest of an approval-bound mount plan, recomputed from the
+/// request grants. Each grant contributes its destination, a NUL, an access
+/// byte (`0` read-only, `1` read-write), a purpose byte (see
+/// [`Purpose::byte`]), and a NUL. The runner re-digests the concatenation to
+/// bind the approved mount plan to the grants that actually mount.
+pub fn mount_plan_identity(grants: &[Grant]) -> String {
+    let mut plan = Vec::new();
+    for grant in grants {
+        plan.extend_from_slice(grant.destination.as_bytes());
+        plan.push(b'\0');
+        plan.push(match grant.access {
+            Access::ReadOnly => b'0',
+            Access::ReadWrite => b'1',
+        });
+        plan.push(grant.purpose.byte());
+        plan.push(b'\0');
+    }
+    format!("sha256:{}", hex_encode(Sha256::digest(&plan)))
 }
 
 /// One typed host-to-sandbox mount grant.

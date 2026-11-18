@@ -139,14 +139,23 @@ pub fn probe() -> ProbeOutcome {
         return ProbeOutcome::Unavailable { reason };
     }
 
-    let bwrap_path = match locate_backend() {
-        Some(path) => path,
-        None => {
-            return ProbeOutcome::Unavailable {
-                reason: "no verified Bubblewrap backend is installed; the capability probe cannot be confirmed"
-                    .to_owned(),
-            };
-        }
+    // A test-only backend override lets the probe exercise a non-trusted
+    // executable (for example a failing stub) to prove the probe actually
+    // executes the backend rather than inferring capabilities from
+    // /proc/self/ns. It is honored only here, in the advisory capability
+    // probe; the enforcement path re-locates and re-validates the backend
+    // independently and never consults this variable.
+    let bwrap_path = match std::env::var_os("GALLA_TEST_BACKEND") {
+        Some(override_path) => PathBuf::from(override_path),
+        None => match locate_backend() {
+            Some(path) => path,
+            None => {
+                return ProbeOutcome::Unavailable {
+                    reason: "no verified Bubblewrap backend is installed; the capability probe cannot be confirmed"
+                        .to_owned(),
+                };
+            }
+        },
     };
     if let Err(reason) = qualify_backend(&bwrap_path) {
         return ProbeOutcome::Unavailable { reason };

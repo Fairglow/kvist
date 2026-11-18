@@ -252,17 +252,18 @@ pub(crate) fn extract_links_with_html(source: &str, strip_html: bool) -> Vec<Lin
             {
                 current_text.push_str(&text);
             }
-            // A footnote reference outside a link is navigable when no
-            // definition exists; the destination is the `#fn-…` anchor.
+            // A footnote reference outside a link is navigable. The parser
+            // emits this event only for references that have a definition, so
+            // every reference here targets a `#fn-…` anchor that resolves to
+            // its definition. Undefined references arrive as plain text and
+            // are handled by the raw-source scan below.
             Event::FootnoteReference(text) if !in_link && !in_code => {
-                if !defined_footnotes.contains(text.as_ref()) {
-                    let id = crate::terminal_text::inert_source(text.as_ref());
-                    let destination = format!("#{FOOTNOTE_ANCHOR_PREFIX}{id}");
-                    let mut link = Link::new(id.into(), destination)
-                        .with_source_line(line_of(source, range.start));
-                    link.source_offset = range.start;
-                    links.push(link);
-                }
+                let id = crate::terminal_text::inert_source(text.as_ref());
+                let destination = format!("#{FOOTNOTE_ANCHOR_PREFIX}{id}");
+                let mut link = Link::new(id.into(), destination)
+                    .with_source_line(line_of(source, range.start));
+                link.source_offset = range.start;
+                links.push(link);
             }
             Event::SoftBreak | Event::HardBreak if in_link => current_text.push(' '),
             Event::Html(source) | Event::InlineHtml(source) => {
@@ -532,6 +533,7 @@ pub(crate) fn parser_options() -> Options {
         | Options::ENABLE_SUPERSCRIPT
         | Options::ENABLE_SUBSCRIPT
         | Options::ENABLE_GFM
+        | Options::ENABLE_DEFINITION_LIST
 }
 
 pub(crate) fn heading_anchors(

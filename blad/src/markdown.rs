@@ -215,6 +215,8 @@ fn render_markdown_theme(
     let safe_source = inert_source(md);
     let md = safe_source.as_ref();
     let options = crate::links::parser_options();
+    let normalized = normalize_definition_lists(md);
+    let md = normalized.as_ref();
 
     let parser = crate::html::events(crate::scripts::events(
         md,
@@ -242,6 +244,7 @@ fn render_markdown_theme(
     let mut list_starts: Vec<Option<usize>> = Vec::new();
     let mut in_heading = false;
     let mut in_footnote = false;
+    let mut in_definition_title = false;
 
     let mut in_table = false;
     let mut table_alignments = Vec::new();
@@ -275,7 +278,7 @@ fn render_markdown_theme(
         }
         let html_style = html.style();
         let style = Style {
-            bold: bold > 0 || in_heading || html_style.bold,
+            bold: bold > 0 || in_heading || in_definition_title || html_style.bold,
             italic: italic > 0 || html_style.italic,
             strike: strikethrough > 0 || html_style.strike,
             reverse: html_style.reverse,
@@ -754,6 +757,50 @@ fn render_markdown_theme(
                 inline.set_indent(2 * list_level + 2);
             }
             Event::End(TagEnd::Item) => inline.finish(w)?,
+            Event::Start(Tag::DefinitionList) => {
+                inline.finish(w)?;
+                inline.reset(0, 0);
+                if need_blank {
+                    writeln!(w)?;
+                    need_blank = false;
+                } else if !at_start {
+                    writeln!(w)?;
+                }
+                at_start = false;
+            }
+            Event::Start(Tag::DefinitionListTitle) => {
+                inline.finish(w)?;
+                in_definition_title = true;
+                // Terms are bold on their own line with no indent. The title
+                // carries plain Text (no Paragraph), so no leading newline.
+                inline.reset(0, 0);
+                at_start = true;
+            }
+            Event::End(TagEnd::DefinitionListTitle) => {
+                inline.finish(w)?;
+                in_definition_title = false;
+                writeln!(w)?;
+                // Definitions are indented two spaces relative to the term.
+                inline.reset(0, 2);
+            }
+            Event::Start(Tag::DefinitionListDefinition) => {
+                // The definition's first line is at the two-space indent;
+                // nested blocks (lists, code) carry their own indentation
+                // inside the definition.
+                inline.reset(0, 2);
+            }
+            Event::End(TagEnd::DefinitionListDefinition) => {
+                inline.finish(w)?;
+                writeln!(w)?;
+                // Reset to the definition indent so a following definition
+                // for the same term starts on its own line.
+                inline.reset(0, 2);
+            }
+            Event::End(TagEnd::DefinitionList) => {
+                inline.finish(w)?;
+                need_blank = true;
+                inline.reset(0, 0);
+            }
             Event::Rule => {
                 inline.finish(w)?;
                 inline.reset(0, 0);
@@ -1206,6 +1253,149 @@ fn footnote_marker(id: &str) -> String {
     } else {
         format!("[{id}]")
     }
+}
+
+/// Rewrite the approved definition-list dialect into pulldown-cmark's
+/// `:`-prefixed form so the parser emits `DefinitionList` events.
+///
+/// The approved dialect (see `blad/tests/definition_lists.rs`) uses a term
+/// line followed by definitions indented two spaces, with no `:` separator:
+///
+/// ```text
+/// term
+///   definition text
+/// ```
+///
+/// pulldown-cmark's `ENABLE_DEFINITION_LIST` extension instead requires a `:`
+/// after the indentation on every definition line. This normalization inserts
+/// that `:` so the parser recognizes the block, while the renderer supplies
+/// the approved two-space visual indent (the `:` is an invisible parser
+/// delimiter, not a rendered character).
+///
+/// Rules:
+/// - A *term* is a non-empty line with no leading whitespace that is not a
+///   block-element marker (heading, list, quote, table, fence, rule, or
+///   ordered-list number).
+/// - A *definition* is a line indented exactly two spaces that follows a term
+///   (possibly across a blank line).
+/// - Multiple consecutive terms share the following definition block.
+/// - Multiple definitions for a term are separated by blank lines.
+/// - Lines indented four or more spaces are code blocks and are left alone.
+/// - Frontmatter (between `---`/`+++` delimiters) is left untouched.
+fn normalize_definition_lists(source: &str) -> std::borrow::Cow<'_, str> {
+    let lines: Vec<&str> = source.split_inclusive('\n').collect();
+    let mut in_frontmatter = false;
+    let mut frontmatter_delim = "";
+    let mut has_term = false;
+
+    let mut output = String::with_capacity(source.len());
+    for line in &lines {
+        let trimmed = line.trim_end_matches(['\n', '\r']);
+        let content = trimmed.trim_start_matches([' ', '\t']);
+        let indent = trimmed.len() - content.len();
+
+        // Track frontmatter delimiters; leave the block untouched.
+        if content == "---" || content == "..." || content == "+++" {
+            if !in_frontmatter {
+                if content == "---" || content == "+++" {
+                    in_frontmatter = true;
+                    frontmatter_delim = content;
+                    has_term = false;
+                }
+            } else if (frontmatter_delim == "---" && (content == "---" || content == "..."))
+                || (frontmatter_delim == "+++" && content == "+++")
+            {
+                in_frontmatter = false;
+                frontmatter_delim = "";
+                has_term = false;
+            }
+            output.push_str(line);
+            continue;
+        }
+        if in_frontmatter {
+            output.push_str(line);
+            continue;
+        }
+
+        // Blank line: a term may still be pending a definition across it.
+        if content.is_empty() {
+            output.push_str(line);
+            continue;
+        }
+
+        // A term is a non-indented line that is not a block-element marker.
+        if indent == 0 {
+            has_term = !is_block_marker(content);
+            output.push_str(line);
+            continue;
+        }
+
+        // Indented line: four or more spaces is a code block, left alone.
+        if indent >= 4 {
+            has_term = false;
+            output.push_str(line);
+            continue;
+        }
+
+        // The approved dialect uses exactly two spaces for definitions.
+        if indent == 2 && has_term {
+            output.push_str("  : ");
+            output.push_str(content);
+            output.push_str(&line[trimmed.len()..]);
+        } else {
+            // Indent of 1 or 3, or no pending term: leave unchanged.
+            output.push_str(line);
+        }
+    }
+    std::borrow::Cow::Owned(output)
+}
+
+/// Whether a non-indented line begins a block element rather than a plain
+/// paragraph that could serve as a definition-list term.
+fn is_block_marker(content: &str) -> bool {
+    content.starts_with('#')
+        || content.starts_with('>')
+        || content.starts_with('|')
+        || content.starts_with("```")
+        || content.starts_with("~~~")
+        || content.starts_with("- ")
+        || content.starts_with("* ")
+        || content.starts_with("+ ")
+        || is_ordered_list_marker(content)
+        || is_thematic_break(content)
+}
+
+/// Whether a line is an ordered-list marker such as `1.`, `2)`, or `10.`.
+fn is_ordered_list_marker(content: &str) -> bool {
+    let mut bytes = content.bytes();
+    let mut saw_digit = false;
+    for byte in &mut bytes {
+        if byte.is_ascii_digit() {
+            saw_digit = true;
+        } else {
+            break;
+        }
+    }
+    if !saw_digit {
+        return false;
+    }
+    matches!(bytes.next(), Some(b'.') | Some(b')'))
+}
+
+/// Whether a line is a thematic break (`---`, `***`, `___`, with optional
+/// spacing between the markers).
+fn is_thematic_break(content: &str) -> bool {
+    let chars: Vec<char> = content.chars().collect();
+    let marker = chars.iter().find(|c| **c != ' ');
+    let marker = match marker {
+        Some(m) => *m,
+        None => return false,
+    };
+    if !matches!(marker, '-' | '*' | '_') {
+        return false;
+    }
+    let non_space: Vec<char> = chars.iter().copied().filter(|c| *c != ' ').collect();
+    non_space.len() >= 3 && non_space.iter().all(|c| *c == marker)
 }
 
 fn get_terminal_theme(ts: &ThemeSet, depth: ColorDepth) -> Option<&syntect::highlighting::Theme> {

@@ -816,6 +816,19 @@ fn resolve_runner_path() -> PathBuf {
         candidates.push(debug_directory.join("galla"));
         candidates.push(debug_directory.join("galla"));
     }
+    // The test binary may live in a build-script `out/` directory (for example
+    // when sccache restores a cached artifact) rather than the normal `deps/`
+    // directory, in which case `CARGO_BIN_EXE_galla` and `CARGO_TARGET_DIR`
+    // are both absent. Walk up every ancestor of the test binary and consider
+    // a `galla` executable sitting alongside it, so the freshly built runner
+    // is found regardless of where the harness placed this test.
+    if let Ok(executable) = std::env::current_exe() {
+        let mut ancestor = executable.parent().map(PathBuf::from);
+        while let Some(directory) = ancestor {
+            candidates.push(directory.join("galla"));
+            ancestor = directory.parent().map(PathBuf::from);
+        }
+    }
     if let Some(target) = std::env::var_os("CARGO_TARGET_DIR") {
         candidates.push(PathBuf::from(&target).join("debug/galla"));
         candidates.push(PathBuf::from(target).join("debug/galla"));
@@ -946,11 +959,24 @@ pub fn run_runner_request(request: &Value) -> Output {
             Err(source) => panic!("start real sandbox runner: {source:?}"),
         }
     };
+    // The runner verifies the command and mount-plan identities against the
+    // actual argv and grants using the canonical encoding, so recompute them
+    // from the final request shape before sending. Only finalize when the
+    // request parses to the typed shape: the negative tests deliberately send
+    // legacy or malformed requests that must reach the runner's own parser to
+    // be rejected for the right reason, and the backend digest is checked
+    // before these identities, so auto-finalizing cannot mask a negative case.
+    let mut request = request.clone();
+    if let Ok(parsed) = serde_json::from_value::<galla::protocol::SandboxRequest>(request.clone()) {
+        request["identities"]["command"] = json!(galla::protocol::command_identity(&parsed.argv));
+        request["identities"]["mount_plan"] =
+            json!(galla::protocol::mount_plan_identity(&parsed.grants));
+    }
     child
         .stdin
         .take()
         .expect("runner stdin")
-        .write_all(&serde_json::to_vec(request).expect("encode request"))
+        .write_all(&serde_json::to_vec(&request).expect("encode request"))
         .expect("write sandbox request");
     child.wait_with_output().expect("wait for sandbox runner")
 }

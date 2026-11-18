@@ -346,7 +346,11 @@ fn footnote_link_ids_are_correct() {
 fn footnote_definitions_are_not_links() {
     let source = "text[^1]\n\n[^1]: definition";
     let links = blad::links::extract_links(source);
-    assert_eq!(links.len(), 0);
+    // The defined reference `[^1]` is navigable to its definition; the
+    // definition itself is not a link. So exactly one link exists, and it is
+    // the footnote reference anchored at `#fn-1`.
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].destination, "#fn-1");
 }
 
 #[test]
@@ -383,9 +387,19 @@ fn missing_footnote_definition_still_renders_marker() {
 fn footnote_with_link_inside_definition() {
     let source = "text[^1]\n\n[^1]: see [this](https://example.com) for more";
     let links = blad::links::extract_links(source);
-    // The link inside the footnote definition is extracted.
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].destination, "https://example.com");
+    // The explicit link inside the definition is extracted, and the defined
+    // reference `[^1]` is itself navigable to its definition.
+    assert_eq!(links.len(), 2);
+    let explicit = links
+        .iter()
+        .find(|link| link.destination == "https://example.com")
+        .expect("the explicit link inside the definition is extracted");
+    assert_eq!(explicit.text, "this");
+    let reference = links
+        .iter()
+        .find(|link| link.destination == "#fn-1")
+        .expect("the defined reference is navigable to its definition");
+    assert_eq!(reference.text, "1");
 }
 
 #[test]

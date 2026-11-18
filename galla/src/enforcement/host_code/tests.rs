@@ -447,10 +447,33 @@ fn trace_supervision_bounds_both_streams_and_cleans_up_deadline_processes() {
                 .unwrap()
                 .parse()
                 .unwrap();
+            // The supervision SIGKILLs the whole process group, but under
+            // heavy parallel load the kernel's kill→death→reap sequence can
+            // lag. Poll for a bounded time for the descendant to become a
+            // zombie (killed, awaiting reap) or to disappear; a descendant
+            // that is still running after the window was not supervised.
+            let deadline = Instant::now() + Duration::from_millis(500);
+            let mut last_stat = String::new();
+            loop {
+                match fs::read_to_string(format!("/proc/{descendant}/stat")) {
+                    Ok(stat) => {
+                        let state = stat.split_once(") ").unwrap().1.as_bytes()[0];
+                        if state == b'Z' {
+                            break;
+                        }
+                        last_stat = stat;
+                    }
+                    Err(_) => break, // reaped or gone
+                }
+                if Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
             if let Ok(stat) = fs::read_to_string(format!("/proc/{descendant}/stat")) {
                 assert!(
                     stat.split_once(") ").unwrap().1.starts_with('Z'),
-                    "trace descendant remained running: {stat}"
+                    "trace descendant remained running: {last_stat}"
                 );
             }
         }

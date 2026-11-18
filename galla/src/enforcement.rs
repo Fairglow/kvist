@@ -2,7 +2,6 @@
 //! Linux Bubblewrap sandbox enforcement implementation.
 
 use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -11,7 +10,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use nix::sys::resource::{Resource, setrlimit};
-use sha2::{Digest, Sha256};
 
 use crate::probe::locate_backend;
 use crate::protocol::{Access, Grant, NetworkMode, Phase, Purpose, SandboxRequest};
@@ -73,14 +71,7 @@ fn verify_request_identities(request: &SandboxRequest) -> Result<(), String> {
     }
 
     // Verify command identity by recomputing from argv.
-    let mut command_input = b"command\0".to_vec();
-    for (index, arg) in request.argv.iter().enumerate() {
-        if index > 0 {
-            command_input.push(b'\0');
-        }
-        command_input.extend_from_slice(arg.as_bytes());
-    }
-    let computed_command = format!("sha256:{}", hex::encode(Sha256::digest(&command_input)));
+    let computed_command = crate::protocol::command_identity(&request.argv);
     if computed_command != request.identities.command {
         return Err(format!(
             "command identity mismatch: expected {}, computed {}",
@@ -90,29 +81,7 @@ fn verify_request_identities(request: &SandboxRequest) -> Result<(), String> {
 
     // Verify mount plan identity by recomputing from grants using the
     // canonical binary encoding: destination, NUL, access byte, purpose byte, NUL.
-    let mut plan_bytes = Vec::new();
-    for grant in &request.grants {
-        plan_bytes.extend_from_slice(grant.destination.as_bytes());
-        plan_bytes.push(b'\0');
-        plan_bytes.push(match grant.access {
-            Access::ReadOnly => b'0',
-            Access::ReadWrite => b'1',
-        });
-        plan_bytes.push(match grant.purpose {
-            Purpose::Context => b'0',
-            Purpose::Authoring => b'1',
-            Purpose::Scratch => b'2',
-            Purpose::Toolchain => b'3',
-            Purpose::Verification => b'4',
-            Purpose::DependencyCache => b'5',
-            Purpose::Lockfile => b'6',
-            Purpose::Registry => b'7',
-            Purpose::CargoConfig => b'8',
-            Purpose::Runtime => b'9',
-        });
-        plan_bytes.push(b'\0');
-    }
-    let computed_plan = format!("sha256:{}", hex::encode(Sha256::digest(&plan_bytes)));
+    let computed_plan = crate::protocol::mount_plan_identity(&request.grants);
     if computed_plan != request.identities.mount_plan {
         return Err(format!(
             "mount plan identity mismatch: expected {}, computed {}",
@@ -230,57 +199,6 @@ fn count_processes_in_pgid(child_pid: u32) -> u64 {
 }
 
 /// Check if any file under the given path exceeds the size limit (recursive).
-fn check_file_size_exceeded(path: &Path, limit_bytes: u64) -> bool {
-    walk_dir(path, |p| {
-        if let Ok(metadata) = p.metadata()
-            && metadata.is_file()
-            && metadata.size() > limit_bytes
-        {
-            return true;
-        }
-        false
-    })
-}
-
-/// Check if the total size of files under the given path exceeds the limit (recursive).
-fn check_scratch_size_exceeded(path: &Path, limit_bytes: u64) -> bool {
-    let mut total = 0u64;
-    let exceeded = Arc::new(AtomicBool::new(false));
-    let exceeded_clone = exceeded.clone();
-    walk_dir(path, move |p| {
-        if exceeded_clone.load(Ordering::SeqCst) {
-            return true;
-        }
-        if let Ok(metadata) = p.metadata()
-            && metadata.is_file()
-        {
-            total += metadata.size();
-            if total > limit_bytes {
-                exceeded_clone.store(true, Ordering::SeqCst);
-                return true;
-            }
-        }
-        false
-    });
-    exceeded.load(Ordering::SeqCst)
-}
-
-/// Walk a directory tree iteratively, calling `f` on each path.
-/// If `f` returns true, the walk stops and returns true.
-fn walk_dir(path: &Path, mut f: impl FnMut(&Path) -> bool) -> bool {
-    let mut stack = vec![path.to_path_buf()];
-    while let Some(current) = stack.pop() {
-        if f(&current) {
-            return true;
-        }
-        if let Ok(entries) = std::fs::read_dir(&current) {
-            for entry in entries.flatten() {
-                stack.push(entry.path());
-            }
-        }
-    }
-    false
-}
 
 /// Executes the request in a secure Bubblewrap sandbox, supervises its resources,
 /// and reaps the child process.
@@ -559,8 +477,23 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     }
 
     // 12. Configure the child Command
-    // Apply inherited limits before any payload can run. Never apply NPROC:
-    // Linux counts it across the real host UID, not just this child.
+    // Apply inherited limits before any payload can run. Rlimits are inherited
+    // at fork time, so they must be set on this process before spawning the
+    // Bubblewrap supervisor; a setrlimit after spawn would only bind the
+    // runner, never the sandboxed payload. Never apply NPROC: Linux counts it
+    // across the real host UID, not just this child.
+    let limits = request.resources;
+    if let Err(error) = setrlimit(Resource::RLIMIT_NOFILE, limits.max_files, limits.max_files) {
+        eprintln!("galla: failed to set RLIMIT_NOFILE: {error}");
+        return ExitCode::from(3);
+    }
+    if let Some(max_file_bytes) = limits.max_file_bytes
+        && let Err(error) = setrlimit(Resource::RLIMIT_FSIZE, max_file_bytes, max_file_bytes)
+    {
+        eprintln!("galla: failed to set RLIMIT_FSIZE: {error}");
+        return ExitCode::from(3);
+    }
+
     let mut child_cmd = Command::new(&bwrap_path);
     child_cmd.args(&bwrap_args);
     child_cmd.stdin(Stdio::null());
@@ -592,27 +525,9 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         }
     };
 
-    let _child_pid = child.id();
-
-    // Apply process resource limits using the prlimit syscall directly,
-    // eliminating the dependency on /usr/bin/prlimit. Report errors instead
-    // of silently ignoring them.
-    let limits = request.resources;
-    if let Err(error) = setrlimit(Resource::RLIMIT_NOFILE, limits.max_files, limits.max_files) {
-        eprintln!("galla: failed to set RLIMIT_NOFILE: {error}");
-        return ExitCode::from(3);
-    }
-    if let Some(max_file_bytes) = limits.max_file_bytes
-        && let Err(error) = setrlimit(Resource::RLIMIT_FSIZE, max_file_bytes, max_file_bytes)
-    {
-        eprintln!("galla: failed to set RLIMIT_FSIZE: {error}");
-        return ExitCode::from(3);
-    }
-
     let child_pid = child.id();
     let total_bytes = Arc::new(AtomicU64::new(0));
     let limit_exceeded = Arc::new(AtomicBool::new(false));
-    let limits = request.resources;
     let max_output_bytes = limits.max_output_bytes;
 
     // Spawn the stdout reader thread. The pipe is always present because
@@ -705,23 +620,14 @@ pub fn run(request: SandboxRequest) -> ExitCode {
             break;
         }
 
-        // Check file size limits recursively
-        if let Some(max_file_bytes) = limits.max_file_bytes
-            && check_file_size_exceeded(&PathBuf::from("/tmp"), max_file_bytes)
-        {
-            specific_breach = Some("file size limit exceeded");
-            let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
-            let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
-            break;
-        }
-
-        // Check scratch size limits recursively
-        if check_scratch_size_exceeded(&PathBuf::from("/tmp"), limits.max_scratch_bytes) {
-            specific_breach = Some("scratch size limit exceeded");
-            let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
-            let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
-            break;
-        }
+        // The file-size and scratch-size bounds are both enforced by the
+        // kernel, not by this host loop: RLIMIT_FSIZE (inherited by the
+        // payload) makes an over-limit write fail and kill the writer with
+        // SIGXFSZ, and the sandbox `/tmp` tmpfs size makes an over-limit
+        // scratch write fail with ENOSPC. Walking host directories here could
+        // not tell a payload write apart from a concurrent host update of the
+        // same mounted file, so it is not performed. The loop only waits for
+        // the payload to finish and the output limit to be reached.
 
         std::thread::sleep(Duration::from_millis(5));
     }

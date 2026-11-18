@@ -482,6 +482,39 @@ struct SandboxGrant {
     identity: String,
 }
 
+/// Map a wire grant to the runner's typed `galla::protocol::Grant` so the
+/// mount-plan identity can be computed with the runner's own canonical
+/// encoding. The `access` and `purpose` strings are the exact kebab-case wire
+/// names the runner's parser accepts, so the mapping is total.
+fn wire_grant(grant: &SandboxGrant) -> galla::protocol::Grant {
+    use galla::protocol::{Access, Purpose};
+    let access = match grant.access {
+        "read-only" => Access::ReadOnly,
+        "read-write" => Access::ReadWrite,
+        other => panic!("unrecognized mount access {other:?}"),
+    };
+    let purpose = match grant.purpose {
+        "context" => Purpose::Context,
+        "authoring" => Purpose::Authoring,
+        "verification" => Purpose::Verification,
+        "toolchain" => Purpose::Toolchain,
+        "scratch" => Purpose::Scratch,
+        "dependency-cache" => Purpose::DependencyCache,
+        "lockfile" => Purpose::Lockfile,
+        "registry" => Purpose::Registry,
+        "cargo-config" => Purpose::CargoConfig,
+        "runtime" => Purpose::Runtime,
+        other => panic!("unrecognized mount purpose {other:?}"),
+    };
+    galla::protocol::Grant {
+        source: grant.source.clone(),
+        destination: grant.destination.clone(),
+        access,
+        purpose,
+        identity: grant.identity.clone(),
+    }
+}
+
 /// The approved toolchain for an execution, serialized to match
 /// `galla::protocol::Toolchain` (`system` or `cargo`).
 #[derive(Debug, Serialize)]
@@ -1381,22 +1414,12 @@ fn execute_with_timeout_inner(
         allowed_sources: Vec::new(),
     };
 
-    let command_identity = digest_label(
-        serde_json::to_string(&argv)
-            .map_err(|error| KvistError::SandboxUnavailable {
-                runner: config.runner.clone(),
-                reason: format!("cannot canonicalize sandbox command identity: {error}"),
-            })?
-            .as_bytes(),
-    );
-    let mount_plan_identity = digest_label(
-        serde_json::to_string(&grants)
-            .map_err(|error| KvistError::SandboxUnavailable {
-                runner: config.runner.clone(),
-                reason: format!("cannot canonicalize sandbox mount plan identity: {error}"),
-            })?
-            .as_bytes(),
-    );
+    // The command and mount-plan identities must match the runner's canonical
+    // recomputation exactly, so derive them with the shared helpers rather
+    // than a locally invented encoding.
+    let command_identity = galla::protocol::command_identity(&argv);
+    let mount_plan_identity =
+        galla::protocol::mount_plan_identity(&grants.iter().map(wire_grant).collect::<Vec<_>>());
 
     let sandbox_request = SandboxRequest {
         protocol: REQUEST_PROTOCOL,
@@ -1732,22 +1755,12 @@ fn build_offline_cargo_verification_request(
         max_cache_bytes: Some(DEFAULT_MAX_CARGO_CACHE_BYTES),
     };
 
-    let command_identity = digest_label(
-        serde_json::to_string(&argv)
-            .map_err(|error| KvistError::SandboxUnavailable {
-                runner: config.runner.clone(),
-                reason: format!("cannot canonicalize command identity: {error}"),
-            })?
-            .as_bytes(),
-    );
-    let mount_plan_identity = digest_label(
-        serde_json::to_string(&grants)
-            .map_err(|error| KvistError::SandboxUnavailable {
-                runner: config.runner.clone(),
-                reason: format!("cannot canonicalize mount plan identity: {error}"),
-            })?
-            .as_bytes(),
-    );
+    // The command and mount-plan identities must match the runner's canonical
+    // recomputation exactly, so derive them with the shared helpers rather
+    // than a locally invented encoding.
+    let command_identity = galla::protocol::command_identity(&argv);
+    let mount_plan_identity =
+        galla::protocol::mount_plan_identity(&grants.iter().map(wire_grant).collect::<Vec<_>>());
 
     let sandbox_request = SandboxRequest {
         protocol: REQUEST_PROTOCOL,

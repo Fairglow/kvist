@@ -185,7 +185,12 @@ mod tests {
         let pid = nix::unistd::Pid::from_raw(launcher.child.id().try_into().unwrap());
         let mut output = Vec::new();
         let mut truncated = false;
-        let timeout = Duration::from_millis(30);
+        // The launcher is a child that prints a hint and then execs a long
+        // sleep. The timeout must be long enough that the child reliably
+        // writes its hint before the deadline under heavy parallel load (the
+        // full workspace runs 16 threads), yet short enough to stay far below
+        // the 2-second bound. 500ms satisfies both.
+        let timeout = Duration::from_millis(500);
         let start = std::time::Instant::now();
         let error = wait_for_exit(
             &mut launcher,
@@ -213,10 +218,15 @@ mod tests {
         let mut output = Vec::new();
         let mut truncated = false;
         let start = std::time::Instant::now();
+        // The flooding child must fill the bounded diagnostic buffer before
+        // the deadline. Under heavy parallel load (the full workspace runs
+        // 16 threads) a 50ms window is too tight for the child to start and
+        // flood, so use 500ms: still far below the 2-second bound, and the
+        // flood still fills and truncates the capture before the deadline.
         let error = wait_for_exit(
             &mut launcher,
             &mut reader,
-            Duration::from_millis(50),
+            Duration::from_millis(500),
             &mut output,
             &mut truncated,
         )
