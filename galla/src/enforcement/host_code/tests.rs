@@ -454,17 +454,11 @@ fn trace_supervision_bounds_both_streams_and_cleans_up_deadline_processes() {
             // that is still running after the window was not supervised.
             let deadline = Instant::now() + Duration::from_millis(500);
             let mut last_stat = String::new();
-            loop {
-                match fs::read_to_string(format!("/proc/{descendant}/stat")) {
-                    Ok(stat) => {
-                        let state = stat.split_once(") ").unwrap().1.as_bytes()[0];
-                        if state == b'Z' {
-                            break;
-                        }
-                        last_stat = stat;
-                    }
-                    Err(_) => break, // reaped or gone
+            while let Ok(stat) = fs::read_to_string(format!("/proc/{descendant}/stat")) {
+                if stat.split_once(") ").unwrap().1.starts_with('Z') {
+                    break;
                 }
+                last_stat = stat;
                 if Instant::now() >= deadline {
                     break;
                 }
