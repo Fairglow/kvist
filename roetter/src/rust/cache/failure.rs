@@ -33,7 +33,11 @@ pub fn classify_metadata_failure(
     let Ok(text) = std::str::from_utf8(stderr) else {
         return fallback();
     };
-    let mut errors = text.lines().filter(|line| line.starts_with("error: "));
+    // Cargo colors just the leading `error` label when color is forced.
+    let mut errors = text.lines().filter_map(|line| {
+        line.strip_prefix("error: ")
+            .or_else(|| line.strip_prefix("\x1b[1m\x1b[91merror\x1b[0m: "))
+    });
     let Some(primary) = errors.next() else {
         return fallback();
     };
@@ -63,7 +67,7 @@ pub fn classify_metadata_failure(
 
 fn evidence(primary: &str, text: &str, graph: &LockedGraph) -> BTreeSet<String> {
     let mut missing = BTreeSet::new();
-    if let Some(name) = primary.strip_prefix("error: no matching package named `")
+    if let Some(name) = primary.strip_prefix("no matching package named `")
         .and_then(|s| s.strip_suffix("` found"))
         && text.lines().any(|line| {
             let line = line.trim_start();
@@ -78,7 +82,7 @@ fn evidence(primary: &str, text: &str, graph: &LockedGraph) -> BTreeSet<String> 
         }
     }
     if let Some(label) = primary
-        .strip_prefix("error: failed to download `")
+        .strip_prefix("failed to download `")
         .and_then(|s| s.strip_suffix('`'))
         && text.lines().any(|line| {
             line.trim() == "attempting to make an HTTP request, but --offline was specified"
@@ -92,7 +96,7 @@ fn evidence(primary: &str, text: &str, graph: &LockedGraph) -> BTreeSet<String> 
             }
         }
     }
-    if !primary.starts_with("error: failed to get `") {
+    if !primary.starts_with("failed to get `") {
         return missing;
     }
     let update = text.lines().find_map(|line| {

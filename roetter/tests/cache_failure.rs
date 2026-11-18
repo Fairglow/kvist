@@ -40,6 +40,7 @@ fn only_observed_cargo_exit_and_locked_offline_missing_registry_chains_allow_acq
     let dir = project(false);
     for stderr in [
         "error: no matching package named `demo` found\nlocation searched: `fixture` index\nAs a reminder, you're using offline mode (--offline)\n",
+        "\x1b[1m\x1b[91merror\x1b[0m: no matching package named `demo` found\nlocation searched: `fixture` index\nnote: offline mode (via `--offline`) can sometimes cause surprising resolution failures\n",
         "error: failed to download `demo v1.0.0`\nCaused by:\n  attempting to make an HTTP request, but --offline was specified\n",
     ] {
         assert!(matches!(
@@ -75,6 +76,8 @@ fn warnings_unknown_dependencies_lock_errors_and_malformed_diagnostics_are_not_m
         "error: failed to download `demo v9.0.0`\nCaused by:\n  attempting to make an HTTP request, but --offline was specified\n",
         "error: the lock file needs to be updated but --locked was passed\n",
         "error: no matching package named `demo` found\nerror: credential provider failed\n",
+        "\x1b[1m\x1b[91merror\x1b[0m: no matching package named `demo` found\nAs a reminder, you're using offline mode (--offline)\n\x1b[1m\x1b[91merror\x1b[0m: credential provider failed\n",
+        "warning: \x1b[1m\x1b[91merror\x1b[0m: no matching package named `demo` found\nAs a reminder, you're using offline mode (--offline)\n",
         "error: failed to parse manifest\nCaused by:\n  no matching package named `demo` found\n",
     ] {
         let error = classify(
@@ -107,7 +110,7 @@ fn warnings_unknown_dependencies_lock_errors_and_malformed_diagnostics_are_not_m
 fn git_missing_checkout_or_revision_must_match_locked_source_and_offline_chain() {
     let dir = project(true);
     let checkout = format!(
-        "error: failed to get `demo` as a dependency of package `fixture`\nCaused by:\n  Unable to update {URL}#{REV}\nCaused by:\n  can't checkout from '{URL}': you are in the offline mode (--offline)\n"
+        "\x1b[1m\x1b[91merror\x1b[0m: failed to get `demo` as a dependency of package `fixture`\nCaused by:\n  unable to update {URL}#{REV}\nCaused by:\n  can't checkout from '{URL}': you are in the offline mode (--offline)\n"
     );
     let revision = format!(
         "error: failed to get `demo` as a dependency of package `fixture`\nCaused by:\n  Unable to update {URL}#{REV}\nCaused by:\n  failed to lookup reference in preexisting repository, and can't check for updates in offline mode (--offline)\nCaused by:\n  revspec '{REV}' not found; class=Reference (4); code=NotFound (-3)\n"

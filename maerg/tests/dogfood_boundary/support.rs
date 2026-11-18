@@ -522,10 +522,9 @@ tasks: []
 ///
 /// This script simulates probe and effect results for workflow assertions.
 /// Real sandbox enforcement is exercised separately by the protocol tests.
-fn write_controlled_runner(project: &Path, external_tools: &Path) -> PathBuf {
+fn write_controlled_runner(project: &Path, external_tools: &Path, backend: &Path) -> PathBuf {
     let runner = external_tools.join("controlled-galla");
     let request_log = external_tools.join("runner-request.json");
-    let backend = Path::new("/usr/bin/true");
     let script = format!(
         r#"#!/usr/bin/bash
 set -eu
@@ -581,7 +580,8 @@ resolver = "3"
     fs::write(maerg.join("src/lib.rs"), "pub fn existing() {}\n").expect("write maerg source");
     create_child(&maerg, "sav", "fixture-sav");
     create_child(&maerg, "galla", "fixture-galla");
-    let runner = write_controlled_runner(project.path(), external_tools.path());
+    let backend = fs::canonicalize("/usr/bin/true").expect("resolve the test backend");
+    let runner = write_controlled_runner(project.path(), external_tools.path(), &backend);
     let (model_endpoint, local_model) = resolve_local_test_model();
     let base_url = model_endpoint
         .strip_suffix("/v1/chat/completions")
@@ -624,7 +624,7 @@ max_output_bytes = 65536
 [sandbox]
 schema_version = 1
 runner = "{}"
-backend = "/usr/bin/true"
+backend = "{}"
 network = "deny"
 environment_allowlist = ["PATH"]
 mount = "component"
@@ -640,7 +640,8 @@ max_output_bytes = 65536
 component = "."
 command = "/usr/bin/test -f tests/generated.rs"
 "##,
-            runner.display()
+            runner.display(),
+            backend.display()
         ),
     )
     .expect("write project configuration");

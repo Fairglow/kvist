@@ -59,6 +59,11 @@ fn fake_galla_path(project: &TempDir) -> std::path::PathBuf {
 }
 
 #[cfg(target_os = "linux")]
+fn fake_backend() -> std::path::PathBuf {
+    fs::canonicalize("/usr/bin/true").expect("resolve the test backend")
+}
+
+#[cfg(target_os = "linux")]
 fn configure_fake_sandbox(project: &TempDir) {
     maerg::init_test_logging();
     use std::os::unix::fs::PermissionsExt;
@@ -69,8 +74,9 @@ fn configure_fake_sandbox(project: &TempDir) {
         r#"#!/bin/sh
 if [ "$1" = "--kvist-sandbox-probe-v1" ]; then
   runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
-  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
-  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend_digest"
+  backend=$(readlink -f /usr/bin/true) || exit 1
+  backend_digest=$(sha256sum "$backend" | cut -d' ' -f1)
+  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"%s","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend" "$backend_digest"
   exit 0
 fi
 request=$(cat)
@@ -110,8 +116,9 @@ printf 'fake sandbox runner\n'
         fs::write(
             config_path,
             format!(
-                "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
-                runner.display()
+                "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+                runner.display(),
+                fake_backend().display()
             ),
         )
         .expect("configure sandbox");
@@ -1465,8 +1472,9 @@ exit 1
 EOF
   chmod 755 "{}"
   runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
-  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
-  printf '{{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{{"path":"%s","digest":"sha256:%s"}},"backend":{{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"}},"capabilities":{{"namespaces":{{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true}},"new_session":true,"parent_death_signal":true}}}}\n' "$0" "$runner_digest" "$backend_digest"
+  backend=$(readlink -f /usr/bin/true) || exit 1
+  backend_digest=$(sha256sum "$backend" | cut -d' ' -f1)
+  printf '{{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{{"path":"%s","digest":"sha256:%s"}},"backend":{{"kind":"bubblewrap","path":"%s","digest":"sha256:%s"}},"capabilities":{{"namespaces":{{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true}},"new_session":true,"parent_death_signal":true}}}}\n' "$0" "$runner_digest" "$backend" "$backend_digest"
   exit 0
 fi
 printf 'approved request runner\n' > sandbox-request.json
@@ -1483,8 +1491,9 @@ printf 'approved request runner\n' > sandbox-request.json
     fs::write(
         config_path,
         format!(
-            "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
-            runner.display()
+            "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+            runner.display(),
+            fake_backend().display()
         ),
     )
     .expect("configure runner");
@@ -1879,7 +1888,10 @@ fn shared_task_project(endpoint: &str) -> TempDir {
         "schema_version = 1\n[profiles.fixture.backend]\nkind = \"native\"\nprovider = \"llama-server\"\nmodel = \"cold-model\"\nbase_url = \"{endpoint}\"\nmax_attempts = 5\nretry_base_delay_secs = 0\nretry_max_delay_secs = 0\n"
     )).unwrap();
     fs::write(project.path().join("kvist.toml"),
-        "schema_version = 1\ncomponent_root = \"src\"\n[agent.registry]\npath = \"providers.toml\"\n[agent.roles.developer]\nprofile = \"fixture\"\n[test_policy]\nschema_version = 1\nworking_directory = \"component\"\nenvironment_allowlist = []\ntimeout_seconds = 5\nmax_output_bytes = 1000\n[[test_policy.commands]]\ncomponent = \".\"\ncommand = \"/usr/bin/true\"\n",
+        format!(
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.registry]\npath = \"providers.toml\"\n[agent.roles.developer]\nprofile = \"fixture\"\n[test_policy]\nschema_version = 1\nworking_directory = \"component\"\nenvironment_allowlist = []\ntimeout_seconds = 5\nmax_output_bytes = 1000\n[[test_policy.commands]]\ncomponent = \".\"\ncommand = \"{}\"\n",
+            fake_backend().display()
+        ),
     ).unwrap();
     track_project(&project);
     let approval = run_kvist(&project, &["task", "approve-policy"]);
@@ -4270,7 +4282,7 @@ values = ["agent-redaction-secret"]
 [sandbox]
 schema_version = 1
 runner = "REPLACED_BY_TEST"
-backend = "/usr/bin/true"
+backend = "{}"
 network = "deny"
 environment_allowlist = ["KVIST_TEST_SECRET"]
 mount = "component"
@@ -4285,7 +4297,8 @@ max_output_bytes = 1000
 component = "."
 command = "/usr/bin/echo verification-secret"
 "#,
-            gateway_command(&gateway.endpoint)
+            gateway_command(&gateway.endpoint),
+            fake_backend().display()
         ),
     )
     .expect("write config");
@@ -5123,7 +5136,7 @@ kind = "auto"
 [sandbox]
 schema_version = 1
 runner = "{}"
-backend = "/usr/bin/true"
+backend = "{}"
 network = "deny"
 mount = "component"
 environment_allowlist = []
@@ -5131,7 +5144,8 @@ environment_allowlist = []
 [agent.profiles.security-reviewer]
 command_template = "my-special-security-agent-cmd {{prompt}}"
 "#,
-        runner.display().to_string().replace('\\', "/")
+        runner.display(),
+        fake_backend().display()
     );
     fs::write(project.path().join("kvist.toml"), config_content).expect("write custom config");
     track_project(&project);
@@ -5176,8 +5190,9 @@ fn test_language_specific_prompt_templates() {
         r#"#!/bin/sh
 if [ "$1" = "--kvist-sandbox-probe-v1" ]; then
   runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
-  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
-  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend_digest"
+  backend=$(readlink -f /usr/bin/true) || exit 1
+  backend_digest=$(sha256sum "$backend" | cut -d' ' -f1)
+  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"%s","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend" "$backend_digest"
   exit 0
 fi
 "#,
@@ -5205,7 +5220,7 @@ kind = "auto"
 [sandbox]
 schema_version = 1
 runner = "{}"
-backend = "/usr/bin/true"
+backend = "{}"
 network = "deny"
 mount = "component"
 environment_allowlist = []
@@ -5223,7 +5238,8 @@ max_output_bytes = 1000
 component = "."
 command = "/usr/bin/echo verify"
 "#,
-        runner.display().to_string().replace('\\', "/"),
+        runner.display(),
+        fake_backend().display(),
         gateway_command(&gateway.endpoint)
     );
     fs::write(project.path().join("kvist.toml"), config_content).expect("write custom config");

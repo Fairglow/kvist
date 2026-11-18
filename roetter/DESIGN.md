@@ -42,7 +42,9 @@ Before opaque-source resolution, inspect only required native directory roots.
 Their absence proves incomplete data and can trigger one acquisition directly;
 otherwise use metadata. Public failure adaptation requires observed Cargo exit
 101 and anchored native offline error chains tied to locked package identities
-or exact Git source URL/revision. Bound complete UTF-8 diagnostics to 64 KiB;
+or exact Git source URL/revision. Recognize Cargo's known colored `error` label
+at the same line boundary as its plain label; do not strip arbitrary terminal
+controls. Bound complete UTF-8 diagnostics to 64 KiB;
 unknown/error-budget/I/O failures never become missing-source evidence. Reuse this
 classification for host and configured metadata without reading arbitrary
 subprocess text into errors. Preserve reported exit codes and I/O causes.

@@ -393,7 +393,10 @@ fn probe_test_workspace(probe_body: &str) -> (TempDir, TempDir, SandboxConfig) {
         .expect("make runner executable");
     let sandbox = SandboxConfig {
         runner: runner.to_string_lossy().into_owned(),
-        backend: "/usr/bin/true".to_owned(),
+        backend: fs::canonicalize("/usr/bin/true")
+            .expect("resolve the test backend")
+            .display()
+            .to_string(),
         environment_allowlist: vec![],
         acquisition: maerg::config::AcquisitionConfig::default(),
     };
@@ -449,8 +452,9 @@ fn ensure_available_rejects_a_successful_probe_that_writes_standard_error() {
 set -eu
 if [ "${1-}" = "--kvist-sandbox-probe-v1" ]; then
   runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
-  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
-  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend_digest"
+  backend=$(readlink -f /usr/bin/true)
+  backend_digest=$(sha256sum "$backend" | cut -d' ' -f1)
+  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"%s","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend" "$backend_digest"
   printf 'unexpected diagnostic\n' >&2
   exit 0
 fi

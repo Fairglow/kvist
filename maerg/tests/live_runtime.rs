@@ -483,7 +483,10 @@ IFS= read -r -t 10 release <&3
         fs::set_permissions(&runner, fs::Permissions::from_mode(0o755)).expect("executable");
         let config = SandboxConfig {
             runner: runner.to_string_lossy().into_owned(),
-            backend: "/usr/bin/true".into(),
+            backend: fs::canonicalize("/usr/bin/true")
+                .expect("resolve the test backend")
+                .display()
+                .to_string(),
             environment_allowlist: vec![],
             acquisition: Default::default(),
         };

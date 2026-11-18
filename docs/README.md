@@ -67,3 +67,4 @@ they describe intended work and its rationale.
 | -------- | -------------- |
 | [First-class Markdown transcripts](proposals/agent-runner-markdown-transcripts.md) | Markdown for message content, versioned YAML for session structure, and one shared semantic transcript viewer for live and historical output. |
 | [Prompt Steering, History, and Queueing Plan](proposals/prompt-steering-and-history-plan.md) | Steering an active task, session history, and prompt queueing. |
+| [Sandboxed external agents: Copilot first](proposals/sandboxed-external-agents.md) | How to run Copilot's local effects inside Galla, with model access mediated separately; alternatives, constraints, and delivery estimates. |

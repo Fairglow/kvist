@@ -347,7 +347,7 @@ For a one-off isolated run:
 
 ```bash
 cargo nextest run --offline --locked \
-  -p kvist-maerg-skott --test rust_build_environment \
+  -p kvist-skott --test rust_build_environment \
   -E 'test(=native_repository_tests_execute_inside_the_workspace_sandbox)'
 ```
 
@@ -356,6 +356,23 @@ approach coordinates another simultaneous runner invocation or unrelated host
 writers. Interrupted tests can leave fixtures behind; exclusivity does not
 remove stale directories. Inspect and clean only known abandoned fixtures
 before rerunning, rather than weakening the scope checks.
+
+Run the full workspace suite on the host (locally or in CI). The suite includes
+trials that start a real Galla sandbox, so those trials must start outside it.
+Inside Galla, run tests that do not need to launch another sandbox directly,
+for example:
+
+```bash
+cargo test --offline --locked -p kvist-roetter --test cache_failure --test cache
+```
+
+The cache tests that exercise initial acquisition use only `file://` sources;
+they override Cargo's offline setting for those fixture subprocesses, not
+Galla's network denial.
+Mock-runner fixtures resolve system executables before using them as backend
+or verification identities; production still rejects symlinks in those
+positions. Roetter recognizes Cargo's colored and uncolored missing-source
+diagnostics, including when CI forces `CARGO_TERM_COLOR=always`.
 
 ## Offline dependencies
 
@@ -471,9 +488,9 @@ If the toolchain manifest is missing or stale, the doctor will report:
 Run the self-contained native chain with a runner built outside the worktree:
 
 ```bash
-cargo build --locked -p kvist-maerg-galla --bin galla
+cargo build --locked -p kvist-galla --bin galla
 KVIST_GALLA=/opt/target/debug/galla \
-  cargo test --locked -p kvist-maerg-skott --test rust_build_environment -- \
+  cargo test --locked -p kvist-skott --test rust_build_environment -- \
   --test-threads=1 --nocapture
 ```
 
@@ -549,7 +566,7 @@ then run:
 
 ```bash
 KVIST_GALLA=/opt/target/debug/galla \
-  cargo test --offline --locked -p kvist-maerg-skott --test rustup_inventory
+  cargo test --offline --locked -p kvist-skott --test rustup_inventory
 KVIST_GALLA=/opt/target/debug/galla \
   cargo test --offline --locked -p kvist-maerg --test sandbox_toolchain
 ```

@@ -75,18 +75,21 @@ tasks:
     )
 }
 
-fn configure_sandbox_and_track(project: &TempDir) {
+fn configure_sandbox_and_track(project: &TempDir) -> TempDir {
     maerg::init_test_logging();
     use std::os::unix::fs::PermissionsExt;
 
-    let runner = project.path().parent().unwrap().join("fake-galla-runner");
+    let tools = TempDir::new().expect("external runner directory");
+    let runner = tools.path().join("fake-galla-runner");
+    let backend = fs::canonicalize("/usr/bin/true").expect("resolve the test backend");
     fs::write(
         &runner,
         r#"#!/bin/sh
 if [ "$1" = "--kvist-sandbox-probe-v1" ]; then
   runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
-  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
-  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend_digest"
+  backend=$(readlink -f /usr/bin/true) || exit 1
+  backend_digest=$(sha256sum "$backend" | cut -d' ' -f1)
+  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"%s","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend" "$backend_digest"
   exit 0
 fi
 echo "fake sandbox runner"
@@ -102,8 +105,9 @@ echo "fake sandbox runner"
         fs::write(
             config_path,
             format!(
-                "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
-                runner.display()
+                "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+                runner.display(),
+                backend.display()
             ),
         )
         .expect("configure sandbox");
@@ -125,6 +129,7 @@ echo "fake sandbox runner"
             .expect("track project artifacts")
             .success()
     );
+    tools
 }
 
 /// A hermetic, loopback-only mock model gateway.
@@ -329,7 +334,7 @@ command = "/usr/bin/echo 'mocking verify'"
         gateway_command(&gateway.endpoint)
     );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
-    configure_sandbox_and_track(&project);
+    let _tools = configure_sandbox_and_track(&project);
 
     // Approve test policy
     let approve_output = run_kvist(&project, &["task", "approve-policy"]);
@@ -396,7 +401,7 @@ command = "/usr/bin/echo 'mocking verify'"
         gateway_command(&gateway.endpoint)
     );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
-    configure_sandbox_and_track(&project);
+    let _tools = configure_sandbox_and_track(&project);
 
     // Approve test policy
     let approve_output = run_kvist(&project, &["task", "approve-policy"]);
@@ -456,7 +461,7 @@ command = "/usr/bin/echo 'mocking verify'"
         gateway_command(&gateway.endpoint)
     );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
-    configure_sandbox_and_track(&project);
+    let _tools = configure_sandbox_and_track(&project);
 
     // Approve test policy
     let approve_output = run_kvist(&project, &["task", "approve-policy"]);

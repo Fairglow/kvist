@@ -44,7 +44,7 @@ fn fixture(script: &str, limit: u64) -> (TempDir, SandboxPaths, SandboxRequest) 
     .unwrap();
     let paths = SandboxPaths {
         runner,
-        backend: PathBuf::from("/usr/bin/true"),
+        backend: std::fs::canonicalize("/usr/bin/true").expect("resolve the test backend"),
     };
     let policy = ToolPolicy::minimum();
     let argv = vec!["/usr/bin/true".into()];

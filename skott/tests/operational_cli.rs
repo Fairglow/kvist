@@ -41,11 +41,12 @@ fn trial_with_read_validation(
     listener.set_nonblocking(true).unwrap();
     let endpoint = listener.local_addr().unwrap();
     let config = root_path.join("skott.toml");
+    let backend = std::fs::canonicalize("/usr/bin/true").expect("resolve the test backend");
     std::fs::write(
         &config,
         format!(
             "schema_version=1\nworking_directory={work:?}\ndefault_provider='llama-server'\n\
-        [sandbox]\nrunner={runner:?}\nbackend='/usr/bin/true'\n\
+        [sandbox]\nrunner={runner:?}\nbackend={backend:?}\n\
         [tool_profiles]\nrust='off'\npython='off'\njavascript='off'\ngo='off'\nc='off'\n\
         [[models]]\nid='test'\nprovider='llama-server'\nbase_url='http://{endpoint}'\n\
         model='test'\ncontext_limit=32768\nresponse_reserve=1024\nmax_attempts=3\n"

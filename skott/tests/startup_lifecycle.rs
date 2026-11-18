@@ -493,7 +493,8 @@ impl Tui {
                 "cat >/dev/null; printf 'permission fixture' >&2; exit 7\n",
             )
             .unwrap();
-            format!("[sandbox]\nrunner={runner:?}\nbackend='/usr/bin/true'\n")
+            let backend = std::fs::canonicalize("/usr/bin/true").expect("resolve the test backend");
+            format!("[sandbox]\nrunner={runner:?}\nbackend={backend:?}\n")
         } else {
             String::new()
         };

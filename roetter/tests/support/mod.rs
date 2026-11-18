@@ -2,7 +2,12 @@ use roetter::{Error, ProcessFailure, rust::cache};
 use sav::{
     CancellationToken, CommandSpec, OutputStream, SupervisionPolicy, run_supervised_observed,
 };
-use std::{env, fs, path::Path, time::Duration};
+use std::{
+    env, fs,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 /// The absolute path of the cargo binary the test process should drive.
 ///
@@ -31,6 +36,20 @@ pub fn cargo_path() -> String {
         }
     }
     "/usr/bin/cargo".to_owned()
+}
+
+pub fn cargo_for_file_sources(fixture: &Path) -> PathBuf {
+    let path = fixture.join("fixture-cargo");
+    let cargo = cargo_path().replace('\'', "'\\''");
+    // Cargo's offline mode also rejects first-time file:// fetches. Only these
+    // fixtures override it; all of their sources are local and Galla still denies networking.
+    fs::write(
+        &path,
+        format!("#!/bin/sh\nexec /usr/bin/env CARGO_NET_OFFLINE=false '{cargo}' \"$@\"\n"),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path
 }
 
 pub fn assert_actual_missing_metadata(project: &Path, home: &Path) {

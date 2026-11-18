@@ -1,6 +1,26 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Independent Cargo diagnostic observations
+
+`cargo-diagnostic-source-observer` read the classifier and cache test assertions
+without intent, queues, prior records or history. It ran no tests and made no
+compliance judgment. Eligible diagnostics remain bounded UTF-8 from an observed
+exit 101. The classifier requires one leading primary error, plain or with
+Cargo's exact supported ANSI label, and matches offline registry or Git evidence
+against the lock graph. Assertions also cover warning text, competing errors,
+unmatched identities and invalid or oversized diagnostics. They do not establish
+support for other ANSI encodings.
+
+The two `file://` acquisition fixtures override `CARGO_NET_OFFLINE` for their
+child Cargo process. Their actual missing-metadata checks still pass `--offline`.
+Implementer-attributed execution inside Galla with color forced passed all 38
+tests in `cache` and `cache_failure`; this is not project acceptance.
+
+`cargo-diagnostic-intent-comparator` compared the local intent and this excerpt
+without source or tests. It found no concrete discrepancy in the bounded,
+lock-graph-bound diagnostic handling and did not verify execution independently.
+
 ## Independent native root repair observations - 2026-11-08
 
 Clean-slate `repair-source-observer` read current source and executable

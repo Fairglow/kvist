@@ -556,7 +556,7 @@ fn actual_git_cache_is_validated_natively_and_reused_without_acquisition() {
     fs::write(dir.path().join("Cargo.lock"), format!("version=4\n[[package]]\nname='fixture'\nversion='1.0.0'\ndependencies=['demo']\n[[package]]\nname='demo'\nversion='1.0.0'\nsource='git+{url}#{}'\n", revision.trim())).unwrap();
     let home = dir.path().join("cargo-home");
     let options = ProvisionOptions {
-        cargo: support::cargo_path().into(),
+        cargo: support::cargo_for_file_sources(repository.path()),
         offline: false,
         vendored_dir: None,
         timeout: Duration::from_secs(30),
@@ -706,7 +706,7 @@ fn actual_alternate_registry_uses_cargo_identity_not_namespace_guessing() {
     .unwrap();
     let home = dir.path().join("cargo-home");
     let options = ProvisionOptions {
-        cargo: support::cargo_path().into(),
+        cargo: support::cargo_for_file_sources(fixture.path()),
         offline: false,
         vendored_dir: None,
         timeout: Duration::from_secs(30),
