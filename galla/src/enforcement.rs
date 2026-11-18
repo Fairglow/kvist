@@ -199,7 +199,6 @@ fn count_processes_in_pgid(child_pid: u32) -> u64 {
 }
 
 /// Check if any file under the given path exceeds the size limit (recursive).
-
 /// Executes the request in a secure Bubblewrap sandbox, supervises its resources,
 /// and reaps the child process.
 pub fn run(request: SandboxRequest) -> ExitCode {
