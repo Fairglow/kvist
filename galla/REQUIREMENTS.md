@@ -354,6 +354,31 @@ permissions, hide sibling `.kvist` files, relax grant-overlap validation, or
 create host directories when the registry is absent. Unsupported or absent
 paths MUST NOT disable independent tools or follow new host origins.
 
+### SR-REQ-SESSION-MODE
+
+The runner MUST provide a separate, explicit, versioned session mode
+(`--kvist-sandbox-session-v1`) beside the one-shot v1 request. It MUST read
+bounded launch metadata on a dedicated descriptor (not through argv, so a
+large prompt and a full launch plan cannot be smuggled through a 4 KiB argv
+slot) and MUST reserve the payload's stdio for ACP. It MUST enforce the same
+closed version-one namespace, grant, resource and identity contract as
+authoring, plus a bounded session block: the reserved stdio role, an optional
+explicitly granted IPC capability for the inference relay, and the run-scoped
+cancellation capability. The runner MUST own and reap the whole process group;
+the embedding host MUST hold the session and cancellation capability. Runner
+lifecycle evidence MUST stay distinguishable from payload output.
+
+The inference relay MUST cross the boundary only through the explicitly
+granted IPC capability: a run-private relay on sandbox loopback, with no host
+loopback sharing, general HTTP proxy, host socket directory, or host filesystem
+grant. The channel MUST be usable by any process in the sandbox, so it MUST
+carry only inference, not arbitrary HTTP, command spawning, or credentials.
+The relay MUST be a narrow exception for inference, not a general egress path.
+One-shot v1 behavior for existing tools and verification MUST be preserved
+unchanged. Tests MUST cover launch-metadata bounds, reserved stdio, IPC
+capability grant/denial, process-group reap, cancellation, and the absence of
+any host loopback or general egress path.
+
 ## Quality requirements and constraints
 
 - Rust stable edition 2024 is required. Prefer safe Rust; necessary, minimally

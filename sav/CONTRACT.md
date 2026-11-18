@@ -368,6 +368,27 @@ require an explicitly granted private capability. Native hosts supply their
 own tools, execution and recorders; a refusal never selects another executor.
 Exact exported Rust APIs and CLI grammar are documented alongside delivery.
 
+The ACP session backend is a parallel external-agent path, distinct from
+`ModelTransport` and from the opaque host-acknowledged runner. It drives ACP v1
+turns against an external agent (Copilot first) that the embedding host has
+placed inside an externally enforced sandbox. It negotiates `initialize` v1,
+opens a session in the sandbox cwd with an empty MCP-server list and no client
+filesystem, terminal, or MCP capabilities, sends prompt turns, and maps agent
+output, plans, tool updates and stop reasons into the common journal event
+stream. It reuses bounded newline-delimited JSON framing, numeric response-ID
+correlation, provider-to-client request rejection, and process-group cleanup.
+Frame sizes, queue lengths and total throughput are bounded; protocol output
+and stderr stay separate. It advertises no host filesystem or terminal
+callbacks and denies unsupported reverse requests. It owns no workspace grant,
+no inference channel, and no host credentials: the embedding host supplies the
+run-scoped inference-only channel and the cancellation capability. ACP output
+is bounded and untrusted; it is mapped into the journal, never treated as
+native tool intent or as authority for an effect. Cancellation and mandatory
+recording failure both tear the session down through the host-owned
+process-group cleanup. ACP is in public preview; the backend pins and
+qualifies the CLI/protocol pair and surfaces unsupported capabilities rather
+than assuming them.
+
 `DirectModelTransport::loaded_model` reads `/props` for standalone llama-server
 identity (`model`, `model_alias`, then `model_path`). Router-mode properties
 trigger read-only `/models` discovery, returning an actually loaded entry's

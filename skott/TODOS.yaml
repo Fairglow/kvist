@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:fe7dfd69eef4591c32f0e6bb88784844fb88927fa99888baeacdc4667a288481"
-  contract_revision: "sha256:3cebd1db66f0018d9d8a654c9c3b95f39d752cca82ecfec77de4bd596f7aecd8"
-  design_revision: "sha256:5167364da6dbaf7ffe249c83fbc0f7b7af51f210b528fbf105b31cb03275342c"
+  requirements_revision: "sha256:0c05f2f38d981abb52e538ac3ac3b4bfabebf636e67a58a6a59c37342d4c8f04"
+  contract_revision: "sha256:e6d4da3a2ce5fa38b90d6a4be153048a76aa9d3354bc28b00c611acea452dbbf"
+  design_revision: "sha256:a4cb9e72efd668e4ea8d15195937b8e6439c1b0aa1ea117c4ae42df027298e11"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-11-15T09:28:47Z"
+    checked_at: "2026-11-18T22:41:01Z"
     stale_since: null
     causes: []
 tasks:
@@ -3786,5 +3786,117 @@ tasks:
       created_at: "2026-10-20T07:30:44Z"
       updated_at: "2026-10-20T07:30:44Z"
       completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "external-session-write-tests"
+    title: "write_tests: sandboxed external-agent session with a fake ACP agent"
+    description: "Add deterministic regressions for the new sandboxed external-agent session using a fake ACP agent and a synthetic inference relay (no external process or model): workspace-grant minimization, launch-metadata bounds, reserved stdio, IPC capability grant/denial, process-group reap, cancellation, and the absence of any host loopback or general egress path. Cover the TUI and headless presentation parity, the scope badge, and the bounded redacted transcript. No real Copilot CLI, model or network is required."
+    context: "Proposal sandboxed-external-agents; explicit scoped advisory exception. Focused failing regressions precede the session implementation. The existing opaque host runner and native loop are unchanged."
+    purpose: "Expose missing sandboxed external-agent session behavior before production changes."
+    expected_outcome: "New external-session regressions fail against the current opaque host runner only."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-EXTERNAL-SESSION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-18T12:00:00Z"
+      updated_at: "2026-11-18T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "external-session-implement-code"
+    title: "implement_code: sandboxed external-agent session"
+    description: "Implement the sandboxed external-agent session: explicit versioned provisioning (resolve the actual Linux executable/bundle, record the observed version and runtime identity, never install/auto-update/acquire on run startup), a pinned profile (backend, transport, selected model, workspace, network policy), an absolute shell-free launch target with sandbox-relative paths and a purpose-built environment (private HOME/COPILOT_HOME, Skott-supplied secret-free provider configuration, no inherited host tokens, credential sockets, SSH agents, Docker sockets, or operator controls). Minimize the workspace grant (writable mount permits direct writes throughout that mount; .gitignore and Copilot tool settings are not exclusions; secrets, canonical Kvist artifacts, logs, and control files stay out of the granted tree; Git administrative state is excluded initially unless deliberately included in a disposable scope; no host sockets or special files exposed through workspace grants; project hooks, plugins, extension servers, and user settings are not auto-trusted; the run starts with file/search/shell tools, no remote MCP or native Copilot delegation). Separate launch control from payload input (build a versioned Galla session request with bounded launch metadata on a dedicated descriptor and stdio reserved for ACP; the prompt is not passed through argv; the Skott owner holds the session and cancellation capability; Galla owns and reaps the namespace; one-shot v1 behavior for existing tools is preserved). Use a run-private relay on sandbox loopback crossing the boundary only via an explicitly granted IPC capability; the broker binds one approved upstream and model server-side, constructs its own request, and adds credentials only on the host when needed; it allows only POST /v1/chat/completions and rejects arbitrary authorities, redirects, payload-supplied authorization headers, and unrelated endpoints; request and response size, concurrency, idle and total time, and observable model usage/cost are bounded; broker lifetime and cancellation are tied to the run; the channel carries only inference, not arbitrary HTTP, command spawning, or credentials; default is local inference and remote BYOK requires an explicit architecture decision and independent opt-in policy. Expose the same backend in TUI and headless mode with a scope badge and a readable, bounded, redacted host-owned transcript; do not copy the opaque runner's raw-byte logging into the new path; cap frame sizes, queue lengths, and total throughput; protocol and stderr stay separate; interactive permission dialogs or a preapproved headless policy can only narrow the sandbox grant. Cancellation acknowledges, asks ACP to stop, and enforces a deadline before tearing down the sandbox and broker; dropping an observer does not cancel the owner; a mandatory recording failure does; the run reports whether the agent finished, was denied, failed, was cancelled, or left uncertain edits; process exit is never presented as human acceptance or rollback; follow-up prompts are supported at turn boundaries; there is no persisted Copilot resume; live steering, resume, token or tool limits are exposed only when the selected transport implements them."
+    context: "External-session regressions pass. No change to the opaque host runner or the native loop; no host loopback or general egress path is added."
+    purpose: "Allow a sandboxed external agent to run as a first-class Skott path."
+    expected_outcome: "External-session regressions and existing external-runner/native tests pass."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "external-session-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-EXTERNAL-SESSION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-18T12:00:00Z"
+      updated_at: "2026-11-18T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "external-session-security-audit"
+    title: "security_audit: independently observe sandboxed external-agent session confinement"
+    description: "Parent-arranged independent source/security observation of the sandboxed external-agent session: workspace-grant minimization, launch-metadata bounds, reserved stdio, IPC capability grant/denial, process-group reap, cancellation, and the absence of any host loopback or general egress path."
+    context: "No implementer self-certification or IMPL updates."
+    purpose: "Retain authority and privacy evidence."
+    expected_outcome: "Independent scoped observations for arbitration."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "external-session-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-EXTERNAL-SESSION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-18T12:00:00Z"
+      updated_at: "2026-11-18T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "external-session-compliance-review"
+    title: "compliance_review: compare sandboxed external-agent session evidence"
+    description: "Parent-arranged separate source-blind comparison of the sandboxed external-agent session requirement, contract and design against independent observations and attributed tests."
+    context: "Independent records are linked from IMPL.md; evidence limits and historical arbitration remain, with no acceptance or fabricated receipt."
+    purpose: "Retain discrepancies and human arbitration."
+    expected_outcome: "Independent comparison and concrete evidence limits."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "external-session-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-EXTERNAL-SESSION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-18T12:00:00Z"
+      updated_at: "2026-11-18T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "external-session-copilot-trial"
+    title: "write_tests: one-off Copilot CLI qualification with a cheap local model (opt-in)"
+    description: "Run a one-off, explicitly approved Copilot CLI qualification using a cheap local model (e.g., a small llama-server or Ollama model) to verify the sandboxed external-agent session against a real ACP agent. This is a supportable batch fallback trial, not part of the offline default test suite. It exercises a real edit and an offline test command, verifies the inference relay routes only POST /v1/chat/completions, and confirms the sandbox confines all effects. It is marked as a trial and is never a security boundary or an acceptance receipt."
+    context: "Proposal sandboxed-external-agents; explicit scoped advisory exception. This is a one-off trial using the installed Copilot CLI and a cheap local model; it is not part of the offline default test suite and does not mint canonical evidence or acceptance."
+    purpose: "Qualify the sandboxed external-agent session against a real ACP agent."
+    expected_outcome: "A one-off Copilot trial records a successful sandboxed run with a cheap local model."
+    kind: test
+    status: pending
+    depends_on:
+      - "external-session-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-EXTERNAL-SESSION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-18T12:00:00Z"
+      updated_at: "2026-11-18T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "host-unconfined-file-tool-root"
+    title: "write_tests: host-unconfined file tools use the working directory as root"
+    description: "In host-unconfined mode (--allow-host-execution), all eight native file tools (read_file, write_file, list_dir, find_files, search_files, edit_file, append_file, apply_patch) MUST use the current working directory as their root, not the /workspace sandbox path that only exists inside the Bubblewrap namespace. The existing FileRequest::host_mapped remaps the sandbox write root to the host working directory for every tool; this task verifies the behavior is complete and covers all tools, including the exact-root, nested-path, and validation-preservation cases, and that the HostExecutor routes every native file tool through the host-mapped request rather than the sandbox path."
+    context: "The /workspace path is a sandbox-only namespace mount; on the host it does not resolve. HostExecutor::execute already calls request.host_mapped(&self.working_directory) for every native file tool before staging and running the helper. The read-only mapping is covered by host_mapping_preserves_exact_root_and_nested_paths_without_relaxing_validation; the mutation-tool mapping is covered by the HostExecutor tests in native_file_tools.rs and incremental_file_tools.rs."
+    purpose: "Ensure host-unconfined file tools operate on the working directory, not the nonexistent /workspace sandbox path."
+    expected_outcome: "All eight native file tools resolve their root to the host working directory in --allow-host-execution mode; existing tests pass unchanged."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Native-file-tool-inputs-and-results"
+      - "REQUIREMENTS.md#RUN-REQ-TOOLS"
+    timestamps:
+      created_at: "2026-11-18T14:00:00Z"
+      updated_at: "2026-11-18T14:00:00Z"
+      completed_at: "2026-11-18T14:00:00Z"
     blocked_reason: null
     recovery_state: null

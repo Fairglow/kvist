@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:3a7f12bd7aa9909342d79f3da374ddf698ffc1786949e69dd6357cfca344c91d"
-  contract_revision: "sha256:4e96c71a6b090b563a1f7953215ef049f718106051d2a674209a3538a732b15e"
-  design_revision: "sha256:410c1f2ce83ce3cd2f1a2ec6d602c345aabc81be5eaefe5f3a097bea0094b578"
+  requirements_revision: "sha256:a780356165e5922ecdd63be3e00e98fb24463b10418845a1b0be1f249260d72d"
+  contract_revision: "sha256:0d43d792fb147d681685907e4d6c248fc762391043f46916b58b909d597aef9e"
+  design_revision: "sha256:04f91c4d592c5d04ec0b2b6bce52d24d9f48f0ba8d166d31868410ec81b19750"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-11-15T09:28:55Z"
+    checked_at: "2026-11-18T22:40:55Z"
     stale_since: null
     causes: []
 tasks:
@@ -2605,6 +2605,81 @@ tasks:
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
       updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "acp-session-write-tests"
+    title: "write_tests: ACP session backend with a deterministic fake agent"
+    description: "Add deterministic regressions using a fake ACP agent over a bounded stdio pair (no external process or model): a scripted turn emitting output, a plan, a tool update and a stop reason; a turn denying an unsupported reverse request; an oversized frame; a truncated stream; and cancellation mid-turn. Assert bounded framing, numeric ID correlation, provider-to-client rejection, event mapping into the journal, and complete process-group cleanup on every outcome."
+    context: "Proposal sandboxed-external-agents; explicit scoped advisory exception. Focused failing regressions precede the session-backend implementation. No real Copilot CLI, model or network is required."
+    purpose: "Expose missing ACP session-backend behavior before production changes."
+    expected_outcome: "New ACP session-backend regressions fail against the current discovery-only client."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-ACP-SESSION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-18T12:00:00Z"
+      updated_at: "2026-11-18T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "acp-session-implement-code"
+    title: "implement_code: bounded ACP v1 session backend"
+    description: "Implement the ACP v1 session backend: negotiate initialize v1, open a session in the sandbox cwd with an empty MCP-server list and no client filesystem, terminal, or MCP capabilities, send prompt turns, and map agent output, plans, tool updates and stop reasons into the common journal event stream. Reuse bounded newline-delimited JSON framing, numeric response-ID correlation, provider-to-client request rejection, and process-group cleanup. Frame sizes, queue lengths, and total throughput are bounded; protocol output and stderr stay separate. It advertises no host filesystem or terminal callbacks and denies unsupported reverse requests. It owns no workspace grant, no inference channel, and no host credentials; the embedding host supplies the run-scoped inference-only channel and the cancellation capability. ACP output is bounded and untrusted, mapped into the journal but never treated as native tool intent or as authority for an effect. Cancellation and mandatory recording failure both tear the session down through host-owned process-group cleanup. The backend pins and qualifies the CLI/protocol pair and surfaces unsupported capabilities rather than assuming them."
+    context: "ACP session-backend regressions pass. No change to the discovery-only catalog client or the native loop; no workspace grant, inference channel, or host credential is owned by Sav."
+    purpose: "Allow a sandboxed external agent to be driven through ACP turns."
+    expected_outcome: "ACP session-backend regressions and existing catalog/conformance tests pass."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "acp-session-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-ACP-SESSION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-18T12:00:00Z"
+      updated_at: "2026-11-18T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "acp-session-security-audit"
+    title: "security_audit: independently observe ACP session-backend bounds"
+    description: "Parent-arranged independent source/security observation of ACP session-backend framing bounds, numeric ID correlation, provider-to-client rejection, event mapping, and process-group cleanup on every outcome."
+    context: "No implementer self-certification or IMPL updates."
+    purpose: "Retain authority and privacy evidence."
+    expected_outcome: "Independent scoped observations for arbitration."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "acp-session-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-ACP-SESSION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-18T12:00:00Z"
+      updated_at: "2026-11-18T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "acp-session-compliance-review"
+    title: "compliance_review: compare ACP session-backend evidence"
+    description: "Parent-arranged separate source-blind comparison of the ACP session-backend requirement, contract and design against independent observations and attributed tests."
+    context: "Independent records are linked from IMPL.md; evidence limits and historical arbitration remain, with no acceptance or fabricated receipt."
+    purpose: "Retain discrepancies and human arbitration."
+    expected_outcome: "Independent comparison and concrete evidence limits."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "acp-session-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-ACP-SESSION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-11-18T12:00:00Z"
+      updated_at: "2026-11-18T12:00:00Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

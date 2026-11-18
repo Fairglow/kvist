@@ -33,6 +33,22 @@ mode argument:
   capabilities. When a verified Bubblewrap backend and namespace enforcement are
   available, it emits a confirmed probe response object; otherwise it fails closed
   with an actionable non-secret diagnostic.
+- `--kvist-sandbox-session-v1` (proposal `sandboxed-external-agents`) is a
+  separate, explicit session mode. It reads bounded launch metadata on a
+  dedicated descriptor (not through argv, so a large prompt and a full launch
+  plan cannot be smuggled through a 4 KiB argv slot) and reserves the payload's
+  stdio for ACP. It enforces the same closed version-one namespace, grant,
+  resource and identity contract as authoring, plus a bounded session block:
+  the reserved stdio role, an optional explicitly granted IPC capability for
+  the inference relay, and the run-scoped cancellation capability. The runner
+  owns and reaps the whole process group; the embedding host holds the session
+  and cancellation capability. The inference relay crosses the boundary only
+  through the explicitly granted IPC capability: a run-private relay on sandbox
+  loopback, with no host loopback sharing, general HTTP proxy, host socket
+  directory, or host filesystem grant. The channel is usable by any process in
+  the sandbox, so it carries only inference, not arbitrary HTTP, command
+  spawning, or credentials. One-shot v1 behavior for existing tools and
+  verification is preserved unchanged.
 
 The accepted target interface is the redefined
 `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` protocol described by

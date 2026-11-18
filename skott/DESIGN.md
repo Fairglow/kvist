@@ -122,6 +122,69 @@ relative to its held directory. Replaced pathnames cannot redirect host writes.
 Each prompt reopens the presentation lifecycle as streaming; a completed answer
 is appended once before the prompt's live terminal record.
 
+## Sandboxed external-agent session (proposal `sandboxed-external-agents`)
+
+The existing opaque host runner (`external.rs`) supervises one unconfined host
+process with mandatory logs and terminal acknowledgement. The sandboxed
+external-agent session is a separate, first-class path: Skott places the
+Copilot CLI itself, its built-in file tools and every local subprocess, inside
+a Galla sandbox and drives it through Sav's ACP session backend. Skott owns
+the workspace grant, the inference channel, presentation, and operator
+controls; Sav owns protocol, mapping and lifecycle; Galla owns the namespace
+and reaps its descendants.
+
+Provisioning is explicit and versioned. Skott resolves the actual Linux
+executable/bundle (including interpreters and libraries), records the observed
+version and runtime identity, and never installs, auto-updates, or acquires
+dependencies on run startup. The profile pins the backend, transport, selected
+model, workspace, and network policy for the run. The launch target is an
+absolute, shell-free argv with sandbox-relative paths and a purpose-built
+environment: private `HOME`/`COPILOT_HOME`, a Skott-supplied secret-free
+provider configuration, and no inherited host tokens, credential sockets,
+SSH agents, Docker sockets, or operator controls.
+
+The workspace grant is minimized. A writable mount permits direct writes
+throughout that mount; `.gitignore` and Copilot tool settings are not
+exclusions. Secrets, canonical Kvist artifacts, logs, and control files stay
+out of the granted tree; Git administrative state is excluded initially unless
+deliberately included in a disposable scope. No host sockets or special files
+are exposed through workspace grants. Project hooks, plugins, extension
+servers, and user settings are not auto-trusted; the run starts with
+file/search/shell tools, no remote MCP or native Copilot delegation.
+
+Launch control is separated from payload input. Skott builds a versioned Galla
+session request with bounded launch metadata passed on a dedicated descriptor
+and stdio reserved for ACP. The prompt is not passed through argv. The Skott
+owner holds the session and cancellation capability; Galla owns and reaps the
+namespace. One-shot v1 behavior for existing tools is preserved.
+
+The inference boundary uses a run-private relay on sandbox loopback crossing
+the boundary only via an explicitly granted IPC capability. The broker binds
+one approved upstream and model server-side, constructs its own request, and
+adds credentials only on the host when needed. It allows only
+`POST /v1/chat/completions`; it rejects arbitrary authorities, redirects,
+payload-supplied authorization headers, and unrelated endpoints. Request and
+response size, concurrency, idle and total time, and observable model
+usage/cost are bounded. Broker lifetime and cancellation are tied to the run.
+The channel is usable by any process in the sandbox, so it carries only
+inference, not arbitrary HTTP, command spawning, or credentials. Default is
+local inference; remote BYOK requires an explicit architecture decision and
+independent opt-in policy.
+
+Presentation: Skott exposes the same backend in TUI and headless mode with a
+scope badge and a readable, bounded, redacted host-owned transcript. It does
+not copy the opaque runner's raw-byte logging into the new path. Frame sizes,
+queue lengths, and total throughput are capped; protocol and stderr stay
+separate. Interactive permission dialogs or a preapproved headless policy can
+only narrow the sandbox grant. Lifecycle: cancellation acknowledges, asks ACP
+to stop, and enforces a deadline before tearing down the sandbox and broker.
+Dropping an observer does not cancel the owner; a mandatory recording failure
+does. The run reports whether the agent finished, was denied, failed, was
+cancelled, or left uncertain edits. Process exit is never presented as human
+acceptance or rollback. Follow-up prompts are supported at turn boundaries;
+there is no persisted Copilot resume. Live steering, resume, token or tool
+limits are exposed only when the selected transport implements them.
+
 ## Responsive lifecycle
 
 Enter the terminal with only local configuration/override validation complete.
@@ -401,6 +464,15 @@ controls, and retains a bounded tail of rendered records. Terminal teardown is
 owned by an RAII guard. Snapshot output marks incompletion; follow output waits
 cooperatively for records or operator detachment. Explicit one-shot control
 requests go through Sav before viewing and report only the returned status.
+
+`external_agent` owns the sandboxed external-agent session: explicit
+runtime provisioning, versioned Galla session-request construction, the
+run-scoped inference relay and broker, ACP turn driving through Sav's session
+backend, journaling, and operator controls. It is a parallel path beside the
+opaque host runner (`external.rs`) and the native loop; it never replaces
+`ModelTransport` and never mediates effects. The embedding host (Skott) owns
+the workspace grant and the inference channel; Sav owns protocol, mapping and
+lifecycle; Galla owns the namespace and reaps its descendants.
 
 `config`/`toolchain`/`tools`/`sandbox` build trusted structures from untrusted
 inputs; `session` owns the model-agnostic conversation and loop policy; `run`
@@ -1022,6 +1094,23 @@ authority; unrelated workspace links are not general preparation blockers.
 
 Network is `Deny` and no Cargo cache is declared, which is what the `Authoring`
 phase requires. Resources are bounded well below the runner's maxima.
+
+The sandboxed external-agent session (proposal `sandboxed-external-agents`)
+extends these bounds. The writable mount permits direct writes throughout that
+mount; `.gitignore` and Copilot tool settings are not exclusions. Secrets,
+canonical Kvist artifacts, logs, and control files stay out of the granted
+tree; Git administrative state is excluded initially unless deliberately
+included in a disposable scope. No host sockets or special files are exposed
+through workspace grants. Project hooks, plugins, extension servers, and user
+settings are not auto-trusted; the run starts with file/search/shell tools, no
+remote MCP or native Copilot delegation. The inference relay binds one approved
+upstream and model server-side and allows only `POST /v1/chat/completions`;
+it rejects arbitrary authorities, redirects, payload-supplied authorization
+headers, and unrelated endpoints. The channel carries only inference, not
+arbitrary HTTP, command spawning, or credentials. Default is local inference;
+remote BYOK requires an explicit architecture decision and independent opt-in
+policy. Interactive permission dialogs or a preapproved headless policy can
+only narrow the sandbox grant.
 
 ## Terminal UI
 

@@ -212,6 +212,7 @@ or host-content drift comparison.
 | `src/enforcement.rs`   | Bubblewrap execution, namespace boundaries, `prlimit` resource caps, network guard proxy, and execution supervision                                                   |
 | `src/lib.rs`           | Module surface and status constants                                                                                                                                   |
 | `src/main.rs`          | Command boundary for probe and request protocol modes                                                                                                                 |
+| `src/session.rs`       | Versioned session mode: bounded launch metadata on a dedicated descriptor, stdio reserved for ACP, IPC capability for the inference relay, and process-group ownership and reap |
 | `schema/*.json`        | Non-normative JSON Schema 2020-12 aids mirroring `src/protocol.rs`                                                                                                    |
 | `tests/conformance.rs` | Accepted shape, canonical serialization, malformed/oversized/unknown, legacy rejection, acquisition source/argv/environment policy, probe, and executable enforcement |
 | `tests/scaffold.rs`    | Structural and capability probe evidence                                                                                                                              |
@@ -238,6 +239,34 @@ independently, and persists no state. It never trusts maerg-side validation as
 a substitute for its own. The enforcement path constructs one explicit
 Bubblewrap execution from a validated request, supervises it, enforces
 resources, cleans up the process tree, and returns bounded results.
+
+### Versioned session mode (proposal `sandboxed-external-agents`)
+
+Session mode is a separate, explicit protocol mode beside the one-shot v1
+request. It is not a reinterpretation of the existing v1 JSON after EOF: the
+runner reads bounded launch metadata on a dedicated descriptor (not through
+argv, so a 64 KiB prompt and a full launch plan cannot be smuggled through a
+4 KiB argv slot), and reserves the payload's stdio for ACP. The existing
+one-shot v1 request keeps its captured-output, null-stdin behavior unchanged.
+
+The session request carries the same closed version-one namespace, grant,
+resource and identity contract as authoring, plus a bounded session block:
+the reserved stdio role, an optional explicitly granted IPC capability for the
+inference relay, and the run-scoped cancellation capability. The runner owns
+and reaps the whole process group; the embedding host (Skott) holds the
+session and cancellation capability. Runner lifecycle evidence stays
+distinguishable from payload output.
+
+The inference relay crosses the boundary only through the explicitly granted
+IPC capability: a run-private relay on sandbox loopback, with no host loopback
+sharing, general HTTP proxy, host socket directory, or host filesystem grant.
+The broker on the host side binds one approved upstream and model server-side
+and allows only the approved route (initially `POST /v1/chat/completions`),
+rejecting arbitrary authorities, redirects, payload-supplied authorization
+headers, and unrelated endpoints. The channel is usable by any process in the
+sandbox, so it carries only inference, not arbitrary HTTP, command spawning,
+or credentials. The relay is a narrow exception for inference, not a general
+egress path.
 
 ## Algorithms and decisions
 

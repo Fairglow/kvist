@@ -334,6 +334,30 @@ typed tool broker, host authorization, execution backend, and redacted runtime
 events. Tool intent is untrusted and cannot cause effects without an explicit
 host decision and selected backend.
 
+### AR-REQ-ACP-SESSION
+
+The component MUST provide a bounded ACP v1 session backend that drives turns
+against an external agent (Copilot first) placed inside an externally enforced
+sandbox by the embedding host. It MUST negotiate `initialize` v1, open a
+session in the sandbox cwd with an empty MCP-server list and no client
+filesystem, terminal, or MCP capabilities, send prompt turns, and map agent
+output, plans, tool updates and stop reasons into the common journal event
+stream. It MUST reuse bounded newline-delimited JSON framing, numeric
+response-ID correlation, provider-to-client request rejection, and
+process-group cleanup. Frame sizes, queue lengths, and total throughput MUST
+be bounded; protocol output and stderr MUST remain separate streams. It MUST
+advertise no host filesystem or terminal callbacks and MUST deny unsupported
+reverse requests. It MUST NOT own a workspace grant, an inference channel, or
+host credentials; the embedding host supplies the run-scoped inference-only
+channel and the cancellation capability. ACP output MUST be bounded and
+untrusted, mapped into the journal but never treated as native tool intent or
+as authority for an effect. Cancellation and mandatory recording failure MUST
+both tear the session down through host-owned process-group cleanup. The
+backend MUST pin and qualify the CLI/protocol pair and surface unsupported
+capabilities rather than assuming them. Tests MUST use a deterministic fake
+agent over bounded stdio and MUST NOT require a real Copilot CLI, model, or
+network.
+
 ### AR-REQ-ADAPTER-BOUNDARY
 
 Third-party provider libraries MAY implement private adapters but MUST NOT

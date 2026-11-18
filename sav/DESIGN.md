@@ -202,6 +202,33 @@ discovery is performed. Setup alone performs explicit discovery/qualification.
 External executable/argv identity is collected structurally, never recovered
 from a command string. Empty capability lists are conservative defaults.
 
+## Sandboxed external-agent session backend
+
+The discovery-only ACP client in `catalog` is not the production engine. A
+separate session backend drives full ACP v1 turns against an external agent
+(Copilot first) that the embedding host has placed inside a Galla sandbox. It
+is a parallel path beside `ModelTransport`; it never replaces the native loop,
+never owns the workspace grant, and never mediates effects.
+
+`acp` owns the session: it negotiates `initialize` v1, opens a session in the
+sandbox cwd with an empty MCP-server list and no client filesystem, terminal,
+or MCP capabilities, sends prompt turns, and maps agent output, plans, tool
+updates and stop reasons into the common journal event stream. It reuses the
+discovery client's bounded newline-delimited JSON framing, numeric response-ID
+correlation, provider-to-client request rejection, and process-group cleanup.
+Frame sizes, queue lengths and total throughput are bounded; protocol output
+and stderr stay separate streams. It advertises no host filesystem or terminal
+callbacks and denies unsupported reverse requests.
+
+The host injects the transport boundary. Sav opens no sandbox, grants no
+workspace, and binds no inference channel; the embedding host supplies the
+run-scoped, inference-only channel to its broker and the cancellation
+capability. The session backend owns turn lifecycle, mapping and journaling
+only. ACP is in public preview, so the backend pins and qualifies the
+CLI/protocol pair and surfaces unsupported capabilities rather than assuming
+them. It does not claim per-action authority: ACP reports what the agent says
+it did, and the host broker plus Galla remain the authority boundary.
+
 ## Loaded-model metadata
 
 Detect llama-server router mode explicitly from `/props.role` and query
@@ -251,7 +278,11 @@ moving workspace tool implementations or maerg policy into Sav. A correlated,
 bounded control queue owns steering handoff; operation interruption cannot
 cancel the whole prompt or reset its accounting. Live event persistence is
 run-owned; observation and optional private control are separate interfaces.
-External agents use process supervision, not the native model/tool loop.
+Opaque external agents use process supervision, not the native model/tool loop.
+The sandboxed external-agent session backend (proposal
+`sandboxed-external-agents`) is a parallel path that drives ACP turns inside an
+externally enforced sandbox; the embedding host owns the workspace grant and the
+inference channel, and Sav owns protocol, mapping and lifecycle.
 
 `offline_rust` contains fixed sandbox-only initialization and runtime script
 generation shared by Skott and maerg. Initialization copies generated settings
@@ -293,6 +324,7 @@ effects. Shutdown stops acceptance and removes the ephemeral capability.
 | `profile`          | Strict bounded profile parsing and formatting-preserving persistence                          |
 | `setup`            | Provider selection, probes, model/executable collection, qualification                        |
 | `catalog`          | Bounded HTTP, ACP, and fallback provider-model discovery                                      |
+| `acp`              | ACP v1 session backend: turn driving, event mapping, bounded framing, lifecycle               |
 | `supervisor`       | Process groups, forward-or-capture streams, idle/loop/wall/output limits, retry, cancellation |
 | `direct_transport` | Bounded loopback Ollama and llama-server HTTP adapters                                        |
 | `trajectory`       | Bounded recorded event stream for agent execution trajectories                                |
@@ -325,6 +357,15 @@ The native loop classifies final text, tool intent, malformed output, or
 refusal. Tool intent proceeds to the broker, which validates schema and
 resources, requests host authorization, invokes the selected backend only
 after allow, validates/redacts results, and returns them to the loop.
+
+The ACP session backend is a separate interaction path. The host opens the
+sandboxed agent process and hands the session backend its bounded stdio and a
+run-scoped inference channel. The backend sends the prompt turn, then consumes
+agent output, plans, tool updates and stop reasons, mapping each into a
+bounded journal event. It holds no effect authority: tool effects the agent
+performs are observed, not mediated, and the host broker plus Galla remain the
+authority boundary. Cancellation and mandatory recording failure both tear the
+session down through the host-owned process-group cleanup.
 
 ## Algorithms and decisions
 
@@ -491,6 +532,18 @@ An explicitly acknowledged opaque host command is a distinct authority mode,
 not a protected-runtime fallback. Sav constructs no isolation namespaces and
 never substitutes an unconstrained executor when a host executor fails.
 
+The ACP session backend inherits these bounds. It parses newline-delimited
+JSON within one deadline and byte budget, correlates numeric response IDs,
+rejects provider-to-client requests, and terminates and reaps the complete
+process group on every outcome. It advertises no client filesystem, terminal,
+or MCP capabilities and sends an empty MCP-server list. It owns no workspace
+grant, no inference channel, and no host credentials; the embedding host
+supplies the run-scoped inference-only channel and the cancellation
+capability. ACP output is bounded and untrusted: it is mapped into the
+journal, never treated as native tool intent or as authority for an effect.
+Unsupported reverse requests are denied; interactive permission dialogs or a
+preapproved headless policy can only narrow the sandbox grant, never widen it.
+
 ## Verification strategy
 
 Unit tests cover parsing, placeholder encoding, canonical types, limits,
@@ -506,6 +559,15 @@ current-model defaults, custom fallback gating, process cleanup, and
 deterministic list output. Negative ACP cases cover wrong response IDs,
 unsolicited requests, incomplete initialization, empty or inconsistent model
 state, oversized records, timeout, cancellation, and retained descendants.
+
+ACP session-backend tests use a deterministic fake agent over a bounded stdio
+pair (no external process or model): a scripted turn that emits output, a plan,
+a tool update and a stop reason; a turn that denies an unsupported reverse
+request; an oversized frame; a truncated stream; and cancellation mid-turn.
+They assert bounded framing, numeric ID correlation, provider-to-client
+rejection, event mapping into the journal, and complete process-group
+cleanup on every outcome. No real Copilot CLI, model or network is required;
+real-model compatibility is a separate qualification, not a unit test.
 
 Conformance tests compare canonical behavior across the direct Ollama and
 llama-server transports. Platform support requires native

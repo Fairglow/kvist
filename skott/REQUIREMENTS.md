@@ -177,6 +177,72 @@ authorized operations, display truthful acknowledgements and preserve the run's
 existing grants and context. Protected task inspection MUST NOT expose Skott's
 workspace executor as a fallback. Private logs are not canonical evidence.
 
+## RUN-REQ-EXTERNAL-SESSION
+
+Skott MUST support a separately selected sandboxed external-agent profile as a
+first-class path, distinct from the opaque host runner and the native loop.
+It MUST place the Copilot CLI itself, its built-in file tools and every local
+subprocess, inside a Galla sandbox and drive it through Sav's ACP session
+backend. Skott MUST own the workspace grant, the inference channel,
+presentation, and operator controls; Sav MUST own protocol, mapping and
+lifecycle; Galla MUST own the namespace and reap its descendants. The existing
+opaque host runner and the native loop MUST remain unchanged.
+
+Provisioning MUST be explicit and versioned: Skott MUST resolve the actual
+Linux executable/bundle (including interpreters and libraries), record the
+observed version and runtime identity, and MUST NOT install, auto-update, or
+acquire dependencies on run startup. The profile MUST pin the backend,
+transport, selected model, workspace, and network policy for the run. The
+launch target MUST be an absolute, shell-free argv with sandbox-relative paths
+and a purpose-built environment: private `HOME`/`COPILOT_HOME`, a Skott-
+supplied secret-free provider configuration, and no inherited host tokens,
+credential sockets, SSH agents, Docker sockets, or operator controls.
+
+The workspace grant MUST be minimized. A writable mount MUST permit direct
+writes throughout that mount; `.gitignore` and Copilot tool settings MUST NOT
+be exclusions. Secrets, canonical Kvist artifacts, logs, and control files
+MUST stay out of the granted tree; Git administrative state MUST be excluded
+initially unless deliberately included in a disposable scope. No host sockets
+or special files MUST be exposed through workspace grants. Project hooks,
+plugins, extension servers, and user settings MUST NOT be auto-trusted; the
+run MUST start with file/search/shell tools, no remote MCP or native Copilot
+delegation.
+
+Launch control MUST be separated from payload input. Skott MUST build a
+versioned Galla session request with bounded launch metadata passed on a
+dedicated descriptor and stdio reserved for ACP. The prompt MUST NOT be passed
+through argv. The Skott owner MUST hold the session and cancellation
+capability; Galla MUST own and reap the namespace. One-shot v1 behavior for
+existing tools MUST be preserved.
+
+The inference boundary MUST use a run-private relay on sandbox loopback
+crossing the boundary only via an explicitly granted IPC capability. The
+broker MUST bind one approved upstream and model server-side, construct its
+own request, and add credentials only on the host when needed. It MUST allow
+only `POST /v1/chat/completions`; it MUST reject arbitrary authorities,
+redirects, payload-supplied authorization headers, and unrelated endpoints.
+Request and response size, concurrency, idle and total time, and observable
+model usage/cost MUST be bounded. Broker lifetime and cancellation MUST be
+tied to the run. The channel MUST carry only inference, not arbitrary HTTP,
+command spawning, or credentials. Default MUST be local inference; remote
+BYOK MUST require an explicit architecture decision and independent opt-in
+policy.
+
+Presentation: Skott MUST expose the same backend in TUI and headless mode
+with a scope badge and a readable, bounded, redacted host-owned transcript. It
+MUST NOT copy the opaque runner's raw-byte logging into the new path. Frame
+sizes, queue lengths, and total throughput MUST be capped; protocol and stderr
+MUST stay separate. Interactive permission dialogs or a preapproved headless
+policy MUST only narrow the sandbox grant. Lifecycle: cancellation MUST
+acknowledge, ask ACP to stop, and enforce a deadline before tearing down the
+sandbox and broker. Dropping an observer MUST NOT cancel the owner; a
+mandatory recording failure MUST. The run MUST report whether the agent
+finished, was denied, failed, was cancelled, or left uncertain edits. Process
+exit MUST NOT be presented as human acceptance or rollback. Follow-up prompts
+MUST be supported at turn boundaries; there MUST be no persisted Copilot
+resume. Live steering, resume, token or tool limits MUST be exposed only when
+the selected transport implements them.
+
 ## RUN-REQ-PROMPT-STEERING
 
 Optional private IPC controls MUST be explicitly enabled and MUST NOT expose
