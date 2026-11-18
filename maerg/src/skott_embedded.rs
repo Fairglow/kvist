@@ -410,6 +410,9 @@ impl EmbeddedSkott {
             retry,
             max_turns,
             budgets.limits,
+            // Kvist applies its own task-aware continuation policy on top of
+            // the shared one, so the worker must not also auto-continue.
+            false,
         )
         .map_err(skott_error)?;
         let app = SkottApp::new(
@@ -855,6 +858,7 @@ mod tests {
             model.retry_policy(),
             None,
             budgets.limits,
+            false,
         )
         .unwrap();
         let mut embedded = EmbeddedSkott::new();

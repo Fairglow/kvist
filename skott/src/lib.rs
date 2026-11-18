@@ -11,6 +11,7 @@
 
 mod blocks;
 mod cli;
+mod continuation;
 mod host;
 mod logging;
 mod markdown;
@@ -48,6 +49,9 @@ pub use cli::{Cli, parse_effort, resolve_config_path};
 pub use config::{Config, DEFAULT_WRITE_ROOT, Model, ModelProvider, SandboxPaths, ToolPolicy};
 pub use context::{
     Compaction, ContextManager, DEFAULT_CONTEXT_TOKENS, estimate_messages, estimate_tokens,
+};
+pub use continuation::{
+    ContinuationDecision, MAX_CONTINUATIONS, continuation_decision, continuation_prompt,
 };
 pub use error::{Error, Result};
 pub use executor::SandboxExecutor;

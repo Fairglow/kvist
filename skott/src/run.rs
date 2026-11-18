@@ -235,6 +235,7 @@ pub fn start<M, E>(
     retry: RetryPolicy,
     max_turns: impl Into<Option<u32>>,
     limits: RunLimits,
+    continuation: bool,
 ) -> Result<(SessionHandle, mpsc::Receiver<Event>, PromptSender)>
 where
     M: ModelTransport + Send + 'static,
@@ -250,6 +251,7 @@ where
         max_turns.into(),
         limits,
         ControlMailbox::default(),
+        continuation,
     )
 }
 
@@ -265,6 +267,7 @@ pub fn start_with_controls<M, E>(
     max_turns: impl Into<Option<u32>>,
     limits: RunLimits,
     controls: ControlMailbox,
+    continuation: bool,
 ) -> Result<(SessionHandle, mpsc::Receiver<Event>, PromptSender)>
 where
     M: ModelTransport + Send + 'static,
@@ -276,7 +279,9 @@ where
         executor,
         context,
         recorder,
-        Skott::with_retry(max_turns, retry).with_limits(limits)?,
+        Skott::with_retry(max_turns, retry)
+            .with_limits(limits)?
+            .with_continuation(continuation),
         controls,
     )
 }
@@ -342,31 +347,74 @@ where
                     break;
                 }
                 session.push_user(text);
-                // Borrow the recorder only for this run; the borrow ends before the
-                // next iteration, and each run starts and finishes its own record.
-                let result = runner.run_controlled(
-                    &mut session,
-                    &transport,
-                    &executor,
-                    &sink,
-                    &cancellation,
-                    &mut context,
-                    borrow_recorder(&mut recorder),
-                    &worker_controls,
-                );
-                if worker_shutdown.load(Ordering::SeqCst) {
-                    break;
-                }
-                if let Err(error) = result {
-                    if !worker_shutdown.load(Ordering::SeqCst)
-                        && let Err(send_error) = sink.send(Event::Failed(error.describe()))
-                    {
-                        tracing::debug!(%send_error, "session event receiver closed");
+                // Skott owns the completion policy. The agent must reach one of
+                // the three accepted outcomes — complete, blocked for a concrete
+                // reason, or awaiting a human decision. When it returns control
+                // without finishing and without a legitimate block (it simply
+                // stopped, or a tool failure ended the run), resubmit a focused
+                // continuation prompt so the task keeps making progress. The
+                // counter is bounded, so a genuinely stuck agent surfaces for a
+                // human decision instead of looping forever. Kvist disables this
+                // (via `with_continuation(false)`) and keeps its own task-aware
+                // loop on top of the shared policy.
+                let mut continuations = 0;
+                loop {
+                    // Borrow the recorder only for this run; the borrow ends before
+                    // the next iteration, and each run starts and finishes its own
+                    // record.
+                    let result = runner.run_controlled(
+                        &mut session,
+                        &transport,
+                        &executor,
+                        &sink,
+                        &cancellation,
+                        &mut context,
+                        borrow_recorder(&mut recorder),
+                        &worker_controls,
+                    );
+                    if worker_shutdown.load(Ordering::SeqCst) {
+                        break;
                     }
-                    // A failed recorder or broken channel must not drive later effects.
-                    break;
+                    let summary = match result {
+                        Ok(summary) => summary,
+                        Err(error) => {
+                            if !worker_shutdown.load(Ordering::SeqCst)
+                                && let Err(send_error) = sink.send(Event::Failed(error.describe()))
+                            {
+                                tracing::debug!(%send_error, "session event receiver closed");
+                            }
+                            // A failed recorder or broken channel must not drive
+                            // later effects.
+                            break;
+                        }
+                    };
+                    cancellation.reset();
+                    // Only a run that returned control without finishing and
+                    // without a legitimate block is continued, and only while the
+                    // budget of automatic continuations remains.
+                    if !runner.continuation_enabled
+                        || continuations >= crate::continuation::MAX_CONTINUATIONS
+                        || crate::continuation::continuation_decision(
+                            summary.stop_reason.unwrap_or(crate::session::StopReason::NoWork),
+                        ) != crate::continuation::ContinuationDecision::Continue
+                    {
+                        break;
+                    }
+                    continuations += 1;
+                    let attempt = continuations;
+                    let prompt = crate::continuation::continuation_prompt(
+                        &summary,
+                        attempt,
+                        crate::continuation::MAX_CONTINUATIONS,
+                    );
+                    if let Err(send_error) = sink.send(Event::Note(format!(
+                        "Agent stopped without finishing; Skott continued the task                          (attempt {attempt})."
+                    ))) {
+                        tracing::debug!(%send_error, "session event receiver closed");
+                        break;
+                    }
+                    session.push_user(prompt);
                 }
-                cancellation.reset();
             }
             worker_controls.shutdown();
             if let Ok(mut server) = worker_server.lock() {
@@ -624,6 +672,7 @@ mod tests {
             RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
             1,
             RunLimits::default(),
+            true,
         )
         .expect("start worker");
         drop(prompt_tx);
@@ -700,6 +749,7 @@ mod tests {
             RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
             1,
             RunLimits::default(),
+            true,
         )
         .expect("start worker");
         prompt_tx.send("fix the bug".into()).unwrap();
@@ -738,6 +788,7 @@ mod tests {
             RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
             1,
             RunLimits::default(),
+            true,
         )
         .unwrap();
         let (done_tx, done_rx) = mpsc::channel();
@@ -799,6 +850,7 @@ mod tests {
             RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
             1,
             RunLimits::default(),
+            true,
         )
         .unwrap();
         prompt_tx.send("active".into()).unwrap();
@@ -846,6 +898,7 @@ mod tests {
             RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
             1,
             RunLimits::default(),
+            true,
         )
         .unwrap();
         prompt_tx.send("flood".into()).unwrap();
@@ -935,6 +988,7 @@ mod tests {
             RetryPolicy::new(3, Duration::from_millis(1), Duration::from_millis(1)),
             5,
             RunLimits::default(),
+            true,
         )
         .unwrap();
         assert_eq!(
@@ -1003,6 +1057,222 @@ mod tests {
         assert!(prompt.contains("preconditions are optional"));
         assert!(!prompt.contains("Continuation rejects changed files"));
         assert!(!prompt.contains("DO NOT** manually modify dependency manifests"));
+    }
+
+    /// A transport whose first turn proposes a tool (a `ToolCalls` finish) and
+    /// whose later turns complete. Pairs with [`FailingExecutor`] so the first
+    /// run ends in a `Failed` stop the worker can continue.
+    struct ContinuingTransport {
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+        /// Records every user message the model is asked to work on, in order.
+        prompts: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl ModelTransport for ContinuingTransport {
+        fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
+            unreachable!()
+        }
+
+        fn stream(
+            &self,
+            request: &ModelRequest,
+            _: &CancellationToken,
+            _: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+        ) -> sav::Result<ModelTurn> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            // Record only the most recent user message: the one this turn is
+            // responding to. The session appends the continuation prompt after
+            // the failed first turn, so the second turn's last user message is
+            // the continuation itself.
+            {
+                let last_user = request
+                    .messages
+                    .iter()
+                    .rev()
+                    .find_map(|message| match message {
+                        sav::ModelMessage::User(text) => Some(text.clone()),
+                        _ => None,
+                    });
+                if let Some(text) = last_user {
+                    self.prompts.lock().unwrap().push(text);
+                }
+            }
+            if call == 0 {
+                // First turn: the model proposes a tool to run.
+                Ok(ModelTurn {
+                    text: String::new(),
+                    reasoning: None,
+                    tool_intents: vec![ToolIntent {
+                        id: "call-1".into(),
+                        provider_id: None,
+                        name: "exec".into(),
+                        arguments: serde_json::json!({}),
+                    }],
+                    finish_reason: sav::FinishReason::ToolCalls,
+                    provider: sav::LocalModelProvider::LlamaServer,
+                    model: "test".into(),
+                    response_id: None,
+                    provider_request_id: None,
+                    usage: None,
+                })
+            } else {
+                // A continuation turn: the model finishes the task.
+                Ok(ModelTurn {
+                    text: "task complete".into(),
+                    reasoning: None,
+                    tool_intents: vec![],
+                    finish_reason: sav::FinishReason::Stop,
+                    provider: sav::LocalModelProvider::LlamaServer,
+                    model: "test".into(),
+                    response_id: None,
+                    provider_request_id: None,
+                    usage: None,
+                })
+            }
+        }
+
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(5)
+        }
+    }
+
+    /// An executor that fails every tool dispatch with a sandbox error. A failed
+    /// dispatch ends the run in a `Failed` stop (the agent gave up), which is the
+    /// condition the worker's automatic continuation must recover from.
+    struct FailingExecutor;
+
+    impl ToolExecutor for FailingExecutor {
+        fn execute(
+            &self,
+            _intent: &ToolIntent,
+            _cancellation: &CancellationToken,
+        ) -> Result<ToolOutcome> {
+            Err(Error::SandboxExec {
+                tool: Some("exec".into()),
+                reason: "the tool failed".into(),
+            })
+        }
+    }
+
+    /// When auto-continuation is enabled, a run that ends in a `Failed` stop
+    /// (the agent's tool failed and it returned control without finishing) is
+    /// resubmitted with a focused continuation prompt, and the session proceeds
+    /// to a real completion.
+    #[test]
+    fn worker_continues_an_unfinished_run_until_it_completes() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let prompts = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (handle, receiver, prompts_tx) = start(
+            test_session(),
+            ContinuingTransport {
+                calls: calls.clone(),
+                prompts: prompts.clone(),
+            },
+            FailingExecutor,
+            ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+            RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
+            5,
+            RunLimits::default(),
+            true,
+        )
+        .unwrap();
+        prompts_tx.send("original objective".into()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut saw_failure = false;
+        let mut saw_continuation_note = false;
+        loop {
+            let event = receiver
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .unwrap();
+            match event {
+                Event::Failed(_) => {
+                    saw_failure = true;
+                }
+                Event::Note(text) => {
+                    assert!(
+                        text.contains("continued the task"),
+                        "continuation notice names the action: {text}"
+                    );
+                    saw_continuation_note = true;
+                }
+                Event::Finished { message } => {
+                    assert_eq!(message, "task complete");
+                    break;
+                }
+                _ => {}
+            }
+        }
+        // Two model turns: the failed first, then the continuation.
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(saw_failure && saw_continuation_note);
+        // The continuation prompt is constructive and bounded.
+        let recorded = prompts.lock().unwrap();
+        assert_eq!(recorded[0], "original objective");
+        assert!(
+            recorded[1].starts_with("The task is not finished yet."),
+            "continuation prompt explains the situation: {}",
+            recorded[1]
+        );
+        assert!(
+            recorded[1].contains("Failed"),
+            "continuation names the stop: {}",
+            recorded[1]
+        );
+        assert!(
+            recorded[1].contains("1/5"),
+            "continuation is bounded: {}",
+            recorded[1]
+        );
+        assert!(
+            recorded[1].contains("complete") && recorded[1].contains("blocked"),
+            "continuation names the accepted outcomes: {}",
+            recorded[1]
+        );
+        drop(recorded);
+        handle.shutdown();
+    }
+
+    /// When auto-continuation is disabled, a run that ends in a `Failed` stop is
+    /// surfaced and the model is not asked to continue. Kvist relies on this to
+    /// apply its own task-aware continuation policy.
+    #[test]
+    fn worker_surfaces_an_unfinished_run_when_continuation_is_disabled() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let prompts = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (handle, receiver, prompts_tx) = start(
+            test_session(),
+            ContinuingTransport {
+                calls: calls.clone(),
+                prompts: prompts.clone(),
+            },
+            FailingExecutor,
+            ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+            RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
+            5,
+            RunLimits::default(),
+            false,
+        )
+        .unwrap();
+        prompts_tx.send("original objective".into()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let event = receiver
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .unwrap();
+            match event {
+                Event::Failed(_) => break,
+                Event::Finished { .. } => panic!("a disabled session must not auto-continue"),
+                _ => {}
+            }
+        }
+        // Exactly one model turn: the failed first, never a continuation.
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let recorded = prompts.lock().unwrap();
+        assert_eq!(*recorded, vec!["original objective".to_string()]);
+        drop(recorded);
+        handle.shutdown();
     }
 
     #[test]

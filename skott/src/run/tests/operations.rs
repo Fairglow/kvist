@@ -28,6 +28,7 @@ fn phase4_cancel_active_unblocks_full_channel_without_shutdown_or_drain() {
         RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
         1,
         RunLimits::default(),
+        true,
     )
     .unwrap();
     prompts.send("cancel saturated producer".into()).unwrap();

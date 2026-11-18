@@ -159,6 +159,7 @@ fn owned_worker_socket_steers_quiet_provider_rejects_idle_and_disappears_on_shut
         RetryPolicy::new(3, Duration::from_millis(1), Duration::from_millis(1)),
         5,
         RunLimits::default(),
+        true,
     )
     .unwrap();
     let path = handle.enable_controls().unwrap();
@@ -235,6 +236,7 @@ fn worker_refuses_control_socket_without_required_recording() {
         RetryPolicy::default(),
         5,
         RunLimits::default(),
+        true,
     )
     .unwrap();
     assert!(handle.enable_controls().is_err());
@@ -266,6 +268,7 @@ fn natural_worker_exit_removes_its_control_socket_without_dropping_handle() {
         RetryPolicy::default(),
         5,
         RunLimits::default(),
+        true,
     )
     .unwrap();
     let path = handle.enable_controls().unwrap();

@@ -135,6 +135,11 @@ pub struct Skott {
     pub retry: RetryPolicy,
     pub limits: RunLimits,
     generation_loop_detection: bool,
+    /// Whether the session worker automatically continues a run that returned
+    /// control without finishing and without a legitimate block. Enabled by
+    /// default so a standalone Skott keeps working toward a result; Kvist
+    /// disables it and applies its own task-aware continuation policy.
+    pub continuation_enabled: bool,
 }
 impl Default for Skott {
     fn default() -> Self {
@@ -148,11 +153,20 @@ impl Skott {
             retry,
             limits: RunLimits::default(),
             generation_loop_detection: true,
+            continuation_enabled: true,
         }
     }
     /// Host-owned exception for intentional repetition; effects remain protected.
     pub fn with_generation_loop_detection(mut self, enabled: bool) -> Self {
         self.generation_loop_detection = enabled;
+        self
+    }
+    /// Enables or disables the worker's automatic continuation of unfinished
+    /// runs. The default is enabled: a standalone Skott keeps the agent working
+    /// until it reaches complete, blocked, or a human decision, instead of
+    /// stopping and waiting for the user to type "continue".
+    pub fn with_continuation(mut self, enabled: bool) -> Self {
+        self.continuation_enabled = enabled;
         self
     }
     pub fn with_limits(mut self, limits: RunLimits) -> Result<Self> {
