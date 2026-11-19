@@ -1334,24 +1334,26 @@ fn parse_limit(
 /// TOML integers decode to `i64`, so a negative or oversized value must be
 /// rejected rather than cast with `as u64`, which would wrap a negative value
 /// into an enormous unsigned bound and silently disable a resource limit.
-fn parse_bounded_unsigned(
-    config_path: &Path,
-    value: &toml::Value,
-    field: &str,
-) -> Result<u64> {
-    let integer = value
-        .as_integer()
-        .ok_or_else(|| invalid_configuration(config_path, &format!("`{field}` must be an integer")))?;
+fn parse_bounded_unsigned(config_path: &Path, value: &toml::Value, field: &str) -> Result<u64> {
+    let integer = value.as_integer().ok_or_else(|| {
+        invalid_configuration(config_path, &format!("`{field}` must be an integer"))
+    })?;
     let unsigned = u64::try_from(integer).map_err(|_| {
         invalid_configuration(
             config_path,
-            &format!("`{field}` must be a positive integer no greater than {}", u64::MAX),
+            &format!(
+                "`{field}` must be a positive integer no greater than {}",
+                u64::MAX
+            ),
         )
     })?;
     if unsigned == 0 {
         return Err(invalid_configuration(
             config_path,
-            &format!("`{field}` must be a positive integer no greater than {}", u64::MAX),
+            &format!(
+                "`{field}` must be a positive integer no greater than {}",
+                u64::MAX
+            ),
         ));
     }
     Ok(unsigned)
@@ -1578,13 +1580,11 @@ fn load_agent_config(
                             .and_then(toml::Value::as_str)
                             .map(str::to_owned);
                         let context_window = match p_table.get("context_window") {
-                            Some(value) => Some(
-                                parse_bounded_unsigned(
-                                    project_config_path,
-                                    value,
-                                    &format!("user agent profile {name} context_window"),
-                                )? as usize,
-                            ),
+                            Some(value) => Some(parse_bounded_unsigned(
+                                project_config_path,
+                                value,
+                                &format!("user agent profile {name} context_window"),
+                            )? as usize),
                             None => None,
                         };
                         let supports_thinking = p_table
@@ -1874,11 +1874,8 @@ fn merge_agent_config_from_table(
             config.discovery.llama_server_url = Some(url_str.to_owned());
         }
         if let Some(timeout) = discovery_table.get("timeout_seconds") {
-            let timeout_val = parse_bounded_unsigned(
-                config_path,
-                timeout,
-                "agent.discovery.timeout_seconds",
-            )?;
+            let timeout_val =
+                parse_bounded_unsigned(config_path, timeout, "agent.discovery.timeout_seconds")?;
             config.discovery.timeout_seconds = Some(timeout_val);
         }
         if let Some(allow) = discovery_table.get("allow_host_discovery") {
@@ -1966,18 +1963,44 @@ fn merge_agent_config_from_table(
 
             // Legacy role migration, made explicit. A profile table is migrated
             // into a role binding only when it is unambiguously a legacy role
-            // definition: it carries at least one role-only key and no profile
-            // field. Carrying any profile field (e.g. `provider`) marks the
-            // table as a profile, so it is never silently repointed into a role
-            // binding merely because a role-only key is also present. This keeps
+            // definition: it carries at least one role-only key and no
+            // unambiguous profile field. Carrying any unambiguous profile field
+            // (e.g. `provider`) marks the table as a profile, so it is never
+            // silently repointed into a role binding merely because a role-only
+            // key is also present. `model` is deliberately *not* a disqualifier:
+            // it is ambiguous, naming both a legacy role's default model and a
+            // profile's model, so a table with `model` plus a role-only key such
+            // as `models` remains an unambiguous legacy role. Only a shape that
+            // also carries an unambiguous profile field (e.g. `provider`) is
+            // content-ambiguous and is left to be parsed as a profile. This keeps
             // the migration a pure, deterministic function of the declared
             // surface rather than a content-inferred guess.
-            let has_profile_field = p_table
-                .keys()
-                .any(|key| matches!(key.as_str(), "provider" | "model" | "context_window" | "supports_thinking" | "default_thinking_effort" | "temperature" | "system_prompt" | "command"));
-            let has_role_only_key = p_table
-                .keys()
-                .any(|key| matches!(key.as_str(), "command_template" | "models" | "token_limit" | "timeout_seconds" | "thinking_effort" | "reasoning_effort" | "redaction_values" | "redaction" | "max_output_bytes"));
+            let has_profile_field = p_table.keys().any(|key| {
+                matches!(
+                    key.as_str(),
+                    "provider"
+                        | "context_window"
+                        | "supports_thinking"
+                        | "default_thinking_effort"
+                        | "temperature"
+                        | "system_prompt"
+                        | "command"
+                )
+            });
+            let has_role_only_key = p_table.keys().any(|key| {
+                matches!(
+                    key.as_str(),
+                    "command_template"
+                        | "models"
+                        | "token_limit"
+                        | "timeout_seconds"
+                        | "thinking_effort"
+                        | "reasoning_effort"
+                        | "redaction_values"
+                        | "redaction"
+                        | "max_output_bytes"
+                )
+            });
             let legacy_role = Role::from_str_case_insensitive(name)
                 .filter(|_| has_role_only_key && !has_profile_field);
 
@@ -2049,13 +2072,11 @@ fn merge_agent_config_from_table(
                     .and_then(toml::Value::as_str)
                     .map(str::to_owned);
                 let context_window = match p_table.get("context_window") {
-                    Some(value) => Some(
-                        parse_bounded_unsigned(
-                            config_path,
-                            value,
-                            &format!("agent.profiles.{name}.context_window"),
-                        )? as usize,
-                    ),
+                    Some(value) => Some(parse_bounded_unsigned(
+                        config_path,
+                        value,
+                        &format!("agent.profiles.{name}.context_window"),
+                    )? as usize),
                     None => None,
                 };
                 let supports_thinking = p_table
@@ -3070,7 +3091,11 @@ mod tests {
         );
         let config = load(root.path()).expect("positive context window");
         assert_eq!(
-            config.agent.profiles.get("qwen-coder").and_then(|p| p.context_window),
+            config
+                .agent
+                .profiles
+                .get("qwen-coder")
+                .and_then(|p| p.context_window),
             Some(8192)
         );
     }

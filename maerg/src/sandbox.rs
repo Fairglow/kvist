@@ -3013,7 +3013,13 @@ fn validate_runner(
                 ),
             });
         }
-        Err(source) => return Err(sandbox_error(config, "inspect trusted sandbox runner", source)),
+        Err(source) => {
+            return Err(sandbox_error(
+                config,
+                "inspect trusted sandbox runner",
+                source,
+            ));
+        }
     };
     // The runner can be a regular non-symlink file or a directory containing
     // handler scripts. Symlinks are rejected for security reasons.

@@ -594,8 +594,7 @@ fn artifacts_for_project(project_dir: &Path) -> Result<Vec<Artifact>> {
     ];
 
     if component_root == Path::new(".") {
-        let discovery =
-            discovery::discover_with_limits(project_dir, DiscoveryLimits::default())?;
+        let discovery = discovery::discover_with_limits(project_dir, DiscoveryLimits::default())?;
         for component in discovery.components {
             let comp_path = component.relative_path;
             for (doc_kind, art_kind) in [

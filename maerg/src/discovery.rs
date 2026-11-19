@@ -10,7 +10,7 @@ use std::{
 
 use crate::{KvistError, Result, artifacts::IMPLEMENTATION_RECORD_FILENAME};
 use crate::{
-    config::{self, DiscoveryLimits, load_component_root},
+    config::{DiscoveryLimits, load_component_root},
     filesystem::is_link_like,
 };
 

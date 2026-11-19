@@ -10,6 +10,7 @@
 //! `kvist.toml` is project-local (not committed); when it is absent there is
 //! no policy to inspect and the test passes.
 
+use sha2::Digest;
 use std::path::PathBuf;
 
 use maerg::config;
@@ -123,7 +124,10 @@ fn policy_digest_is_deterministic_and_bound_to_the_full_policy() {
 
     let first = maerg::config::compute_policy_hash(&policy).expect("policy serializes");
     let second = maerg::config::compute_policy_hash(&policy).expect("policy serializes");
-    assert_eq!(first, second, "the same policy must always hash identically");
+    assert_eq!(
+        first, second,
+        "the same policy must always hash identically"
+    );
     assert!(
         first.starts_with("sha256:"),
         "the policy digest must be a sha256 digest, got {first}"
@@ -147,7 +151,9 @@ fn policy_digest_is_deterministic_and_bound_to_the_full_policy() {
     );
 
     let mut altered = policy.clone();
-    altered.environment_allowlist.push("RUST_BACKTRACE".to_owned());
+    altered
+        .environment_allowlist
+        .push("RUST_BACKTRACE".to_owned());
     assert_ne!(
         first,
         maerg::config::compute_policy_hash(&altered).expect("policy serializes"),

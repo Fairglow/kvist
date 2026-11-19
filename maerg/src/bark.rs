@@ -1610,9 +1610,7 @@ fn destructive_gate(command: &cli::Command) -> Option<&'static str> {
         cli::Command::Component {
             command: cli::ComponentCommand::Commit { .. },
         } => Some("component commit (creates an acceptance commit)"),
-        cli::Command::Locks { clean: true } => {
-            Some("locks clean (removes stale task lock files)")
-        }
+        cli::Command::Locks { clean: true } => Some("locks clean (removes stale task lock files)"),
         _ => None,
     }
 }
@@ -2802,7 +2800,10 @@ mod tests {
         // The confirmation prompt names the destructive part, consistent with
         // the other declared destructive commands.
         let gate = destructive_gate(&locks_clean).unwrap();
-        assert!(gate.contains("locks clean"), "gate prompt names the command: {gate}");
+        assert!(
+            gate.contains("locks clean"),
+            "gate prompt names the command: {gate}"
+        );
         assert!(
             gate.contains("stale"),
             "gate prompt names what is removed: {gate}"

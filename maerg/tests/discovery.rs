@@ -274,8 +274,8 @@ fn workspace_namespace_classification_reuses_loaded_configuration() {
         ],
     );
 
-    let discovery = discover_with_limits(project.path(), Default::default())
-        .expect("discover components");
+    let discovery =
+        discover_with_limits(project.path(), Default::default()).expect("discover components");
 
     // The loaded configuration normalizes `./` to `.`, a workspace root, so the
     // component root itself must not be emitted as a root component.
@@ -332,8 +332,8 @@ fn nested_subproject_is_not_misclassified_as_workspace_root() {
         ],
     );
 
-    let discovery = discover_with_limits(project.path(), Default::default())
-        .expect("discover components");
+    let discovery =
+        discover_with_limits(project.path(), Default::default()).expect("discover components");
 
     // The subproject must be discovered as a regular component, not suppressed
     // as a misclassified workspace namespace root.

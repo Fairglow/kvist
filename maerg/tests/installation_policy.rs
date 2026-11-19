@@ -76,9 +76,7 @@ fn absent_configured_runner_diagnostic_names_installation_step_and_path() {
     let error = runner_identity(&config, &project_root, VcsSelection::Auto)
         .expect_err("an absent configured runner must fail closed");
     let KvistError::SandboxUnavailable { runner, reason } = error else {
-        panic!(
-            "an absent configured runner must fail with SandboxUnavailable, not `{error:?}`"
-        );
+        panic!("an absent configured runner must fail with SandboxUnavailable, not `{error:?}`");
     };
     // The diagnostic must name the installation step.
     assert!(
@@ -114,7 +112,10 @@ fn documented_installation_policy_references_runner_path_and_descriptor_bound_va
         .lines()
         .find_map(|line| {
             let line = line.trim();
-            let value = line.strip_prefix("runner")?.trim_start().strip_prefix('=')?;
+            let value = line
+                .strip_prefix("runner")?
+                .trim_start()
+                .strip_prefix('=')?;
             Some(value.trim().trim_matches('"').to_owned())
         })
         .expect("the workspace kvist.toml must configure a [sandbox] runner path");
