@@ -40,7 +40,7 @@ pub const fn default_resources() -> Resources {
     Resources {
         wall_time_ms: 120_000,
         max_output_bytes: 1 << 20,
-        max_processes: 256,
+        max_processes: 4096,
         max_files: 1 << 12,
         max_file_bytes: None,
         max_scratch_bytes: 1 << 30,
