@@ -63,7 +63,9 @@ fn split_exec_command(
         if let Some(field) = field {
             index += 1;
             let Some(root) = command_line.get(index) else {
-                return Err(format!("the {flag} flag requires a root directory argument"));
+                return Err(format!(
+                    "the {flag} flag requires a root directory argument"
+                ));
             };
             *field = Some(PathBuf::from(root));
         } else {

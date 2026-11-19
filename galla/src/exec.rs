@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::protocol::{
-    command_identity, mount_plan_identity, Access, BackendIdentity, BackendKind, Grant, Identities,
-    Network, NetworkMode, Phase, Purpose, REQUEST_PROTOCOL, Resources, SandboxRequest, Toolchain,
+    Access, BackendIdentity, BackendKind, Grant, Identities, Network, NetworkMode, Phase, Purpose,
+    REQUEST_PROTOCOL, Resources, SandboxRequest, Toolchain, command_identity, mount_plan_identity,
 };
 
 /// The canonical absolute sandbox destination for the working directory.
@@ -104,13 +104,15 @@ pub fn resolve_argv(
     let mut argv = vec![resolved.to_string_lossy().into_owned()];
     for argument in &command_line[1..] {
         argv.push(
-            argument.to_str().ok_or_else(|| {
-                format!(
-                    "exec argument `{}` is not valid UTF-8",
-                    argument.to_string_lossy()
-                )
-            })?
-            .to_owned(),
+            argument
+                .to_str()
+                .ok_or_else(|| {
+                    format!(
+                        "exec argument `{}` is not valid UTF-8",
+                        argument.to_string_lossy()
+                    )
+                })?
+                .to_owned(),
         );
     }
     Ok(argv)
@@ -150,7 +152,7 @@ pub fn resolve_on_path(name: &Path, extra_dirs: &[PathBuf]) -> Result<PathBuf, S
                 return Err(format!(
                     "cannot inspect exec candidate `{}`: {error}",
                     candidate.display()
-                ))
+                ));
             }
         };
         if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 {
@@ -251,9 +253,8 @@ pub fn build_request(
 /// The root must be a directory; a missing or non-directory root is an
 /// error because `--rust` was explicitly requested.
 pub fn rust_grants(root: &Path) -> Result<Vec<(String, String)>, String> {
-    let metadata = std::fs::symlink_metadata(root).map_err(|error| {
-        format!("cannot inspect the Rust root `{}`: {error}", root.display())
-    })?;
+    let metadata = std::fs::symlink_metadata(root)
+        .map_err(|error| format!("cannot inspect the Rust root `{}`: {error}", root.display()))?;
     if !metadata.is_dir() {
         return Err(format!(
             "the Rust root `{}` must be a directory",
@@ -271,13 +272,19 @@ pub fn rust_grants(root: &Path) -> Result<Vec<(String, String)>, String> {
         (root.join("user-cargo-bin"), RUST_USER_CARGO_BIN_DEST),
     ] {
         if source.is_dir() {
-            grants.push((source.to_string_lossy().into_owned(), destination.to_owned()));
+            grants.push((
+                source.to_string_lossy().into_owned(),
+                destination.to_owned(),
+            ));
         }
     }
     // The rustup launcher is a file, not a directory.
     let rustup = root.join("rustup");
     if rustup.is_file() {
-        grants.push((rustup.to_string_lossy().into_owned(), RUSTUP_DEST.to_owned()));
+        grants.push((
+            rustup.to_string_lossy().into_owned(),
+            RUSTUP_DEST.to_owned(),
+        ));
     }
     // Each installed toolchain, individually, at /rust/toolchains/<name>.
     if let Ok(entries) = std::fs::read_dir(root.join("toolchains")) {
@@ -335,17 +342,11 @@ impl ToolchainRoots {
         }
         if let Some(root) = &self.go {
             require_directory(root, "Go")?;
-            grants.push((
-                root.to_string_lossy().into_owned(),
-                format!("{home}/go"),
-            ));
+            grants.push((root.to_string_lossy().into_owned(), format!("{home}/go")));
         }
         if let Some(root) = &self.node {
             require_directory(root, "Node")?;
-            grants.push((
-                root.to_string_lossy().into_owned(),
-                format!("{home}/.npm"),
-            ));
+            grants.push((root.to_string_lossy().into_owned(), format!("{home}/.npm")));
         }
         if let Some(root) = &self.python {
             require_directory(root, "Python")?;
@@ -378,7 +379,10 @@ impl ToolchainRoots {
 /// corresponding flag was explicitly requested.
 fn require_directory(root: &Path, toolchain: &str) -> Result<(), String> {
     let metadata = std::fs::symlink_metadata(root).map_err(|error| {
-        format!("cannot inspect the {toolchain} root `{}`: {error}", root.display())
+        format!(
+            "cannot inspect the {toolchain} root `{}`: {error}",
+            root.display()
+        )
     })?;
     if !metadata.is_dir() {
         return Err(format!(
@@ -420,11 +424,7 @@ pub fn wrap_argv_with_rust_init(argv: &[String]) -> Vec<String> {
             .collect::<Vec<_>>()
             .join(" ")
     );
-    vec![
-        "/usr/bin/bash".to_owned(),
-        "-c".to_owned(),
-        script,
-    ]
+    vec!["/usr/bin/bash".to_owned(), "-c".to_owned(), script]
 }
 
 /// Quotes a single argument for safe interpolation into a `bash -c` script.
@@ -527,10 +527,7 @@ pub fn build_request_with_toolchains(
                 format!("{WORKSPACE_DESTINATION}/target"),
             );
             environment.insert("CARGO_NET_OFFLINE".to_owned(), "true".to_owned());
-            environment.insert(
-                "RUSTC".to_owned(),
-                format!("{RUST_RUNTIME_DEST}/bin/rustc"),
-            );
+            environment.insert("RUSTC".to_owned(), format!("{RUST_RUNTIME_DEST}/bin/rustc"));
             environment.insert(
                 "RUSTDOC".to_owned(),
                 format!("{RUST_RUNTIME_DEST}/bin/rustdoc"),
@@ -607,8 +604,7 @@ mod tests {
             &fixture_digest(b"backend"),
             &fixture_digest(b"runner"),
         );
-        validation::validate(&request)
-            .expect("the exec request must validate");
+        validation::validate(&request).expect("the exec request must validate");
     }
 
     #[test]
@@ -626,8 +622,7 @@ mod tests {
             &fixture_digest(b"backend"),
             &fixture_digest(b"runner"),
         );
-        validation::validate(&request)
-            .expect("a shell exec request must validate");
+        validation::validate(&request).expect("a shell exec request must validate");
     }
 
     #[test]
@@ -664,10 +659,13 @@ mod tests {
             &fixture_digest(b"backend"),
             &fixture_digest(b"runner"),
         );
-        assert_eq!(request.grants.len(), 2, "exactly two grants: system and workspace");
         assert_eq!(
-            request.grants[1].destination,
-            WORKSPACE_DESTINATION,
+            request.grants.len(),
+            2,
+            "exactly two grants: system and workspace"
+        );
+        assert_eq!(
+            request.grants[1].destination, WORKSPACE_DESTINATION,
             "the working directory must mount at /workspace"
         );
         assert_eq!(request.grants[1].access, Access::ReadWrite);
@@ -816,11 +814,17 @@ mod tests {
             Some(RUST_PATH)
         );
         assert_eq!(
-            request.environment.get("CARGO_TARGET_DIR").map(String::as_str),
+            request
+                .environment
+                .get("CARGO_TARGET_DIR")
+                .map(String::as_str),
             Some("/workspace/target")
         );
         assert_eq!(
-            request.environment.get("CARGO_NET_OFFLINE").map(String::as_str),
+            request
+                .environment
+                .get("CARGO_NET_OFFLINE")
+                .map(String::as_str),
             Some("true")
         );
         assert_eq!(
@@ -832,11 +836,11 @@ mod tests {
             Some("/rust/runtime/bin/rustdoc")
         );
         assert!(
-            request.environment.get("RUSTUP_HOME").is_none(),
+            !request.environment.contains_key("RUSTUP_HOME"),
             "no RUSTUP_HOME override; rustup uses $HOME/.rustup"
         );
         assert!(
-            request.environment.get("CARGO_HOME").is_none(),
+            !request.environment.contains_key("CARGO_HOME"),
             "no CARGO_HOME override; cargo uses $HOME/.cargo"
         );
     }
@@ -896,8 +900,8 @@ mod tests {
             Some(home.as_str())
         );
         // No Rust environment variables are set.
-        assert!(request.environment.get("RUSTC").is_none());
-        assert!(request.environment.get("CARGO_HOME").is_none());
+        assert!(!request.environment.contains_key("RUSTC"));
+        assert!(!request.environment.contains_key("CARGO_HOME"));
     }
 
     #[test]
@@ -985,23 +989,31 @@ mod tests {
         .unwrap();
         let home = expected_home();
         // The Rust resources are mounted at /rust/*.
-        assert!(request
-            .grants
-            .iter()
-            .any(|grant| grant.destination == RUST_RUNTIME_DEST));
+        assert!(
+            request
+                .grants
+                .iter()
+                .any(|grant| grant.destination == RUST_RUNTIME_DEST)
+        );
         // The Go, Node, and Python caches are mounted under $HOME.
-        assert!(request
-            .grants
-            .iter()
-            .any(|grant| grant.destination == format!("{home}/go")));
-        assert!(request
-            .grants
-            .iter()
-            .any(|grant| grant.destination == format!("{home}/.npm")));
-        assert!(request
-            .grants
-            .iter()
-            .any(|grant| grant.destination == format!("{home}/.cache/uv")));
+        assert!(
+            request
+                .grants
+                .iter()
+                .any(|grant| grant.destination == format!("{home}/go"))
+        );
+        assert!(
+            request
+                .grants
+                .iter()
+                .any(|grant| grant.destination == format!("{home}/.npm"))
+        );
+        assert!(
+            request
+                .grants
+                .iter()
+                .any(|grant| grant.destination == format!("{home}/.cache/uv"))
+        );
         // The home is a real /home/<username> directory.
         assert_eq!(request.home.as_deref(), Some(home.as_str()));
     }
@@ -1070,15 +1082,23 @@ mod tests {
         assert!(script.contains(&format!("cp {RUSTUP_HOME_DEST}/settings.toml")));
         assert!(script.contains(&format!("ln -sfn {RUSTUP_HOME_DEST}/toolchains")));
         assert!(script.contains(&format!("{RUST_RUNTIME_DEST}/initialize")));
-        assert!(script.contains(&format!("ln -sfn {RUST_REGISTRY_DEST} \"$HOME/.cargo/registry\"")));
+        assert!(script.contains(&format!(
+            "ln -sfn {RUST_REGISTRY_DEST} \"$HOME/.cargo/registry\""
+        )));
         assert!(script.contains(&format!("ln -sfn {RUST_GIT_DEST} \"$HOME/.cargo/git\"")));
-        assert!(script.contains(&format!("ln -sfn {RUST_TOOLCHAIN_DEST} {RUST_TOOLCHAINS_DEST}/default")));
+        assert!(script.contains(&format!(
+            "ln -sfn {RUST_TOOLCHAIN_DEST} {RUST_TOOLCHAINS_DEST}/default"
+        )));
         assert!(script.ends_with("&& exec '/usr/bin/cargo' 'build'"));
     }
 
     #[test]
     fn wrap_argv_with_rust_init_quotes_embedded_single_quotes() {
-        let argv = vec!["/usr/bin/bash".to_owned(), "-c".to_owned(), "echo 'hi'".to_owned()];
+        let argv = vec![
+            "/usr/bin/bash".to_owned(),
+            "-c".to_owned(),
+            "echo 'hi'".to_owned(),
+        ];
         let wrapped = wrap_argv_with_rust_init(&argv);
         // The embedded single quotes are escaped as '\'' so the payload
         // argument survives the outer bash -c quoting.

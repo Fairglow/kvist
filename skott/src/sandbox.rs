@@ -274,6 +274,7 @@ pub(crate) fn build_request_with_rust(
         grants: grants.clone(),
         cache: None,
         scratch: None,
+        home: None,
     };
 
     // Validate locally before spawning so a malformed request fails fast and is
