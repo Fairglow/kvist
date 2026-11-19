@@ -61,6 +61,17 @@ arguments, or a command line to run inside the sandbox:
   through the same Bubblewrap-backed isolation as the one-shot request mode.
   It never falls back to host execution, and the no-nesting guard applies
   unchanged.
+- The opt-in `--rust <root>` flag mounts the host Rust installation at `<root>`
+  read-only at the same `/rust/*` destinations and with the same environment
+  Skott uses: the runtime, toolchain, rustup home, rustup launcher, offline
+  registry, git dependencies, user cargo binaries, and each installed
+  toolchain. The Rust `initialize` script runs before the payload, bridging
+  the read-only `/rust/*` mounts into the writable `/tmp` locations that
+  rustup and cargo expect. Relative Rust command names (`cargo`, `rustc`, ...)
+  are resolved from the Rust bin directories. Without `--rust`, only the
+  system tree and the working directory are mounted. The flag is opt-in so
+  galla does not assume a host Rust installation exists or lives at a
+  particular path.
 
 The accepted target interface for the protocol modes is the redefined
 `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` protocol described by

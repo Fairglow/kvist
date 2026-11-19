@@ -32,6 +32,25 @@ pub const WORKSPACE_DESTINATION: &str = "/workspace";
 pub const SYSTEM_DESTINATION: &str = "/usr";
 /// The sandbox `PATH` exposing the system bin directories.
 pub const SYSTEM_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+/// The sandbox destination for the host Rust runtime (shims + initialize).
+pub const RUST_RUNTIME_DEST: &str = "/rust/runtime";
+/// The sandbox destination for the active Rust toolchain.
+pub const RUST_TOOLCHAIN_DEST: &str = "/rust/toolchain";
+/// The sandbox destination for the rustup home (settings + toolchain links).
+pub const RUSTUP_HOME_DEST: &str = "/rust/rustup-home";
+/// The sandbox destination for the rustup launcher.
+pub const RUSTUP_DEST: &str = "/rust/rustup";
+/// The sandbox destination for the offline Cargo registry.
+pub const RUST_REGISTRY_DEST: &str = "/rust/cargo-registry";
+/// The sandbox destination for the offline Cargo git dependencies.
+pub const RUST_GIT_DEST: &str = "/rust/cargo-git";
+/// The sandbox destination for user-installed cargo binaries.
+pub const RUST_USER_CARGO_BIN_DEST: &str = "/rust/user-cargo-bin";
+/// The sandbox destination prefix for each installed toolchain.
+pub const RUST_TOOLCHAINS_DEST: &str = "/rust/toolchains";
+/// The sandbox `PATH` when a Rust root is mounted.
+pub const RUST_PATH: &str =
+    "/rust/runtime/bin:/rust/toolchain/bin:/rust/user-cargo-bin:/usr/local/bin:/usr/bin:/bin";
 
 /// Bounded execution limits for one exec command. These match the runner's
 /// safe maxima and are deliberately generous: the exec mode is a convenience
@@ -51,11 +70,14 @@ pub const fn default_resources() -> Resources {
 /// Resolves the exec command line to an absolute argv.
 ///
 /// A relative `argv[0]` is searched on the host `PATH` (the standard system
-/// directories are always consulted), so `galla bash` works as well as
-/// `galla /usr/bin/bash`. The resolved program path is canonicalized so the
-/// request carries a canonical absolute path, as the protocol requires. The
-/// remaining arguments are passed through unchanged.
-pub fn resolve_argv(command_line: &[std::ffi::OsString]) -> Result<Vec<String>, String> {
+/// directories are always consulted, plus any `extra_dirs`), so `galla bash`
+/// works as well as `galla /usr/bin/bash`. The resolved program path is
+/// canonicalized so the request carries a canonical absolute path, as the
+/// protocol requires. The remaining arguments are passed through unchanged.
+pub fn resolve_argv(
+    command_line: &[std::ffi::OsString],
+    extra_dirs: &[PathBuf],
+) -> Result<Vec<String>, String> {
     let Some(program) = command_line.first() else {
         return Err("exec command line is empty".to_owned());
     };
@@ -68,7 +90,7 @@ pub fn resolve_argv(command_line: &[std::ffi::OsString]) -> Result<Vec<String>, 
             )
         })?
     } else {
-        resolve_on_path(program_path)?
+        resolve_on_path(program_path, extra_dirs)?
     };
     let mut argv = vec![resolved.to_string_lossy().into_owned()];
     for argument in &command_line[1..] {
@@ -87,11 +109,11 @@ pub fn resolve_argv(command_line: &[std::ffi::OsString]) -> Result<Vec<String>, 
 
 /// Resolves a relative command name against the host `PATH`.
 ///
-/// The standard system directories are always consulted, even when `PATH` is
-/// unset or cleared, so the exec mode does not depend on an ambient
-/// environment. The first regular executable file found is canonicalized and
-/// returned.
-pub fn resolve_on_path(name: &Path) -> Result<PathBuf, String> {
+/// The standard system directories and any `extra_dirs` are always consulted,
+/// even when `PATH` is unset or cleared, so the exec mode does not depend on
+/// an ambient environment. The first regular executable file found is
+/// canonicalized and returned.
+pub fn resolve_on_path(name: &Path, extra_dirs: &[PathBuf]) -> Result<PathBuf, String> {
     let mut directories: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|path| {
             std::env::split_paths(&path)
@@ -103,6 +125,11 @@ pub fn resolve_on_path(name: &Path) -> Result<PathBuf, String> {
         let path = PathBuf::from(directory);
         if !directories.contains(&path) {
             directories.push(path);
+        }
+    }
+    for directory in extra_dirs {
+        if !directories.contains(directory) {
+            directories.push(directory.clone());
         }
     }
     for directory in directories {
@@ -205,6 +232,217 @@ pub fn build_request(
         cache: None,
         scratch: None,
     }
+}
+
+/// Discovers the host Rust resources under `root` and returns the
+/// read-only grants that mount them at the same `/rust/*` destinations
+/// Skott uses. Each entry is included only when the corresponding host
+/// path exists, so a partial installation is mounted as far as it goes.
+/// The root must be a directory; a missing or non-directory root is an
+/// error because `--rust` was explicitly requested.
+pub fn rust_grants(root: &Path) -> Result<Vec<(String, String)>, String> {
+    let metadata = std::fs::symlink_metadata(root).map_err(|error| {
+        format!("cannot inspect the Rust root `{}`: {error}", root.display())
+    })?;
+    if !metadata.is_dir() {
+        return Err(format!(
+            "the Rust root `{}` must be a directory",
+            root.display()
+        ));
+    }
+    let mut grants = Vec::new();
+    // Fixed sub-resources, mounted at their canonical destinations.
+    for (source, destination) in [
+        (root.join("runtime"), RUST_RUNTIME_DEST),
+        (root.join("toolchain"), RUST_TOOLCHAIN_DEST),
+        (root.join("rustup-home"), RUSTUP_HOME_DEST),
+        (root.join("cargo-registry"), RUST_REGISTRY_DEST),
+        (root.join("cargo-git"), RUST_GIT_DEST),
+        (root.join("user-cargo-bin"), RUST_USER_CARGO_BIN_DEST),
+    ] {
+        if source.is_dir() {
+            grants.push((source.to_string_lossy().into_owned(), destination.to_owned()));
+        }
+    }
+    // The rustup launcher is a file, not a directory.
+    let rustup = root.join("rustup");
+    if rustup.is_file() {
+        grants.push((rustup.to_string_lossy().into_owned(), RUSTUP_DEST.to_owned()));
+    }
+    // Each installed toolchain, individually, at /rust/toolchains/<name>.
+    if let Ok(entries) = std::fs::read_dir(root.join("toolchains")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir()
+                && let Some(name) = entry.file_name().to_str()
+            {
+                grants.push((
+                    path.to_string_lossy().into_owned(),
+                    format!("{RUST_TOOLCHAINS_DEST}/{name}"),
+                ));
+            }
+        }
+    }
+    Ok(grants)
+}
+
+/// Wraps the payload argv so the Rust `initialize` script runs first.
+///
+/// When a Rust root is mounted, the `initialize` script at
+/// `/rust/runtime/initialize` must run inside the sandbox before the payload:
+/// it creates `/tmp/rustup-home`, copies the rustup settings, symlinks the
+/// toolchains, and links the offline registry and git dependencies into
+/// `CARGO_HOME`. The wrapped argv is a `bash -c` that runs the initialize
+/// script and then `exec`s the original command, so the payload replaces the
+/// shell and the process group is preserved.
+pub fn wrap_argv_with_rust_init(argv: &[String]) -> Vec<String> {
+    let script = format!(
+        "bash {RUST_RUNTIME_DEST}/initialize && exec {}",
+        argv.iter()
+            .map(|arg| shell_quote(arg))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    vec![
+        "/usr/bin/bash".to_owned(),
+        "-c".to_owned(),
+        script,
+    ]
+}
+
+/// Quotes a single argument for safe interpolation into a `bash -c` script.
+///
+/// The argument is wrapped in single quotes, with any embedded single quote
+/// escaped as `'\''` (close quote, literal quote, open quote). This is the
+/// standard POSIX shell quoting for arbitrary strings.
+fn shell_quote(arg: &str) -> String {
+    let mut quoted = String::with_capacity(arg.len() + 2);
+    quoted.push('\'');
+    for byte in arg.bytes() {
+        if byte == b'\'' {
+            quoted.push_str("'\\''");
+        } else {
+            quoted.push(byte as char);
+        }
+    }
+    quoted.push('\'');
+    quoted
+}
+
+/// Builds a closed authoring-phase request for the exec command line,
+/// optionally mounting a host Rust root at the same `/rust/*` destinations
+/// and with the same environment Skott uses. When `rust_root` is `None`,
+/// the request is identical to [`build_request`]: only the system tree and
+/// the working directory are mounted. When `Some`, the Rust resources are
+/// mounted read-only, the environment is extended with the Rust toolchain
+/// variables, and the payload argv is wrapped so the `initialize` script
+/// runs first. The sandbox matches the environment Skott would provide.
+pub fn build_request_with_rust(
+    argv: &[String],
+    workdir: &Path,
+    backend_path: &Path,
+    backend_digest: &str,
+    runner_digest: &str,
+    rust_root: Option<&Path>,
+) -> Result<SandboxRequest, String> {
+    // When a Rust root is mounted, wrap the payload so the initialize script
+    // runs first, bridging the read-only /rust/* mounts into the writable
+    // /tmp locations that rustup and cargo expect.
+    let effective_argv: Vec<String> = match rust_root {
+        Some(_) => wrap_argv_with_rust_init(argv),
+        None => argv.to_vec(),
+    };
+    let mut grants = vec![
+        Grant {
+            source: SYSTEM_DESTINATION.to_owned(),
+            destination: SYSTEM_DESTINATION.to_owned(),
+            access: Access::ReadOnly,
+            purpose: Purpose::Toolchain,
+            identity: digest_input(b"grant", SYSTEM_DESTINATION.as_bytes()),
+        },
+        Grant {
+            source: workdir.to_string_lossy().into_owned(),
+            destination: WORKSPACE_DESTINATION.to_owned(),
+            access: Access::ReadWrite,
+            purpose: Purpose::Authoring,
+            identity: digest_input(b"grant", workdir.to_string_lossy().as_bytes()),
+        },
+    ];
+    let mut environment = BTreeMap::from([
+        ("HOME".to_owned(), WORKSPACE_DESTINATION.to_owned()),
+        ("PATH".to_owned(), SYSTEM_PATH.to_owned()),
+    ]);
+    let toolchain_identity = match rust_root {
+        Some(root) => digest_input(b"toolchain", root.to_string_lossy().as_bytes()),
+        None => digest_input(b"toolchain", SYSTEM_DESTINATION.as_bytes()),
+    };
+
+    if let Some(root) = rust_root {
+        for (source, destination) in rust_grants(root)? {
+            grants.push(Grant {
+                source,
+                destination,
+                access: Access::ReadOnly,
+                purpose: Purpose::Toolchain,
+                identity: digest_input(b"grant-rust", root.to_string_lossy().as_bytes()),
+            });
+        }
+        environment.insert("PATH".to_owned(), RUST_PATH.to_owned());
+        environment.insert("HOME".to_owned(), "/tmp".to_owned());
+        environment.insert("RUSTUP_HOME".to_owned(), "/tmp/rustup-home".to_owned());
+        environment.insert("RUSTUP_AUTO_INSTALL".to_owned(), "0".to_owned());
+        environment.insert("CARGO_HOME".to_owned(), "/tmp/cargo-home".to_owned());
+        environment.insert(
+            "CARGO_TARGET_DIR".to_owned(),
+            format!("{WORKSPACE_DESTINATION}/target"),
+        );
+        environment.insert("CARGO_NET_OFFLINE".to_owned(), "true".to_owned());
+        environment.insert(
+            "RUSTC".to_owned(),
+            format!("{RUST_RUNTIME_DEST}/bin/rustc"),
+        );
+        environment.insert(
+            "RUSTDOC".to_owned(),
+            format!("{RUST_RUNTIME_DEST}/bin/rustdoc"),
+        );
+    }
+
+    let command_identity = command_identity(&effective_argv);
+    let mount_plan = mount_plan_identity(&grants);
+    let policy_identity = digest_input(b"policy", b"exec");
+
+    Ok(SandboxRequest {
+        protocol: REQUEST_PROTOCOL.to_owned(),
+        protocol_version: 1,
+        phase: Phase::Authoring,
+        argv: effective_argv,
+        working_directory: WORKSPACE_DESTINATION.to_owned(),
+        environment,
+        network: Network {
+            mode: NetworkMode::Deny,
+            allowed_sources: Vec::new(),
+        },
+        resources: default_resources(),
+        identities: Identities {
+            runner: runner_digest.to_owned(),
+            backend: BackendIdentity {
+                kind: BackendKind::Bubblewrap,
+                path: backend_path.to_string_lossy().into_owned(),
+                digest: backend_digest.to_owned(),
+            },
+            policy: policy_identity,
+            toolchain: toolchain_identity.clone(),
+            command: command_identity,
+            mount_plan,
+        },
+        toolchain: Toolchain::System {
+            identity: toolchain_identity,
+            root: SYSTEM_DESTINATION.to_owned(),
+        },
+        grants,
+        cache: None,
+        scratch: None,
+    })
 }
 
 /// Computes a `sha256:` digest of a domain-separated input.
@@ -320,5 +558,213 @@ mod tests {
         assert!(matches!(request.toolchain, Toolchain::System { .. }));
         assert!(request.cache.is_none());
         assert!(request.scratch.is_none());
+    }
+
+    /// Builds a fixture Rust root with the expected sub-resources so the
+    /// grant discovery and request construction can be tested without a
+    /// live host installation.
+    fn fixture_rust_root() -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        for directory in [
+            "runtime",
+            "toolchain",
+            "rustup-home",
+            "cargo-registry",
+            "cargo-git",
+            "user-cargo-bin",
+            "toolchains",
+        ] {
+            std::fs::create_dir(root.path().join(directory)).unwrap();
+        }
+        // The rustup launcher is a file.
+        std::fs::write(root.path().join("rustup"), "fixture rustup").unwrap();
+        // Two installed toolchains.
+        std::fs::create_dir(root.path().join("toolchains/stable")).unwrap();
+        std::fs::create_dir(root.path().join("toolchains/nightly")).unwrap();
+        root
+    }
+
+    #[test]
+    fn rust_grants_mounts_every_present_resource() {
+        let root = fixture_rust_root();
+        let grants = rust_grants(root.path()).unwrap();
+        let destinations: Vec<&str> = grants.iter().map(|(_, d)| d.as_str()).collect();
+        assert!(destinations.contains(&RUST_RUNTIME_DEST));
+        assert!(destinations.contains(&RUST_TOOLCHAIN_DEST));
+        assert!(destinations.contains(&RUSTUP_HOME_DEST));
+        assert!(destinations.contains(&RUST_REGISTRY_DEST));
+        assert!(destinations.contains(&RUST_GIT_DEST));
+        assert!(destinations.contains(&RUST_USER_CARGO_BIN_DEST));
+        assert!(destinations.contains(&RUSTUP_DEST));
+        assert!(destinations.contains(&format!("{RUST_TOOLCHAINS_DEST}/stable").as_str()));
+        assert!(destinations.contains(&format!("{RUST_TOOLCHAINS_DEST}/nightly").as_str()));
+    }
+
+    #[test]
+    fn rust_grants_requires_a_directory_root() {
+        let root = fixture_rust_root();
+        // A file is not a valid Rust root.
+        let file = root.path().join("rustup");
+        assert!(rust_grants(&file).is_err());
+        // A missing root is an error.
+        assert!(rust_grants(Path::new("/nonexistent/rust")).is_err());
+    }
+
+    #[test]
+    fn exec_request_with_rust_mounts_rust_and_sets_environment() {
+        let workdir = tempfile::tempdir().unwrap();
+        let root = fixture_rust_root();
+        let argv = vec!["/usr/bin/true".to_owned()];
+        let request = build_request_with_rust(
+            &argv,
+            workdir.path(),
+            Path::new("/usr/bin/bwrap"),
+            &fixture_digest(b"backend"),
+            &fixture_digest(b"runner"),
+            Some(root.path()),
+        )
+        .unwrap();
+        // The Rust resources are mounted read-only at the canonical destinations.
+        let rust_destinations: Vec<&str> = request
+            .grants
+            .iter()
+            .filter(|grant| grant.destination.starts_with("/rust/"))
+            .map(|grant| grant.destination.as_str())
+            .collect();
+        assert!(rust_destinations.contains(&RUST_RUNTIME_DEST));
+        assert!(rust_destinations.contains(&RUST_TOOLCHAIN_DEST));
+        assert!(rust_destinations.contains(&RUSTUP_HOME_DEST));
+        assert!(rust_destinations.contains(&RUST_REGISTRY_DEST));
+        assert!(rust_destinations.contains(&RUST_GIT_DEST));
+        assert!(rust_destinations.contains(&RUST_USER_CARGO_BIN_DEST));
+        assert!(rust_destinations.contains(&RUSTUP_DEST));
+        assert!(rust_destinations.contains(&format!("{RUST_TOOLCHAINS_DEST}/stable").as_str()));
+        assert!(rust_destinations.contains(&format!("{RUST_TOOLCHAINS_DEST}/nightly").as_str()));
+        // Every Rust grant is read-only.
+        for grant in &request.grants {
+            if grant.destination.starts_with("/rust/") {
+                assert_eq!(grant.access, Access::ReadOnly);
+                assert_eq!(grant.purpose, Purpose::Toolchain);
+            }
+        }
+        // The environment matches Skott's Rust environment.
+        assert_eq!(
+            request.environment.get("PATH").map(String::as_str),
+            Some(RUST_PATH)
+        );
+        assert_eq!(
+            request.environment.get("HOME").map(String::as_str),
+            Some("/tmp")
+        );
+        assert_eq!(
+            request.environment.get("RUSTUP_HOME").map(String::as_str),
+            Some("/tmp/rustup-home")
+        );
+        assert_eq!(
+            request.environment.get("CARGO_HOME").map(String::as_str),
+            Some("/tmp/cargo-home")
+        );
+        assert_eq!(
+            request.environment.get("CARGO_TARGET_DIR").map(String::as_str),
+            Some("/workspace/target")
+        );
+        assert_eq!(
+            request.environment.get("CARGO_NET_OFFLINE").map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            request.environment.get("RUSTC").map(String::as_str),
+            Some("/rust/runtime/bin/rustc")
+        );
+        assert_eq!(
+            request.environment.get("RUSTDOC").map(String::as_str),
+            Some("/rust/runtime/bin/rustdoc")
+        );
+    }
+
+    #[test]
+    fn exec_request_with_rust_validates() {
+        let workdir = tempfile::tempdir().unwrap();
+        let root = fixture_rust_root();
+        let argv = vec!["/usr/bin/true".to_owned()];
+        let request = build_request_with_rust(
+            &argv,
+            workdir.path(),
+            Path::new("/usr/bin/bwrap"),
+            &fixture_digest(b"backend"),
+            &fixture_digest(b"runner"),
+            Some(root.path()),
+        )
+        .unwrap();
+        validation::validate(&request).expect("the Rust exec request must validate");
+    }
+
+    #[test]
+    fn exec_request_without_rust_is_unchanged() {
+        let workdir = tempfile::tempdir().unwrap();
+        let argv = vec!["/usr/bin/true".to_owned()];
+        let plain = build_request(
+            &argv,
+            workdir.path(),
+            Path::new("/usr/bin/bwrap"),
+            &fixture_digest(b"backend"),
+            &fixture_digest(b"runner"),
+        );
+        let with_none = build_request_with_rust(
+            &argv,
+            workdir.path(),
+            Path::new("/usr/bin/bwrap"),
+            &fixture_digest(b"backend"),
+            &fixture_digest(b"runner"),
+            None,
+        )
+        .unwrap();
+        // A `None` Rust root produces the same request as the plain builder.
+        assert_eq!(plain.grants.len(), with_none.grants.len());
+        assert_eq!(plain.environment, with_none.environment);
+        assert_eq!(plain.identities.toolchain, with_none.identities.toolchain);
+    }
+
+    #[test]
+    fn wrap_argv_with_rust_init_runs_initialize_then_execs_payload() {
+        let argv = vec!["/usr/bin/cargo".to_owned(), "build".to_owned()];
+        let wrapped = wrap_argv_with_rust_init(&argv);
+        assert_eq!(wrapped.len(), 3);
+        assert_eq!(wrapped[0], "/usr/bin/bash");
+        assert_eq!(wrapped[1], "-c");
+        // The script runs the initialize script and then execs the payload.
+        assert!(wrapped[2].starts_with("bash /rust/runtime/initialize && exec "));
+        assert!(wrapped[2].ends_with("'/usr/bin/cargo' 'build'"));
+    }
+
+    #[test]
+    fn wrap_argv_with_rust_init_quotes_embedded_single_quotes() {
+        let argv = vec!["/usr/bin/bash".to_owned(), "-c".to_owned(), "echo 'hi'".to_owned()];
+        let wrapped = wrap_argv_with_rust_init(&argv);
+        // The embedded single quotes are escaped as '\'' so the payload
+        // argument survives the outer bash -c quoting.
+        assert!(wrapped[2].contains(&"echo 'hi'".replace('\'', "'\\''")));
+    }
+
+    #[test]
+    fn exec_request_with_rust_wraps_the_payload_argv() {
+        let workdir = tempfile::tempdir().unwrap();
+        let root = fixture_rust_root();
+        let argv = vec!["/usr/bin/cargo".to_owned(), "build".to_owned()];
+        let request = build_request_with_rust(
+            &argv,
+            workdir.path(),
+            Path::new("/usr/bin/bwrap"),
+            &fixture_digest(b"backend"),
+            &fixture_digest(b"runner"),
+            Some(root.path()),
+        )
+        .unwrap();
+        // The request argv is the wrapped form, not the raw payload.
+        assert_eq!(request.argv[0], "/usr/bin/bash");
+        assert_eq!(request.argv[1], "-c");
+        assert!(request.argv[2].starts_with("bash /rust/runtime/initialize && exec "));
+        // The command identity binds the wrapped argv.
+        assert_eq!(request.identities.command, command_identity(&request.argv));
     }
 }

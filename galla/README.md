@@ -127,13 +127,29 @@ galla --kvist-sandbox-request-v1
 galla /usr/bin/bash
 galla bash -c 'echo hello'
 galla exec /usr/bin/ls -la
+
+# Run a Rust command with the host Rust installation mounted. The `--rust`
+# flag takes the host Rust root directory and mounts its runtime, toolchain,
+# rustup home, offline registry, git dependencies, and user cargo binaries
+# read-only at the same /rust/* destinations and with the same environment
+# Skott uses. The Rust initialize script runs before the payload, bridging
+# the read-only /rust/* mounts into the writable /tmp locations that rustup
+# and cargo expect. Relative Rust command names (cargo, rustc, ...) are
+# resolved from the Rust bin directories.
+galla --rust /rust cargo build
+galla --rust /rust rustc --version
+galla exec --rust /rust cargo test --offline
 ```
 
 The exec mode constructs a closed authoring-phase request — denied network,
 the working directory as the only writable grant, the system tree read-only,
 and the standard resource limits — and enforces it through the same
 Bubblewrap-backed isolation as the one-shot request mode. It never falls back
-to host execution.
+to host execution. When `--rust` is given, the host Rust resources are added
+as read-only grants and the environment is extended with the Rust toolchain
+variables, so the sandbox matches the environment Skott would provide for a
+Rust build. The `--rust` flag is opt-in: without it, only the system tree and
+the working directory are mounted.
 
 The accepted target interface for the protocol modes is the redefined
 `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` protocol described by

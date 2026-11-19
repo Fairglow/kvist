@@ -7,6 +7,7 @@
 //! via Bubblewrap-backed Linux isolation. It never falls back to unconstrained host execution.
 
 use std::io::{self, Read};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use galla::probe::{self, ProbeOutcome};
@@ -23,10 +24,47 @@ const SESSION_ARGUMENT: &str = "--kvist-sandbox-session-v1";
 /// form of the convenience exec mode; a bare `galla <command> <args...>` is
 /// equivalent and is the primary form.
 const EXEC_ARGUMENT: &str = "exec";
+/// The opt-in Rust root flag. `galla --rust <root> <command> <args...>`
+/// mounts the host Rust installation at `<root>` read-only at the same
+/// `/rust/*` destinations and with the same environment Skott uses, so the
+/// sandbox matches the environment Skott would provide for a Rust build.
+const RUST_ARGUMENT: &str = "--rust";
+
+/// Splits the exec command line into an optional Rust root and the command.
+///
+/// A leading `exec` keyword is stripped (it is the explicit form of the exec
+/// mode). The `--rust <root>` flag may appear anywhere before the command;
+/// when present, the following argument is the Rust root and is removed from
+/// the command line. When absent, the Rust root is `None`. A `--rust` flag
+/// without a following argument is an error.
+fn split_exec_command(
+    command_line: Vec<std::ffi::OsString>,
+) -> Result<(Option<PathBuf>, Vec<std::ffi::OsString>), String> {
+    // Strip a leading `exec` keyword, if present.
+    let mut index = 0;
+    if command_line.first().is_some_and(|arg| arg == EXEC_ARGUMENT) {
+        index = 1;
+    }
+    let mut rust_root = None;
+    let mut command = Vec::with_capacity(command_line.len());
+    while index < command_line.len() {
+        if command_line[index] == RUST_ARGUMENT {
+            index += 1;
+            let Some(root) = command_line.get(index) else {
+                return Err("the --rust flag requires a root directory argument".to_owned());
+            };
+            rust_root = Some(PathBuf::from(root));
+        } else {
+            command.push(command_line[index].clone());
+        }
+        index += 1;
+    }
+    Ok((rust_root, command))
+}
 
 fn main() -> ExitCode {
-    let mut arguments = std::env::args_os().skip(1);
-    let Some(first) = arguments.next() else {
+    let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+    let Some(first) = arguments.first() else {
         eprintln!("galla: a protocol mode argument is required");
         return ExitCode::from(2);
     };
@@ -34,29 +72,27 @@ fn main() -> ExitCode {
     // The three protocol modes are fixed tokens that take no further
     // arguments. Anything else is a command line for the exec mode.
     match first.as_os_str().to_str() {
-        Some(PROBE_ARGUMENT) => {
-            if arguments.next().is_some() {
+        Some(PROBE_ARGUMENT) | Some(REQUEST_ARGUMENT) | Some(SESSION_ARGUMENT) => {
+            if arguments.len() > 1 {
                 eprintln!("galla: exactly one protocol mode argument is accepted");
                 return ExitCode::from(2);
             }
-            run_probe()
-        }
-        Some(REQUEST_ARGUMENT) => {
-            if arguments.next().is_some() {
-                eprintln!("galla: exactly one protocol mode argument is accepted");
-                return ExitCode::from(2);
+            match first.as_os_str().to_str() {
+                Some(PROBE_ARGUMENT) => run_probe(),
+                Some(REQUEST_ARGUMENT) => run_request(),
+                _ => run_session(),
             }
-            run_request()
         }
-        Some(SESSION_ARGUMENT) => {
-            if arguments.next().is_some() {
-                eprintln!("galla: exactly one protocol mode argument is accepted");
-                return ExitCode::from(2);
-            }
-            run_session()
+        _ => {
+            let (rust_root, command) = match split_exec_command(arguments) {
+                Ok(pair) => pair,
+                Err(reason) => {
+                    eprintln!("galla: {reason}");
+                    return ExitCode::from(2);
+                }
+            };
+            run_exec(command, rust_root)
         }
-        Some(EXEC_ARGUMENT) => run_exec(arguments.collect()),
-        _ => run_exec(std::iter::once(first).chain(arguments).collect()),
     }
 }
 
@@ -69,14 +105,14 @@ fn main() -> ExitCode {
 /// enforced through the same Bubblewrap-backed isolation as the one-shot
 /// request mode. The no-nesting guard, backend identity, and host-code
 /// protection all apply unchanged.
-fn run_exec(command_line: Vec<std::ffi::OsString>) -> ExitCode {
+fn run_exec(command_line: Vec<std::ffi::OsString>, rust_root: Option<PathBuf>) -> ExitCode {
     if let Err(reason) = context::require_host() {
         eprintln!("galla: {reason}");
         return ExitCode::from(3);
     }
 
     if command_line.is_empty() {
-        eprintln!("galla: exec mode requires a command; usage: galla <command> <args...>");
+        eprintln!("galla: exec mode requires a command; usage: galla [--rust <root>] <command> <args...>");
         return ExitCode::from(2);
     }
 
@@ -85,7 +121,19 @@ fn run_exec(command_line: Vec<std::ffi::OsString>) -> ExitCode {
         return ExitCode::from(3);
     };
 
-    let argv = match galla::exec::resolve_argv(&command_line) {
+    // When a Rust root is mounted, the Rust bin directories are searched so
+    // that `cargo`, `rustc`, etc. resolve from the host Rust installation.
+    let rust_dirs: Vec<PathBuf> = rust_root
+        .as_ref()
+        .map(|root| {
+            vec![
+                root.join("runtime/bin"),
+                root.join("toolchain/bin"),
+                root.join("user-cargo-bin"),
+            ]
+        })
+        .unwrap_or_default();
+    let argv = match galla::exec::resolve_argv(&command_line, &rust_dirs) {
         Ok(argv) => argv,
         Err(reason) => {
             eprintln!("galla: {reason}");
@@ -122,13 +170,20 @@ fn run_exec(command_line: Vec<std::ffi::OsString>) -> ExitCode {
         }
     };
 
-    let request = galla::exec::build_request(
+    let request = match galla::exec::build_request_with_rust(
         &argv,
         &workdir,
         &bwrap_path,
         &backend_digest,
         &runner_digest,
-    );
+        rust_root.as_deref(),
+    ) {
+        Ok(request) => request,
+        Err(reason) => {
+            eprintln!("galla: {reason}");
+            return ExitCode::from(2);
+        }
+    };
 
     if let Err(error) = validation::validate(&request) {
         eprintln!("galla: {error}");
