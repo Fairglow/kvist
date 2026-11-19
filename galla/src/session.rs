@@ -143,8 +143,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{
-    Cache, Grant, Identities, Network, Phase, PROTOCOL_VERSION, Resources, SandboxRequest,
-    Scratch, Toolchain,
+    Cache, Grant, Identities, Network, PROTOCOL_VERSION, Phase, Resources, SandboxRequest, Scratch,
+    Toolchain,
 };
 use crate::validation;
 
@@ -184,10 +184,16 @@ impl fmt::Display for SessionError {
                 "session launch metadata of {size} bytes exceeds the {limit}-byte protocol limit"
             ),
             Self::Malformed { detail } => {
-                write!(formatter, "malformed version-one session launch metadata: {detail}")
+                write!(
+                    formatter,
+                    "malformed version-one session launch metadata: {detail}"
+                )
             }
             Self::Invalid { detail } => {
-                write!(formatter, "invalid version-one session launch metadata: {detail}")
+                write!(
+                    formatter,
+                    "invalid version-one session launch metadata: {detail}"
+                )
             }
         }
     }
@@ -443,16 +449,15 @@ pub fn parse_and_validate(bytes: &[u8]) -> Result<SessionLaunch, SessionError> {
         cache: wire.cache.clone(),
         scratch: wire.scratch.clone(),
     };
-    validation::validate_request(&request, SESSION_PROTOCOL)
-        .map_err(|error| match error {
-            crate::validation::ProtocolError::TooLarge { size, limit } => {
-                SessionError::TooLarge { size, limit }
-            }
-            crate::validation::ProtocolError::Malformed { detail } => {
-                SessionError::Malformed { detail }
-            }
-            crate::validation::ProtocolError::Invalid { detail } => SessionError::Invalid { detail },
-        })?;
+    validation::validate_request(&request, SESSION_PROTOCOL).map_err(|error| match error {
+        crate::validation::ProtocolError::TooLarge { size, limit } => {
+            SessionError::TooLarge { size, limit }
+        }
+        crate::validation::ProtocolError::Malformed { detail } => {
+            SessionError::Malformed { detail }
+        }
+        crate::validation::ProtocolError::Invalid { detail } => SessionError::Invalid { detail },
+    })?;
 
     // Validate the bounded session block.
     let session = validate_session_block(&wire.session)?;
@@ -485,7 +490,7 @@ fn validate_session_block(wire: &SessionWire) -> Result<Session, SessionError> {
         other => {
             return Err(invalid(format!(
                 "session stdio must be `reserved-for-acp`, not `{other}`"
-            )))
+            )));
         }
     };
 
@@ -497,7 +502,7 @@ fn validate_session_block(wire: &SessionWire) -> Result<Session, SessionError> {
         other => {
             return Err(invalid(format!(
                 "session cancellation must be `run-scoped`, not `{other}`"
-            )))
+            )));
         }
     };
 
@@ -528,7 +533,7 @@ fn validate_ipc_capability(capability: &IpcCapability) -> Result<IpcCapability, 
         IpcKind::GeneralHttpProxy => {
             return Err(invalid(
                 "session IPC capability must not grant a general HTTP proxy",
-            ))
+            ));
         }
     }
 
@@ -539,7 +544,7 @@ fn validate_ipc_capability(capability: &IpcCapability) -> Result<IpcCapability, 
         IpcSocket::HostLoopback => {
             return Err(invalid(
                 "session IPC capability must not share host loopback",
-            ))
+            ));
         }
     }
 

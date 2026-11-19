@@ -111,11 +111,8 @@ fn request_protocol_mismatch(buffer: &[u8]) -> Option<String> {
     }
     let value = serde_json::from_slice::<serde_json::Value>(buffer).ok()?;
     let protocol = value.get("protocol")?.as_str()?;
-    (protocol != REQUEST_PROTOCOL).then(|| {
-        format!(
-            "protocol must be `{REQUEST_PROTOCOL}`, not `{protocol}`"
-        )
-    })
+    (protocol != REQUEST_PROTOCOL)
+        .then(|| format!("protocol must be `{REQUEST_PROTOCOL}`, not `{protocol}`"))
 }
 
 /// Runs the explicit, versioned session mode.
@@ -137,7 +134,9 @@ fn run_session() -> ExitCode {
         .ok()
         .and_then(|value| value.parse::<i32>().ok())
     else {
-        eprintln!("galla: session mode requires the KVIST_SESSION_FD environment variable naming the dedicated launch-metadata descriptor");
+        eprintln!(
+            "galla: session mode requires the KVIST_SESSION_FD environment variable naming the dedicated launch-metadata descriptor"
+        );
         return ExitCode::from(2);
     };
 
@@ -148,7 +147,9 @@ fn run_session() -> ExitCode {
     let file = match std::fs::File::open(format!("/proc/self/fd/{descriptor}")) {
         Ok(file) => file,
         Err(error) => {
-            eprintln!("galla: cannot open the session launch-metadata descriptor {descriptor}: {error}");
+            eprintln!(
+                "galla: cannot open the session launch-metadata descriptor {descriptor}: {error}"
+            );
             return ExitCode::from(2);
         }
     };
@@ -156,7 +157,9 @@ fn run_session() -> ExitCode {
     let mut handle = std::io::BufReader::new(file).take((MAX_SESSION_BYTES as u64) + 1);
     let mut buffer = Vec::new();
     if let Err(error) = handle.read_to_end(&mut buffer) {
-        eprintln!("galla: cannot read the session launch metadata from descriptor {descriptor}: {error}");
+        eprintln!(
+            "galla: cannot read the session launch metadata from descriptor {descriptor}: {error}"
+        );
         return ExitCode::from(2);
     }
 
