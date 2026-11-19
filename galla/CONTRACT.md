@@ -61,17 +61,34 @@ arguments, or a command line to run inside the sandbox:
   through the same Bubblewrap-backed isolation as the one-shot request mode.
   It never falls back to host execution, and the no-nesting guard applies
   unchanged.
-- The opt-in `--rust <root>` flag mounts the host Rust installation at `<root>`
-  read-only at the same `/rust/*` destinations and with the same environment
-  Skott uses: the runtime, toolchain, rustup home, rustup launcher, offline
-  registry, git dependencies, user cargo binaries, and each installed
-  toolchain. The Rust `initialize` script runs before the payload, bridging
-  the read-only `/rust/*` mounts into the writable `/tmp` locations that
-  rustup and cargo expect. Relative Rust command names (`cargo`, `rustc`, ...)
-  are resolved from the Rust bin directories. Without `--rust`, only the
-  system tree and the working directory are mounted. The flag is opt-in so
-  galla does not assume a host Rust installation exists or lives at a
-  particular path.
+- The opt-in toolchain flags (`--rust <root>`, `--go <root>`, `--node <root>`,
+  `--python <root>`) mount the host toolchain resources read-only and a user
+  home directory `/home/<username>` as a writable tmpfs, where `<username>` is
+  inherited from the host `USER` environment variable. The sandbox resembles a
+  normal system: the tools find their caches where they would on a host.
+  - `--rust` mounts the host Rust installation at `<root>` at the same
+    `/rust/*` destinations Skott uses: the runtime, toolchain, rustup home,
+    rustup launcher, offline registry, git dependencies, user cargo binaries,
+    and each installed toolchain. The Rust setup runs before the payload,
+    bridging the read-only `/rust/*` mounts into `$HOME/.rustup` and
+    `$HOME/.cargo` so rustup and cargo find their state where a normal system
+    would have it, with no `RUSTUP_HOME` or `CARGO_HOME` overrides. Relative
+    Rust command names (`cargo`, `rustc`, ...) are resolved from the Rust bin
+    directories.
+  - `--go` mounts the host Go module cache at `<root>` read-only at
+    `$HOME/go`. The Go interpreter and `GOROOT` live in the system tree, so
+    only the module cache needs mounting.
+  - `--node` mounts the host npm cache at `<root>` read-only at `$HOME/.npm`.
+    The Node interpreter and `npm` live in the system tree, so only the cache
+    needs mounting.
+  - `--python` mounts the host uv cache at `<root>` read-only at
+    `$HOME/.cache/uv`. The Python interpreter, `pip`, and `uv` live in the
+    system tree, so only the cache needs mounting.
+  The flags may be combined; the same home directory is shared and each cache
+  is mounted at its expected location. Without any toolchain flag, only the
+  system tree and the working directory are mounted, and `HOME` is the working
+  directory. The flags are opt-in so galla does not assume a host toolchain
+  installation exists or lives at a particular path.
 
 The accepted target interface for the protocol modes is the redefined
 `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` protocol described by

@@ -51,6 +51,15 @@ pub const RUST_TOOLCHAINS_DEST: &str = "/rust/toolchains";
 /// The sandbox `PATH` when a Rust root is mounted.
 pub const RUST_PATH: &str =
     "/rust/runtime/bin:/rust/toolchain/bin:/rust/user-cargo-bin:/usr/local/bin:/usr/bin:/bin";
+/// The sandbox destination prefix for the user home. The home directory is
+/// `/home/<username>`, where `<username>` is inherited from the host `USER`
+/// environment variable. The home is mounted as a writable tmpfs, and the
+/// toolchain caches are mounted read-only into their expected `$HOME`-relative
+/// locations, so the tools find everything where a normal system would have
+/// it.
+pub const HOME_PREFIX: &str = "/home";
+/// The default username when the host `USER` environment variable is unset.
+pub const DEFAULT_USERNAME: &str = "user";
 
 /// Bounded execution limits for one exec command. These match the runner's
 /// safe maxima and are deliberately generous: the exec mode is a convenience
@@ -231,6 +240,7 @@ pub fn build_request(
         grants,
         cache: None,
         scratch: None,
+        home: None,
     }
 }
 
@@ -286,18 +296,125 @@ pub fn rust_grants(root: &Path) -> Result<Vec<(String, String)>, String> {
     Ok(grants)
 }
 
-/// Wraps the payload argv so the Rust `initialize` script runs first.
+/// The host toolchain roots requested by the exec command line. Each field,
+/// when `Some`, names a host directory that is mounted read-only at the
+/// expected `$HOME`-relative location so the corresponding tool finds its
+/// cache where a normal system would have it. The interpreters and compilers
+/// for Go, Node, and Python live in the system tree, so only their caches
+/// need mounting. Rust is different: its toolchain and registry live outside
+/// the system tree, so `rust` names the host Rust root and the runtime,
+/// toolchain, rustup home, and offline registry are mounted at the same
+/// `/rust/*` destinations Skott uses.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolchainRoots {
+    /// The host Rust root, mounted at the `/rust/*` destinations.
+    pub rust: Option<PathBuf>,
+    /// The host Go module cache, mounted at `$HOME/go`.
+    pub go: Option<PathBuf>,
+    /// The host npm cache, mounted at `$HOME/.npm`.
+    pub node: Option<PathBuf>,
+    /// The host uv cache, mounted at `$HOME/.cache/uv`.
+    pub python: Option<PathBuf>,
+}
+
+impl ToolchainRoots {
+    /// Returns `true` when at least one toolchain root is requested.
+    pub fn any(&self) -> bool {
+        self.rust.is_some() || self.go.is_some() || self.node.is_some() || self.python.is_some()
+    }
+
+    /// Returns the read-only grants for the requested toolchain roots, given
+    /// the sandbox home directory. Each root is mounted at its expected
+    /// `$HOME`-relative location (or, for Rust, at the `/rust/*`
+    /// destinations). A missing or non-directory root is an error because the
+    /// corresponding flag was explicitly requested.
+    pub fn grants(&self, home: &str) -> Result<Vec<(String, String)>, String> {
+        let mut grants = Vec::new();
+        if let Some(root) = &self.rust {
+            grants.extend(rust_grants(root)?);
+        }
+        if let Some(root) = &self.go {
+            require_directory(root, "Go")?;
+            grants.push((
+                root.to_string_lossy().into_owned(),
+                format!("{home}/go"),
+            ));
+        }
+        if let Some(root) = &self.node {
+            require_directory(root, "Node")?;
+            grants.push((
+                root.to_string_lossy().into_owned(),
+                format!("{home}/.npm"),
+            ));
+        }
+        if let Some(root) = &self.python {
+            require_directory(root, "Python")?;
+            grants.push((
+                root.to_string_lossy().into_owned(),
+                format!("{home}/.cache/uv"),
+            ));
+        }
+        Ok(grants)
+    }
+
+    /// Returns the bin directories to search when resolving a relative
+    /// command name. For Rust, the runtime, toolchain, and user cargo bin
+    /// directories are searched. For Go, Node, and Python, the interpreters
+    /// are in the system tree, so no extra directories are needed.
+    pub fn extra_dirs(&self) -> Vec<PathBuf> {
+        match &self.rust {
+            Some(root) => vec![
+                root.join("runtime/bin"),
+                root.join("toolchain/bin"),
+                root.join("user-cargo-bin"),
+            ],
+            None => Vec::new(),
+        }
+    }
+}
+
+/// Requires that `root` is an existing directory, naming the toolchain in
+/// the diagnostic. A missing or non-directory root is an error because the
+/// corresponding flag was explicitly requested.
+fn require_directory(root: &Path, toolchain: &str) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(root).map_err(|error| {
+        format!("cannot inspect the {toolchain} root `{}`: {error}", root.display())
+    })?;
+    if !metadata.is_dir() {
+        return Err(format!(
+            "the {toolchain} root `{}` must be a directory",
+            root.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Wraps the payload argv so the Rust environment is set up under `$HOME`
+/// before the payload runs.
 ///
-/// When a Rust root is mounted, the `initialize` script at
-/// `/rust/runtime/initialize` must run inside the sandbox before the payload:
-/// it creates `/tmp/rustup-home`, copies the rustup settings, symlinks the
-/// toolchains, and links the offline registry and git dependencies into
-/// `CARGO_HOME`. The wrapped argv is a `bash -c` that runs the initialize
-/// script and then `exec`s the original command, so the payload replaces the
-/// shell and the process group is preserved.
+/// When a Rust root is mounted, the read-only `/rust/*` mounts must be
+/// bridged into the writable home locations that rustup and cargo expect,
+/// namely `$HOME/.rustup` (settings and toolchain links) and `$HOME/.cargo`
+/// (registry and git). The wrapped argv is a `bash -c` that creates those
+/// directories, copies the rustup settings, symlinks the toolchains, and
+/// links the offline registry and git dependencies, then `exec`s the original
+/// command so the payload replaces the shell and the process group is
+/// preserved. The setup uses `$HOME` (not the hardcoded `/tmp` paths from the
+/// host `initialize` script) so the environment resembles a normal system,
+/// with rustup and cargo finding their state where they would on a host and
+/// no `RUSTUP_HOME` or `CARGO_HOME` overrides.
 pub fn wrap_argv_with_rust_init(argv: &[String]) -> Vec<String> {
+    let setup = format!(
+        "mkdir -p \"$HOME/.rustup\" \"$HOME/.cargo\" \
+         && cp {RUSTUP_HOME_DEST}/settings.toml \"$HOME/.rustup/settings.toml\" \
+         && ln -sfn {RUSTUP_HOME_DEST}/toolchains \"$HOME/.rustup/toolchains\" \
+         && {RUST_RUNTIME_DEST}/initialize \
+         && ln -sfn {RUST_REGISTRY_DEST} \"$HOME/.cargo/registry\" \
+         && ln -sfn {RUST_GIT_DEST} \"$HOME/.cargo/git\" \
+         && ln -sfn {RUST_TOOLCHAIN_DEST} {RUST_TOOLCHAINS_DEST}/default"
+    );
     let script = format!(
-        "bash {RUST_RUNTIME_DEST}/initialize && exec {}",
+        "{setup} && exec {}",
         argv.iter()
             .map(|arg| shell_quote(arg))
             .collect::<Vec<_>>()
@@ -330,25 +447,29 @@ fn shell_quote(arg: &str) -> String {
 }
 
 /// Builds a closed authoring-phase request for the exec command line,
-/// optionally mounting a host Rust root at the same `/rust/*` destinations
-/// and with the same environment Skott uses. When `rust_root` is `None`,
-/// the request is identical to [`build_request`]: only the system tree and
-/// the working directory are mounted. When `Some`, the Rust resources are
-/// mounted read-only, the environment is extended with the Rust toolchain
-/// variables, and the payload argv is wrapped so the `initialize` script
-/// runs first. The sandbox matches the environment Skott would provide.
-pub fn build_request_with_rust(
+/// optionally mounting the requested toolchain roots and a user home. When
+/// no toolchain root is requested, the request is identical to
+/// [`build_request`]: only the system tree and the working directory are
+/// mounted, and `HOME` is the working directory. When at least one root is
+/// requested, the home directory `/home/<username>` is mounted as a writable
+/// tmpfs (the username is inherited from the host `USER` environment
+/// variable), the toolchain caches are mounted read-only into their expected
+/// `$HOME`-relative locations, and the environment is extended with the
+/// toolchain variables. For Rust, the payload argv is also wrapped so the
+/// `initialize` script runs first. The sandbox resembles a normal system:
+/// the tools find their caches where they would on a host.
+pub fn build_request_with_toolchains(
     argv: &[String],
     workdir: &Path,
     backend_path: &Path,
     backend_digest: &str,
     runner_digest: &str,
-    rust_root: Option<&Path>,
+    roots: &ToolchainRoots,
 ) -> Result<SandboxRequest, String> {
     // When a Rust root is mounted, wrap the payload so the initialize script
     // runs first, bridging the read-only /rust/* mounts into the writable
-    // /tmp locations that rustup and cargo expect.
-    let effective_argv: Vec<String> = match rust_root {
+    // home locations that rustup and cargo expect.
+    let effective_argv: Vec<String> = match roots.rust {
         Some(_) => wrap_argv_with_rust_init(argv),
         None => argv.to_vec(),
     };
@@ -372,39 +493,50 @@ pub fn build_request_with_rust(
         ("HOME".to_owned(), WORKSPACE_DESTINATION.to_owned()),
         ("PATH".to_owned(), SYSTEM_PATH.to_owned()),
     ]);
-    let toolchain_identity = match rust_root {
+    let toolchain_identity = match &roots.rust {
         Some(root) => digest_input(b"toolchain", root.to_string_lossy().as_bytes()),
         None => digest_input(b"toolchain", SYSTEM_DESTINATION.as_bytes()),
     };
-
-    if let Some(root) = rust_root {
-        for (source, destination) in rust_grants(root)? {
+    // The home directory is /home/<username>, where <username> is inherited
+    // from the host USER environment variable. It is mounted as a writable
+    // tmpfs by the enforcement, and the toolchain caches are mounted
+    // read-only into it at their expected locations. When no toolchain root
+    // is requested, no home tmpfs is mounted and HOME stays the working
+    // directory.
+    let mut home: Option<String> = None;
+    if roots.any() {
+        let username = std::env::var("USER")
+            .ok()
+            .filter(|user| !user.is_empty())
+            .unwrap_or_else(|| DEFAULT_USERNAME.to_owned());
+        let home_dir = format!("{HOME_PREFIX}/{username}");
+        for (source, destination) in roots.grants(&home_dir)? {
             grants.push(Grant {
                 source,
                 destination,
                 access: Access::ReadOnly,
                 purpose: Purpose::Toolchain,
-                identity: digest_input(b"grant-rust", root.to_string_lossy().as_bytes()),
+                identity: digest_input(b"grant-toolchain", home_dir.as_bytes()),
             });
         }
-        environment.insert("PATH".to_owned(), RUST_PATH.to_owned());
-        environment.insert("HOME".to_owned(), "/tmp".to_owned());
-        environment.insert("RUSTUP_HOME".to_owned(), "/tmp/rustup-home".to_owned());
-        environment.insert("RUSTUP_AUTO_INSTALL".to_owned(), "0".to_owned());
-        environment.insert("CARGO_HOME".to_owned(), "/tmp/cargo-home".to_owned());
-        environment.insert(
-            "CARGO_TARGET_DIR".to_owned(),
-            format!("{WORKSPACE_DESTINATION}/target"),
-        );
-        environment.insert("CARGO_NET_OFFLINE".to_owned(), "true".to_owned());
-        environment.insert(
-            "RUSTC".to_owned(),
-            format!("{RUST_RUNTIME_DEST}/bin/rustc"),
-        );
-        environment.insert(
-            "RUSTDOC".to_owned(),
-            format!("{RUST_RUNTIME_DEST}/bin/rustdoc"),
-        );
+        environment.insert("HOME".to_owned(), home_dir.clone());
+        if roots.rust.is_some() {
+            environment.insert("PATH".to_owned(), RUST_PATH.to_owned());
+            environment.insert(
+                "CARGO_TARGET_DIR".to_owned(),
+                format!("{WORKSPACE_DESTINATION}/target"),
+            );
+            environment.insert("CARGO_NET_OFFLINE".to_owned(), "true".to_owned());
+            environment.insert(
+                "RUSTC".to_owned(),
+                format!("{RUST_RUNTIME_DEST}/bin/rustc"),
+            );
+            environment.insert(
+                "RUSTDOC".to_owned(),
+                format!("{RUST_RUNTIME_DEST}/bin/rustdoc"),
+            );
+        }
+        home = Some(home_dir);
     }
 
     let command_identity = command_identity(&effective_argv);
@@ -442,6 +574,7 @@ pub fn build_request_with_rust(
         grants,
         cache: None,
         scratch: None,
+        home,
     })
 }
 
@@ -610,18 +743,40 @@ mod tests {
         assert!(rust_grants(Path::new("/nonexistent/rust")).is_err());
     }
 
+    /// Computes the sandbox home directory the same way the builder does:
+    /// `/home/<username>`, where `<username>` is the host `USER` environment
+    /// variable or the default.
+    fn expected_home() -> String {
+        let username = std::env::var("USER")
+            .ok()
+            .filter(|user| !user.is_empty())
+            .unwrap_or_else(|| DEFAULT_USERNAME.to_owned());
+        format!("{HOME_PREFIX}/{username}")
+    }
+
+    /// Builds a fixture directory to serve as a host toolchain cache root.
+    fn fixture_cache_root() -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("marker"), "fixture").unwrap();
+        root
+    }
+
     #[test]
     fn exec_request_with_rust_mounts_rust_and_sets_environment() {
         let workdir = tempfile::tempdir().unwrap();
         let root = fixture_rust_root();
         let argv = vec!["/usr/bin/true".to_owned()];
-        let request = build_request_with_rust(
+        let roots = ToolchainRoots {
+            rust: Some(root.path().to_owned()),
+            ..Default::default()
+        };
+        let request = build_request_with_toolchains(
             &argv,
             workdir.path(),
             Path::new("/usr/bin/bwrap"),
             &fixture_digest(b"backend"),
             &fixture_digest(b"runner"),
-            Some(root.path()),
+            &roots,
         )
         .unwrap();
         // The Rust resources are mounted read-only at the canonical destinations.
@@ -647,22 +802,18 @@ mod tests {
                 assert_eq!(grant.purpose, Purpose::Toolchain);
             }
         }
-        // The environment matches Skott's Rust environment.
+        // The home is a real /home/<username> directory, not /tmp.
+        let home = expected_home();
+        assert_eq!(
+            request.environment.get("HOME").map(String::as_str),
+            Some(home.as_str())
+        );
+        assert_eq!(request.home.as_deref(), Some(home.as_str()));
+        // The Rust environment uses the standard locations under $HOME, with
+        // no RUSTUP_HOME or CARGO_HOME overrides.
         assert_eq!(
             request.environment.get("PATH").map(String::as_str),
             Some(RUST_PATH)
-        );
-        assert_eq!(
-            request.environment.get("HOME").map(String::as_str),
-            Some("/tmp")
-        );
-        assert_eq!(
-            request.environment.get("RUSTUP_HOME").map(String::as_str),
-            Some("/tmp/rustup-home")
-        );
-        assert_eq!(
-            request.environment.get("CARGO_HOME").map(String::as_str),
-            Some("/tmp/cargo-home")
         );
         assert_eq!(
             request.environment.get("CARGO_TARGET_DIR").map(String::as_str),
@@ -680,6 +831,14 @@ mod tests {
             request.environment.get("RUSTDOC").map(String::as_str),
             Some("/rust/runtime/bin/rustdoc")
         );
+        assert!(
+            request.environment.get("RUSTUP_HOME").is_none(),
+            "no RUSTUP_HOME override; rustup uses $HOME/.rustup"
+        );
+        assert!(
+            request.environment.get("CARGO_HOME").is_none(),
+            "no CARGO_HOME override; cargo uses $HOME/.cargo"
+        );
     }
 
     #[test]
@@ -687,20 +846,168 @@ mod tests {
         let workdir = tempfile::tempdir().unwrap();
         let root = fixture_rust_root();
         let argv = vec!["/usr/bin/true".to_owned()];
-        let request = build_request_with_rust(
+        let roots = ToolchainRoots {
+            rust: Some(root.path().to_owned()),
+            ..Default::default()
+        };
+        let request = build_request_with_toolchains(
             &argv,
             workdir.path(),
             Path::new("/usr/bin/bwrap"),
             &fixture_digest(b"backend"),
             &fixture_digest(b"runner"),
-            Some(root.path()),
+            &roots,
         )
         .unwrap();
         validation::validate(&request).expect("the Rust exec request must validate");
     }
 
     #[test]
-    fn exec_request_without_rust_is_unchanged() {
+    fn exec_request_with_go_mounts_module_cache_in_home() {
+        let workdir = tempfile::tempdir().unwrap();
+        let root = fixture_cache_root();
+        let argv = vec!["/usr/bin/true".to_owned()];
+        let roots = ToolchainRoots {
+            go: Some(root.path().to_owned()),
+            ..Default::default()
+        };
+        let request = build_request_with_toolchains(
+            &argv,
+            workdir.path(),
+            Path::new("/usr/bin/bwrap"),
+            &fixture_digest(b"backend"),
+            &fixture_digest(b"runner"),
+            &roots,
+        )
+        .unwrap();
+        let home = expected_home();
+        // The Go module cache is mounted read-only at $HOME/go.
+        let go_grant = request
+            .grants
+            .iter()
+            .find(|grant| grant.destination == format!("{home}/go"))
+            .expect("the Go module cache must be mounted at $HOME/go");
+        assert_eq!(go_grant.access, Access::ReadOnly);
+        assert_eq!(go_grant.purpose, Purpose::Toolchain);
+        // The home is a real /home/<username> directory.
+        assert_eq!(request.home.as_deref(), Some(home.as_str()));
+        assert_eq!(
+            request.environment.get("HOME").map(String::as_str),
+            Some(home.as_str())
+        );
+        // No Rust environment variables are set.
+        assert!(request.environment.get("RUSTC").is_none());
+        assert!(request.environment.get("CARGO_HOME").is_none());
+    }
+
+    #[test]
+    fn exec_request_with_node_mounts_npm_cache_in_home() {
+        let workdir = tempfile::tempdir().unwrap();
+        let root = fixture_cache_root();
+        let argv = vec!["/usr/bin/true".to_owned()];
+        let roots = ToolchainRoots {
+            node: Some(root.path().to_owned()),
+            ..Default::default()
+        };
+        let request = build_request_with_toolchains(
+            &argv,
+            workdir.path(),
+            Path::new("/usr/bin/bwrap"),
+            &fixture_digest(b"backend"),
+            &fixture_digest(b"runner"),
+            &roots,
+        )
+        .unwrap();
+        let home = expected_home();
+        // The npm cache is mounted read-only at $HOME/.npm.
+        let node_grant = request
+            .grants
+            .iter()
+            .find(|grant| grant.destination == format!("{home}/.npm"))
+            .expect("the npm cache must be mounted at $HOME/.npm");
+        assert_eq!(node_grant.access, Access::ReadOnly);
+        assert_eq!(node_grant.purpose, Purpose::Toolchain);
+        assert_eq!(request.home.as_deref(), Some(home.as_str()));
+    }
+
+    #[test]
+    fn exec_request_with_python_mounts_uv_cache_in_home() {
+        let workdir = tempfile::tempdir().unwrap();
+        let root = fixture_cache_root();
+        let argv = vec!["/usr/bin/true".to_owned()];
+        let roots = ToolchainRoots {
+            python: Some(root.path().to_owned()),
+            ..Default::default()
+        };
+        let request = build_request_with_toolchains(
+            &argv,
+            workdir.path(),
+            Path::new("/usr/bin/bwrap"),
+            &fixture_digest(b"backend"),
+            &fixture_digest(b"runner"),
+            &roots,
+        )
+        .unwrap();
+        let home = expected_home();
+        // The uv cache is mounted read-only at $HOME/.cache/uv.
+        let python_grant = request
+            .grants
+            .iter()
+            .find(|grant| grant.destination == format!("{home}/.cache/uv"))
+            .expect("the uv cache must be mounted at $HOME/.cache/uv");
+        assert_eq!(python_grant.access, Access::ReadOnly);
+        assert_eq!(python_grant.purpose, Purpose::Toolchain);
+        assert_eq!(request.home.as_deref(), Some(home.as_str()));
+    }
+
+    #[test]
+    fn exec_request_with_multiple_toolchains_mounts_all() {
+        let workdir = tempfile::tempdir().unwrap();
+        let rust_root = fixture_rust_root();
+        let go_root = fixture_cache_root();
+        let node_root = fixture_cache_root();
+        let python_root = fixture_cache_root();
+        let argv = vec!["/usr/bin/true".to_owned()];
+        let roots = ToolchainRoots {
+            rust: Some(rust_root.path().to_owned()),
+            go: Some(go_root.path().to_owned()),
+            node: Some(node_root.path().to_owned()),
+            python: Some(python_root.path().to_owned()),
+        };
+        let request = build_request_with_toolchains(
+            &argv,
+            workdir.path(),
+            Path::new("/usr/bin/bwrap"),
+            &fixture_digest(b"backend"),
+            &fixture_digest(b"runner"),
+            &roots,
+        )
+        .unwrap();
+        let home = expected_home();
+        // The Rust resources are mounted at /rust/*.
+        assert!(request
+            .grants
+            .iter()
+            .any(|grant| grant.destination == RUST_RUNTIME_DEST));
+        // The Go, Node, and Python caches are mounted under $HOME.
+        assert!(request
+            .grants
+            .iter()
+            .any(|grant| grant.destination == format!("{home}/go")));
+        assert!(request
+            .grants
+            .iter()
+            .any(|grant| grant.destination == format!("{home}/.npm")));
+        assert!(request
+            .grants
+            .iter()
+            .any(|grant| grant.destination == format!("{home}/.cache/uv")));
+        // The home is a real /home/<username> directory.
+        assert_eq!(request.home.as_deref(), Some(home.as_str()));
+    }
+
+    #[test]
+    fn exec_request_without_toolchains_is_unchanged() {
         let workdir = tempfile::tempdir().unwrap();
         let argv = vec!["/usr/bin/true".to_owned()];
         let plain = build_request(
@@ -710,31 +1017,63 @@ mod tests {
             &fixture_digest(b"backend"),
             &fixture_digest(b"runner"),
         );
-        let with_none = build_request_with_rust(
+        let with_none = build_request_with_toolchains(
             &argv,
             workdir.path(),
             Path::new("/usr/bin/bwrap"),
             &fixture_digest(b"backend"),
             &fixture_digest(b"runner"),
-            None,
+            &ToolchainRoots::default(),
         )
         .unwrap();
-        // A `None` Rust root produces the same request as the plain builder.
+        // No toolchain roots produces the same request as the plain builder.
         assert_eq!(plain.grants.len(), with_none.grants.len());
         assert_eq!(plain.environment, with_none.environment);
         assert_eq!(plain.identities.toolchain, with_none.identities.toolchain);
+        assert_eq!(plain.home, with_none.home);
+        assert!(with_none.home.is_none(), "no home tmpfs without toolchains");
+        assert_eq!(
+            with_none.environment.get("HOME").map(String::as_str),
+            Some(WORKSPACE_DESTINATION),
+            "HOME is the working directory without toolchains"
+        );
     }
 
     #[test]
-    fn wrap_argv_with_rust_init_runs_initialize_then_execs_payload() {
+    fn toolchain_rots_grants_requires_a_directory_root() {
+        let root = fixture_cache_root();
+        // A file is not a valid toolchain root.
+        let file = root.path().join("marker");
+        let roots = ToolchainRoots {
+            go: Some(file.clone()),
+            ..Default::default()
+        };
+        assert!(roots.grants("/home/user").is_err());
+        // A missing root is an error.
+        let roots = ToolchainRoots {
+            node: Some(PathBuf::from("/nonexistent/node")),
+            ..Default::default()
+        };
+        assert!(roots.grants("/home/user").is_err());
+    }
+
+    #[test]
+    fn wrap_argv_with_rust_init_sets_up_home_then_execs_payload() {
         let argv = vec!["/usr/bin/cargo".to_owned(), "build".to_owned()];
         let wrapped = wrap_argv_with_rust_init(&argv);
         assert_eq!(wrapped.len(), 3);
         assert_eq!(wrapped[0], "/usr/bin/bash");
         assert_eq!(wrapped[1], "-c");
-        // The script runs the initialize script and then execs the payload.
-        assert!(wrapped[2].starts_with("bash /rust/runtime/initialize && exec "));
-        assert!(wrapped[2].ends_with("'/usr/bin/cargo' 'build'"));
+        // The script sets up the home locations and then execs the payload.
+        let script = &wrapped[2];
+        assert!(script.contains("mkdir -p \"$HOME/.rustup\" \"$HOME/.cargo\""));
+        assert!(script.contains(&format!("cp {RUSTUP_HOME_DEST}/settings.toml")));
+        assert!(script.contains(&format!("ln -sfn {RUSTUP_HOME_DEST}/toolchains")));
+        assert!(script.contains(&format!("{RUST_RUNTIME_DEST}/initialize")));
+        assert!(script.contains(&format!("ln -sfn {RUST_REGISTRY_DEST} \"$HOME/.cargo/registry\"")));
+        assert!(script.contains(&format!("ln -sfn {RUST_GIT_DEST} \"$HOME/.cargo/git\"")));
+        assert!(script.contains(&format!("ln -sfn {RUST_TOOLCHAIN_DEST} {RUST_TOOLCHAINS_DEST}/default")));
+        assert!(script.ends_with("&& exec '/usr/bin/cargo' 'build'"));
     }
 
     #[test]
@@ -751,20 +1090,47 @@ mod tests {
         let workdir = tempfile::tempdir().unwrap();
         let root = fixture_rust_root();
         let argv = vec!["/usr/bin/cargo".to_owned(), "build".to_owned()];
-        let request = build_request_with_rust(
+        let roots = ToolchainRoots {
+            rust: Some(root.path().to_owned()),
+            ..Default::default()
+        };
+        let request = build_request_with_toolchains(
             &argv,
             workdir.path(),
             Path::new("/usr/bin/bwrap"),
             &fixture_digest(b"backend"),
             &fixture_digest(b"runner"),
-            Some(root.path()),
+            &roots,
         )
         .unwrap();
         // The request argv is the wrapped form, not the raw payload.
         assert_eq!(request.argv[0], "/usr/bin/bash");
         assert_eq!(request.argv[1], "-c");
-        assert!(request.argv[2].starts_with("bash /rust/runtime/initialize && exec "));
+        assert!(request.argv[2].contains("mkdir -p \"$HOME/.rustup\" \"$HOME/.cargo\""));
+        assert!(request.argv[2].ends_with("&& exec '/usr/bin/cargo' 'build'"));
         // The command identity binds the wrapped argv.
         assert_eq!(request.identities.command, command_identity(&request.argv));
+    }
+
+    #[test]
+    fn exec_request_without_rust_does_not_wrap_the_payload_argv() {
+        let workdir = tempfile::tempdir().unwrap();
+        let root = fixture_cache_root();
+        let argv = vec!["/usr/bin/go".to_owned(), "build".to_owned()];
+        let roots = ToolchainRoots {
+            go: Some(root.path().to_owned()),
+            ..Default::default()
+        };
+        let request = build_request_with_toolchains(
+            &argv,
+            workdir.path(),
+            Path::new("/usr/bin/bwrap"),
+            &fixture_digest(b"backend"),
+            &fixture_digest(b"runner"),
+            &roots,
+        )
+        .unwrap();
+        // Without a Rust root, the payload argv is not wrapped.
+        assert_eq!(request.argv, argv);
     }
 }

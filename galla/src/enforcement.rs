@@ -400,6 +400,15 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         }
     }
     // Final origin descriptors are consumed/closed by Bubblewrap before exec.
+    // Mount the user home as a writable tmpfs, if requested. This must happen
+    // before the grants so that read-only toolchain caches can be mounted
+    // into it at their expected `$HOME`-relative locations.
+    if let Some(home) = &request.home {
+        bwrap_args.push("--size".to_owned());
+        bwrap_args.push(request.resources.max_scratch_bytes.to_string());
+        bwrap_args.push("--tmpfs".to_owned());
+        bwrap_args.push(home.clone());
+    }
     for (grant, source) in request.grants.iter().zip(&sources) {
         if crate::validation::is_system_grant(grant) {
             continue;

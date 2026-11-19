@@ -131,25 +131,45 @@ galla exec /usr/bin/ls -la
 # Run a Rust command with the host Rust installation mounted. The `--rust`
 # flag takes the host Rust root directory and mounts its runtime, toolchain,
 # rustup home, offline registry, git dependencies, and user cargo binaries
-# read-only at the same /rust/* destinations and with the same environment
-# Skott uses. The Rust initialize script runs before the payload, bridging
-# the read-only /rust/* mounts into the writable /tmp locations that rustup
-# and cargo expect. Relative Rust command names (cargo, rustc, ...) are
-# resolved from the Rust bin directories.
+# read-only at the same /rust/* destinations Skott uses. A user home
+# directory /home/<username> is mounted as a writable tmpfs (the username is
+# inherited from the host USER environment variable), and the Rust setup runs
+# before the payload, bridging the read-only /rust/* mounts into $HOME/.rustup
+# and $HOME/.cargo so rustup and cargo find their state where a normal system
+# would have it. Relative Rust command names (cargo, rustc, ...) are resolved
+# from the Rust bin directories.
 galla --rust /rust cargo build
 galla --rust /rust rustc --version
 galla exec --rust /rust cargo test --offline
+
+# Run a Go, Node, or Python command with the host package cache mounted. The
+# `--go`, `--node`, and `--python` flags take the host cache directory and
+# mount it read-only at the expected $HOME-relative location ($HOME/go,
+# $HOME/.npm, $HOME/.cache/uv), so the tool finds its cache where a normal
+# system would have it. The interpreters and compilers (go, node, npm,
+# python3, pip3, uv) live in the system tree and need no flag; only the
+# offline cache does. The same /home/<username> home directory is mounted.
+galla --go /root/go go build
+galla --node /root/.npm npm install --offline
+galla --python /root/.cache/uv uv build
+
+# Combine toolchains: the same home directory is shared, and each cache is
+# mounted at its expected location.
+galla --rust /rust --go /root/go bash
 ```
 
 The exec mode constructs a closed authoring-phase request — denied network,
 the working directory as the only writable grant, the system tree read-only,
 and the standard resource limits — and enforces it through the same
 Bubblewrap-backed isolation as the one-shot request mode. It never falls back
-to host execution. When `--rust` is given, the host Rust resources are added
-as read-only grants and the environment is extended with the Rust toolchain
-variables, so the sandbox matches the environment Skott would provide for a
-Rust build. The `--rust` flag is opt-in: without it, only the system tree and
-the working directory are mounted.
+to host execution. When any toolchain flag is given, a user home directory
+`/home/<username>` is mounted as a writable tmpfs (the username is inherited
+from the host `USER` environment variable), the toolchain caches are mounted
+read-only into their expected `$HOME`-relative locations, and the environment
+is extended with the toolchain variables. The sandbox resembles a normal
+system: the tools find their caches where they would on a host. The flags are
+opt-in: without them, only the system tree and the working directory are
+mounted, and `HOME` is the working directory.
 
 The accepted target interface for the protocol modes is the redefined
 `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` protocol described by

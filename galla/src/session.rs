@@ -356,6 +356,7 @@ impl SessionLaunch {
             toolchain: self.toolchain.clone(),
             cache: self.cache.clone(),
             scratch: self.scratch.clone(),
+            home: None,
         }
     }
 }
@@ -448,6 +449,7 @@ pub fn parse_and_validate(bytes: &[u8]) -> Result<SessionLaunch, SessionError> {
         toolchain: wire.toolchain.clone(),
         cache: wire.cache.clone(),
         scratch: wire.scratch.clone(),
+        home: None,
     };
     validation::validate_request(&request, SESSION_PROTOCOL).map_err(|error| match error {
         crate::validation::ProtocolError::TooLarge { size, limit } => {

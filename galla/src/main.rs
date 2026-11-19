@@ -24,42 +24,54 @@ const SESSION_ARGUMENT: &str = "--kvist-sandbox-session-v1";
 /// form of the convenience exec mode; a bare `galla <command> <args...>` is
 /// equivalent and is the primary form.
 const EXEC_ARGUMENT: &str = "exec";
-/// The opt-in Rust root flag. `galla --rust <root> <command> <args...>`
-/// mounts the host Rust installation at `<root>` read-only at the same
-/// `/rust/*` destinations and with the same environment Skott uses, so the
-/// sandbox matches the environment Skott would provide for a Rust build.
+/// The opt-in toolchain root flags. Each flag takes a host directory and
+/// mounts it read-only at the expected `$HOME`-relative location (or, for
+/// Rust, at the `/rust/*` destinations), so the corresponding tool finds its
+/// cache where a normal system would have it.
 const RUST_ARGUMENT: &str = "--rust";
+const GO_ARGUMENT: &str = "--go";
+const NODE_ARGUMENT: &str = "--node";
+const PYTHON_ARGUMENT: &str = "--python";
 
-/// Splits the exec command line into an optional Rust root and the command.
+/// Splits the exec command line into the requested toolchain roots and the
+/// command.
 ///
 /// A leading `exec` keyword is stripped (it is the explicit form of the exec
-/// mode). The `--rust <root>` flag may appear anywhere before the command;
-/// when present, the following argument is the Rust root and is removed from
-/// the command line. When absent, the Rust root is `None`. A `--rust` flag
-/// without a following argument is an error.
+/// mode). The `--rust`, `--go`, `--node`, and `--python` flags may each
+/// appear anywhere before the command; when present, the following argument
+/// is the host root and is removed from the command line. A flag without a
+/// following argument is an error.
 fn split_exec_command(
     command_line: Vec<std::ffi::OsString>,
-) -> Result<(Option<PathBuf>, Vec<std::ffi::OsString>), String> {
+) -> Result<(galla::exec::ToolchainRoots, Vec<std::ffi::OsString>), String> {
     // Strip a leading `exec` keyword, if present.
     let mut index = 0;
     if command_line.first().is_some_and(|arg| arg == EXEC_ARGUMENT) {
         index = 1;
     }
-    let mut rust_root = None;
+    let mut roots = galla::exec::ToolchainRoots::default();
     let mut command = Vec::with_capacity(command_line.len());
     while index < command_line.len() {
-        if command_line[index] == RUST_ARGUMENT {
+        let flag = command_line[index].as_os_str().to_str().unwrap_or("");
+        let field = match flag {
+            RUST_ARGUMENT => Some(&mut roots.rust),
+            GO_ARGUMENT => Some(&mut roots.go),
+            NODE_ARGUMENT => Some(&mut roots.node),
+            PYTHON_ARGUMENT => Some(&mut roots.python),
+            _ => None,
+        };
+        if let Some(field) = field {
             index += 1;
             let Some(root) = command_line.get(index) else {
-                return Err("the --rust flag requires a root directory argument".to_owned());
+                return Err(format!("the {flag} flag requires a root directory argument"));
             };
-            rust_root = Some(PathBuf::from(root));
+            *field = Some(PathBuf::from(root));
         } else {
             command.push(command_line[index].clone());
         }
         index += 1;
     }
-    Ok((rust_root, command))
+    Ok((roots, command))
 }
 
 fn main() -> ExitCode {
@@ -84,14 +96,14 @@ fn main() -> ExitCode {
             }
         }
         _ => {
-            let (rust_root, command) = match split_exec_command(arguments) {
+            let (roots, command) = match split_exec_command(arguments) {
                 Ok(pair) => pair,
                 Err(reason) => {
                     eprintln!("galla: {reason}");
                     return ExitCode::from(2);
                 }
             };
-            run_exec(command, rust_root)
+            run_exec(command, roots)
         }
     }
 }
@@ -105,14 +117,16 @@ fn main() -> ExitCode {
 /// enforced through the same Bubblewrap-backed isolation as the one-shot
 /// request mode. The no-nesting guard, backend identity, and host-code
 /// protection all apply unchanged.
-fn run_exec(command_line: Vec<std::ffi::OsString>, rust_root: Option<PathBuf>) -> ExitCode {
+fn run_exec(command_line: Vec<std::ffi::OsString>, roots: galla::exec::ToolchainRoots) -> ExitCode {
     if let Err(reason) = context::require_host() {
         eprintln!("galla: {reason}");
         return ExitCode::from(3);
     }
 
     if command_line.is_empty() {
-        eprintln!("galla: exec mode requires a command; usage: galla [--rust <root>] <command> <args...>");
+        eprintln!(
+            "galla: exec mode requires a command; usage: galla [--rust <root>] [--go <root>] [--node <root>] [--python <root>] <command> <args...>"
+        );
         return ExitCode::from(2);
     }
 
@@ -123,17 +137,8 @@ fn run_exec(command_line: Vec<std::ffi::OsString>, rust_root: Option<PathBuf>) -
 
     // When a Rust root is mounted, the Rust bin directories are searched so
     // that `cargo`, `rustc`, etc. resolve from the host Rust installation.
-    let rust_dirs: Vec<PathBuf> = rust_root
-        .as_ref()
-        .map(|root| {
-            vec![
-                root.join("runtime/bin"),
-                root.join("toolchain/bin"),
-                root.join("user-cargo-bin"),
-            ]
-        })
-        .unwrap_or_default();
-    let argv = match galla::exec::resolve_argv(&command_line, &rust_dirs) {
+    let extra_dirs = roots.extra_dirs();
+    let argv = match galla::exec::resolve_argv(&command_line, &extra_dirs) {
         Ok(argv) => argv,
         Err(reason) => {
             eprintln!("galla: {reason}");
@@ -170,13 +175,13 @@ fn run_exec(command_line: Vec<std::ffi::OsString>, rust_root: Option<PathBuf>) -
         }
     };
 
-    let request = match galla::exec::build_request_with_rust(
+    let request = match galla::exec::build_request_with_toolchains(
         &argv,
         &workdir,
         &bwrap_path,
         &backend_digest,
         &runner_digest,
-        rust_root.as_deref(),
+        &roots,
     ) {
         Ok(request) => request,
         Err(reason) => {

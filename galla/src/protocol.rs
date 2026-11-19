@@ -413,6 +413,14 @@ pub struct SandboxRequest {
     pub toolchain: Toolchain,
     pub cache: Option<Cache>,
     pub scratch: Option<Scratch>,
+    /// The canonical absolute sandbox destination for the user home, mounted
+    /// as a writable tmpfs. When `Some`, the enforcement mounts a tmpfs at
+    /// this path before the grants, so read-only toolchain caches can be
+    /// mounted into it at their expected `$HOME`-relative locations. When
+    /// `None`, no home tmpfs is mounted and the `HOME` environment variable
+    /// is set to the working directory.
+    #[serde(default)]
+    pub home: Option<String>,
 }
 
 /// Reference to a verified executable.
