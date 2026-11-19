@@ -107,7 +107,8 @@ when those prerequisites are absent.
 
 ## Running `galla`
 
-`galla` accepts exactly one protocol mode argument:
+`galla` accepts one of the protocol modes, or a command line to run inside the
+sandbox:
 
 ```bash
 # Confirm production enforcement capabilities (verified Bubblewrap backend and
@@ -117,10 +118,25 @@ galla --kvist-sandbox-probe-v1
 # Read one bounded JSON request from standard input, validate it, and enforce
 # it via Bubblewrap-backed Linux isolation.
 galla --kvist-sandbox-request-v1
+
+# Run a command line inside the sandbox. The current working directory is
+# mounted read-write at /workspace and the standard system tree read-only at
+# /usr; nothing else is mounted. The command is resolved to an absolute path
+# (relative names are searched on the host PATH). The explicit `exec` keyword
+# is equivalent.
+galla /usr/bin/bash
+galla bash -c 'echo hello'
+galla exec /usr/bin/ls -la
 ```
 
-The accepted target interface is the redefined `kvist-sandbox-probe-v1` and
-`kvist-sandbox-request-v1` protocol described by
+The exec mode constructs a closed authoring-phase request — denied network,
+the working directory as the only writable grant, the system tree read-only,
+and the standard resource limits — and enforces it through the same
+Bubblewrap-backed isolation as the one-shot request mode. It never falls back
+to host execution.
+
+The accepted target interface for the protocol modes is the redefined
+`kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` protocol described by
 [ADR 0004](../docs/decisions/0004-bubblewrap-runner-and-sandbox-v1.md). Request
 parsing, validation, and Bubblewrap-backed isolation are fully implemented and
 active.
@@ -129,7 +145,8 @@ Nested Galla invocations are rejected with status 3 and a clear "already inside
 a Galla sandbox" diagnostic, before waiting for request input. Run the intended
 command directly in the existing sandbox instead. Detection uses a read-only
 namespace-local marker, not inherited environment variables. This notice does
-not authorize bypassing an enclosing tool's execution policy.
+not authorize bypassing an enclosing tool's execution policy. The exec mode
+fails closed with the same diagnostic when invoked from inside a sandbox.
 
 ## Documentation
 

@@ -21,8 +21,8 @@ or mint Kvist evidence.
 
 ## Provided interfaces
 
-The executable is named `galla`. It accepts exactly one protocol
-mode argument:
+The executable is named `galla`. It accepts one of the protocol mode
+arguments, or a command line to run inside the sandbox:
 
 - `--kvist-sandbox-request-v1` reads one bounded JSON request from standard
   input, strictly parses and independently validates it, and either rejects it
@@ -49,8 +49,20 @@ mode argument:
   the sandbox, so it carries only inference, not arbitrary HTTP, command
   spawning, or credentials. One-shot v1 behavior for existing tools and
   verification is preserved unchanged.
+- A command line (`galla <command> <args...>`, or the explicit
+  `galla exec <command> <args...>`) runs that command inside the sandbox. The
+  command is resolved to a canonical absolute host path (relative names are
+  searched on the host `PATH`, with the standard system directories always
+  consulted), the current working directory is mounted read-write at
+  `/workspace`, and the standard system tree is mounted read-only at `/usr`.
+  No other host path is mounted. The runner constructs a closed authoring-phase
+  request — denied network, the working directory as the only writable grant,
+  a system toolchain, and the standard resource limits — and enforces it
+  through the same Bubblewrap-backed isolation as the one-shot request mode.
+  It never falls back to host execution, and the no-nesting guard applies
+  unchanged.
 
-The accepted target interface is the redefined
+The accepted target interface for the protocol modes is the redefined
 `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` protocol described by
 ADR 0004. Request parsing, validation, and Bubblewrap-backed isolation are
 fully implemented and active.

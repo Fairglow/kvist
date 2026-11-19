@@ -33,6 +33,7 @@ compile_error!("galla currently supports Linux only");
 pub mod cache;
 pub mod context;
 pub mod enforcement;
+pub mod exec;
 pub mod origin;
 pub mod probe;
 pub mod protocol;

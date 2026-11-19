@@ -28,7 +28,7 @@ pub enum ProbeOutcome {
 }
 
 /// Helper to compute the SHA256 digest of a file.
-pub(crate) fn file_sha256(path: &Path) -> Result<String, std::io::Error> {
+pub fn file_sha256(path: &Path) -> Result<String, std::io::Error> {
     let file = File::open(path)?;
     let length = file.metadata()?.len();
     let mut file = file.take(length);
@@ -230,7 +230,7 @@ pub fn probe() -> ProbeOutcome {
 ///
 /// Validates that the discovered path resolves to a real file within a
 /// trusted system directory, preventing symlink substitution attacks.
-pub(crate) fn locate_backend() -> Option<PathBuf> {
+pub fn locate_backend() -> Option<PathBuf> {
     let direct = ["/usr/bin/bwrap", "/bin/bwrap", "/usr/local/bin/bwrap"];
     for candidate in direct {
         let path = Path::new(candidate);
