@@ -485,7 +485,7 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
     };
 
     if !root_exists {
-        let artifacts = artifacts_for_project(project_dir);
+        let artifacts = artifacts_for_project(project_dir)?;
         return Ok(ProjectInspection {
             project_dir: project_dir.to_path_buf(),
             state: ProjectState::Uninitialized,
@@ -506,7 +506,7 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         });
     }
 
-    let artifact_specs = artifacts_for_project(project_dir);
+    let artifact_specs = artifacts_for_project(project_dir)?;
     let artifacts = artifact_specs
         .iter()
         .map(|artifact| inspect_artifact(project_dir, artifact))
@@ -561,15 +561,15 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
 /// Relative paths of every TODO queue the inspection validates: the
 /// configured root component's queue plus each discovered component queue,
 /// in stable artifact order.
-pub fn todo_queue_paths(project_dir: &Path) -> Vec<String> {
-    artifacts_for_project(project_dir)
+pub fn todo_queue_paths(project_dir: &Path) -> Result<Vec<String>> {
+    Ok(artifacts_for_project(project_dir)?
         .into_iter()
         .filter(|artifact| artifact.kind == ArtifactKind::TodoQueue)
         .map(|artifact| artifact.path)
-        .collect()
+        .collect())
 }
 
-fn artifacts_for_project(project_dir: &Path) -> Vec<Artifact> {
+fn artifacts_for_project(project_dir: &Path) -> Result<Vec<Artifact>> {
     let component_root = config::load(project_dir)
         .map(|configuration| configuration.component_root)
         .unwrap_or_else(|_| PathBuf::from("src"));
@@ -594,48 +594,46 @@ fn artifacts_for_project(project_dir: &Path) -> Vec<Artifact> {
     ];
 
     if component_root == Path::new(".") {
-        if let Ok(discovery) =
-            discovery::discover_with_limits(project_dir, DiscoveryLimits::default())
-        {
-            for component in discovery.components {
-                let comp_path = component.relative_path;
-                for (doc_kind, art_kind) in [
-                    (
-                        DocumentKind::Requirements,
-                        ArtifactKind::ComponentDocument(DocumentKind::Requirements),
-                    ),
-                    (
-                        DocumentKind::Contract,
-                        ArtifactKind::ComponentDocument(DocumentKind::Contract),
-                    ),
-                    (
-                        DocumentKind::Design,
-                        ArtifactKind::ComponentDocument(DocumentKind::Design),
-                    ),
-                ] {
-                    artifacts.push(Artifact {
-                        path: comp_path
-                            .join(doc_kind.filename())
-                            .to_string_lossy()
-                            .into_owned(),
-                        kind: art_kind,
-                    });
-                }
+        let discovery =
+            discovery::discover_with_limits(project_dir, DiscoveryLimits::default())?;
+        for component in discovery.components {
+            let comp_path = component.relative_path;
+            for (doc_kind, art_kind) in [
+                (
+                    DocumentKind::Requirements,
+                    ArtifactKind::ComponentDocument(DocumentKind::Requirements),
+                ),
+                (
+                    DocumentKind::Contract,
+                    ArtifactKind::ComponentDocument(DocumentKind::Contract),
+                ),
+                (
+                    DocumentKind::Design,
+                    ArtifactKind::ComponentDocument(DocumentKind::Design),
+                ),
+            ] {
                 artifacts.push(Artifact {
                     path: comp_path
-                        .join(ComponentArtifact::TaskQueue.filename())
+                        .join(doc_kind.filename())
                         .to_string_lossy()
                         .into_owned(),
-                    kind: ArtifactKind::TodoQueue,
-                });
-                artifacts.push(Artifact {
-                    path: comp_path
-                        .join(ComponentArtifact::ImplementationRecord.filename())
-                        .to_string_lossy()
-                        .into_owned(),
-                    kind: ArtifactKind::ImplementationRecord,
+                    kind: art_kind,
                 });
             }
+            artifacts.push(Artifact {
+                path: comp_path
+                    .join(ComponentArtifact::TaskQueue.filename())
+                    .to_string_lossy()
+                    .into_owned(),
+                kind: ArtifactKind::TodoQueue,
+            });
+            artifacts.push(Artifact {
+                path: comp_path
+                    .join(ComponentArtifact::ImplementationRecord.filename())
+                    .to_string_lossy()
+                    .into_owned(),
+                kind: ArtifactKind::ImplementationRecord,
+            });
         }
     } else {
         let component_path =
@@ -665,7 +663,7 @@ fn artifacts_for_project(project_dir: &Path) -> Vec<Artifact> {
         ]);
     }
 
-    artifacts
+    Ok(artifacts)
 }
 
 fn invalid_root_inspection(project_dir: &Path) -> ProjectInspection {

@@ -1000,6 +1000,16 @@ impl Shell {
 /// Lists live and stale task locks; `locks clean` removes the stale ones.
 fn handle_locks(theme: Theme, clean: bool, journal: &SessionJournal) -> LoopAction {
     let command = if clean { "locks clean" } else { "locks" };
+    // `locks clean` is in the declared destructive set, so it requires the
+    // same explicit in-shell confirmation as every other state-removing
+    // operation before it removes stale lock files.
+    if let Some(gate) = destructive_gate(&cli::Command::Locks { clean })
+        && !confirm(&format!("confirm {gate}? [y/N] "))
+    {
+        println!("Operation cancelled.");
+        journal.append(journal_entry(command, "confirmation declined"));
+        return LoopAction::Continue;
+    }
     let entries = locks::scan();
     let cleaned = if clean {
         locks::clean_stale()
@@ -1017,6 +1027,22 @@ fn handle_locks(theme: Theme, clean: bool, journal: &SessionJournal) -> LoopActi
         &format!("{} locks, {} cleaned", entries.len(), cleaned.len()),
     ));
     LoopAction::Continue
+}
+
+/// Renders the `locks` command output for the standalone CLI (no session
+/// journal), mirroring the shell builtin's listing.
+pub(crate) fn locks_command_output(clean: bool) -> String {
+    let entries = locks::scan();
+    let cleaned = if clean {
+        locks::clean_stale()
+    } else {
+        Vec::new()
+    };
+    if entries.is_empty() {
+        "No task locks.".to_owned()
+    } else {
+        render_locks(Theme::plain(), &entries, &cleaned, clean)
+    }
 }
 
 /// Renders the task-lock listing (pure, so it is testable without user state).
@@ -1584,6 +1610,9 @@ fn destructive_gate(command: &cli::Command) -> Option<&'static str> {
         cli::Command::Component {
             command: cli::ComponentCommand::Commit { .. },
         } => Some("component commit (creates an acceptance commit)"),
+        cli::Command::Locks { clean: true } => {
+            Some("locks clean (removes stale task lock files)")
+        }
         _ => None,
     }
 }
@@ -2758,6 +2787,33 @@ mod tests {
             },
         };
         assert!(destructive_gate(&plain_run).is_none());
+    }
+
+    #[test]
+    fn locks_clean_is_in_the_declared_destructive_set() {
+        // `locks clean` removes user-state lock files, so it must be covered
+        // by the same in-shell confirmation rule as every other
+        // state-removing operation in the destructive set.
+        let locks_clean = cli::Command::Locks { clean: true };
+        assert!(
+            destructive_gate(&locks_clean).is_some(),
+            "`locks clean` must require an explicit in-shell confirmation"
+        );
+        // The confirmation prompt names the destructive part, consistent with
+        // the other declared destructive commands.
+        let gate = destructive_gate(&locks_clean).unwrap();
+        assert!(gate.contains("locks clean"), "gate prompt names the command: {gate}");
+        assert!(
+            gate.contains("stale"),
+            "gate prompt names what is removed: {gate}"
+        );
+    }
+
+    #[test]
+    fn plain_locks_listing_is_not_destructive() {
+        // `locks` (no `clean`) only inspects lock files and must not prompt.
+        let locks = cli::Command::Locks { clean: false };
+        assert!(destructive_gate(&locks).is_none());
     }
 
     fn lock_entry(live: bool, task: Option<&str>) -> locks::LockEntry {

@@ -521,6 +521,37 @@ runner, or a failed probe refuses `task run` before any task transition; Kvist
 never falls back to host execution. A version-1 sandbox cannot run a
 `test_policy` with `working_directory = "project"`.
 
+### Installing the sandbox runner
+
+The `[sandbox] runner` value is a machine-local absolute path, so a fresh host
+or a fresh checkout has no runner at that path until it is installed. The
+runner is the `galla` enforcement binary, built from the `galla` package and
+copied to the configured path. This project's `kvist.toml` configures the
+runner at `/home/stefan/.kvist/bin/galla`; on another host, replace that path
+with your own absolute, user-owned destination outside the project root and the
+selected VCS worktree.
+
+```bash
+# Build the runner from the `galla` package (release build).
+cargo build --release -p galla
+
+# Install the runner bytes at the configured [sandbox] runner path.
+install -d /home/stefan/.kvist/bin
+cp target/release/galla /home/stefan/.kvist/bin/galla
+```
+
+The installed runner must be a regular, non-symlink file outside the project
+root and worktree, and it must answer `--kvist-sandbox-probe-v1` with the
+approved runner digest and the exact configured backend identity. Kvist never
+trusts a syntax-only digest claim: the runner identity is derived from the
+on-disk bytes, and on Linux each probe and request launches a private
+descriptor-bound copy of the freshly verified runner bytes, so replacement
+after validation cannot alter what executes. Installing the runner therefore
+does not weaken the approval-bound, descriptor-bound validation that follows
+it; it only provides the bytes that validation binds. An absent configured
+runner fails closed with a diagnostic that names this installation step and
+the configured `[sandbox] runner` path.
+
 Mediated Cargo dependency acquisition is configured, per project, under
 `[sandbox.acquisition]`. The canonical crates.io source is built in and is
 never listed. Additional registries and Git sources are explicit, exact, and

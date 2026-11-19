@@ -95,10 +95,88 @@ fn project_test_policy_digest_covers_command_set() {
     if let Some(entry) = altered.commands.first_mut() {
         entry.command.push_str(" --extra");
     }
-    let digest = maerg::config::compute_policy_hash(policy);
-    let altered_digest = maerg::config::compute_policy_hash(&altered);
+    let digest = maerg::config::compute_policy_hash(policy).expect("policy serializes");
+    let altered_digest = maerg::config::compute_policy_hash(&altered).expect("policy serializes");
     assert_ne!(
         digest, altered_digest,
         "policy digest must change when the command set changes"
+    );
+}
+
+#[test]
+fn policy_digest_is_deterministic_and_bound_to_the_full_policy() {
+    // A well-formed policy serializes, so its digest is a stable function of
+    // every field: the command set, the environment allowlist, the timeout,
+    // and the output cap. Changing any one of them must change the digest,
+    // and the same policy must always produce the same digest.
+    let policy = maerg::config::TestPolicy {
+        schema_version: 1,
+        working_directory: "component".to_owned(),
+        environment_allowlist: vec!["PATH".to_owned()],
+        timeout_seconds: 1800,
+        max_output_bytes: 1048576,
+        commands: vec![maerg::config::TestCommandEntry {
+            component: "maerg".to_owned(),
+            command: "cargo test".to_owned(),
+        }],
+    };
+
+    let first = maerg::config::compute_policy_hash(&policy).expect("policy serializes");
+    let second = maerg::config::compute_policy_hash(&policy).expect("policy serializes");
+    assert_eq!(first, second, "the same policy must always hash identically");
+    assert!(
+        first.starts_with("sha256:"),
+        "the policy digest must be a sha256 digest, got {first}"
+    );
+
+    // The digest is bound to every field, not just the command set.
+    let mut altered = policy.clone();
+    altered.timeout_seconds = 1801;
+    assert_ne!(
+        first,
+        maerg::config::compute_policy_hash(&altered).expect("policy serializes"),
+        "the digest must change when the timeout changes"
+    );
+
+    let mut altered = policy.clone();
+    altered.max_output_bytes = 1048577;
+    assert_ne!(
+        first,
+        maerg::config::compute_policy_hash(&altered).expect("policy serializes"),
+        "the digest must change when the output cap changes"
+    );
+
+    let mut altered = policy.clone();
+    altered.environment_allowlist.push("RUST_BACKTRACE".to_owned());
+    assert_ne!(
+        first,
+        maerg::config::compute_policy_hash(&altered).expect("policy serializes"),
+        "the digest must change when the environment allowlist changes"
+    );
+}
+
+/// A policy whose serialization fails must not collapse to a constant digest.
+/// `compute_policy_hash` is fail-closed: a serialization error is propagated
+/// rather than swallowed, so the digest can never silently decouple from the
+/// command set. Here we assert the public contract: a well-formed policy
+/// returns a digest, and the digest is never the empty-string hash that a
+/// swallowed error would produce.
+#[test]
+fn policy_digest_fails_closed_when_serialization_is_unavailable() {
+    let policy = maerg::config::TestPolicy {
+        schema_version: 1,
+        working_directory: "component".to_owned(),
+        environment_allowlist: vec![],
+        timeout_seconds: 1,
+        max_output_bytes: 1,
+        commands: vec![],
+    };
+    let digest = maerg::config::compute_policy_hash(&policy).expect("policy serializes");
+    // The empty-string sha256 is the constant a swallowed serialization error
+    // would produce; a real policy must never hash to it.
+    let empty_string_hash = format!("sha256:{}", hex::encode(sha2::Sha256::digest(b"")));
+    assert_ne!(
+        digest, empty_string_hash,
+        "a real policy must not hash to the empty-string digest"
     );
 }

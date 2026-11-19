@@ -6758,10 +6758,10 @@ fn build_execution_approval_for_runner(
             .test_policy
             .as_ref()
             .map(|policy| policy.schema_version),
-        test_policy_digest: config
-            .test_policy
-            .as_ref()
-            .map(crate::config::compute_policy_hash),
+        test_policy_digest: match config.test_policy.as_ref() {
+            Some(policy) => Some(crate::config::compute_policy_hash(policy)?),
+            None => None,
+        },
     };
     let approval_digest = digest(&serde_json::to_vec(&material).map_err(|error| {
         KvistError::UnapprovedExecutionPolicy {

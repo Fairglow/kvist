@@ -1039,8 +1039,8 @@ produced and retains the full bounded log as evidence. The prompt and status
 line report the active VCS branch, the default component, the configured
 sandbox backend, the default model, and task-lock counts that distinguish
 live locks from stale ones. Destructive operations (`task unlock --force`,
-`agent remove --all`, `component accept --commit`, `vcs commit-accepted`)
-require an explicit in-shell confirmation.
+`agent remove --all`, `component accept --commit`, `vcs commit-accepted`,
+`locks clean`) require an explicit in-shell confirmation.
 
 ### Markdown-first output and the interactive TUI
 

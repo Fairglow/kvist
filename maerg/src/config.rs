@@ -162,7 +162,13 @@ impl ProviderConfig {
 }
 
 /// Configuration for a specific model profile (model identifier and intrinsic capabilities).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Equality is total: the `temperature` field is compared by its IEEE-754 bit
+/// pattern rather than `f64::eq`, so a `NaN` temperature is reflexive and two
+/// `NaN`s compare equal. This keeps the `Eq` implementation sound — a role
+/// selects a profile by equality, and an ill-defined comparison could otherwise
+/// change that selection without any recorded intent change.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileConfig {
     /// Unique profile name (e.g. "qwen-coder-32b", "claude-default").
     pub name: String,
@@ -182,6 +188,32 @@ pub struct ProfileConfig {
     pub system_prompt: Option<String>,
     /// Optional command template directly overriding provider template.
     pub command: Option<String>,
+}
+
+/// Compares the `temperature` field by its IEEE-754 bit pattern so that a
+/// `NaN` temperature is reflexive and two `NaN`s compare equal. Every other
+/// field is compared normally, which is already total because the remaining
+/// fields are all `Eq`.
+fn profile_temperatures_equal(left: Option<f64>, right: Option<f64>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => left.to_bits() == right.to_bits(),
+        (None, None) => true,
+        (Some(_), None) | (None, Some(_)) => false,
+    }
+}
+
+impl PartialEq for ProfileConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.provider == other.provider
+            && self.model == other.model
+            && self.context_window == other.context_window
+            && self.supports_thinking == other.supports_thinking
+            && self.default_thinking_effort == other.default_thinking_effort
+            && profile_temperatures_equal(self.temperature, other.temperature)
+            && self.system_prompt == other.system_prompt
+            && self.command == other.command
+    }
 }
 
 impl Eq for ProfileConfig {}
@@ -755,6 +787,23 @@ fn parse(config_path: &Path, project_root: &Path, contents: &str) -> Result<Proj
             )
         })?;
 
+    // The declared agent configuration surface nests provider, profile, and
+    // role tables under `[agent]`. Top-level tables of those names are not
+    // part of the accepted surface and must be rejected with a diagnostic that
+    // names the offending table and points the user to the `agent` table, so a
+    // silently accepted undeclared surface can never change which profile a
+    // role selects without a recorded intent change.
+    for name in ["providers", "profiles", "roles"] {
+        if table.contains_key(name) {
+            return Err(invalid_configuration(
+                config_path,
+                &format!(
+                    "`{name}` is not a declared top-level configuration table; move it under `[agent.{name}]`"
+                ),
+            ));
+        }
+    }
+
     Ok(ProjectConfig {
         component_root: normalize_component_root(config_path, component_root)?,
         discovery: parse_discovery_limits(config_path, table)?,
@@ -781,6 +830,68 @@ fn parse(config_path: &Path, project_root: &Path, contents: &str) -> Result<Proj
             .transpose()?
             .unwrap_or_default(),
     })
+}
+
+/// Reads and normalizes only the `component_root` field of `kvist.toml`.
+///
+/// This is the minimal trust surface for layout classification: it applies the
+/// same file hygiene and normalization as [`load`] (regular non-symlink file,
+/// bounded size, relative path with only normal segments) without validating
+/// unrelated sections such as `agent`, `test_policy`, or `sandbox`. A project
+/// whose `component_root` is valid must be classified the same way even when
+/// another section is malformed; full configuration validation is the caller's
+/// responsibility.
+pub(crate) fn load_component_root(project_root: &Path) -> Result<Option<PathBuf>> {
+    let config_path = project_root.join("kvist.toml");
+    let metadata = match fs::symlink_metadata(&config_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "inspect project configuration",
+                path: config_path,
+                source,
+            });
+        }
+    };
+    let file_type = metadata.file_type();
+    if is_link_like(&metadata) {
+        return Err(KvistError::ProjectConfigurationIsSymlink { path: config_path });
+    }
+    if !file_type.is_file() {
+        return Err(KvistError::ProjectConfigurationNotFile { path: config_path });
+    }
+    if metadata.len() > MAX_CONFIGURATION_BYTES {
+        return Err(KvistError::ProjectConfigurationTooLarge {
+            path: config_path,
+            max_bytes: MAX_CONFIGURATION_BYTES,
+        });
+    }
+
+    let contents = fs::read_to_string(&config_path).map_err(|source| KvistError::Io {
+        operation: "read project configuration",
+        path: config_path.clone(),
+        source,
+    })?;
+    let value: toml::Value =
+        toml::from_str(&contents).map_err(|error| KvistError::InvalidProjectConfiguration {
+            path: config_path.clone(),
+            reason: error.to_string(),
+        })?;
+    let component_root = value
+        .get("component_root")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| {
+            invalid_configuration(
+                &config_path,
+                "`component_root` must be a relative string path",
+            )
+        })?;
+
+    Ok(Some(normalize_component_root(
+        &config_path,
+        component_root,
+    )?))
 }
 
 pub(crate) fn validate_project_configuration_contents(
@@ -1218,6 +1329,34 @@ fn parse_limit(
     Ok(value)
 }
 
+/// Parses an untrusted TOML integer as a positive `u64` bound.
+///
+/// TOML integers decode to `i64`, so a negative or oversized value must be
+/// rejected rather than cast with `as u64`, which would wrap a negative value
+/// into an enormous unsigned bound and silently disable a resource limit.
+fn parse_bounded_unsigned(
+    config_path: &Path,
+    value: &toml::Value,
+    field: &str,
+) -> Result<u64> {
+    let integer = value
+        .as_integer()
+        .ok_or_else(|| invalid_configuration(config_path, &format!("`{field}` must be an integer")))?;
+    let unsigned = u64::try_from(integer).map_err(|_| {
+        invalid_configuration(
+            config_path,
+            &format!("`{field}` must be a positive integer no greater than {}", u64::MAX),
+        )
+    })?;
+    if unsigned == 0 {
+        return Err(invalid_configuration(
+            config_path,
+            &format!("`{field}` must be a positive integer no greater than {}", u64::MAX),
+        ));
+    }
+    Ok(unsigned)
+}
+
 fn normalize_component_root(config_path: &Path, value: &str) -> Result<PathBuf> {
     let path = Path::new(value);
     if path.as_os_str().is_empty() || path.is_absolute() {
@@ -1398,10 +1537,14 @@ fn load_agent_config(
                             .get("command_template")
                             .and_then(toml::Value::as_str)
                             .map(str::to_owned);
-                        let timeout_seconds = p_table
-                            .get("timeout_seconds")
-                            .and_then(toml::Value::as_integer)
-                            .map(|v| v as u64);
+                        let timeout_seconds = match p_table.get("timeout_seconds") {
+                            Some(value) => Some(parse_bounded_unsigned(
+                                project_config_path,
+                                value,
+                                &format!("user agent provider {name} timeout_seconds"),
+                            )?),
+                            None => None,
+                        };
                         config.providers.insert(
                             name.clone(),
                             ProviderConfig {
@@ -1434,10 +1577,16 @@ fn load_agent_config(
                             .or_else(|| p_table.get("command_template"))
                             .and_then(toml::Value::as_str)
                             .map(str::to_owned);
-                        let context_window = p_table
-                            .get("context_window")
-                            .and_then(toml::Value::as_integer)
-                            .map(|v| v as usize);
+                        let context_window = match p_table.get("context_window") {
+                            Some(value) => Some(
+                                parse_bounded_unsigned(
+                                    project_config_path,
+                                    value,
+                                    &format!("user agent profile {name} context_window"),
+                                )? as usize,
+                            ),
+                            None => None,
+                        };
                         let supports_thinking = p_table
                             .get("supports_thinking")
                             .and_then(toml::Value::as_bool);
@@ -1725,13 +1874,12 @@ fn merge_agent_config_from_table(
             config.discovery.llama_server_url = Some(url_str.to_owned());
         }
         if let Some(timeout) = discovery_table.get("timeout_seconds") {
-            let timeout_val = timeout.as_integer().ok_or_else(|| {
-                invalid_configuration(
-                    config_path,
-                    "`agent.discovery.timeout_seconds` must be an integer",
-                )
-            })?;
-            config.discovery.timeout_seconds = Some(timeout_val as u64);
+            let timeout_val = parse_bounded_unsigned(
+                config_path,
+                timeout,
+                "agent.discovery.timeout_seconds",
+            )?;
+            config.discovery.timeout_seconds = Some(timeout_val);
         }
         if let Some(allow) = discovery_table.get("allow_host_discovery") {
             let allow_val = allow.as_bool().ok_or_else(|| {
@@ -1776,10 +1924,14 @@ fn merge_agent_config_from_table(
                 .get("command_template")
                 .and_then(toml::Value::as_str)
                 .map(str::to_owned);
-            let timeout_seconds = p_table
-                .get("timeout_seconds")
-                .and_then(toml::Value::as_integer)
-                .map(|v| v as u64);
+            let timeout_seconds = match p_table.get("timeout_seconds") {
+                Some(value) => Some(parse_bounded_unsigned(
+                    config_path,
+                    value,
+                    &format!("agent.providers.{name}.timeout_seconds"),
+                )?),
+                None => None,
+            };
             config.providers.insert(
                 name.clone(),
                 ProviderConfig {
@@ -1812,15 +1964,22 @@ fn merge_agent_config_from_table(
                 )
             })?;
 
-            // Legacy check: is this table an old role definition like
-            // [agent.profiles.architect]? `filter` keeps the `Some` guard and
-            // the legacy-shape predicate in one place, so the binding below
-            // is total.
-            let is_legacy = p_table.contains_key("command_template")
-                || p_table.contains_key("models")
-                || p_table.contains_key("token_limit")
-                || p_table.contains_key("timeout_seconds");
-            let legacy_role = Role::from_str_case_insensitive(name).filter(|_| is_legacy);
+            // Legacy role migration, made explicit. A profile table is migrated
+            // into a role binding only when it is unambiguously a legacy role
+            // definition: it carries at least one role-only key and no profile
+            // field. Carrying any profile field (e.g. `provider`) marks the
+            // table as a profile, so it is never silently repointed into a role
+            // binding merely because a role-only key is also present. This keeps
+            // the migration a pure, deterministic function of the declared
+            // surface rather than a content-inferred guess.
+            let has_profile_field = p_table
+                .keys()
+                .any(|key| matches!(key.as_str(), "provider" | "model" | "context_window" | "supports_thinking" | "default_thinking_effort" | "temperature" | "system_prompt" | "command"));
+            let has_role_only_key = p_table
+                .keys()
+                .any(|key| matches!(key.as_str(), "command_template" | "models" | "token_limit" | "timeout_seconds" | "thinking_effort" | "reasoning_effort" | "redaction_values" | "redaction" | "max_output_bytes"));
+            let legacy_role = Role::from_str_case_insensitive(name)
+                .filter(|_| has_role_only_key && !has_profile_field);
 
             if let Some(role) = legacy_role {
                 let role_cfg = config
@@ -1889,10 +2048,16 @@ fn merge_agent_config_from_table(
                     .or_else(|| p_table.get("command_template"))
                     .and_then(toml::Value::as_str)
                     .map(str::to_owned);
-                let context_window = p_table
-                    .get("context_window")
-                    .and_then(toml::Value::as_integer)
-                    .map(|v| v as usize);
+                let context_window = match p_table.get("context_window") {
+                    Some(value) => Some(
+                        parse_bounded_unsigned(
+                            config_path,
+                            value,
+                            &format!("agent.profiles.{name}.context_window"),
+                        )? as usize,
+                    ),
+                    None => None,
+                };
                 let supports_thinking = p_table
                     .get("supports_thinking")
                     .and_then(toml::Value::as_bool);
@@ -2297,12 +2462,19 @@ pub struct TestCommandEntry {
 }
 
 /// Computes the canonical SHA-256 hash of a test policy.
-pub fn compute_policy_hash(policy: &TestPolicy) -> String {
-    let serialized = serde_json::to_string(policy).unwrap_or_default();
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(serialized.as_bytes());
-    format!("sha256:{}", hex::encode(hasher.finalize()))
+///
+/// The hash is a function of the fully serialized policy, so any change to the
+/// command set, environment allowlist, timeout, or output cap changes the
+/// digest. Serialization is fallible: a policy that cannot be serialized
+/// cannot be bound to a digest, so the error is propagated rather than
+/// swallowed (which would collapse the digest to a constant and decouple it
+/// from the command set).
+pub fn compute_policy_hash(policy: &TestPolicy) -> Result<String> {
+    let serialized =
+        serde_json::to_string(policy).map_err(|error| KvistError::UnapprovedExecutionPolicy {
+            reason: format!("cannot serialize test policy for digest: {error}"),
+        })?;
+    Ok(sha256(serialized.as_bytes()))
 }
 
 fn parse_test_policy(
@@ -2357,6 +2529,12 @@ fn parse_test_policy(
                 "`test_policy.environment_allowlist` must be an array of strings",
             )
         })?;
+    if env_allowlist_val.len() > MAX_SANDBOX_ENVIRONMENT_ENTRIES {
+        return Err(invalid_configuration(
+            config_path,
+            "`test_policy.environment_allowlist` exceeds the 256-entry runner limit",
+        ));
+    }
     let mut environment_allowlist = Vec::new();
     for val in env_allowlist_val {
         let s = val.as_str().ok_or_else(|| {
@@ -2365,6 +2543,12 @@ fn parse_test_policy(
                 "`test_policy.environment_allowlist` must be an array of strings",
             )
         })?;
+        if s.len() > MAX_SANDBOX_ENVIRONMENT_NAME_BYTES || !is_portable_environment_name(s) {
+            return Err(invalid_configuration(
+                config_path,
+                "`test_policy.environment_allowlist` must contain portable identifiers no longer than 4096 bytes",
+            ));
+        }
         environment_allowlist.push(s.to_owned());
     }
 
@@ -2383,6 +2567,12 @@ fn parse_test_policy(
             "`test_policy.timeout_seconds` must be a positive integer",
         )
     })?;
+    if timeout_seconds == 0 {
+        return Err(invalid_configuration(
+            config_path,
+            "`test_policy.timeout_seconds` must be a positive integer",
+        ));
+    }
 
     let max_output_bytes = policy
         .get("max_output_bytes")
@@ -2399,6 +2589,12 @@ fn parse_test_policy(
             "`test_policy.max_output_bytes` must be a positive integer",
         )
     })?;
+    if max_output_bytes == 0 {
+        return Err(invalid_configuration(
+            config_path,
+            "`test_policy.max_output_bytes` must be a positive integer",
+        ));
+    }
 
     let commands_val = policy
         .get("commands")
@@ -2575,5 +2771,307 @@ mod tests {
             Err(KvistError::ProjectConfigurationTooLarge { .. }) => {}
             other => panic!("expected ProjectConfigurationTooLarge, got {other:?}"),
         }
+    }
+
+    // --- Agent configuration surface: pinning the accepted contract ---
+    //
+    // These tests define the configuration surface that agent loading must
+    // accept and reject. They fail on the current (broken) surface and pass
+    // once the surface is pinned: top-level provider/profile/role tables are
+    // rejected with actionable diagnostics, the legacy role migration is
+    // explicit and deterministic, and profile equality is total even for NaN
+    // temperatures.
+
+    /// The accepted surface nests provider, profile, and role tables under the
+    /// `agent` table. A top-level `[providers.<name>]` table is not part of the
+    /// declared surface and must be rejected with a diagnostic that names the
+    /// offending table and points the user to the `agent` table.
+    #[test]
+    fn rejects_a_top_level_provider_table_outside_the_agent_table() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[providers.local-llama]\ntype = \"llama-server\"\nbase_url = \"http://127.0.0.1:9931\"\n",
+        );
+        match load(root.path()) {
+            Err(KvistError::InvalidProjectConfiguration { reason, .. }) => {
+                assert!(
+                    reason.to_lowercase().contains("providers"),
+                    "diagnostic must name the offending table, got: {reason}"
+                );
+                assert!(
+                    reason.to_lowercase().contains("agent"),
+                    "diagnostic must point to the agent table, got: {reason}"
+                );
+            }
+            other => panic!("expected InvalidProjectConfiguration, got {other:?}"),
+        }
+    }
+
+    /// A top-level `[profiles.<name>]` table is not part of the declared
+    /// surface and must be rejected with an actionable diagnostic.
+    #[test]
+    fn rejects_a_top_level_profile_table_outside_the_agent_table() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[profiles.qwen-coder]\nprovider = \"custom\"\nmodel = \"qwen-coder-32b\"\n",
+        );
+        match load(root.path()) {
+            Err(KvistError::InvalidProjectConfiguration { reason, .. }) => {
+                assert!(
+                    reason.to_lowercase().contains("profiles"),
+                    "diagnostic must name the offending table, got: {reason}"
+                );
+                assert!(
+                    reason.to_lowercase().contains("agent"),
+                    "diagnostic must point to the agent table, got: {reason}"
+                );
+            }
+            other => panic!("expected InvalidProjectConfiguration, got {other:?}"),
+        }
+    }
+
+    /// A top-level `[roles.<name>]` table is not part of the declared surface
+    /// and must be rejected with an actionable diagnostic.
+    #[test]
+    fn rejects_a_top_level_role_table_outside_the_agent_table() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[roles.architect]\nprofile = \"claude-default\"\n",
+        );
+        match load(root.path()) {
+            Err(KvistError::InvalidProjectConfiguration { reason, .. }) => {
+                assert!(
+                    reason.to_lowercase().contains("roles"),
+                    "diagnostic must name the offending table, got: {reason}"
+                );
+                assert!(
+                    reason.to_lowercase().contains("agent"),
+                    "diagnostic must point to the agent table, got: {reason}"
+                );
+            }
+            other => panic!("expected InvalidProjectConfiguration, got {other:?}"),
+        }
+    }
+
+    /// The legacy role migration must be deterministic: loading the same legacy
+    /// configuration repeatedly yields identical results. The migration is a
+    /// pure function of the configuration content, with no dependence on
+    /// environment, ordering, or prior state.
+    #[test]
+    fn legacy_role_migration_is_deterministic() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.architect]\ncommand_template = \"legacy-architect --prompt '{prompt}'\"\n",
+        );
+        let first = load(root.path()).expect("first legacy load");
+        let second = load(root.path()).expect("second legacy load");
+        assert_eq!(
+            first.agent, second.agent,
+            "legacy migration must be a pure, deterministic function of the configuration"
+        );
+    }
+
+    /// The legacy role migration must be explicit, not inferred from content.
+    /// A profile table that carries profile fields (e.g. `provider`) is a
+    /// profile, even if it also carries a role-only key; it must not be
+    /// silently migrated into a role binding. The current content-based
+    /// heuristic migrates it merely because a role-only key is present.
+    #[test]
+    fn legacy_role_migration_is_explicit_not_content_inferred() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.architect]\nprovider = \"custom\"\nmodel = \"architect-model\"\ntimeout_seconds = 900\n",
+        );
+        match load(root.path()) {
+            Ok(config) => {
+                // A table with profile fields is a profile, not a legacy role:
+                // the architect role must retain its default profile binding
+                // rather than being silently repointed.
+                assert_eq!(
+                    config.agent.role(Role::Architect).profile,
+                    "claude-default",
+                    "a profile table must not be silently migrated into a role binding"
+                );
+            }
+            // Rejecting the ambiguous table outright is also an explicit,
+            // acceptable surface; what is not acceptable is silent migration.
+            Err(KvistError::InvalidProjectConfiguration { .. }) => {}
+            other => panic!("expected a profile or a rejection, got {other:?}"),
+        }
+    }
+
+    /// Profile equality must be total: a profile with a NaN temperature is
+    /// equal to itself and to a clone. The derived `PartialEq` compares the
+    /// `f64` temperature with `==`, which is not reflexive for NaN, so the
+    /// manual `Eq` impl is unsound until equality is made NaN-safe.
+    #[test]
+    fn profile_equality_is_reflexive_for_a_nan_temperature() {
+        let profile = ProfileConfig {
+            name: "nan-profile".to_owned(),
+            provider: "custom".to_owned(),
+            model: None,
+            context_window: None,
+            supports_thinking: None,
+            default_thinking_effort: None,
+            temperature: Some(f64::NAN),
+            system_prompt: None,
+            command: None,
+        };
+        let clone = profile.clone();
+        assert_eq!(
+            profile, clone,
+            "a profile must equal its own clone even with a NaN temperature"
+        );
+    }
+
+    /// Two profiles that differ only in an unbounded floating-point temperature
+    /// that is NaN must compare equal: equality is well-defined (total) rather
+    /// than collapsing to `false` under the derived `f64` comparison.
+    #[test]
+    fn profile_equality_is_total_across_nan_temperatures() {
+        let a = ProfileConfig {
+            name: "p".to_owned(),
+            provider: "custom".to_owned(),
+            model: None,
+            context_window: None,
+            supports_thinking: None,
+            default_thinking_effort: None,
+            temperature: Some(f64::NAN),
+            system_prompt: None,
+            command: None,
+        };
+        let b = ProfileConfig {
+            name: "p".to_owned(),
+            provider: "custom".to_owned(),
+            model: None,
+            context_window: None,
+            supports_thinking: None,
+            default_thinking_effort: None,
+            temperature: Some(f64::NAN),
+            system_prompt: None,
+            command: None,
+        };
+        assert_eq!(a, b, "two NaN-temperature profiles must compare equal");
+    }
+
+    // --- Untrusted integer bounds: negative/zero values must be rejected ---
+    //
+    // TOML integers decode to `i64`. Casting them with `as u64` / `as usize`
+    // would wrap a negative value into an enormous unsigned bound and silently
+    // disable a resource limit. These tests pin the strict rejection: a
+    // negative or zero discovery/provider timeout or profile context window is
+    // an invalid configuration, not a wrapped bound.
+
+    /// A negative `agent.discovery.timeout_seconds` must be rejected rather
+    /// than wrapped into `u64::MAX` (which `Duration::from_secs` saturates to
+    /// `Duration::MAX`, i.e. no timeout at all).
+    #[test]
+    fn rejects_a_negative_discovery_timeout_instead_of_wrapping() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.discovery]\ntimeout_seconds = -1\n",
+        );
+        match load(root.path()) {
+            Err(KvistError::InvalidProjectConfiguration { reason, .. }) => {
+                assert!(
+                    reason.to_lowercase().contains("timeout"),
+                    "diagnostic must name the offending field, got: {reason}"
+                );
+            }
+            other => panic!("expected InvalidProjectConfiguration, got {other:?}"),
+        }
+    }
+
+    /// A zero `agent.discovery.timeout_seconds` is not a valid bound and must
+    /// be rejected, matching the role-policy and test-policy bounds.
+    #[test]
+    fn rejects_a_zero_discovery_timeout() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.discovery]\ntimeout_seconds = 0\n",
+        );
+        assert!(
+            matches!(
+                load(root.path()),
+                Err(KvistError::InvalidProjectConfiguration { .. })
+            ),
+            "a zero discovery timeout must be rejected"
+        );
+    }
+
+    /// A valid positive `agent.discovery.timeout_seconds` is accepted and
+    /// recorded, so the strict bound does not over-reject.
+    #[test]
+    fn accepts_a_positive_discovery_timeout() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.discovery]\ntimeout_seconds = 5\n",
+        );
+        let config = load(root.path()).expect("positive discovery timeout");
+        assert_eq!(config.agent.discovery.timeout_seconds, Some(5));
+    }
+
+    /// A negative `[agent.providers.<name>] timeout_seconds` must be rejected
+    /// rather than wrapped into an enormous provider timeout.
+    #[test]
+    fn rejects_a_negative_provider_timeout_instead_of_wrapping() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.providers.local-llama]\ntype = \"llama-server\"\ntimeout_seconds = -1\n",
+        );
+        match load(root.path()) {
+            Err(KvistError::InvalidProjectConfiguration { reason, .. }) => {
+                assert!(
+                    reason.to_lowercase().contains("timeout"),
+                    "diagnostic must name the offending field, got: {reason}"
+                );
+            }
+            other => panic!("expected InvalidProjectConfiguration, got {other:?}"),
+        }
+    }
+
+    /// A negative `[agent.profiles.<name>] context_window` must be rejected
+    /// rather than wrapped into a huge token-window bound.
+    #[test]
+    fn rejects_a_negative_profile_context_window_instead_of_wrapping() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.qwen-coder]\nprovider = \"custom\"\ncontext_window = -1\n",
+        );
+        match load(root.path()) {
+            Err(KvistError::InvalidProjectConfiguration { reason, .. }) => {
+                assert!(
+                    reason.to_lowercase().contains("context_window"),
+                    "diagnostic must name the offending field, got: {reason}"
+                );
+            }
+            other => panic!("expected InvalidProjectConfiguration, got {other:?}"),
+        }
+    }
+
+    /// A valid positive `[agent.profiles.<name>] context_window` is accepted
+    /// and recorded, so the strict bound does not over-reject.
+    #[test]
+    fn accepts_a_positive_profile_context_window() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.qwen-coder]\nprovider = \"custom\"\ncontext_window = 8192\n",
+        );
+        let config = load(root.path()).expect("positive context window");
+        assert_eq!(
+            config.agent.profiles.get("qwen-coder").and_then(|p| p.context_window),
+            Some(8192)
+        );
     }
 }

@@ -9,7 +9,10 @@ use std::{
 };
 
 use crate::{KvistError, Result, artifacts::IMPLEMENTATION_RECORD_FILENAME};
-use crate::{config::DiscoveryLimits, filesystem::is_link_like};
+use crate::{
+    config::{self, DiscoveryLimits, load_component_root},
+    filesystem::is_link_like,
+};
 
 /// Maximum number of directory levels below the component root to traverse.
 pub const MAX_COMPONENT_DEPTH: usize = 64;
@@ -180,7 +183,14 @@ pub fn discover_with_limits(component_root: &Path, limits: DiscoveryLimits) -> R
         components: Vec::new(),
         ignore_rules,
     };
-    let is_workspace_root = is_workspace_namespace_root(&component_root);
+    // Only the `component_root` field drives workspace-namespace
+    // classification. Reading it directly avoids coupling that decision to
+    // the validity of unrelated configuration sections (agent, test_policy,
+    // sandbox): a project whose `component_root = "."` is valid must be
+    // classified as a workspace root even when another section is malformed.
+    // Full configuration validation remains the caller's responsibility.
+    let is_workspace_root = load_component_root(&component_root)
+        .is_ok_and(|component_root| component_root == Some(PathBuf::from(".")));
     scan_directory(
         &component_root,
         Path::new(""),
@@ -240,17 +250,6 @@ fn validate_component_root(component_root: &Path) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn is_workspace_namespace_root(component_root: &Path) -> bool {
-    let config_path = component_root.join("kvist.toml");
-    if let Ok(content) = fs::read_to_string(config_path)
-        && let Ok(value) = toml::from_str::<toml::Value>(&content)
-        && value.get("component_root").and_then(|v| v.as_str()) == Some(".")
-    {
-        return true;
-    }
-    false
 }
 
 #[derive(Debug, Clone)]

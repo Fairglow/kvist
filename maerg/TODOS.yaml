@@ -1,12 +1,12 @@
 schema_version: 1
 component:
   requirements_revision: "sha256:c786ec71ab7aa367e6305ae1a715adb6a16c7126410fe72dd760c83d9f3e712e"
-  contract_revision: "sha256:646ba4be7b92ac8e292a4cae80274ff239ed06c3c7e7925dac4e5d2bed4a04f6"
+  contract_revision: "sha256:957ce69d562103d49f26cac15691f96f1fe3ab9ab0e43962af6cb89776d9d53a"
   design_revision: "sha256:bc195225b837d3416c7d9fe9bb154759606bdbd4246dc768687e0349f0acef3f"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-11-14T19:35:33Z"
+    checked_at: "2026-11-19T16:35:47Z"
     stale_since: null
     causes: []
 tasks:
@@ -4980,7 +4980,7 @@ tasks:
     purpose: "Confirm the verification boundary stays fail-closed and digest-bound after the policy becomes real."
     expected_outcome: "Every high-confidence binding, substitution, or limit defect is fixed or retained as an explicit blocker."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "test-policy-verification-implement-code"
     requirements:
@@ -4989,8 +4989,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T02:55:28Z"
+      completed_at: "2026-11-19T02:55:28Z"
     blocked_reason: null
     recovery_state: null
   - id: "test-policy-verification-compliance-review"
@@ -5000,7 +5000,7 @@ tasks:
     purpose: "Preserve independent evidence that recorded verification matches the approved policy."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "test-policy-verification-security-audit"
     requirements:
@@ -5009,8 +5009,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T03:40:28Z"
+      completed_at: "2026-11-19T03:40:28Z"
     blocked_reason: null
     recovery_state: null
   - id: "galla-install-policy-write-tests"
@@ -5020,7 +5020,7 @@ tasks:
     purpose: "Make the runner installation boundary verifiable before the policy is documented and relied on."
     expected_outcome: "Tests define the required diagnostic and documentation behavior for the configured runner path."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Compatibility-and-verification"
@@ -5028,8 +5028,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T05:02:02Z"
+      completed_at: "2026-11-19T05:02:02Z"
     blocked_reason: null
     recovery_state: null
   - id: "galla-install-policy"
@@ -5039,7 +5039,7 @@ tasks:
     purpose: "Make the approved runner boundary reproducible across hosts without weakening descriptor-bound validation."
     expected_outcome: "The installation policy is documented, a fresh host can reproduce the configured runner, and an absent runner produces an actionable installation diagnostic."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "galla-install-policy-write-tests"
     requirements:
@@ -5048,8 +5048,8 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T05:20:48Z"
+      completed_at: "2026-11-19T05:20:48Z"
     blocked_reason: null
     recovery_state: null
   - id: "discovery-hardening-write-tests"
@@ -5059,7 +5059,7 @@ tasks:
     purpose: "Make single-parse discovery and error propagation executable before nested subprojects are supported."
     expected_outcome: "Tests fail while discovery re-parses configuration or swallows errors and pass once classification and artifact projection reuse loaded state."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Provided-interfaces"
@@ -5067,8 +5067,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T07:21:02Z"
+      completed_at: "2026-11-19T07:21:02Z"
     blocked_reason: null
     recovery_state: null
   - id: "discovery-hardening-implement-code"
@@ -5078,7 +5078,7 @@ tasks:
     purpose: "Keep discovery deterministic, single-parse, and fail-loud."
     expected_outcome: "Workspace classification and artifact projection use one loaded configuration, and discovery errors surface as actionable diagnostics."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "discovery-hardening-write-tests"
     requirements:
@@ -5087,8 +5087,8 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T08:13:00Z"
+      completed_at: "2026-11-19T08:13:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "discovery-hardening-security-audit"
@@ -5098,7 +5098,7 @@ tasks:
     purpose: "Confirm the hardening does not introduce new trust or error-handling weaknesses."
     expected_outcome: "Every high-confidence finding is fixed or retained as an explicit blocker."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "discovery-hardening-implement-code"
     requirements:
@@ -5107,8 +5107,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T09:07:37Z"
+      completed_at: "2026-11-19T09:07:37Z"
     blocked_reason: null
     recovery_state: null
   - id: "discovery-hardening-compliance-review"
@@ -5118,7 +5118,7 @@ tasks:
     purpose: "Preserve independent evidence that discovery matches its declared behavior."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "discovery-hardening-security-audit"
     requirements:
@@ -5126,8 +5126,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T09:26:24Z"
+      completed_at: "2026-11-19T09:26:24Z"
     blocked_reason: null
     recovery_state: null
   - id: "agent-config-surface-write-tests"
@@ -5137,7 +5137,7 @@ tasks:
     purpose: "Make the configuration surface total, explicit, and equality-safe before agent configuration is trusted further."
     expected_outcome: "Tests fail on the accepted-but-undeclared tables, the heuristic behavior, and NaN equality, and pass once the surface is pinned."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Provided-interfaces"
@@ -5145,8 +5145,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T11:41:59Z"
+      completed_at: "2026-11-19T11:41:59Z"
     blocked_reason: null
     recovery_state: null
   - id: "agent-config-surface-implement-code"
@@ -5156,7 +5156,7 @@ tasks:
     purpose: "Keep agent configuration parsing explicit, deterministic, and equality-safe."
     expected_outcome: "The declared configuration surface is the only accepted one, migration is documented, and profile comparison is total."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "agent-config-surface-write-tests"
     requirements:
@@ -5165,8 +5165,8 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T12:03:48Z"
+      completed_at: "2026-11-19T12:03:48Z"
     blocked_reason: null
     recovery_state: null
   - id: "agent-config-surface-security-audit"
@@ -5176,7 +5176,7 @@ tasks:
     purpose: "Confirm the tightened surface cannot be exploited to change effective execution policy silently."
     expected_outcome: "Every high-confidence parsing, bounds, or authority finding is fixed or retained as an explicit blocker."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "agent-config-surface-implement-code"
     requirements:
@@ -5185,8 +5185,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T12:55:33Z"
+      completed_at: "2026-11-19T12:55:33Z"
     blocked_reason: null
     recovery_state: null
   - id: "agent-config-surface-compliance-review"
@@ -5196,7 +5196,7 @@ tasks:
     purpose: "Preserve independent evidence that configuration handling matches its declared behavior."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "agent-config-surface-security-audit"
     requirements:
@@ -5204,8 +5204,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T14:10:08Z"
+      completed_at: "2026-11-19T14:10:08Z"
     blocked_reason: null
     recovery_state: null
   - id: "locks-clean-confirmation-write-tests"
@@ -5215,7 +5215,7 @@ tasks:
     purpose: "Keep every state-removing shell operation covered by the same confirmation rule."
     expected_outcome: "Tests fail while locks clean acts without confirmation and pass once the behavior and the contract set agree."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Provided-interfaces"
@@ -5223,8 +5223,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T16:09:00Z"
+      completed_at: "2026-11-19T16:09:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "locks-clean-confirmation-implement-code"
@@ -5234,7 +5234,7 @@ tasks:
     purpose: "Remove the contract-behavior gap for shell destructive operations."
     expected_outcome: "locks clean confirms before removal and the contract lists it with the other destructive operations."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "locks-clean-confirmation-write-tests"
     requirements:
@@ -5243,8 +5243,8 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T16:28:01Z"
+      completed_at: "2026-11-19T16:28:01Z"
     blocked_reason: null
     recovery_state: null
   - id: "locks-clean-confirmation-security-audit"

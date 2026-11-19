@@ -309,6 +309,19 @@ pub enum Command {
         #[command(subcommand)]
         command: AgentCommand,
     },
+    /// Inspect or clean task locks in the user-state directory.
+    ///
+    /// The interactive shell dispatches `locks` as a builtin before a line is
+    /// re-parsed by clap, so this variant is hidden from help and completion
+    /// (the shell's `locks` builtin is the user-facing surface); it is retained
+    /// so the destructive-confirmation gate can name `locks clean` and the
+    /// standalone CLI can still execute it.
+    #[command(hide = true)]
+    Locks {
+        /// Remove stale (non-live) lock files; requires confirmation.
+        #[arg(long)]
+        clean: bool,
+    },
     /// Generate shell completion scripts on stdout.
     Completions {
         /// Target shell for completion generation.
@@ -1554,6 +1567,9 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     r#"{{"status":"success","command":"help","topic":{topic_json},"text":{text_json}}}"#
                 )))
             }
+            Command::Locks { clean } => Ok(CommandOutput::message(
+                crate::bark::locks_command_output(clean),
+            )),
             // Dispatched above before presentation handling; retained so the
             // match stays total and the JSON branch never sees it.
             Command::AuthoringApply {
@@ -2136,6 +2152,9 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 Ok(CommandOutput::message(script))
             }
             Command::Help { topic } => Ok(CommandOutput::message(crate::help::render(topic))),
+            Command::Locks { clean } => Ok(CommandOutput::message(
+                crate::bark::locks_command_output(clean),
+            )),
             // Dispatched above before presentation handling; retained so the
             // match stays total and the plain branch never sees it.
             Command::AuthoringApply {

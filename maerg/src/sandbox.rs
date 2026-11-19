@@ -2999,8 +2999,22 @@ fn validate_runner(
             reason: "the runner path must be absolute".to_owned(),
         });
     }
-    let metadata = fs::symlink_metadata(runner)
-        .map_err(|source| sandbox_error(config, "inspect trusted sandbox runner", source))?;
+    let metadata = match fs::symlink_metadata(runner) {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            return Err(KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!(
+                    "the configured sandbox runner `{}` is not installed at that path; \
+                     install the `galla` runner there (build it with \
+                     `cargo build --release -p galla`, then copy the `galla` \
+                     executable to that path) before running a sandboxed task",
+                    config.runner
+                ),
+            });
+        }
+        Err(source) => return Err(sandbox_error(config, "inspect trusted sandbox runner", source)),
+    };
     // The runner can be a regular non-symlink file or a directory containing
     // handler scripts. Symlinks are rejected for security reasons.
     if metadata.file_type().is_symlink() {
