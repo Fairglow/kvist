@@ -36,6 +36,7 @@ pub mod enforcement;
 pub mod origin;
 pub mod probe;
 pub mod protocol;
+pub mod session;
 pub mod validation;
 
 /// Honest status describing the current protocol-and-acquisition-capable, OS-enforcement-available runner.

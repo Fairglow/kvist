@@ -127,9 +127,24 @@ pub(crate) fn is_system_grant(grant: &Grant) -> bool {
 
 /// Validates all host-independent protocol invariants.
 pub fn validate(request: &SandboxRequest) -> Result<(), ProtocolError> {
-    if request.protocol != REQUEST_PROTOCOL {
+    validate_request(request, REQUEST_PROTOCOL)
+}
+
+/// Validates the closed version-one namespace/grant/resource/identity contract
+/// for the named protocol identifier.
+///
+/// The one-shot request and the versioned session launch share this exact
+/// contract: the session mode is a separate, explicit protocol mode beside the
+/// one-shot request, not a reinterpretation of it. Both must name the same
+/// closed namespace, grant, resource, and identity invariants before any
+/// session-specific authority is considered.
+pub(crate) fn validate_request(
+    request: &SandboxRequest,
+    expected_protocol: &str,
+) -> Result<(), ProtocolError> {
+    if request.protocol != expected_protocol {
         return Err(invalid(format!(
-            "protocol must be `{REQUEST_PROTOCOL}`, not `{}`",
+            "protocol must be `{expected_protocol}`, not `{}`",
             request.protocol
         )));
     }

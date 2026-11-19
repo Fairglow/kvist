@@ -1728,15 +1728,15 @@ tasks:
     purpose: "Expose missing session-mode behavior before production changes."
     expected_outcome: "New session-mode regressions fail against the current one-shot-only runner."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#SR-REQ-SESSION-MODE"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-11-18T12:00:00Z"
-      updated_at: "2026-11-18T12:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-18T23:58:13Z"
+      completed_at: "2026-11-18T23:58:13Z"
     blocked_reason: null
     recovery_state: null
   - id: "session-mode-implement-code"
@@ -1746,7 +1746,7 @@ tasks:
     purpose: "Allow a sandboxed external agent to run with a run-scoped inference-only channel."
     expected_outcome: "Session-mode regressions and existing one-shot conformance pass."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "session-mode-write-tests"
     requirements:
@@ -1754,8 +1754,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-11-18T12:00:00Z"
-      updated_at: "2026-11-18T12:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T01:25:42Z"
+      completed_at: "2026-11-19T01:25:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "session-mode-security-audit"
@@ -1765,7 +1765,7 @@ tasks:
     purpose: "Retain authority and privacy evidence."
     expected_outcome: "Independent scoped observations for arbitration."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "session-mode-implement-code"
     requirements:
@@ -1773,8 +1773,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-11-18T12:00:00Z"
-      updated_at: "2026-11-18T12:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T01:46:21Z"
+      completed_at: "2026-11-19T01:46:21Z"
     blocked_reason: null
     recovery_state: null
   - id: "session-mode-compliance-review"
@@ -1784,7 +1784,7 @@ tasks:
     purpose: "Retain discrepancies and human arbitration."
     expected_outcome: "Independent comparison and concrete evidence limits."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "session-mode-security-audit"
     requirements:
@@ -1792,7 +1792,7 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-11-18T12:00:00Z"
-      updated_at: "2026-11-18T12:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-19T02:23:10Z"
+      completed_at: "2026-11-19T02:23:10Z"
     blocked_reason: null
     recovery_state: null
