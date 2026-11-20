@@ -98,7 +98,39 @@ impl Workspace {
         // Wide enough for two side-by-side panes? Each pane needs at least 40
         // columns plus the separator.
         let side_by_side = pane == ActivePane::Both && body.width >= 83;
-        match (skott.is_some(), pane, side_by_side) {
+        // The embedded Skott app pre-wraps its transcript rows at the pane's
+        // width, so feed it the pane it is about to render into. Without this
+        // the rows keep their launch-time 79-column wrapping no matter how the
+        // terminal or the split view changes.
+        let (skott_pane, kvist_pane) = match (skott_active, pane, side_by_side) {
+            (true, ActivePane::Both, true) => {
+                let split =
+                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(body);
+                (split[1], split[0])
+            }
+            (true, ActivePane::Skott, _) => (body, body),
+            _ => (Rect::ZERO, body),
+        };
+        if skott_pane != Rect::ZERO
+            && let Some(skott) = self.skott.as_mut().filter(|skott| skott.is_active())
+        {
+            let width = skott_pane.width.saturating_sub(1).max(1);
+            if width != skott.app.width {
+                skott.app.resize(width, skott.app.height);
+                self.dirty = true;
+            }
+        }
+        // The Kvist transcript is pre-wrapped at `self.width`; keep that width
+        // below the area it renders into (full body on its own, left half in
+        // the split view, minus the right scrollbar column) so a terminal
+        // resize or a split-view pane change re-wraps it at the next render.
+        let width = kvist_pane.width.saturating_sub(2).max(1);
+        if width != self.width {
+            self.width = width;
+            self.dirty = true;
+        }
+        match (skott_active, pane, side_by_side) {
             (true, ActivePane::Skott, _) => {
                 self.render_skott_body(frame, body, base, border, accent)?;
             }
@@ -682,6 +714,92 @@ mod tests {
         workspace.change_focus(Some(".".into())).unwrap();
         assert!(workspace.source.contains("# Component only"));
         assert_eq!(workspace.history, ["status"]);
+    }
+
+    #[test]
+    fn skott_view_tracks_terminal_resizes_split_panes_and_mouse_scroll() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut workspace = Workspace::new(dir.path()).unwrap();
+        let (mut embedded, _prompts) = crate::skott_embedded::tests::start_stubbed();
+        // A long agent transcript: streamed answer paragraphs are retained
+        // as Markdown blocks with their source, so a narrower pane must
+        // re-wrap them into more rows.
+        let paragraph = "the agent is working through a long sequence of steps that the \
+        user wants to review while the model is generating output for the task at \
+        hand and every one of these lines needs to stay readable when the user \
+        scrolls through the transcript later in the session and compares the \
+        reasoning against the result";
+        for i in 0..12 {
+            embedded
+                .app_mut()
+                .push_event(skott::session::Event::Text(format!(
+                    "Paragraph {i}: {paragraph}\n\n"
+                )));
+        }
+        workspace.skott = Some(embedded);
+
+        // Wide terminal: the Skott pane must adopt the pane's inner width and
+        // the Kvist transcript must adopt its full-body inner width.
+        let mut terminal = Terminal::new(TestBackend::new(200, 30)).unwrap();
+        terminal
+            .draw(|frame| workspace.draw(frame).unwrap())
+            .unwrap();
+        assert_eq!(workspace.width, 198, "Kvist transcript must track the pane");
+        assert_eq!(workspace.skott.as_ref().unwrap().app.width, 199);
+        assert_eq!(workspace.skott_viewport, 23);
+
+        // Mouse wheel on the Skott view scrolls the Skott transcript, not the
+        // Kvist transcript: scrolling back unpins auto-follow, and the Kvist
+        // scroll offset is left untouched.
+        let kvist_scroll = workspace.scroll;
+        let lines = workspace.skott.as_ref().unwrap().app.lines.len();
+        workspace.mouse_scroll(true).unwrap();
+        assert_eq!(
+            workspace.scroll, kvist_scroll,
+            "Kvist transcript must not move"
+        );
+        assert!(
+            !workspace.skott_follow,
+            "scrolling back must unpin auto-follow"
+        );
+        assert_eq!(
+            workspace.skott_scroll,
+            (lines - workspace.skott_viewport) - 3,
+            "the wheel must scroll the Skott view by its step"
+        );
+        // Scrolling down again reaches the bottom and re-pins auto-follow.
+        workspace.mouse_scroll(false).unwrap();
+        assert!(
+            workspace.skott_follow,
+            "reaching the bottom must re-pin follow"
+        );
+
+        // A narrower terminal re-wraps both transcripts: the Skott app reflows
+        // its rows at the new pane width, and the Kvist width tracks the pane.
+        let narrow = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(narrow).unwrap();
+        terminal
+            .draw(|frame| workspace.draw(frame).unwrap())
+            .unwrap();
+        assert_eq!(workspace.skott.as_ref().unwrap().app.width, 99);
+        assert!(
+            workspace.skott.as_ref().unwrap().app.lines.len() > lines,
+            "the Skott transcript must re-wrap at the narrower pane"
+        );
+        assert_eq!(workspace.width, 98);
+
+        // The side-by-side split shrinks both panes again: the Skott app
+        // re-wraps at the half-width pane, and the Kvist transcript follows.
+        workspace
+            .skott
+            .as_mut()
+            .unwrap()
+            .set_active_pane(ActivePane::Both);
+        terminal
+            .draw(|frame| workspace.draw(frame).unwrap())
+            .unwrap();
+        assert_eq!(workspace.skott.as_ref().unwrap().app.width, 49);
+        assert_eq!(workspace.width, 48);
     }
 
     #[test]

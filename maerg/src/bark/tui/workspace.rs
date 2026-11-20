@@ -190,6 +190,11 @@ pub(crate) fn run(project: &Path) -> Result<()> {
         let mut workspace = Workspace::new(project)?;
         let _guard = TerminalGuard::enter()?;
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+        // Seed the transcript wrap width from the real terminal size so the
+        // first frame already wraps at the right width; the frame sync in the
+        // loop below keeps it tracking resizes and split-view panes after.
+        let size = terminal.size()?;
+        workspace.width = size.width.saturating_sub(2).max(1);
         let mut last_render = Instant::now() - Duration::from_secs(1);
         let mut last_error = String::new();
         loop {
@@ -211,14 +216,8 @@ pub(crate) fn run(project: &Path) -> Result<()> {
                     }
                 }
                 let size = terminal.size()?;
-                let width = size.width.saturating_sub(3).max(1);
-                if workspace.width != width {
-                    workspace.width = width;
-                    workspace.dirty = true;
-                }
                 if workspace.dirty && last_render.elapsed() >= Duration::from_millis(100) {
-                    workspace.rendered =
-                        render::markdown(&workspace.source, width, workspace.theme)?;
+                    workspace.rendered = workspace.render_transcript()?;
                     workspace.dirty = false;
                     last_render = Instant::now();
                 }
@@ -237,20 +236,9 @@ pub(crate) fn run(project: &Path) -> Result<()> {
                         }
                         Event::Paste(text) => workspace.paste(&text),
                         Event::Mouse(mouse) => match mouse.kind {
-                            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-                                if workspace.overlay.is_some() =>
-                            {
-                                let key = if mouse.kind == MouseEventKind::ScrollUp {
-                                    KeyCode::Up
-                                } else {
-                                    KeyCode::Down
-                                };
-                                for _ in 0..3 {
-                                    workspace.overlay_key(key.into())?;
-                                }
+                            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                                workspace.mouse_scroll(mouse.kind == MouseEventKind::ScrollUp)?;
                             }
-                            MouseEventKind::ScrollUp => workspace.navigate(-3)?,
-                            MouseEventKind::ScrollDown => workspace.navigate(3)?,
                             MouseEventKind::Down(event::MouseButton::Left)
                             | MouseEventKind::Drag(event::MouseButton::Left)
                                 if workspace.overlay.is_none()
@@ -262,7 +250,16 @@ pub(crate) fn run(project: &Path) -> Result<()> {
                             }
                             _ => {}
                         },
-                        Event::Resize(_, _) => workspace.dirty = true,
+                        // The frame carries the authoritative size (it can
+                        // change between loop iterations); re-derive the
+                        // transcript width from it and re-wrap when it moved.
+                        Event::Resize(width, _) => {
+                            let transcript_width = width.saturating_sub(2).max(1);
+                            if workspace.width != transcript_width {
+                                workspace.width = transcript_width;
+                                workspace.dirty = true;
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -503,7 +500,7 @@ impl Workspace {
         let source = self.transcript.read(segment)?;
         self.segment = segment;
         self.source = source;
-        self.rendered = render::markdown(&self.source, self.width, self.theme)?;
+        self.rendered = self.render_transcript()?;
         self.scroll = if bottom {
             self.rendered.lines.len().saturating_sub(self.viewport)
         } else {
@@ -511,6 +508,13 @@ impl Workspace {
         };
         self.dirty = false;
         Ok(())
+    }
+
+    /// Re-renders the Kvist transcript at its current width. The width is
+    /// read back from the last frame (which tracks the terminal), so a
+    /// resize or a split-view pane change rewraps the markdown.
+    fn render_transcript(&mut self) -> io::Result<Text<'static>> {
+        render::markdown(&self.source, self.width, self.theme)
     }
 
     /// True when a plain PageUp/PageDown should scroll the embedded Skott
@@ -545,6 +549,26 @@ impl Workspace {
         };
         self.skott_scroll = next.min(max_scroll);
         self.skott_follow = self.skott_scroll == max_scroll;
+    }
+
+    /// Applies one mouse-wheel tick. Overlays scroll themselves; while the
+    /// Skott view (alone or side-by-side) is showing the embedded Skott
+    /// transcript, the wheel scrolls that transcript — matching what plain
+    /// PageUp/PageDown do there; otherwise the Kvist transcript scrolls.
+    pub(super) fn mouse_scroll(&mut self, up: bool) -> io::Result<()> {
+        if self.overlay.is_some() {
+            let key = if up { KeyCode::Up } else { KeyCode::Down };
+            for _ in 0..3 {
+                self.overlay_key(key.into())?;
+            }
+            return Ok(());
+        }
+        if self.skott_viewport_scroll_active() {
+            self.skott_scroll_page(if up { -3 } else { 3 });
+            return Ok(());
+        }
+        self.navigate(if up { -3 } else { 3 })?;
+        Ok(())
     }
 
     fn navigate(&mut self, delta: isize) -> io::Result<()> {

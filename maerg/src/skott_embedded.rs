@@ -727,7 +727,7 @@ impl Drop for EmbeddedSkott {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::Mutex;
@@ -836,7 +836,9 @@ mod tests {
     /// Starts a session with a stub transport by driving the same construction
     /// path as [`EmbeddedSkott::start`], but injecting the stub transport and
     /// executor in place of the real model transport and sandbox executor.
-    fn start_stubbed() -> (EmbeddedSkott, PromptSender) {
+    /// Shared with the workspace view tests so they can drive a live embedded
+    /// session without a model.
+    pub(crate) fn start_stubbed() -> (EmbeddedSkott, PromptSender) {
         let config = test_config();
         let model = test_model(&config).clone();
         let budgets = model
