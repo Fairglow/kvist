@@ -26,7 +26,10 @@ fn component_dir() -> PathBuf {
 
 /// The workspace root holds the project-level `GUIDE.md`.
 fn workspace_root() -> PathBuf {
-    component_dir().parent().expect("maerg has a parent directory").to_path_buf()
+    component_dir()
+        .parent()
+        .expect("maerg has a parent directory")
+        .to_path_buf()
 }
 
 /// The single CLI-table row that documents `kvist task run`.
@@ -43,9 +46,7 @@ fn guide_task_run_section(guide: &str) -> &str {
         .find("### 5.2 Running a Task")
         .expect("GUIDE is missing its task-run examples section");
     let tail = &guide[start..];
-    let end = tail
-        .find("### 5.3")
-        .unwrap_or(tail.len());
+    let end = tail.find("### 5.3").unwrap_or(tail.len());
     &tail[..end]
 }
 

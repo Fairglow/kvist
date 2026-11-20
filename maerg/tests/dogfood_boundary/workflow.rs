@@ -3,7 +3,7 @@ use std::fs;
 use serde_json::json;
 
 use crate::support::{
-    ATTEMPT_ID, TASK_ID, ScriptedProposal, add_independent_ready_implementation_task,
+    ATTEMPT_ID, ScriptedProposal, TASK_ID, add_independent_ready_implementation_task,
     assert_success, create_scripted_target_project, create_target_project, git, output_text,
     run_kvist, sha256_file, task_block, write_ambiguous_attempt, write_finalizable_attempt,
 };
@@ -1279,8 +1279,8 @@ fn in_policy_dependency_request_continues_without_awaiting_decision() {
     );
     let _execution = run_kvist(project.path(), &["task", "run", ".", TASK_ID]);
 
-    let queue = fs::read_to_string(project.path().join("maerg/TODOS.yaml"))
-        .expect("read post-run queue");
+    let queue =
+        fs::read_to_string(project.path().join("maerg/TODOS.yaml")).expect("read post-run queue");
     let task = task_block(&queue, TASK_ID);
     assert!(
         !task.contains("status: awaiting-decision"),

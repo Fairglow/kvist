@@ -154,9 +154,8 @@ pub fn clean_stale_dir(dir: &Path) -> Vec<PathBuf> {
         if entry.live {
             continue;
         }
-        match crate::task_commands::TaskLock::remove_stale_lock_for_clean(&entry.path) {
-            Ok(true) => removed.push(entry.path),
-            Ok(false) | Err(_) => {}
+        if let Ok(true) = crate::task_commands::TaskLock::remove_stale_lock_for_clean(&entry.path) {
+            removed.push(entry.path);
         }
     }
     removed

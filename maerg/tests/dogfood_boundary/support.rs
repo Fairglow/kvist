@@ -127,9 +127,15 @@ impl TargetProject {
 #[derive(Clone)]
 pub enum ScriptedProposal {
     /// Propose `propose_decision` with the given `summary` and `why`.
-    Decision { summary: &'static str, why: &'static str },
+    Decision {
+        summary: &'static str,
+        why: &'static str,
+    },
     /// Propose `request_dependency` with the given `name` and `origin`.
-    Dependency { name: &'static str, origin: &'static str },
+    Dependency {
+        name: &'static str,
+        origin: &'static str,
+    },
 }
 
 pub struct LocalModel {

@@ -101,7 +101,10 @@ fn unknown_pin_field_is_rejected_fail_closed() {
     )
     .unwrap();
     let registry = resolve_with_rust_on(directory.path());
-    assert_rejected(&registry, "only channel, components, targets and profile are supported");
+    assert_rejected(
+        &registry,
+        "only channel, components, targets and profile are supported",
+    );
 }
 
 #[test]

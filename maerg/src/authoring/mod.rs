@@ -2711,7 +2711,11 @@ mod tests {
             &[dependency_intent("public-crate", public_origin)],
             &policy(),
         );
-        assert_eq!(plan.decision_count(), 0, "172.32.x is outside the RFC 1918 block");
+        assert_eq!(
+            plan.decision_count(),
+            0,
+            "172.32.x is outside the RFC 1918 block"
+        );
         assert_eq!(plan.dependency_request_count(), 1);
     }
 
