@@ -371,6 +371,121 @@ fn execute_agent_surfaces_a_proposed_decision_and_pauses() {
     );
 }
 
+#[test]
+#[cfg(target_os = "linux")]
+fn execute_agent_redacts_the_decision_patch_in_the_recorded_evidence() {
+    maerg::init_test_logging();
+    let target_dir = TempDir::new().expect("workspace");
+
+    // The provider returns a propose_decision tool call whose patch carries a
+    // configured secret; the brokered run must record the proposal with the
+    // secret redacted, never the raw value.
+    let secret = "sk-live-9f8e7d6c5b4a3secret";
+    let tool_calls = serde_json::json!([
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "propose_decision",
+                "arguments": {
+                    "summary": "use a different crate",
+                    "why": "recorded fit is worse",
+                    "patch": format!("token = \"{secret}\"")
+                }
+            }
+        }
+    ]);
+    let endpoint = serve_local_ollama_tool_call("", &tool_calls.to_string());
+    let prompt = "Choose the best serialization approach";
+    let command = format!(
+        "curl --silent --request POST --json '{{\"model\":\"test-model\"}}' -- \"{endpoint}\""
+    );
+
+    let profile = AgentProfile {
+        resolved_profile: None,
+        role: Role::Developer,
+        profile: "default".to_owned(),
+        command_template: command.clone(),
+        models: vec![Model {
+            name: "default".to_owned(),
+            command,
+            system_prompt: None,
+        }],
+        default_model: "default".to_owned(),
+        model: None,
+        thinking_effort: None,
+        token_limit: None,
+        timeout_seconds: 5,
+        max_output_bytes: 1_024,
+        redaction_values: vec![secret.to_owned()],
+    };
+
+    let context_paths: Vec<PathBuf> = vec![];
+    let task_id = "test-task";
+    let sandbox = SandboxConfig {
+        runner: "/usr/bin/true".to_owned(),
+        backend: "/usr/bin/true".to_owned(),
+        environment_allowlist: vec![],
+        acquisition: maerg::config::AcquisitionConfig::default(),
+    };
+
+    let result = execute_agent(
+        &profile,
+        &sandbox,
+        // A surfaced decision returns before any authoring sandbox dispatch,
+        // so no runner or probe is required.
+        None,
+        None,
+        maerg::agent::AgentExecutionRequest {
+            project_root: target_dir.path(),
+            vcs_selection: VcsSelection::Git,
+            prompt,
+            context_paths: &context_paths,
+            read_only_mounts: &[],
+            target_dir: target_dir.path(),
+            task_id,
+            stream_output: false,
+            role: Role::Developer,
+            policy_identity: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        },
+    )
+    .expect("agent execution success");
+
+    assert!(result.surfaced_decision);
+
+    // The proposal evidence must carry the redaction marker, never the raw
+    // secret, in both the machine-readable JSON and the Markdown companion.
+    let proposals = target_dir
+        .path()
+        .join(".kvist")
+        .join("authoring")
+        .join("proposals");
+    assert!(
+        proposals.exists(),
+        "proposals directory should exist: {proposals:?}"
+    );
+    let entries: Vec<_> = std::fs::read_dir(&proposals)
+        .expect("read proposals")
+        .map(|entry| entry.expect("entry").path())
+        .collect();
+    let json = entries
+        .iter()
+        .find(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .expect("machine proposal");
+    let markdown = json.with_extension("md");
+    for path in [json, &markdown] {
+        let evidence = fs::read_to_string(path).expect("read proposal evidence");
+        assert!(
+            evidence.contains("[REDACTED]"),
+            "evidence must redact the secret: {evidence}"
+        );
+        assert!(
+            !evidence.contains(secret),
+            "evidence must not contain the raw secret: {evidence}"
+        );
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn probe_test_workspace(probe_body: &str) -> (TempDir, TempDir, SandboxConfig) {
     maerg::init_test_logging();

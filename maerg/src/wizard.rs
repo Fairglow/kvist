@@ -950,15 +950,25 @@ fn collect_providers(
             let Some(provider_table) = item.as_table() else {
                 continue;
             };
-            let Some(provider_type) = provider_table
+            // Mirror the canonical parser (`merge_agent_config_from_table`):
+            // accept the `type` key or the `provider_type` alias, fall back to
+            // the provider name, and carry the `command_template` override, so
+            // the acknowledgement gate approves exactly the template the
+            // runtime would execute rather than a synthesized default.
+            let provider_type = provider_table
                 .get("type")
+                .or_else(|| provider_table.get("provider_type"))
                 .and_then(Item::as_value)
                 .and_then(Value::as_str)
-            else {
-                continue;
-            };
+                .unwrap_or(name)
+                .to_owned();
             let base_url = provider_table
                 .get("base_url")
+                .and_then(Item::as_value)
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let command_template = provider_table
+                .get("command_template")
                 .and_then(Item::as_value)
                 .and_then(Value::as_str)
                 .map(str::to_owned);
@@ -966,9 +976,9 @@ fn collect_providers(
                 name.to_owned(),
                 config::ProviderConfig {
                     name: name.to_owned(),
-                    provider_type: provider_type.to_owned(),
+                    provider_type,
                     base_url,
-                    command_template: None,
+                    command_template,
                     timeout_seconds: None,
                 },
             );

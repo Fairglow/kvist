@@ -5254,7 +5254,7 @@ tasks:
     purpose: "Confirm the gated removal cannot act on live, changed, or fenced lock state."
     expected_outcome: "Every high-confidence race, classification, or authorization finding is fixed or retained as an explicit blocker."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "locks-clean-confirmation-implement-code"
     requirements:
@@ -5263,8 +5263,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T00:12:17Z"
+      completed_at: "2026-11-20T00:12:17Z"
     blocked_reason: null
     recovery_state: null
   - id: "locks-clean-confirmation-compliance-review"
@@ -5274,7 +5274,7 @@ tasks:
     purpose: "Preserve independent evidence that the confirmation behavior matches its declared contract."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "locks-clean-confirmation-security-audit"
     requirements:
@@ -5282,8 +5282,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T00:42:52Z"
+      completed_at: "2026-11-20T00:42:52Z"
     blocked_reason: null
     recovery_state: null
   - id: "shell-docs-align-write-tests"
@@ -5293,7 +5293,7 @@ tasks:
     purpose: "Make documentation drift detectable before the first dogfood cycle relies on the README and GUIDE."
     expected_outcome: "Tests fail while the README or GUIDE contradicts the contracted task-run behavior and pass once they agree."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Provided-interfaces"
@@ -5301,8 +5301,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T01:30:50Z"
+      completed_at: "2026-11-20T01:30:50Z"
     blocked_reason: null
     recovery_state: null
   - id: "shell-docs-align"
@@ -5312,7 +5312,7 @@ tasks:
     purpose: "Keep the user-facing documentation accurate for the first dogfood cycle."
     expected_outcome: "README and GUIDE describe the optional TASK_ID flow and confirmation semantics exactly as implemented and contracted."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "shell-docs-align-write-tests"
     requirements:
@@ -5320,8 +5320,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T13:15:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T01:55:04Z"
+      completed_at: "2026-11-20T01:55:04Z"
     blocked_reason: null
     recovery_state: null
   - id: "brokered-turn-write-tests"
@@ -5373,7 +5373,7 @@ tasks:
     purpose: "Confirm the broker and applier cannot be coaxed into an unauthorized, out-of-root, or link-following write."
     expected_outcome: "Every high-confidence parsing, race, identity, or authorization finding is fixed or retained as an explicit blocker."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "brokered-turn-implement-code"
     requirements:
@@ -5383,8 +5383,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-16T12:00:00Z"
-      updated_at: "2026-09-16T12:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T02:38:53Z"
+      completed_at: "2026-11-20T02:38:53Z"
     blocked_reason: null
     recovery_state: null
   - id: "brokered-turn-compliance-review"
@@ -5394,7 +5394,7 @@ tasks:
     purpose: "Preserve independent evidence that the brokered path matches its declared requirements and contract."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "brokered-turn-security-audit"
     requirements:
@@ -5402,8 +5402,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-16T12:00:00Z"
-      updated_at: "2026-09-16T12:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T04:11:02Z"
+      completed_at: "2026-11-20T04:11:02Z"
     blocked_reason: null
     recovery_state: null
   - id: "agent-check-write-tests"
@@ -5453,7 +5453,7 @@ tasks:
     purpose: "Confirm no test command can execute without explicit acknowledgement and configuration input cannot be coaxed into out-of-scope effects."
     expected_outcome: "Every high-confidence parsing, race, authorization, or information-disclosure finding is fixed or retained as an explicit blocker."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "agent-check-implement-code"
     requirements:
@@ -5462,8 +5462,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-17T18:00:00Z"
-      updated_at: "2026-09-17T18:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T04:26:33Z"
+      completed_at: "2026-11-20T04:26:33Z"
     blocked_reason: null
     recovery_state: null
   - id: "agent-check-compliance-review"
@@ -5473,7 +5473,7 @@ tasks:
     purpose: "Preserve independent evidence that the agent check matches its declared requirements and contract."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "agent-check-security-audit"
     requirements:
@@ -5481,8 +5481,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-17T18:00:00Z"
-      updated_at: "2026-09-17T18:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T04:58:09Z"
+      completed_at: "2026-11-20T04:58:09Z"
     blocked_reason: null
     recovery_state: null
   - id: "phase-4-write-tests"
@@ -5492,7 +5492,7 @@ tasks:
     purpose: "Establish executable evidence for the propose_decision and request_dependency tools, the awaiting-decision run-harness transition, and the dependency-origin policy before their implementation, so a hostile or buggy model cannot wedge the broker nor escape the scope."
     expected_outcome: "Tests cover propose_decision classification and redacted-patch evidence, request_dependency in/out-of-policy routing, the closed ALLOWED_TOOLS enumeration, the decision-pause ordering over write effects, surfaced_decision on the run result, and the awaiting-decision task transition in the harness."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Behavioral-guarantees"
@@ -5501,8 +5501,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
     timestamps:
       created_at: "2026-09-24T09:00:00Z"
-      updated_at: "2026-09-24T09:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T05:34:40Z"
+      completed_at: "2026-11-20T05:34:40Z"
     blocked_reason: null
     recovery_state: null
   - id: "phase-4-implement-code"
@@ -5512,7 +5512,7 @@ tasks:
     purpose: "Close the implemented target-tier gap so an uncovered, impactful decision or an out-of-policy dependency request pauses the run for the human without blocking on trivial issues, while normal work proceeds unattended across turns."
     expected_outcome: "The broker classifies every intent to exactly one of read, write, dependency request, or decision; a decision ends the run in awaiting-decision; an in-policy dependency request is recorded and the agent continues; an out-of-policy request is surfaced; the tool set is advertised in the prompt; and all phase-4 tests pass."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "phase-4-write-tests"
     requirements:
@@ -5521,8 +5521,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-DEPENDENCY-REQUEST"
     timestamps:
       created_at: "2026-09-24T09:00:00Z"
-      updated_at: "2026-09-24T09:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T05:58:52Z"
+      completed_at: "2026-11-20T05:58:52Z"
     blocked_reason: null
     recovery_state: null
   - id: "phase-4-write-tests-2"
@@ -5532,7 +5532,7 @@ tasks:
     purpose: "Establish executable evidence for the run-harness awaiting-decision transition and the dependency-policy surface decision through the full loop."
     expected_outcome: "The dogfood suite exercises propose_decision, in-policy request_dependency, and out-of-policy request_dependency end to end."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "phase-4-implement-code"
     requirements:
@@ -5540,8 +5540,8 @@ tasks:
       - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
     timestamps:
       created_at: "2026-09-24T09:00:00Z"
-      updated_at: "2026-09-24T09:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T07:07:34Z"
+      completed_at: "2026-11-20T07:07:34Z"
     blocked_reason: null
     recovery_state: null
   - id: "phase-4-security-audit"
@@ -5551,7 +5551,7 @@ tasks:
     purpose: "Preserve independent confirmation that the broker is still the total, fail-closed source of truth and no untrusted intent can write a protected document or escape the scope."
     expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "phase-4-write-tests-2"
     requirements:
@@ -5559,8 +5559,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-24T09:00:00Z"
-      updated_at: "2026-09-24T09:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T08:24:25Z"
+      completed_at: "2026-11-20T08:24:25Z"
     blocked_reason: null
     recovery_state: null
   - id: "phase-4-compliance-review"
@@ -5570,7 +5570,7 @@ tasks:
     purpose: "Preserve independent evidence that the implemented tools match their declared requirements and contract."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "phase-4-security-audit"
     requirements:
@@ -5579,8 +5579,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-24T09:00:00Z"
-      updated_at: "2026-09-24T09:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T08:43:48Z"
+      completed_at: "2026-11-20T08:43:48Z"
     blocked_reason: null
     recovery_state: null
   - id: "rust-toolchain-write-tests"
@@ -5630,7 +5630,7 @@ tasks:
     purpose: "Preserve independent confirmation that toolchain selection cannot be tampered with, bypassed, or used to reach the network inside the sandbox."
     expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "rust-toolchain-implement-code"
     requirements:
@@ -5638,8 +5638,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"
-      updated_at: "2026-09-26T08:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T09:32:01Z"
+      completed_at: "2026-11-20T09:32:01Z"
     blocked_reason: null
     recovery_state: null
   - id: "rust-toolchain-compliance-review"
@@ -5649,7 +5649,7 @@ tasks:
     purpose: "Preserve independent evidence that the implemented toolchain handling matches its declared requirements and contract."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "rust-toolchain-security-audit"
     requirements:
@@ -5658,8 +5658,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"
-      updated_at: "2026-09-26T08:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T10:12:42Z"
+      completed_at: "2026-11-20T10:12:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "rust-toolchain-nightly-e2e"
@@ -5884,7 +5884,7 @@ tasks:
     purpose: "Preserve independent confirmation that per-language offline builds resolve only approved, pinned material with network denied."
     expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "language-e2e-implement-code"
     requirements:
@@ -5892,8 +5892,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"
-      updated_at: "2026-09-26T08:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T11:54:10Z"
+      completed_at: "2026-11-20T11:54:10Z"
     blocked_reason: null
     recovery_state: null
   - id: "language-e2e-compliance-review"
@@ -5903,7 +5903,7 @@ tasks:
     purpose: "Preserve independent evidence that implemented language support matches its declared requirements and contract."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "language-e2e-security-audit"
     requirements:
@@ -5912,8 +5912,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"
-      updated_at: "2026-09-26T08:00:00Z"
-      completed_at: null
+      updated_at: "2026-11-20T13:16:10Z"
+      completed_at: "2026-11-20T13:16:10Z"
     blocked_reason: null
     recovery_state: null
   - id: "help-guidance-write-tests"
@@ -5982,7 +5982,7 @@ tasks:
     purpose: "Retain an independent disposition for the new help and guidance surfaces."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "help-guidance-security-audit"
     requirements:
@@ -5991,8 +5991,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-29T22:23:20Z"
-      updated_at: "2026-09-29T22:23:20Z"
-      completed_at: null
+      updated_at: "2026-11-20T15:26:47Z"
+      completed_at: "2026-11-20T15:26:47Z"
     blocked_reason: null
     recovery_state: null
   - id: "soft-wrap-write-tests"
@@ -6060,7 +6060,7 @@ tasks:
     purpose: "Retain an independent disposition for the soft-wrapping surfaces."
     expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
     kind: compliance-review
-    status: pending
+    status: in-progress
     depends_on:
       - "soft-wrap-security-audit"
     requirements:
@@ -6069,7 +6069,7 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-30T07:00:00Z"
-      updated_at: "2026-09-30T07:00:00Z"
+      updated_at: "2026-11-20T15:26:48Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

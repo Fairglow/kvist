@@ -673,6 +673,55 @@ impl TaskLock {
         sync_lock_directory(path)
     }
 
+    /// Removes one stale lock file for the `locks clean` path, using the same
+    /// quarantine-and-revalidate discipline as [`Self::remove_stale_path`].
+    ///
+    /// Returns `Ok(true)` when the lock file was removed and `Ok(false)` when
+    /// it was preserved because its owner still appears live. A lock that is a
+    /// valid record whose owner still appears live is left untouched. A
+    /// malformed record, or a valid record whose owner is dead, is
+    /// quarantined, re-read, verified against the original snapshot, and only
+    /// then removed. If the file changed while it was being quarantined (for
+    /// example, a new task replaced it with a live lock), the quarantine is
+    /// restored and the removal is refused with an error. This closes the
+    /// TOCTOU window between the scan that classified the lock as stale and
+    /// the removal: a live lock that appears after the scan is never removed.
+    pub(crate) fn remove_stale_lock_for_clean(path: &Path) -> Result<bool> {
+        let retained = read_task_lock(path)?;
+        if valid_task_lock_record(&retained.contents)
+            && lock_owner_appears_live(&retained.contents)
+        {
+            return Ok(false);
+        }
+
+        let quarantine = unique_lock_quarantine_path(path)?;
+        fs::rename(path, &quarantine).map_err(|source| KvistError::Io {
+            operation: "quarantine stale task lock for clean",
+            path: path.to_path_buf(),
+            source,
+        })?;
+        sync_lock_directory(path)?;
+
+        let quarantined = read_task_lock(&quarantine)?;
+        if quarantined != retained
+            || (valid_task_lock_record(&quarantined.contents)
+                && lock_owner_appears_live(&quarantined.contents))
+        {
+            return Err(restore_quarantined_lock(
+                path,
+                &quarantine,
+                "clean refused because the task lock changed while it was being quarantined",
+            ));
+        }
+        fs::remove_file(&quarantine).map_err(|source| KvistError::Io {
+            operation: "remove quarantined stale task lock for clean",
+            path: quarantine,
+            source,
+        })?;
+        sync_lock_directory(path)?;
+        Ok(true)
+    }
+
     fn task_lock_path(context: &TaskContext) -> Result<PathBuf> {
         Self::path_for_directories(&context.project_dir, &context.component_dir)
     }
@@ -8019,6 +8068,55 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&replacement_path).expect("read replacement lock"),
             "replacement-owner"
+        );
+    }
+
+    #[test]
+    fn clean_lock_removal_removes_stale_and_preserves_live() {
+        let directory = TempDir::new().expect("create lock test directory");
+
+        // A malformed record is stale and is removed.
+        let malformed_path = directory.path().join("malformed.lock");
+        fs::write(&malformed_path, "not a lock file\n").expect("write malformed lock");
+        assert_eq!(
+            TaskLock::remove_stale_lock_for_clean(&malformed_path)
+                .expect("clean removes a malformed lock"),
+            true,
+            "malformed lock must be removed and reported as removed"
+        );
+        assert!(!malformed_path.exists());
+
+        // A valid record whose owner is dead is stale and is removed.
+        let stale_path = directory.path().join("stale.lock");
+        let stale_contents =
+            "schema_version: 1\nstarted_at: 2026-09-01T20:30:00Z\ntask_id: \"task\"\npid: 999999\nnonce: 00000000000000000000000000000000\n";
+        fs::write(&stale_path, stale_contents).expect("write stale lock");
+        assert_eq!(
+            TaskLock::remove_stale_lock_for_clean(&stale_path)
+                .expect("clean removes a stale lock"),
+            true,
+            "stale lock must be removed and reported as removed"
+        );
+        assert!(!stale_path.exists());
+
+        // A valid record whose owner appears live is preserved and reported
+        // as not removed.
+        let live_path = directory.path().join("live.lock");
+        let live_contents = format!(
+            "schema_version: 1\nstarted_at: 2026-09-01T20:30:00Z\ntask_id: \"task\"\npid: {}\nnonce: 11111111111111111111111111111111\n",
+            std::process::id()
+        );
+        fs::write(&live_path, &live_contents).expect("write live lock");
+        assert_eq!(
+            TaskLock::remove_stale_lock_for_clean(&live_path)
+                .expect("clean preserves a live lock"),
+            false,
+            "live lock must be preserved and reported as not removed"
+        );
+        assert!(live_path.exists());
+        assert_eq!(
+            fs::read_to_string(&live_path).expect("read preserved live lock"),
+            live_contents
         );
     }
 

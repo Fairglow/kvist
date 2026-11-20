@@ -141,14 +141,22 @@ pub fn clean_stale() -> Vec<PathBuf> {
 /// Removes stale (non-live) lock files from one directory, returning the
 /// removed paths. Live locks are never touched; removal failures are
 /// skipped, not fatal.
+///
+/// Each stale lock is removed through the quarantine-and-revalidate path in
+/// [`crate::task_commands::TaskLock::remove_stale_lock_for_clean`], which
+/// re-checks the lock's liveness after it has been quarantined. This closes
+/// the TOCTOU window between the scan that classified the lock as stale and
+/// the removal: if a new task replaced the lock with a live one in the
+/// meantime, the quarantine is restored and the removal is refused.
 pub fn clean_stale_dir(dir: &Path) -> Vec<PathBuf> {
     let mut removed = Vec::new();
     for entry in scan_dir(dir) {
         if entry.live {
             continue;
         }
-        if fs::remove_file(&entry.path).is_ok() {
-            removed.push(entry.path);
+        match crate::task_commands::TaskLock::remove_stale_lock_for_clean(&entry.path) {
+            Ok(true) => removed.push(entry.path),
+            Ok(false) | Err(_) => {}
         }
     }
     removed

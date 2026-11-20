@@ -436,8 +436,11 @@ kvist task run . implement-code --stream
 ```
 
 An exact `TASK` runs only that task if its prerequisites are fulfilled.
-Omit it for continuous execution without confirmation. There are no batch
-selectors or separate whole-component command.
+A bare positive integer `N` runs the Nth ready task (1-based, the same
+ordering the `tasks` listing numbers), so `kvist task run . 1` runs the next
+ready task without typing its ID. Omit the target for continuous execution
+without confirmation. There are no batch selectors or separate whole-component
+command.
 
 ### 5.3 Automated Unattended Task Loop
 

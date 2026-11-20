@@ -116,6 +116,22 @@ impl TargetProject {
 /// the full brokered effect loop (turn, intent, authorization, staging, and
 /// in-sandbox dispatch). A serve thread owns the listening socket; dropping
 /// the guard stops the thread deterministically.
+/// A tool call the scripted mock gateway proposes on its first turn.
+///
+/// The default gateway always proposes a `write_file` effect; a scripted
+/// gateway instead proposes one of these so a test can drive the run loop
+/// through a specific broker outcome (a surfaced decision, an in-policy
+/// dependency request, or an out-of-policy dependency request that the broker
+/// surfaces as a decision). Every later turn returns a final answer with no
+/// tool calls so the multi-turn loop completes.
+#[derive(Clone)]
+pub enum ScriptedProposal {
+    /// Propose `propose_decision` with the given `summary` and `why`.
+    Decision { summary: &'static str, why: &'static str },
+    /// Propose `request_dependency` with the given `name` and `origin`.
+    Dependency { name: &'static str, origin: &'static str },
+}
+
 pub struct LocalModel {
     address: String,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -136,7 +152,7 @@ impl Drop for LocalModel {
 }
 
 impl LocalModel {
-    fn spawn() -> Self {
+    fn spawn(script: Option<ScriptedProposal>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback mock provider");
         let address = listener.local_addr().expect("mock address").to_string();
         // The serve thread owns the socket; the guard's stop flag and sentinel
@@ -204,20 +220,114 @@ impl LocalModel {
                 // fixture's test root: the broker authorizes it and the effect
                 // loop dispatches the in-sandbox applier for it, so every
                 // supervised run in this suite exercises the full effect path.
-                // Every later turn returns a final answer with no tool calls so
-                // the multi-turn loop completes.
+                // A scripted gateway instead proposes the configured tool call so
+                // a test can drive the run loop through a specific broker outcome
+                // (a surfaced decision, an in-policy dependency request, or an
+                // out-of-policy dependency request that the broker surfaces as a
+                // decision). Every later turn returns a final answer with no tool
+                // calls so the multi-turn loop completes.
                 serve_turn += 1;
-                let body: &[u8] = if serve_turn == 1 {
-                    &b"{\"model\":\"kvist-test-mock\",\"choices\":[{\"finish_reason\":\"tool_calls\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"destination\\\":\\\"tests/generated.rs\\\",\\\"content\\\":\\\"#[test]\\\\nfn generated() {}\\\\n\\\"}\"}}]}}]}"[..]
+                let body = if serve_turn == 1 {
+                    match &script {
+                        Some(ScriptedProposal::Decision { summary, why }) => {
+                            let arguments = serde_json::json!({
+                                "summary": summary,
+                                "why": why,
+                            });
+                            let body = serde_json::json!({
+                                "model": "kvist-test-mock",
+                                "choices": [{
+                                    "finish_reason": "tool_calls",
+                                    "index": 0,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": "",
+                                        "tool_calls": [{
+                                            "id": "call_1",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "propose_decision",
+                                                "arguments": arguments.to_string(),
+                                            },
+                                        }],
+                                    },
+                                }],
+                            });
+                            serde_json::to_string(&body).expect("encode scripted decision")
+                        }
+                        Some(ScriptedProposal::Dependency { name, origin }) => {
+                            let arguments = serde_json::json!({
+                                "name": name,
+                                "origin": origin,
+                            });
+                            let body = serde_json::json!({
+                                "model": "kvist-test-mock",
+                                "choices": [{
+                                    "finish_reason": "tool_calls",
+                                    "index": 0,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": "",
+                                        "tool_calls": [{
+                                            "id": "call_1",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "request_dependency",
+                                                "arguments": arguments.to_string(),
+                                            },
+                                        }],
+                                    },
+                                }],
+                            });
+                            serde_json::to_string(&body).expect("encode scripted dependency")
+                        }
+                        None => {
+                            // The default gateway proposes the `write_file` effect.
+                            let body = serde_json::json!({
+                                "model": "kvist-test-mock",
+                                "choices": [{
+                                    "finish_reason": "tool_calls",
+                                    "index": 0,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": "",
+                                        "tool_calls": [{
+                                            "id": "call_1",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "write_file",
+                                                "arguments": serde_json::json!({
+                                                    "destination": "tests/generated.rs",
+                                                    "content": "#[test]\nfn generated() {}\n",
+                                                }).to_string(),
+                                            },
+                                        }],
+                                    },
+                                }],
+                            });
+                            serde_json::to_string(&body).expect("encode default effect")
+                        }
+                    }
                 } else {
-                    &b"{\"model\":\"kvist-test-mock\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Implementation complete.\"}}]}"[..]
+                    let body = serde_json::json!({
+                        "model": "kvist-test-mock",
+                        "choices": [{
+                            "finish_reason": "stop",
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "Implementation complete.",
+                            },
+                        }],
+                    });
+                    serde_json::to_string(&body).expect("encode final answer")
                 };
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len()
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
                 );
                 let _ = stream.write_all(response.as_bytes());
-                let _ = stream.write_all(body);
                 let _ = stream.flush();
             }
         });
@@ -259,7 +369,28 @@ pub fn resolve_local_test_model() -> (String, Option<LocalModel>) {
     {
         return (url, None);
     }
-    let model = LocalModel::spawn();
+    let model = LocalModel::spawn(None);
+    (
+        format!("http://{}/v1/chat/completions", model.address),
+        Some(model),
+    )
+}
+
+/// Resolves a loopback model endpoint that proposes a specific scripted tool
+/// call on its first turn, so a test can drive the run loop through a specific
+/// broker outcome (a surfaced decision, an in-policy dependency request, or an
+/// out-of-policy dependency request that the broker surfaces as a decision).
+///
+/// The `KVIST_TEST_MODEL_URL` override is honored only when it is set and
+/// loopback; otherwise a hermetic scripted mock server is spawned. The returned
+/// guard must be retained while the injected endpoint stays reachable.
+pub fn resolve_scripted_test_model(script: ScriptedProposal) -> (String, Option<LocalModel>) {
+    if let Ok(url) = std::env::var("KVIST_TEST_MODEL_URL")
+        && (url.contains("127.0.0.1:") || url.contains("[::1]:"))
+    {
+        return (url, None);
+    }
+    let model = LocalModel::spawn(Some(script));
     (
         format!("http://{}/v1/chat/completions", model.address),
         Some(model),
@@ -550,6 +681,22 @@ printf '#[test]\nfn generated() {{}}\n' > "{project}/maerg/tests/generated.rs"
 }
 
 pub fn create_target_project(status: &str) -> TargetProject {
+    create_target_project_with_model(status, resolve_local_test_model)
+}
+
+/// Creates a fixture project whose mock model gateway proposes a specific
+/// scripted tool call on its first turn, so a test can drive the run loop
+/// through a specific broker outcome (a surfaced decision, an in-policy
+/// dependency request, or an out-of-policy dependency request that the broker
+/// surfaces as a decision).
+pub fn create_scripted_target_project(status: &str, script: ScriptedProposal) -> TargetProject {
+    create_target_project_with_model(status, || resolve_scripted_test_model(script.clone()))
+}
+
+fn create_target_project_with_model(
+    status: &str,
+    resolve_model: impl Fn() -> (String, Option<LocalModel>),
+) -> TargetProject {
     let project = temporary_directory("project-");
     let external_tools = temporary_directory("dogfood-tools-");
     for artifact in ["VISION.md", "ARCHITECTURE.md", "ROOT_CONTRACT.md"] {
@@ -582,7 +729,7 @@ resolver = "3"
     create_child(&maerg, "galla", "fixture-galla");
     let backend = fs::canonicalize("/usr/bin/true").expect("resolve the test backend");
     let runner = write_controlled_runner(project.path(), external_tools.path(), &backend);
-    let (model_endpoint, local_model) = resolve_local_test_model();
+    let (model_endpoint, local_model) = resolve_model();
     let base_url = model_endpoint
         .strip_suffix("/v1/chat/completions")
         .unwrap_or(&model_endpoint);

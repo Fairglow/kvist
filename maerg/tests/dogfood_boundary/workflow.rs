@@ -3,9 +3,9 @@ use std::fs;
 use serde_json::json;
 
 use crate::support::{
-    ATTEMPT_ID, TASK_ID, add_independent_ready_implementation_task, assert_success,
-    create_target_project, git, output_text, run_kvist, sha256_file, task_block,
-    write_ambiguous_attempt, write_finalizable_attempt,
+    ATTEMPT_ID, TASK_ID, ScriptedProposal, add_independent_ready_implementation_task,
+    assert_success, create_scripted_target_project, create_target_project, git, output_text,
+    run_kvist, sha256_file, task_block, write_ambiguous_attempt, write_finalizable_attempt,
 };
 
 fn attempt_journal(project: &std::path::Path) -> std::path::PathBuf {
@@ -1182,4 +1182,252 @@ fn finalization_is_bound_to_the_exact_task_and_attempt_identity() {
         );
         assert_eq!(fs::read(&queue_path).expect("read unchanged queue"), before);
     }
+}
+
+/// A surfaced `propose_decision` pauses the run in awaiting-decision and
+/// records the proposal as durable evidence, without applying any effects.
+#[test]
+fn propose_decision_pauses_the_run_in_awaiting_decision_and_records_the_proposal() {
+    let project = create_scripted_target_project(
+        "pending",
+        ScriptedProposal::Decision {
+            summary: "choose between two incompatible crate layouts",
+            why: "the recorded fit is worse and the alternatives diverge",
+        },
+    );
+
+    assert_success(
+        &run_kvist(project.path(), &["task", "approve-policy"]),
+        "approve fixture policy",
+    );
+    let execution = run_kvist(project.path(), &["task", "run", ".", TASK_ID]);
+    assert!(
+        execution.status.success(),
+        "a surfaced decision must pause the run without a hard failure: {}",
+        output_text(&execution)
+    );
+
+    let queue = fs::read_to_string(project.path().join("maerg/TODOS.yaml"))
+        .expect("read awaiting-decision queue");
+    let task = task_block(&queue, TASK_ID);
+    assert!(
+        task.contains("status: awaiting-decision"),
+        "a surfaced propose_decision must pause the run in awaiting-decision: {}",
+        task
+    );
+    assert!(
+        !task.contains("status: completed"),
+        "a surfaced decision must not complete the task"
+    );
+
+    // The proposal is recorded as durable evidence under the component state
+    // directory, with both the summary and the why justification retained.
+    let proposals_dir = project.path().join("maerg/.kvist/authoring/proposals");
+    assert!(
+        proposals_dir.is_dir(),
+        "a surfaced decision must record proposal evidence under the component state directory"
+    );
+    let proposal_files: Vec<_> = fs::read_dir(&proposals_dir)
+        .expect("read proposal evidence directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    assert!(
+        !proposal_files.is_empty(),
+        "a surfaced decision must record at least one proposal JSON file"
+    );
+    for path in &proposal_files {
+        let contents = fs::read_to_string(path).expect("read proposal evidence");
+        assert!(
+            contents.contains("choose between two incompatible crate layouts"),
+            "proposal evidence must retain the summary: {}",
+            contents
+        );
+        assert!(
+            contents.contains("the recorded fit is worse and the alternatives diverge"),
+            "proposal evidence must retain the why justification: {}",
+            contents
+        );
+    }
+
+    // No effects were applied: the fixture's test root was never written.
+    assert!(
+        !project.path().join("maerg/tests/generated.rs").is_file(),
+        "a surfaced decision must apply no effects from the paused turn"
+    );
+}
+
+/// An in-policy `request_dependency` (an exact, pinned revision) is recorded
+/// as durable evidence and the run continues past the broker classification
+/// without pausing in awaiting-decision. The acquisition phase then fails
+/// because the dependency is not bound to the existing lock/manifest, so the
+/// run is blocked rather than paused in awaiting-decision.
+#[test]
+fn in_policy_dependency_request_continues_without_awaiting_decision() {
+    let project = create_scripted_target_project(
+        "pending",
+        ScriptedProposal::Dependency {
+            name: "serde",
+            origin: "1.0.200",
+        },
+    );
+
+    assert_success(
+        &run_kvist(project.path(), &["task", "approve-policy"]),
+        "approve fixture policy",
+    );
+    let _execution = run_kvist(project.path(), &["task", "run", ".", TASK_ID]);
+
+    let queue = fs::read_to_string(project.path().join("maerg/TODOS.yaml"))
+        .expect("read post-run queue");
+    let task = task_block(&queue, TASK_ID);
+    assert!(
+        !task.contains("status: awaiting-decision"),
+        "an in-policy dependency request must not pause the run in awaiting-decision: {}",
+        task
+    );
+    assert!(
+        !task.contains("status: completed"),
+        "an in-policy dependency request must not complete the task"
+    );
+
+    // The in-policy request is recorded as durable evidence under the
+    // component state directory, with the crate name and pinned origin
+    // retained.
+    let dependencies_dir = project.path().join("maerg/.kvist/authoring/dependencies");
+    assert!(
+        dependencies_dir.is_dir(),
+        "an in-policy dependency request must record evidence under the component state directory"
+    );
+    let request_files: Vec<_> = fs::read_dir(&dependencies_dir)
+        .expect("read dependency evidence directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    assert!(
+        !request_files.is_empty(),
+        "an in-policy dependency request must record at least one request JSON file"
+    );
+    for path in &request_files {
+        let contents = fs::read_to_string(path).expect("read dependency evidence");
+        assert!(
+            contents.contains("\"serde\""),
+            "dependency evidence must retain the crate name: {}",
+            contents
+        );
+        assert!(
+            contents.contains("\"1.0.200\""),
+            "dependency evidence must retain the pinned origin: {}",
+            contents
+        );
+    }
+
+    // No proposal evidence was recorded: the broker did not surface the
+    // in-policy request as a decision.
+    let proposals_dir = project.path().join("maerg/.kvist/authoring/proposals");
+    if proposals_dir.is_dir() {
+        let proposal_files: Vec<_> = fs::read_dir(&proposals_dir)
+            .expect("read proposal evidence directory")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .collect();
+        assert!(
+            proposal_files.is_empty(),
+            "an in-policy dependency request must not surface a decision proposal"
+        );
+    }
+}
+
+/// An out-of-policy `request_dependency` (an unpinned or private origin) is
+/// surfaced by the broker as a decision, pausing the run in awaiting-decision
+/// and recording the proposal as durable evidence.
+#[test]
+fn out_of_policy_dependency_request_pauses_the_run_in_awaiting_decision() {
+    let project = create_scripted_target_project(
+        "pending",
+        ScriptedProposal::Dependency {
+            name: "serde",
+            origin: "*",
+        },
+    );
+
+    assert_success(
+        &run_kvist(project.path(), &["task", "approve-policy"]),
+        "approve fixture policy",
+    );
+    let execution = run_kvist(project.path(), &["task", "run", ".", TASK_ID]);
+    assert!(
+        execution.status.success(),
+        "an out-of-policy dependency request must pause the run without a hard failure: {}",
+        output_text(&execution)
+    );
+
+    let queue = fs::read_to_string(project.path().join("maerg/TODOS.yaml"))
+        .expect("read awaiting-decision queue");
+    let task = task_block(&queue, TASK_ID);
+    assert!(
+        task.contains("status: awaiting-decision"),
+        "an out-of-policy dependency request must pause the run in awaiting-decision: {}",
+        task
+    );
+    assert!(
+        !task.contains("status: completed"),
+        "an out-of-policy dependency request must not complete the task"
+    );
+
+    // The out-of-policy request is surfaced as a decision proposal, recorded
+    // as durable evidence under the component state directory.
+    let proposals_dir = project.path().join("maerg/.kvist/authoring/proposals");
+    assert!(
+        proposals_dir.is_dir(),
+        "an out-of-policy dependency request must record proposal evidence under the component state directory"
+    );
+    let proposal_files: Vec<_> = fs::read_dir(&proposals_dir)
+        .expect("read proposal evidence directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    assert!(
+        !proposal_files.is_empty(),
+        "an out-of-policy dependency request must record at least one proposal JSON file"
+    );
+    for path in &proposal_files {
+        let contents = fs::read_to_string(path).expect("read proposal evidence");
+        assert!(
+            contents.contains("serde"),
+            "proposal evidence must retain the crate name: {}",
+            contents
+        );
+        assert!(
+            contents.contains("not an exact, pinned revision"),
+            "proposal evidence must identify the out-of-policy origin: {}",
+            contents
+        );
+    }
+
+    // No in-policy request evidence was recorded: the broker surfaced the
+    // out-of-policy request as a decision rather than accepting it.
+    let dependencies_dir = project.path().join("maerg/.kvist/authoring/dependencies");
+    if dependencies_dir.is_dir() {
+        let request_files: Vec<_> = fs::read_dir(&dependencies_dir)
+            .expect("read dependency evidence directory")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .collect();
+        assert!(
+            request_files.is_empty(),
+            "an out-of-policy dependency request must not record an accepted request"
+        );
+    }
+
+    // No effects were applied: the fixture's test root was never written.
+    assert!(
+        !project.path().join("maerg/tests/generated.rs").is_file(),
+        "an out-of-policy dependency request must apply no effects from the paused turn"
+    );
 }

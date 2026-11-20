@@ -589,16 +589,35 @@ fn classify_propose(
 
 /// The set of host substrings that mark an origin private, link-local, loopback,
 /// or otherwise unverified-remote and therefore outside the dependency policy.
-const UNVERIFIED_ORIGIN_PREFIXES: [&str; 8] = [
+const UNVERIFIED_ORIGIN_PREFIXES: [&str; 6] = [
     "127.",
     "10.",
     "192.168.",
     "169.254.",
-    "172.16.",
-    "172.17.",
     "localhost",
     "file://",
 ];
+
+/// Rejects an RFC 1918 `172.16.0.0/12` private address by its first two octets,
+/// so the whole `172.16.0.0`–`172.31.255.255` block is refused, not just the
+/// `172.16.` and `172.17.` prefixes. Handles both bare IP origins and VCS
+/// origins with a scheme prefix (e.g. `git+https://172.20.0.5/crate.git`).
+/// A non-numeric or malformed address is not a private IP and is left for the
+/// scheme and pinning checks.
+fn is_rfc1918_private_ip(origin: &str) -> bool {
+    // Strip the scheme prefix (e.g. "git+https://", "https://") if present,
+    // then take the host (IP) part before any port or path.
+    let host = origin.split("://").last().unwrap_or(origin);
+    let ip = host.split(['/', ':']).next().unwrap_or("");
+    let Some((first, rest)) = ip.split_once('.') else {
+        return false;
+    };
+    first == "172"
+        && rest
+            .split_once('.')
+            .and_then(|(second, _)| second.parse::<u8>().ok())
+            .is_some_and(|second| (16..=31).contains(&second))
+}
 
 /// Rejects an origin that is private, link-local, loopback, a local path, or a
 /// VCS/registry scheme pointing at a non-public host. Public crates.io and public
@@ -608,6 +627,7 @@ fn is_unverified_origin(origin: &str) -> bool {
     UNVERIFIED_ORIGIN_PREFIXES
         .iter()
         .any(|prefix| origin.starts_with(prefix))
+    || is_rfc1918_private_ip(origin)
     || origin.starts_with("./")
     || origin.starts_with("/")
     // Any scheme other than a public http(s) or git-over-http(s)/ssh VCS origin
@@ -2656,6 +2676,43 @@ mod tests {
         );
         assert_eq!(plan.decision_count(), 1);
         assert_eq!(plan.dependency_request_count(), 0);
+    }
+
+    #[test]
+    fn rfc1918_private_ip_origins_are_surfaced_as_a_decision() {
+        // The whole 172.16.0.0/12 block is private, not just 172.16.x and
+        // 172.17.x. Each of these pinned VCS origins must be surfaced as a
+        // decision rather than accepted as an in-policy dependency request.
+        let private_origins = [
+            "git+https://172.16.0.0/crate.git?rev=abcdef1",
+            "git+https://172.17.0.5/crate.git?rev=abcdef1",
+            "git+https://172.20.0.5/crate.git?rev=abcdef1",
+            "git+https://172.31.255.255/crate.git?rev=abcdef1",
+            "https://172.25.10.9/crate.git?rev=abcdef1",
+        ];
+        for origin in private_origins {
+            let plan = authorize_intents(
+                tempdir().unwrap().path(),
+                &[dependency_intent("private-crate", origin)],
+                &policy(),
+            );
+            assert_eq!(plan.decision_count(), 1, "origin {origin} must be surfaced");
+            assert_eq!(
+                plan.dependency_request_count(),
+                0,
+                "origin {origin} must not be accepted"
+            );
+        }
+        // The address just outside the block is not private; with a pinned ref
+        // it is an in-policy request.
+        let public_origin = "git+https://172.32.0.1/crate.git?rev=abcdef1";
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[dependency_intent("public-crate", public_origin)],
+            &policy(),
+        );
+        assert_eq!(plan.decision_count(), 0, "172.32.x is outside the RFC 1918 block");
+        assert_eq!(plan.dependency_request_count(), 1);
     }
 
     #[test]
