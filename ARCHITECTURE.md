@@ -178,9 +178,10 @@ commit creation fails.
 
 **Continuous component work:** bare `task run COMPONENT` schedules ready tasks
 iteratively without confirmation. Execution completion unlocks dependencies
-but does not record human acceptance. All queued stages of an item finish
-before its checkpoint; test, implementation and review stages are grouped
-when declared together. Local checkpoint commits are explicitly unaccepted work. The final
+but does not record human acceptance. The default item policy checkpoints
+after all of its declared test, implementation and review stages finish;
+the approved task policy checkpoints each completed stage instead. Local
+checkpoint commits are explicitly unaccepted work. The final
 component state awaits human approval. A durable, exclusive run ledger binds
 item baselines, effects and pending commits so interruption never implies replay.
 

@@ -1180,9 +1180,10 @@ requiring the human to select each one; the final independent review determines
 whether the resulting component can be declared compliant. Human
 task-by-task supervision remains an option, not a lifecycle requirement.
 
-Today, `task run` is the one-task execution primitive that an unattended loop
-can compose. It requires a current project and component, complete VCS
-tracking, and a ready queue task. One user-owned, sandbox-inaccessible lock,
+`task run COMPONENT TASK_ID` runs one task; `task run COMPONENT` runs ready
+work continuously with configurable checkpoints. Both require a current
+project and component, complete VCS tracking, and a ready queue task. One
+user-owned, sandbox-inaccessible lock,
 keyed by canonical project and component identity, is retained from selection
 through agent execution, verification, durable evidence, and its terminal
 transition. Kvist revalidates its ownership before durable transitions. Kvist

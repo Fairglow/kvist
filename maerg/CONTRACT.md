@@ -421,7 +421,12 @@ Streamed task commands do not run a competing terminal spinner.
 Long result lines wrap without discarding error details or command arguments.
 
 `[task_run] commit = "item"` in `kvist.toml` is the approval-bound default;
+`"task"` checkpoints after each task completes in a continuous run,
 `"component"` checkpoints once after all work, and `"manual"` never commits.
+The TUI Workspace menu exposes **Auto-commit**, with all four settings and
+the current selection. Selecting a different setting writes `kvist.toml`;
+it does not approve policy. Run `kvist task approve-policy` after reviewing
+the change. Explicit single-task implementation finalization is unchanged.
 Checkpoint Git/signing subprocesses have a five-minute per-command deadline
 and honor cancellation; stalled signing stops clearly without replaying tasks
 or bypassing signing policy.
@@ -441,6 +446,19 @@ Only changed approved source/test paths and host-owned workflow evidence enter
 a checkpoint. Overlapping dirty/staged files are refused before execution;
 unrelated work and staged changes are preserved. Commit failure retains the
 pending checkpoint; repeating bare run retries it without rerunning tasks.
+
+The TUI task header displays the executing component (not transcript focus),
+the task ID and one-based position in `TODOS.yaml`, and completed/total and
+integer percent complete. The header retains component progress during
+checkpointing; it clears when the command exits. Embedded free-form `agent`
+sessions remain separate from supervised `task run`.
+
+For a locked Rust project, protected test and implementation execution records
+the results of `cargo fmt --check`, `cargo clippy --offline --locked
+--all-targets -- -D warnings`, `cargo build --offline --locked`, and
+`cargo test --offline --locked`, in order, stopping at the first failure.
+Missing Rustfmt or Clippy is a verification failure, not a skipped check.
+Non-Rust verification keeps the existing approved language or test commands.
 
 Security review tasks use fresh source-only context. Compliance tasks use
 separate source-only observation and source-blind comparison requests, without

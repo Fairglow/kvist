@@ -831,7 +831,10 @@ All active tasks sharing that prefix belong to the item; unrecognized IDs MUST f
 explicitly before automatic item commits rather than guess ownership. Item
 checkpoints MUST wait for all defined item tasks, including every test,
 implementation and review task belonging to that item. Configurable local commit frequency MUST default to per-item, permit
-per-component or manual commits, and be approval-bound. Checkpoint commits
+per-task, per-component or manual commits, and be approval-bound. Per-task
+mode MUST checkpoint each successfully completed task before selecting the
+next. The TUI MUST expose the current setting and allow an idle operator to
+change it without granting execution approval. Checkpoint commits
 MUST NOT imply acceptance, include unrelated changes, push, amend, or bypass
 signing policy. Dirty overlapping paths, concurrent changes and failed commits
 MUST stop clearly; retained pending commits MUST be resumable without rerunning
@@ -854,6 +857,26 @@ a conservative provisional capacity otherwise.
 The requested workflow change has an explicit advisory exception while review
 receipts are unavailable. Independent post-code observation/comparison remain
 required.
+
+### REQ-TASK-RUN-FEEDBACK-AND-QUALITY
+
+The TUI MUST distinguish command focus from the component actually executing
+and keep the active task ID, its one-based declared queue position, and
+component completion count and percentage visible outside the scrolling
+transcript. Completed tasks, not just ready tasks, determine progress.
+Interactive task runs MUST enforce the same supervised completion and
+checkpoint rules as non-interactive runs.
+
+Rust test and implementation tasks MUST pass a formatter check, strict
+linter, build, and test in that order before recording completion or offering
+implementation finalization. Missing tooling or any failed stage MUST prevent
+completion, checkpointing, and dependent work. Checks are component-scoped
+where Cargo permits, with declared dependencies available read-only and no
+host or network fallback. Source-blind and source-only review tasks do not
+author source and are not separate build stages.
+
+This requested increment uses an explicit advisory exception while review
+receipts are unavailable. It does not record acceptance or compliance.
 
 ### REQ-SUPERVISED-EXECUTION
 

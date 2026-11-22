@@ -1796,3 +1796,71 @@ tasks:
       completed_at: "2026-11-19T02:23:10Z"
     blocked_reason: null
     recovery_state: null
+  - id: "cargo-quality-write-tests"
+    title: "write_tests: cover exact Rust quality commands and projected inputs"
+    description: "Pin accepted native quality argv and read-only workspace inputs, and reject other shapes."
+    context: "The native verifier previously admitted only test and metadata commands."
+    purpose: "Exercise the closed task verification surface."
+    expected_outcome: "Exact commands and input projections pass; mutations fail."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-22T20:37:40Z"
+      updated_at: "2026-11-22T20:37:40Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "cargo-quality-implement-code"
+    title: "implement_code: admit native Rust quality commands"
+    description: "Validate exact format, lint, and build requests and bound projected workspace inputs without increasing write or network authority."
+    context: "Human-requested change; explicit advisory exception while receipts are unavailable."
+    purpose: "Provide protected Cargo quality checks to the caller."
+    expected_outcome: "Native verification admits the exact checks with the same confinement."
+    kind: implementation
+    status: pending
+    depends_on: ["cargo-quality-write-tests"]
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-22T20:37:40Z"
+      updated_at: "2026-11-22T20:37:40Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "cargo-quality-security-audit"
+    title: "security_audit: inspect native Cargo quality request authority"
+    description: "Independently review exact argv, mount, environment, and network constraints."
+    context: "Independent gate; no implementer certification."
+    purpose: "Identify unintended authority changes."
+    expected_outcome: "Audit findings and limits are retained."
+    kind: security-audit
+    status: pending
+    depends_on: ["cargo-quality-implement-code"]
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-22T20:37:40Z"
+      updated_at: "2026-11-22T20:37:40Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "cargo-quality-compliance-review"
+    title: "compliance_review: compare native Cargo quality evidence"
+    description: "Independently derive observations, then compare them with the requirements and contract in a separate source-blind context."
+    context: "Separate source-only observation from source-blind comparison."
+    purpose: "Retain independent evidence of the verifier behavior."
+    expected_outcome: "Discrepancies are retained for human arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on: ["cargo-quality-security-audit"]
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-NATIVE-CARGO-CACHE"
+    timestamps:
+      created_at: "2026-11-22T20:37:40Z"
+      updated_at: "2026-11-22T20:37:40Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

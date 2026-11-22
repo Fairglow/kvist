@@ -18,13 +18,29 @@ const METADATA_ARGS: [&str; 6] = [
 
 #[derive(Clone, Copy)]
 pub(super) enum OfflineCommand {
+    Format,
+    Lint,
+    Build,
     Test,
     Metadata,
 }
 
 impl OfflineCommand {
+    pub(super) const PRE_TEST_CHECKS: [Self; 3] = [Self::Format, Self::Lint, Self::Build];
+
     pub(super) fn arguments(self) -> &'static [&'static str] {
         match self {
+            Self::Format => &["fmt", "--check"],
+            Self::Lint => &[
+                "clippy",
+                "--offline",
+                "--locked",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+            Self::Build => &["build", "--offline", "--locked"],
             Self::Test => &VERIFY_ARGS,
             Self::Metadata => &METADATA_ARGS,
         }
@@ -39,6 +55,7 @@ pub(super) enum Phase<'a> {
     Verification {
         command: OfflineCommand,
         lockfile_identity: &'a str,
+        projection: Option<&'a super::cargo_context::CargoContext>,
     },
 }
 
@@ -136,7 +153,16 @@ impl Request<'_> {
                 purpose: "scratch",
                 identity: scratch_identity.clone(),
             },
-            SandboxGrant {
+        ];
+        let projection = match &self.phase {
+            Phase::Verification { projection, .. } => *projection,
+            Phase::Acquisition { .. } => None,
+        };
+        let working_directory = if let Some(projection) = projection {
+            grants.extend(projection.grants.iter().cloned());
+            projection.directory.as_str()
+        } else {
+            grants.push(SandboxGrant {
                 source: workspace,
                 destination: destination.into(),
                 access: if acquisition {
@@ -150,8 +176,9 @@ impl Request<'_> {
                     "verification"
                 },
                 identity: workspace_identity.clone(),
-            },
-        ];
+            });
+            destination
+        };
         let mut endpoint = |path: Option<&Path>, destination: &str, purpose| {
             path.map(|path| -> Result<SandboxCacheEndpoint> {
                 let source = source(path, "resolve native Cargo data endpoint")?;
@@ -233,7 +260,7 @@ impl Request<'_> {
             protocol_version: PROTOCOL_VERSION,
             phase: phase.wire(),
             argv: &arguments,
-            working_directory: destination,
+            working_directory,
             environment: &environment,
             network,
             resources: SandboxResources {

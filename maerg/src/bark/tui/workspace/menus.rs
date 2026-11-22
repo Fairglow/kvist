@@ -5,7 +5,10 @@ use std::{collections::BTreeSet, io, path::PathBuf};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{config::Role, presentation};
+use crate::{
+    config::{CommitFrequency, Role},
+    presentation,
+};
 
 use super::{Overlay, Workspace};
 
@@ -25,6 +28,7 @@ pub(super) enum Page {
     RoleModel { role: Role, global: bool },
     Effort { role: Role, global: bool },
     Models,
+    CommitFrequency,
     Model(ModelKey),
     Appearance,
     Theme,
@@ -45,6 +49,13 @@ pub(super) struct Entry {
     pub action: Action,
     pub current: bool,
     search: String,
+}
+
+fn auto_commit_entry(mode: CommitFrequency) -> Entry {
+    Entry::new(
+        format!("Auto-commit: {}", mode.as_str()),
+        Action::Open(Page::CommitFrequency),
+    )
 }
 
 impl Entry {
@@ -75,6 +86,10 @@ pub(super) enum Action {
     Segment(u64),
     Follow,
     MaskAnswers(bool),
+    SetCommitFrequency {
+        expected: CommitFrequency,
+        mode: CommitFrequency,
+    },
     Help,
     Quit,
     Cancel,
@@ -165,6 +180,9 @@ impl Workspace {
                     Entry::new("History", Action::Open(Page::History)),
                     Entry::new("Help", Action::Help),
                 ];
+                if let Some(mode) = self.commit_frequency {
+                    entries.push(auto_commit_entry(mode));
+                }
                 if self.running.is_some() {
                     entries.push(Entry::new("Cancel command", Action::Cancel));
                 }
@@ -273,6 +291,30 @@ impl Workspace {
                     Entry::new(name.clone(), Action::Theme(name)).current(current)
                 })
                 .collect(),
+            Page::CommitFrequency => {
+                let current = crate::config::load(&self.project)
+                    .map_err(io::Error::other)?
+                    .task_run
+                    .commit;
+                [
+                    (CommitFrequency::Task, "after every completed task"),
+                    (CommitFrequency::Item, "after every lifecycle item"),
+                    (CommitFrequency::Component, "after the entire component"),
+                    (CommitFrequency::Manual, "off; commit manually"),
+                ]
+                .into_iter()
+                .map(|(mode, detail)| {
+                    Entry::new(
+                        format!("{}: {detail}", mode.as_str()),
+                        Action::SetCommitFrequency {
+                            expected: current,
+                            mode,
+                        },
+                    )
+                    .current(mode == current)
+                })
+                .collect()
+            }
             Page::History => {
                 let last = self.transcript.latest();
                 let mut entries =
@@ -288,12 +330,10 @@ impl Workspace {
             }
             _ => return self.model_menu(page),
         };
-        // Only `Appearance`, `Theme` and `History` fall through to the title
-        // match (every other page returns above); the fallback keeps the
-        // invariant a debug build still verifies without a runtime panic.
         let title = match &page {
             Page::Appearance => "Appearance",
             Page::Theme => "Appearance / Theme",
+            Page::CommitFrequency => "Auto-commit (changes require task approve-policy)",
             Page::History => "History (PageUp reaches all older segments)",
             other => {
                 debug_assert!(false, "unhandled menu page: {other:?}");
@@ -624,10 +664,38 @@ impl Workspace {
                 self.mask_answers = mask;
                 self.back();
             }
+            Action::SetCommitFrequency { expected, mode } => {
+                self.overlay = Some(Overlay::Menu(menu));
+                if self.running.is_some()
+                    || self.skott.as_ref().is_some_and(|skott| skott.is_active())
+                {
+                    return Err(io::Error::other(
+                        "wait for the current run before changing Auto-commit",
+                    ));
+                }
+                if mode != expected {
+                    crate::model_settings::set_task_run_commit(&self.project, expected, mode)
+                        .map_err(io::Error::other)?;
+                    self.commit_frequency = Some(mode);
+                    if let Some(parent) = self.menu_stack.last_mut()
+                        && let Some(entry) = parent.choices.iter_mut().find(|entry| {
+                            matches!(entry.action, Action::Open(Page::CommitFrequency))
+                        })
+                    {
+                        *entry = auto_commit_entry(mode);
+                    }
+                    self.notice = format!(
+                        "Auto-commit set to {}; review and run `task approve-policy` before executing.",
+                        mode.as_str()
+                    );
+                    self.overlay = Some(Overlay::Menu(self.build_menu(Page::CommitFrequency)?));
+                }
+            }
             Action::Help => {
                 self.menu_stack.push(menu);
                 self.overlay = Some(Overlay::Help { scroll: 0 });
             }
+
             Action::Quit => {
                 self.overlay = Some(Overlay::Menu(menu));
                 self.request_quit();

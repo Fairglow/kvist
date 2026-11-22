@@ -403,7 +403,7 @@ struct SandboxRequest<'a> {
     protocol_version: u32,
     phase: &'static str,
     argv: &'a [String],
-    working_directory: &'static str,
+    working_directory: &'a str,
     environment: &'a BTreeMap<String, String>,
     network: SandboxNetwork,
     resources: SandboxResources,
@@ -1999,6 +1999,7 @@ pub fn execute_offline_cargo_verification(
         options,
         native_cargo::OfflineCommand::Test,
         None,
+        None,
     )
 }
 
@@ -2020,6 +2021,7 @@ pub(crate) fn execute_native_cargo_metadata(
         request,
         options,
         native_cargo::OfflineCommand::Metadata,
+        None,
         Some(cancellation),
     )
 }
@@ -2029,6 +2031,7 @@ fn execute_offline_cargo_request(
     request: &OfflineCargoVerification<'_>,
     options: ExecutionOptions,
     command: native_cargo::OfflineCommand,
+    projection: Option<&cargo_context::CargoContext>,
     cancellation: Option<&sav::CancellationToken>,
 ) -> Result<ExecutionResult> {
     let environment: BTreeMap<String, String> = BTreeMap::new();
@@ -2080,12 +2083,17 @@ fn execute_offline_cargo_request(
             cargo: Path::new(&resolved.canonical_path),
             runtime: request.runtime_bin,
             scratch: request.scratch_host_dir,
-            workspace: request.component_dir,
+            workspace: if projection.is_some() {
+                request.project_root
+            } else {
+                request.component_dir
+            },
             registry,
             git,
             phase: native_cargo::Phase::Verification {
                 command,
                 lockfile_identity: &request.lockfile_digest,
+                projection,
             },
         }
         .encode()?,
@@ -2347,11 +2355,115 @@ pub fn run_offline_cargo_verification(
     component_dir: &Path,
     options: ExecutionOptions,
 ) -> Result<ExecutionResult> {
+    with_offline_cargo_workspace(
+        config,
+        project_root,
+        vcs_selection,
+        probe,
+        policy_identity,
+        component_dir,
+        false,
+        |request, _| execute_offline_cargo_verification(config, request, options),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_offline_cargo_quality_checks<T>(
+    config: &SandboxConfig,
+    project_root: &Path,
+    vcs_selection: VcsSelection,
+    probe: &SandboxProbe,
+    policy_identity: &str,
+    component_dir: &Path,
+    timeout: Duration,
+    output_limit: usize,
+    mut record: impl FnMut(&str, &ExecutionResult) -> Result<T>,
+) -> Result<T> {
+    with_offline_cargo_workspace(
+        config,
+        project_root,
+        vcs_selection,
+        probe,
+        policy_identity,
+        component_dir,
+        true,
+        |request, projection| {
+            let started = Instant::now();
+            let mut verify = |stage: native_cargo::OfflineCommand| {
+                let command = format!("cargo {}", stage.arguments().join(" "));
+                let remaining = timeout.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(KvistError::SandboxUnavailable {
+                        runner: config.runner.clone(),
+                        reason: format!(
+                            "task verification exceeded its deadline before `{command}`"
+                        ),
+                    });
+                }
+                eprintln!("Verifying: {command}");
+                let result = execute_offline_cargo_request(
+                    config,
+                    request,
+                    ExecutionOptions {
+                        timeout: Some(remaining),
+                        output_limit: Some(output_limit),
+                        live_stdout: None,
+                    },
+                    stage,
+                    projection,
+                    None,
+                )?;
+                let evidence = record(&command, &result)?;
+                let passed = !result.cancelled
+                    && !result.timed_out
+                    && !result.output_limit_exceeded
+                    && result.output.status.success();
+                Ok((evidence, passed))
+            };
+            for stage in native_cargo::OfflineCommand::PRE_TEST_CHECKS {
+                let (evidence, passed) = verify(stage)?;
+                if !passed {
+                    return Ok(evidence);
+                }
+                // Galla mounts Cargo's private admin tmpfs onto this empty
+                // placeholder. Remove only the mountpoint; keep build output.
+                let home_mountpoint = request.scratch_host_dir.join("cargo-home");
+                match fs::remove_dir(&home_mountpoint) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(source) => {
+                        return Err(KvistError::Io {
+                            operation: "reset private Cargo home mountpoint between verification stages",
+                            path: home_mountpoint,
+                            source,
+                        });
+                    }
+                }
+            }
+            verify(native_cargo::OfflineCommand::Test).map(|(evidence, _)| evidence)
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn with_offline_cargo_workspace<T>(
+    config: &SandboxConfig,
+    project_root: &Path,
+    vcs_selection: VcsSelection,
+    probe: &SandboxProbe,
+    policy_identity: &str,
+    component_dir: &Path,
+    project_workspace: bool,
+    run: impl FnOnce(&OfflineCargoVerification<'_>, Option<&cargo_context::CargoContext>) -> Result<T>,
+) -> Result<T> {
     // Enforce vendoring readiness against the manifest and lock file. This fails
     // closed with a clear message when the project is not vendored, the lockfile
     // has drifted since vendoring, or a registry or Git dependency is absent.
-    let enforcement =
-        crate::language_vendoring::enforce_vendoring(project_root, true, Some(config))?;
+    let enforcement = crate::language_vendoring::enforce_vendoring(
+        project_root,
+        !project_workspace,
+        Some(config),
+    )?;
     if enforcement.language != "rust" {
         return Err(KvistError::SandboxUnavailable {
             runner: config.runner.clone(),
@@ -2374,19 +2486,51 @@ pub fn run_offline_cargo_verification(
     }
     let toolchain = crate::toolchain::resolve_pinned_toolchain(project_root, &config.runner)?;
     let runtime_bin = provision_toolchain_bin(project_root, &config.runner)?;
+    if project_workspace {
+        for tool in ["cargo-fmt", "rustfmt", "cargo-clippy", "clippy-driver"] {
+            if !toolchain.root.join("bin").join(tool).is_file() {
+                return Err(KvistError::SandboxUnavailable {
+                    runner: config.runner.clone(),
+                    reason: format!(
+                        "pinned Rust toolchain is missing `{tool}`; install its rustfmt and clippy components before retrying"
+                    ),
+                });
+            }
+            link_runtime_entry(
+                runtime_bin.path(),
+                tool,
+                &format!("{CARGO_TOOLCHAIN_DEST}/bin/{tool}"),
+                &config.runner,
+            )?;
+        }
+        link_runtime_entry(
+            runtime_bin.path(),
+            "cargo",
+            &format!("{CARGO_TOOLCHAIN_DEST}/bin/cargo"),
+            &config.runner,
+        )?;
+    }
     let scratch = tempfile::tempdir().map_err(|source| KvistError::Io {
         operation: "create writable scratch for offline cargo verification",
         path: PathBuf::from("."),
         source,
     })?;
-    let native_home = roetter::rust::cache::home()?;
-    let staged_component = prepare_native_component_verification_workspace(
-        project_root,
-        component_dir,
-        &toolchain.cargo,
-        &native_home,
-        config,
-    )?;
+    let projection = project_workspace
+        .then(|| {
+            cargo_context::prepare_verification(config, project_root, component_dir, Instant::now())
+        })
+        .transpose()?;
+    let staged_component = if projection.is_some() {
+        None
+    } else {
+        prepare_native_component_verification_workspace(
+            project_root,
+            component_dir,
+            &toolchain.cargo,
+            &roetter::rust::cache::home()?,
+            config,
+        )?
+    };
     let effective_component_dir = staged_component
         .as_ref()
         .map_or(component_dir, tempfile::TempDir::path);
@@ -2409,6 +2553,12 @@ pub fn run_offline_cargo_verification(
                 "cannot re-identify the trusted sandbox runner for offline cargo verification: {source}"
             ),
         })?;
+    if approved_runner.digest != probe.runner_digest {
+        return Err(KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: "the verification runner changed after the approved capability probe".into(),
+        });
+    }
 
     let request = OfflineCargoVerification {
         project_root,
@@ -2429,7 +2579,7 @@ pub fn run_offline_cargo_verification(
         expected_runner: &approved_runner,
     };
 
-    execute_offline_cargo_verification(config, &request, options)
+    run(&request, projection.as_ref())
 }
 
 fn prepare_native_component_verification_workspace(

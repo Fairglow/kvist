@@ -13,6 +13,42 @@ use super::{
 };
 use crate::{KvistError, Result, file_io::replace_file_atomically};
 
+pub(crate) fn set_task_run_commit(
+    project: &Path,
+    expected: crate::config::CommitFrequency,
+    commit: crate::config::CommitFrequency,
+) -> Result<()> {
+    let path = absolute(&project.join("kvist.toml"))?;
+    safe_path(&path)?;
+    let _lock = SourceLock::acquire(&path)?;
+    let before = read_optional(&path)?
+        .ok_or_else(|| failure("initialize the project before changing Auto-commit"))?;
+    if crate::config::load(project)?.task_run.commit != expected {
+        return Err(failure(
+            "Auto-commit changed; reopen the menu before editing",
+        ));
+    }
+    let mut document = before
+        .parse::<DocumentMut>()
+        .map_err(|error| failure(format!("invalid project TOML: {error}")))?;
+    if !document.contains_key("task_run") {
+        document["task_run"] = Item::Table(toml_edit::Table::new());
+    }
+    let table = document
+        .get_mut("task_run")
+        .and_then(Item::as_table_like_mut)
+        .ok_or_else(|| failure("task_run must be a table"))?;
+    table.insert("commit", value(commit.as_str()));
+    let after = document.to_string();
+    crate::config::validate_project_configuration_contents(&path, project, &after)?;
+    if read_optional(&path)?.as_deref() != Some(&before) {
+        return Err(failure(
+            "project configuration changed; reopen the menu before editing",
+        ));
+    }
+    replace_file_atomically(&path, &after)
+}
+
 /// A source-specific registry edit, never a role/policy edit.
 #[derive(Debug, Clone, Copy)]
 pub enum RegistryChange {

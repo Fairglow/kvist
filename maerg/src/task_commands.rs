@@ -171,7 +171,7 @@ fn untracked_durable_artifacts(inspection: &project_state::ProjectInspection) ->
     }
 }
 
-fn validate_context(project_dir: &Path, component_path: &Path) -> Result<TaskContext> {
+pub(crate) fn validate_context(project_dir: &Path, component_path: &Path) -> Result<TaskContext> {
     validate_context_with_blocked(project_dir, component_path, false)
 }
 
@@ -304,7 +304,7 @@ fn validate_context_in_states(
     })
 }
 
-fn read_queue(component_dir: &Path) -> Result<TaskQueue> {
+pub(crate) fn read_queue(component_dir: &Path) -> Result<TaskQueue> {
     read_queue_snapshot(component_dir).map(|(queue, _)| queue)
 }
 
@@ -329,11 +329,12 @@ fn read_queue_snapshot(component_dir: &Path) -> Result<(TaskQueue, String)> {
             ),
         });
     }
-    let contents = fs::read_to_string(&path).map_err(|source| KvistError::Io {
-        operation: "read component TODO queue",
-        path: path.clone(),
-        source,
-    })?;
+    let contents = crate::file_io::read_text_bounded(&path, MAX_ROOT_TEXT_ARTIFACT_BYTES as usize)
+        .map_err(|source| KvistError::Io {
+            operation: "read component TODO queue",
+            path: path.clone(),
+            source,
+        })?;
     let queue = parse(&contents).map_err(|error| KvistError::TaskQueueUnavailable {
         path,
         reason: error.to_string(),
@@ -597,14 +598,6 @@ impl TaskLock {
     }
 
     fn release(mut self) -> Result<()> {
-        self.released = true;
-        self.remove_if_owned()
-    }
-
-    /// Releases the lock in place, for a caller that keeps the handle (such as
-    /// the embedded TUI's retained task-run preparation). Idempotent with
-    /// [`Drop`]: once released, the drop guard does not remove it again.
-    fn release_in_place(&mut self) -> Result<()> {
         self.released = true;
         self.remove_if_owned()
     }
@@ -4457,7 +4450,7 @@ fn authoring_scope_directive(write_scope: &[AttemptWriteScope]) -> String {
          - Do not write at the component root or anywhere outside those directories; \
          the sandbox rejects any other destination. Use `read_file` to read `Cargo.toml` and `request_dependency` to request dependencies.\n\
          - This task is ALREADY approved by the user: do NOT call `propose_decision` to report task completion, summarize your work, or ask for approval of normal implementation/test details.\n\
-         - There is no shell or `cargo` tool during authoring: Kvist runs `cargo test` automatically in the verification sandbox as soon as you finish your turn by replying with a final text summary and NO tool calls.\n",
+         - There is no shell or `cargo` tool during authoring: Kvist runs the Rust formatter check, Clippy, build, and tests in the verification sandbox after your final text summary with NO tool calls. Tests must pass against the resulting code; if a test-first change intentionally fails, surface it for human review rather than declaring the task complete.\n",
         list.join(", ")
     )
 }
@@ -4967,472 +4960,6 @@ pub fn run_task_with_controls(
     )
 }
 
-/// A prepared task run: the task-queue setup is complete (lock held, status
-/// transitioned to InProgress, prompt and context built, attempt journal
-/// entry written) and the agent work is ready to be handed to Skott. Kvist
-/// owns this handle; Skott is unaware of task states.
-pub(crate) struct TaskRunPrep {
-    /// The task context (project, component, directory).
-    pub(crate) context: TaskContext,
-    /// The operation lock held for the duration of the run.
-    pub(crate) lock: TaskLock,
-    /// The task ID being run.
-    pub(crate) task_id: String,
-    /// One-based queue position and total queue size at admission.
-    pub(crate) queue_position: (usize, usize),
-    /// Wall clock for admission, agent work and finalization.
-    pub(crate) started: std::time::Instant,
-    /// The attempt ID for this run.
-    pub(crate) attempt_id: String,
-    /// The task kind (Test, Implementation, SecurityAudit, ComplianceReview).
-    pub(crate) task_kind: TaskKind,
-    /// The agent profile selected by task kind (developer, security-reviewer,
-    /// or architect). The embedded TUI path uses this to pick the Skott model,
-    /// so review tasks run on the architect model, not the developer default.
-    pub(crate) profile: crate::config::RoleConfig,
-    /// The interpolated prompt to hand to Skott.
-    pub(crate) prompt: String,
-    /// The context files Skott should make available to the agent.
-    pub(crate) context_files: Vec<PathBuf>,
-    /// The read-only mounts Skott should set up.
-    pub(crate) read_only_mounts: Vec<crate::sandbox::ReadOnlyMount>,
-    /// The redactions to apply to agent output.
-    pub(crate) redactions: Vec<String>,
-    /// The attempt journal path.
-    pub(crate) journal: PathBuf,
-    /// The pre-run queue digest.
-    pub(crate) pre_queue_digest: String,
-    /// The pre-run queue contents, captured after Kvist transitions the task to
-    /// InProgress. Kvist owns the queue: if the agent modifies `TODOS.yaml`
-    /// directly (outside the approved write scope), Kvist restores this exact
-    /// pre-run state before transitioning, so the agent's untrusted edits never
-    /// reach the durable queue and timestamps are always set by Kvist.
-    pub(crate) pre_queue_contents: String,
-}
-
-/// Prepares a protected task run: validates the context, loads configuration,
-/// checks approval, acquires the operation lock, transitions the task to
-/// InProgress, builds the prompt and context files, and writes the prepared
-/// attempt journal entry. Returns a [`TaskRunPrep`] handle ready to be handed
-/// to Skott. Kvist owns all task-queue state; Skott is unaware of it.
-pub(crate) fn prepare_task_run(
-    project_dir: &Path,
-    component_path: &Path,
-    task_id: &str,
-    _allow_control: bool,
-) -> Result<TaskRunPrep> {
-    let started = std::time::Instant::now();
-    let context = validate_context(project_dir, component_path)?;
-    let config = crate::config::load(project_dir)?;
-    if config.sandbox.is_none() {
-        return Err(KvistError::UnapprovedExecutionPolicy {
-            reason: "sandbox configuration is absent".to_owned(),
-        });
-    }
-    if config.test_policy.is_none() {
-        return Err(KvistError::UnapprovedExecutionPolicy {
-            reason: "test policy is absent".to_owned(),
-        });
-    }
-    let (approved_runner, policy_identity, secret) = match task_run_approval(project_dir, &config)?
-    {
-        TaskRunApproval::Ready {
-            runner,
-            policy_identity,
-        } => {
-            let (_, secret) = load_authenticated_execution_approval(project_dir, &config)?;
-            (runner, policy_identity, secret)
-        }
-        TaskRunApproval::DescriptorUnavailable {
-            approval,
-            secret,
-            error,
-        } => {
-            fence_pre_spawn_failure(
-                component_path,
-                task_id,
-                project_dir,
-                &config,
-                &approval,
-                &secret,
-                &error,
-            )?;
-            return Err(error);
-        }
-    };
-    let sandbox_config = config
-        .sandbox
-        .as_ref()
-        .ok_or_else(|| KvistError::SandboxUnavailable {
-            runner: "<unconfigured>".to_owned(),
-            reason: "task execution requires a project-local [sandbox] configuration".to_owned(),
-        })?;
-    let approved_backend =
-        crate::sandbox::backend_identity(sandbox_config, project_dir, config.vcs)?;
-    let _sandbox_probe = crate::sandbox::ensure_available(
-        sandbox_config,
-        project_dir,
-        config.vcs,
-        &approved_runner,
-        &approved_backend,
-    )?;
-
-    let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-    let lock = TaskLock::for_context(&context, task_id, &started_at)?;
-    lock.revalidate()?;
-    ensure_component_attempts_recovered(&context.component_dir)?;
-    let mut queue = read_queue(&context.component_dir)?;
-    let task_index = queue
-        .tasks
-        .iter()
-        .position(|task| task.id == task_id)
-        .ok_or_else(|| KvistError::TaskQueueUnavailable {
-            path: context
-                .component_dir
-                .join(ComponentArtifact::TaskQueue.filename()),
-            reason: format!("task `{task_id}` not found in the queue"),
-        })?;
-    let task = &queue.tasks[task_index];
-    if task.status != TaskStatus::InProgress {
-        validate_transition(task, &queue.tasks, TaskStatus::InProgress, None)?;
-        let transition_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-        let _ = transition_locked(
-            &context,
-            &lock,
-            task_id,
-            TaskStatus::InProgress,
-            None,
-            &transition_at,
-            None,
-        )?;
-        queue = read_queue(&context.component_dir)?;
-    }
-    let task = &queue.tasks[task_index];
-    if !is_runnable_task(task, &queue.tasks) {
-        return Err(journal_error(
-            &context.component_dir.join("TODOS.yaml"),
-            &format!("task `{task_id}` is not ready for execution"),
-        ));
-    }
-    // The embedded TUI path selects the Skott model from this profile, so the
-    // role must be resolved here, not discarded.
-    let (agent_profile, _role) = match task.kind {
-        TaskKind::Test | TaskKind::Implementation => {
-            (&config.agent.developer, crate::config::Role::Developer)
-        }
-        TaskKind::SecurityAudit => (
-            &config.agent.security_reviewer,
-            crate::config::Role::SecurityReviewer,
-        ),
-        TaskKind::ComplianceReview => (&config.agent.architect, crate::config::Role::Architect),
-    };
-    let agent_attempt_path = attempt_path(&context.component_dir, task_id)?;
-    let attempt_id = next_attempt_id(&agent_attempt_path)?;
-    let write_scope = approved_write_scope(project_dir, &context, &config)?;
-    let pre_queue_digest = current_queue_digest(&context.component_dir)?;
-    // Kvist owns the queue: capture the exact pre-run contents so an agent that
-    // edits `TODOS.yaml` directly (outside the approved write scope) cannot
-    // corrupt the durable state. The run restores this before transitioning.
-    let pre_queue_contents = fs::read_to_string(
-        context
-            .component_dir
-            .join(ComponentArtifact::TaskQueue.filename()),
-    )
-    .map_err(|source| KvistError::Io {
-        operation: "capture pre-run TODO queue for agent-write protection",
-        path: context
-            .component_dir
-            .join(ComponentArtifact::TaskQueue.filename()),
-        source,
-    })?;
-    let mut prepared = PreparedAttempt {
-        schema_version: ATTEMPT_SCHEMA_VERSION,
-        attempt_id: attempt_id.clone(),
-        task_id: task_id.to_owned(),
-        phase: "prepared".to_owned(),
-        pre_status: status_name(task.status).to_owned(),
-        pre_queue_digest: pre_queue_digest.clone(),
-        intended_post_queue_digest: pre_queue_digest.clone(),
-        policy_identity,
-        runner_identity: approved_runner.digest.clone(),
-        approved_write_scope: write_scope.clone(),
-        timestamp: started_at.clone(),
-        operation_lock_digest: lock.contents_digest(),
-        authentication_tag: String::new(),
-    };
-    prepared.authentication_tag = prepared_attempt_tag(&secret[..], &prepared)?;
-    append_json_attempt(
-        &agent_attempt_path,
-        &prepared,
-        "append prepared run_task attempt",
-    )?;
-    // The queue (`TODOS.yaml`) is intentionally NOT mounted into the agent's
-    // context: Kvist owns it, the prompt already carries the task's full
-    // definition, and exposing the queue invites the agent to edit it directly
-    // (setting `status` without the matching `completed_at`), which corrupts
-    // the durable state and halts continuous execution.
-    let mut context_files = vec![
-        PathBuf::from("/workspace/component/REQUIREMENTS.md"),
-        PathBuf::from("/workspace/component/CONTRACT.md"),
-        PathBuf::from("/workspace/component/DESIGN.md"),
-        PathBuf::from("/workspace/component/IMPL.md"),
-        PathBuf::from("/workspace/context/ROOT_CONTRACT.md"),
-    ];
-    let mut read_only_mounts = vec![crate::sandbox::ReadOnlyMount::file(
-        project_dir.join("ROOT_CONTRACT.md"),
-        "/workspace/context/ROOT_CONTRACT.md".to_owned(),
-    )];
-    if queue.component.parent_contract.is_some() {
-        let component_root = project_dir.join(&config.component_root);
-        let (parent_component_dir, _) =
-            discovery::find_parent_component_dir(&component_root, &context.component_path)?;
-        context_files.push(PathBuf::from("/workspace/context/PARENT_CONTRACT.md"));
-        read_only_mounts.push(crate::sandbox::ReadOnlyMount::file(
-            parent_component_dir.join(ComponentArtifact::Contract.filename()),
-            "/workspace/context/PARENT_CONTRACT.md".to_owned(),
-        ));
-    }
-    let lang = detect_language(&context.component_dir);
-    let prompt = load_and_interpolate_template(&context.component_dir, lang, task, &write_scope)?;
-    let redactions = evidence_redactions(&config);
-    Ok(TaskRunPrep {
-        context,
-        lock,
-        task_id: task_id.to_owned(),
-        queue_position: (task_index + 1, queue.tasks.len()),
-        started,
-        attempt_id,
-        task_kind: task.kind,
-        profile: agent_profile.clone(),
-        prompt,
-        context_files,
-        read_only_mounts,
-        redactions,
-        journal: agent_attempt_path,
-        pre_queue_digest,
-        pre_queue_contents,
-    })
-}
-
-impl TaskRunPrep {
-    /// Interprets a Skott [`RunSummary`] and performs the task-queue teardown:
-    /// records the execution in the attempt journal and transitions the task
-    /// to its terminal state. Returns the result message for display.
-    ///
-    /// Allowed outcomes:
-    /// - `Completed` (with an answer) -> task completes.
-    /// - A surfaced decision -> task transitions to awaiting-decision.
-    /// - `GuidanceRequired` / `Stalled` / `Limit` / `Cancelled` / `Failed`
-    ///   -> task blocks with the failure reason.
-    /// - `NoWork` -> not an allowed outcome; the caller should push back to
-    ///   Skott with guidance via [`TaskRunPrep::push_back`].
-    ///
-    /// Kvist owns the task queue. The agent runs with a bounded write scope
-    /// (`src`/`tests`) and must never edit `TODOS.yaml` itself. If it does —
-    /// setting `status: completed` while leaving `completed_at: null`, for
-    /// example — the durable queue becomes invalid and every later revalidation
-    /// fails, halting continuous execution. Before Kvist records the terminal
-    /// transition it therefore restores the exact pre-run queue it captured at
-    /// prepare time, discarding any agent write to the queue. The restore is
-    /// silent on the happy path (the agent left the queue alone) and only
-    /// rewrites the file when the agent actually modified it.
-    pub fn complete(
-        &self,
-        summary: &sav::runtime::RunSummary,
-        answer: Option<String>,
-    ) -> Result<String> {
-        use sav::runtime::StopReason;
-        self.restore_queue_if_modified()?;
-        let at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-        let success = summary.success() && answer.is_some();
-        let stdout = answer.unwrap_or_default();
-        let stderr = summary.failure.clone().unwrap_or_default();
-        let surfaced_decision = matches!(summary.stop_reason, Some(StopReason::GuidanceRequired));
-        append_agent_execution(
-            &self.journal,
-            AgentExecutionRecord {
-                schema_version: ATTEMPT_SCHEMA_VERSION,
-                attempt_id: &self.attempt_id,
-                phase: "agent-execution",
-                task_id: &self.task_id,
-                timestamp: &at,
-                success,
-                timed_out: false,
-                output_limit_exceeded: false,
-                stdout: &stdout,
-                stderr: &stderr,
-                cancelled: summary.cancelled,
-                surfaced_decision,
-                model_sequence: None,
-                log_path: None,
-            },
-        )
-        .map_err(|recording| {
-            unresolved_run_error(
-                &self.context,
-                &self.task_id,
-                &self.attempt_id,
-                &stderr,
-                &recording,
-            )
-        })?;
-        if surfaced_decision {
-            let evidence_dir = self
-                .context
-                .component_dir
-                .join(".kvist/authoring/proposals");
-            let summary_path = attention::decision(
-                &self.context,
-                &self.task_id,
-                &self.attempt_id,
-                &stdout,
-                &evidence_dir,
-                &self.redactions,
-                &self.lock,
-            )?;
-            let reason = format!(
-                "one or more impactful, uncovered decisions surfaced and require a human decision before implementation continues. Human-readable summary: {}.",
-                summary_path.display()
-            );
-            transition_locked(
-                &self.context,
-                &self.lock,
-                &self.task_id,
-                TaskStatus::AwaitingDecision,
-                Some(&reason),
-                &at,
-                Some(&self.attempt_id),
-            )?;
-            let component = decisions::component_argument(&self.context.component_path);
-            Ok(format!(
-                "# Decision required\n\ntask `{}` paused and transitioned to awaiting-decision.\n\nHuman-readable summary: {}\n\nNext Step: use `kvist decision {component} show {}` to discuss and stage the complete resolution.",
-                self.task_id,
-                summary_path.display(),
-                self.task_id,
-            ))
-        } else if success {
-            transition_locked(
-                &self.context,
-                &self.lock,
-                &self.task_id,
-                TaskStatus::Completed,
-                None,
-                &at,
-                Some(&self.attempt_id),
-            )?;
-            // The full answer is the human's report; do not truncate it to a
-            // display window (the 500-char cut made long reports end mid-word
-            // with no marker). The transcript is bounded elsewhere; show it all.
-            Ok(format!(
-                "Task `{task_id}` completed.\n\nAnswer:\n{answer}\n\n",
-                task_id = self.task_id,
-                answer = task_run_answer(&stdout),
-            ))
-        } else {
-            let reason = format!(
-                "agent run ended without an allowed outcome (stop: {:?}, failure: {})",
-                summary.stop_reason,
-                summary.failure.as_deref().unwrap_or("none"),
-            );
-            transition_locked(
-                &self.context,
-                &self.lock,
-                &self.task_id,
-                TaskStatus::Blocked,
-                Some(&reason),
-                &at,
-                Some(&self.attempt_id),
-            )?;
-            Ok(format!("Task `{}` blocked: {}", self.task_id, reason))
-        }
-    }
-
-    /// Restores the pre-run queue if the agent modified `TODOS.yaml` directly.
-    ///
-    /// Kvist owns the queue: the agent's write scope is `src`/`tests` only, and
-    /// the queue is never part of it. If the agent nonetheless edits the queue
-    /// (for example setting `status: completed` while leaving
-    /// `completed_at: null`), the durable state becomes invalid and every later
-    /// revalidation fails, halting continuous execution. Restoring the exact
-    /// pre-run contents discards the agent's untrusted write so Kvist's own
-    /// transition — which sets `completed_at` correctly — is the only writer.
-    /// The happy path (agent left the queue alone) is a silent no-op.
-    fn restore_queue_if_modified(&self) -> Result<()> {
-        let queue_path = self
-            .context
-            .component_dir
-            .join(ComponentArtifact::TaskQueue.filename());
-        let current = fs::read_to_string(&queue_path).map_err(|source| KvistError::Io {
-            operation: "re-read TODO queue after agent run",
-            path: queue_path.clone(),
-            source,
-        })?;
-        if current == self.pre_queue_contents {
-            return Ok(());
-        }
-        // The agent modified the queue. Restore the pre-run state atomically so
-        // the agent's untrusted edit never reaches the durable queue.
-        replace_file_atomically(&queue_path, &self.pre_queue_contents)?;
-        tracing::warn!(
-            task_id = %self.task_id,
-            component = %self.context.component_path.display(),
-            "agent modified TODOS.yaml directly; restored pre-run queue state"
-        );
-        Ok(())
-    }
-
-    /// Records a continuation in the attempt journal without transitioning the
-    /// task. The task stays InProgress; Skott will be re-prompted with
-    /// Kvist-authored guidance.
-    pub fn push_back(&self, guidance: &str) -> Result<()> {
-        let at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-        append_agent_execution(
-            &self.journal,
-            AgentExecutionRecord {
-                schema_version: ATTEMPT_SCHEMA_VERSION,
-                attempt_id: &self.attempt_id,
-                phase: "continuation",
-                task_id: &self.task_id,
-                timestamp: &at,
-                success: false,
-                timed_out: false,
-                output_limit_exceeded: false,
-                stdout: "",
-                stderr: guidance,
-                cancelled: false,
-                surfaced_decision: false,
-                model_sequence: None,
-                log_path: None,
-            },
-        )
-        .map_err(|recording| {
-            unresolved_run_error(
-                &self.context,
-                &self.task_id,
-                &self.attempt_id,
-                guidance,
-                &recording,
-            )
-        })?;
-        Ok(())
-    }
-
-    /// Releases the per-component operation lock now that the task run has
-    /// reached a terminal state.
-    ///
-    /// The embedded TUI path keeps a [`TaskRunPrep`] handle for the whole
-    /// process; without an explicit release the held lock only goes away when
-    /// the process exits, so a second `task run` of the same component in one
-    /// session fails with `component is locked`. Releasing on the terminal
-    /// result mirrors the headless path, which drops the lock once the run
-    /// finishes. The lock is released exactly once (a second call is a
-    /// no-op), and a failed release is surfaced so a run that cannot clean up
-    /// its own lock is never reported as cleanly finished.
-    pub fn release_lock(&mut self) -> Result<()> {
-        self.lock.release_in_place()
-    }
-}
-
 fn run_task_under_lock(
     project_dir: &Path,
     component_path: &Path,
@@ -5761,12 +5288,21 @@ fn execute_task_under_lock(
         if run_result.surfaced_decision {
             attempt.decision(&run_result, task.kind)
         } else if run_result.success {
-            if task.kind == TaskKind::Implementation {
+            let rust_verification = is_rust_verification(project_dir);
+            if task.kind == TaskKind::Implementation
+                || task.kind == TaskKind::Test && rust_verification
+            {
+                let needs_finalization = !continuous && task.kind == TaskKind::Implementation;
+                let verification_label = if rust_verification {
+                    "Rust quality verification"
+                } else {
+                    "test-command verification"
+                };
                 let sequence =
                     sequence
                         .as_mut()
                         .ok_or_else(|| KvistError::AgentEvidenceFailed {
-                            reason: "implementation authoring sequence was not retained".into(),
+                            reason: "authoring sequence was not retained".into(),
                         })?;
                 const MAX_VERIFICATION_REPAIR_ROUNDS: usize = 4;
                 let mut repair_round = 0usize;
@@ -5787,9 +5323,9 @@ fn execute_task_under_lock(
                     tracing::info!(
                         task_id = %task_id,
                         repair_round,
-                        "running test-command verification"
+                        "running task verification"
                     );
-                    eprintln!("Running test-command verification...");
+                    eprintln!("Running {verification_label}...");
                     let res = verify_task(
                         component_path,
                         task_id,
@@ -5863,7 +5399,7 @@ fn execute_task_under_lock(
                     repair_round += 1;
                     sequence.repairs_started = repair_round;
                     eprintln!(
-                        "Verification failed (repair round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS}); feeding test failure diagnostics back to the agent to investigate and fix..."
+                        "Verification failed (repair round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS}); feeding failure diagnostics back to the agent to investigate and fix..."
                     );
                     let stdout_tail = redact_bounded(
                         verify_res.stdout.clone(),
@@ -6003,7 +5539,7 @@ fn execute_task_under_lock(
                                 "phase": "pending-human-disposition"
                             });
                             let mut events = vec![exec_fin, verif_fin];
-                            if !continuous {
+                            if needs_finalization {
                                 events.push(pend_disp);
                             }
                             for event in events {
@@ -6024,7 +5560,7 @@ fn execute_task_under_lock(
                                 &run_result.log_path,
                             )?;
 
-                            if continuous {
+                            if !needs_finalization {
                                 let at = Timestamp::now()
                                     .map_err(|source| KvistError::TaskClock { source })?;
                                 attempt.completion_boundary(
@@ -6070,7 +5606,7 @@ fn execute_task_under_lock(
                             };
                             let blocker_reason = attempt.cause(Some(&history.cause()), &redact_bounded(
                                 format!(
-                                    "test-command verification failed{}. Command: '{}', Exit code: {:?}.\n---\nStdout:\n{}\n---\nStderr:\n{}",
+                                    "{verification_label} failed{}. Command: '{}', Exit code: {:?}.\n---\nStdout:\n{}\n---\nStderr:\n{}",
                                     timed_out_msg,
                                     verify_res.command,
                                     verify_res.exit_code,
@@ -6118,7 +5654,7 @@ fn execute_task_under_lock(
                         let blocker_reason = attempt.cause(
                             Some(&history.cause()),
                             &format!(
-                                "test-command verification blocked: {verification_error}\n{}",
+                                "{verification_label} blocked: {verification_error}\n{}",
                                 sequence
                                     .diagnostics(crate::agent::error_stop(&err))
                                     .message()
@@ -6344,7 +5880,7 @@ pub fn run_task_or_item_with_controls(
 /// position). Otherwise a bare positive integer is a 1-based position in the
 /// ready-task list, matching the numbering the `tasks` listing displays. Returns
 /// `None` when neither matches so the caller reports the exact unresolved spec.
-fn resolve_task_spec(tasks: &[Task], spec: &str) -> Option<String> {
+pub(crate) fn resolve_task_spec(tasks: &[Task], spec: &str) -> Option<String> {
     if let Some(task) = task_by_id(tasks, spec) {
         return Some(task.id.clone());
     }
@@ -7504,31 +7040,19 @@ pub fn verify_task(
     let normalized_component = crate::context::normalize_component_path(component_path)?;
     let context = validate_context(project_dir, component_path)?;
 
-    // Vendored Rust verification runs `cargo test --locked` offline through the
-    // closed cargo topology; every other vendored language uses its offline
-    // language topology (vendored mounts plus writable scratch, network
-    // denied); non-vendored projects keep the generic sandbox path with their
-    // approved test command.
     if is_rust_verification(project_dir) {
-        return finalize_verification(
-            &context,
-            task_id,
-            "cargo test --locked",
-            &crate::sandbox::run_offline_cargo_verification(
-                sandbox_config,
-                project_dir,
-                config.vcs,
-                probe,
-                policy_identity,
-                &context.component_dir,
-                crate::sandbox::ExecutionOptions {
-                    timeout: Some(std::time::Duration::from_secs(policy.timeout_seconds)),
-                    output_limit: Some(policy.max_output_bytes),
-                    live_stdout: None,
-                },
-            )?,
-            policy,
-            config,
+        return crate::sandbox::run_offline_cargo_quality_checks(
+            sandbox_config,
+            project_dir,
+            config.vcs,
+            probe,
+            policy_identity,
+            &context.component_dir,
+            std::time::Duration::from_secs(policy.timeout_seconds),
+            policy.max_output_bytes,
+            |command, output| {
+                finalize_verification(&context, task_id, command, output, policy, config)
+            },
         );
     }
     if let Some(result) = vendored_language_verification(

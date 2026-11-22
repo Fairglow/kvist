@@ -37,6 +37,11 @@ network = "deny"
 mount = "component"
 environment_allowlist = ["PATH", "RUST_BACKTRACE", "CARGO_HOME", "RUSTC", "TERM"]
 
+[task_run]
+# Local unaccepted checkpoints: task, item (default), component, or manual.
+# Changes require `kvist task approve-policy`.
+commit = "item"
+
 [test_policy]
 schema_version = 1
 working_directory = "component"

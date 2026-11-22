@@ -1469,7 +1469,9 @@ recovery recognizes exactly that commit rather than creating a duplicate.
 Only committed paths are synchronized in the real index under its lock, so
 unrelated staging survives. Index/HEAD/worktree drift aborts explicitly.
 Policy changes require execution reapproval and cannot silently rewrite a
-retained run. Component/manual policies retain the same scheduling semantics.
+retained run. Per-task frequency reuses the authenticated checkpoint
+transaction with singleton groups keyed by exact task ID. Component/manual
+policies retain the same scheduling semantics.
 An authenticated awaiting-approval ledger with no pending checkpoint may be
 replaced only when the authored definition changes and unfinished work exists.
 Fresh-run cleanliness/HEAD checks run again before replacing it, permitting a
@@ -1483,6 +1485,19 @@ Checkpoint subprocesses own an isolated process group and a scoped watchdog;
 deadline/cancellation kills and reaps that owned group, unblocks transaction
 pipes, and retains exact prepared/ref/index recovery state. Each Git/signing
 command has a five-minute deadline; test hooks may shorten that deadline.
+
+The workspace drives `task run` through its existing supervised command
+subprocess instead of finalizing embedded agent answers. The task header
+observes the host-owned queue for the command's resolved component, throttled
+and outside the transcript renderer. The menu edits the project TOML
+atomically without changing the execution approval. Read-only embedded agent
+telemetry has no role in task completion.
+
+Rust task quality checks use one offline verification workspace and private
+scratch per suite. The host records every completed stage, returns the first
+failed stage to the existing bounded repair flow, and reruns the suite from
+the formatter on repair. Cargo workspace members use selected read-only build
+resources at their original relative paths, not a flattened crate copy.
 Snapshots persist metadata/digests, not source bytes. The authenticated ledger
 has a separate 192 MiB bound to accommodate two snapshots and prepared Git path
 changes at the inventory's worst-case escaped-path bound; source-file and

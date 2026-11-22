@@ -120,7 +120,11 @@ for explicit project selection. Redirected bare invocation stays finite.
   complete, when a task becomes blocked, or when a task reaches an
   awaiting-decision point. It never auto-resolves a decision or unblocks a
   blocked task; it pauses and reports the exact state and the command that
-  resolves it.
+  resolves it. The TUI header shows the running component, task ID and queue
+  position, and component completion percentage even when browsing the transcript.
+- **Auto-commit:** Press Esc and choose **Auto-commit** to see or change the
+  checkpoint frequency. The header shows the selected mode. A change requires
+  explicit policy reapproval before task execution.
 - **Contextual Auto-Completion:** Press `<TAB>` to autocomplete commands,
   flags, subcommands, component directory paths, active task IDs, attempt IDs,
   and configured model names. Dynamic values carry rich descriptions (task
@@ -262,7 +266,7 @@ Advance tasks through the queue:
 kvist task next src/storage
 
 # Approve test policy before execution
-kvist task approve-policy .
+kvist task approve-policy
 
 # Run the task via the sandboxed agent
 kvist task run src/storage implement-code --stream
@@ -442,6 +446,11 @@ ready task without typing its ID. Omit the target for continuous execution
 without confirmation. There are no batch selectors or separate whole-component
 command.
 
+In a locked Rust project, test and implementation tasks must pass Rustfmt,
+strict Clippy, build, and tests in that order. Install Rustfmt and Clippy for
+the pinned toolchain and update the installed Galla runner before reapproving
+policy. A failed stage blocks completion if the bounded repair cannot fix it.
+
 ### 5.3 Automated Unattended Task Loop
 
 The simple form runs the whole component's remaining work in one command:
@@ -453,7 +462,7 @@ kvist status .
 
 ```toml
 [task_run]
-commit = "item" # default; alternatives: "component" or "manual"
+commit = "item" # default; alternatives: "task", "component", or "manual"
 ```
 
 Each default checkpoint waits for every queued stage of its item, including
@@ -462,6 +471,8 @@ before the lifecycle suffix and must be contiguous in the queue. Automatic
 commits require an existing attached Git HEAD and clean overlapping paths;
 unrelated staged work is preserved and nothing is pushed. Commits are
 **unaccepted checkpoints**, not human approval.
+Use `task` to checkpoint every completed task, `component` to checkpoint
+once at the end, or `manual` to disable automatic commits.
 If Git signing is enabled, prepare the signing helper for unattended use.
 Git/signing commands honor cancellation and stop after five minutes instead of
 hanging indefinitely; signing policy is never bypassed.
@@ -715,7 +726,7 @@ current directory.
 | :--------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kvist task next [DIR]`                                    | Print the next ready task ID.                                                                                                                                                                                        |
 | `kvist task approve-policy [DIR]`                          | Cryptographically approve the sandbox test-execution policy.                                                                                                                                                         |
-| `kvist task run DIR [TASK\|N]`                             | Run an exact task, the Nth ready task by number (1-based, matching `tasks`), or omit the target for continuous dependency-ready work and complete-item checkpoint commits; stop for approval, decisions or blockers. |
+| `kvist task run DIR [TASK\|N]`                             | Run an exact task, the Nth ready task by number (1-based, matching `tasks`), or omit the target for continuous dependency-ready work with configurable checkpoints; stop for approval, decisions or blockers. |
 | `kvist task log <DIR> <TASK>`                              | Display the execution log of a completed or failed task.                                                                                                                                                             |
 | `kvist task replay <SESSION>`                              | Step through a structured execution trajectory journal.                                                                                                                                                              |
 | `kvist task unlock [DIR]`                                  | Release stale or orphaned component execution locks.                                                                                                                                                                 |

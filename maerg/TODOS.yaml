@@ -6725,3 +6725,72 @@ tasks:
       completed_at: "2026-11-21T04:20:24Z"
     blocked_reason: null
     recovery_state: null
+  - id: "task-run-quality-write-tests"
+    title: "write_tests: pin protected task quality and workspace feedback"
+    description: "Cover per-task checkpoints, persisted menu selection, active component and queue progress, and mandatory ordered Rust verification."
+    context: "The former embedded path could mark agent answers complete without protected verification."
+    purpose: "Prevent regressions in task completion and operator visibility."
+    expected_outcome: "Focused tests distinguish successful execution from failed verification and show the active queue position."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-RUN-FEEDBACK-AND-QUALITY"
+    timestamps:
+      created_at: "2026-11-22T20:37:40Z"
+      updated_at: "2026-11-22T20:37:40Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-run-quality-implement-code"
+    title: "implement_code: unify task execution and enforce Rust quality"
+    description: "Use the supervised task executor in the TUI, expose checkpoint policy and live progress, and gate Rust authoring completion on all four checks."
+    context: "Human-requested change; explicit advisory exception while receipts are unavailable."
+    purpose: "Keep interactive and non-interactive behavior consistent."
+    expected_outcome: "Only verified task work completes; operators can see progress and choose checkpoints."
+    kind: implementation
+    status: pending
+    depends_on: ["task-run-quality-write-tests"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
+      - "REQUIREMENTS.md#REQ-TASK-RUN-FEEDBACK-AND-QUALITY"
+    timestamps:
+      created_at: "2026-11-22T20:37:40Z"
+      updated_at: "2026-11-22T20:37:40Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-run-quality-security-audit"
+    title: "security_audit: inspect task quality and checkpoint authority"
+    description: "Review Git scope, approval binding, sandbox input projection, and fail-closed task completion."
+    context: "Independent gate; no implementer certification."
+    purpose: "Identify any unintended change to task authority."
+    expected_outcome: "Audit findings and limits are retained."
+    kind: security-audit
+    status: pending
+    depends_on: ["task-run-quality-implement-code"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-RUN-FEEDBACK-AND-QUALITY"
+    timestamps:
+      created_at: "2026-11-22T20:37:40Z"
+      updated_at: "2026-11-22T20:37:40Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-run-quality-compliance-review"
+    title: "compliance_review: compare task quality with protected evidence"
+    description: "Derive clean-slate observations and separately compare them with the task-run intent and test evidence."
+    context: "Separate source-only observation from source-blind comparison."
+    purpose: "Keep implementation evidence independent."
+    expected_outcome: "Discrepancies are retained for human arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on: ["task-run-quality-security-audit"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-RUN-FEEDBACK-AND-QUALITY"
+    timestamps:
+      created_at: "2026-11-22T20:37:40Z"
+      updated_at: "2026-11-22T20:37:40Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

@@ -579,10 +579,23 @@ pub enum CommitFrequency {
     /// Commit after all lifecycle tasks for each item complete.
     #[default]
     Item,
+    /// Commit after each successfully completed task.
+    Task,
     /// Commit after all component tasks complete.
     Component,
     /// Leave changes for an explicit human commit.
     Manual,
+}
+
+impl CommitFrequency {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Item => "item",
+            Self::Task => "task",
+            Self::Component => "component",
+            Self::Manual => "manual",
+        }
+    }
 }
 
 /// Project-selected version-1 external sandbox runner contract.

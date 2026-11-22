@@ -365,7 +365,12 @@ request shape. Acquisition additionally rejects anything but `<cargo> fetch --lo
 a mismatched Cargo toolchain/grant, wrong Cargo home, lockfile workspace,
 scratch target/HOME, path, source identity, or export promotion intent.
 Cargo verification rejects anything but the exact test operation or, only in
-native mode, the exact metadata admission operation. It rejects non-denied network,
+native mode, the exact metadata admission, `fmt --check`, `clippy --offline
+--locked --all-targets -- -D warnings`, or `build --offline --locked`
+operation. Native task verification can use disjoint read-only build inputs
+under `/rust/project`, including the selected working directory's `Cargo.toml`,
+instead of the single verification workspace grant. Metadata admission retains
+the single workspace grant. It rejects non-denied network,
 non-offline environment, mutable cache data, or wrong cache/scratch/workspace
 topology. The runner exposes validated transport-policy value types and
 descriptor-relative immutable generation construction, and enforces namespace,

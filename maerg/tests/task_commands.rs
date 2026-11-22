@@ -88,6 +88,12 @@ case "$request" in
     ;;
 esac
 case "$request" in
+  *'"clippy","--offline","--locked"'*)
+    if [ -f fail-clippy ]; then
+      printf 'fixture clippy failure\n' >&2
+      exit 1
+    fi
+    ;;
   *'"argv":["/usr/bin/false"'*) exit 1 ;;
   *'verification-secret'*)
     printf 'agent-redaction-secret'
@@ -2847,13 +2853,120 @@ fn continuous_run_new_work_uses_a_fresh_baseline_and_approved_commit_policy() {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn rust_test_task_requires_every_quality_stage_before_checkpointing() {
+    use maerg::task_queue::TaskStatus;
+
+    let gateway = MockGateway::spawn(
+        &gateway_text_body(r#"{"report":"Observed evidence.","decision_required":false}"#),
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "task");
+    for (path, bytes) in [
+        ("Cargo.toml", "[workspace]\nmembers=['src']\nresolver='3'\n"),
+        (
+            "src/Cargo.toml",
+            "[package]\nname='quality-fixture'\nversion='0.1.0'\nedition='2024'\n",
+        ),
+        (
+            "Cargo.lock",
+            "version = 4\n[[package]]\nname = \"quality-fixture\"\nversion = \"0.1.0\"\n",
+        ),
+        ("fail-clippy", ""),
+    ] {
+        fs::write(project.path().join(path), bytes).unwrap();
+    }
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(project.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stdout).unwrap()
+    };
+    git(&["add", "--", "Cargo.toml", "Cargo.lock", "src/Cargo.toml"]);
+    git(&["commit", "--quiet", "-m", "Rust workspace"]);
+    let head = git(&["rev-parse", "HEAD"]);
+    let failed = run_kvist(&project, &["task", "run", "."]);
+    assert!(!failed.status.success(), "{failed:?}");
+    assert!(
+        String::from_utf8_lossy(&failed.stderr).contains("fixture clippy failure"),
+        "{failed:?}"
+    );
+    assert_eq!(git(&["rev-parse", "HEAD"]), head);
+    let queue = || {
+        maerg::task_queue::parse(
+            &fs::read_to_string(project.path().join("src/TODOS.yaml")).unwrap(),
+        )
+        .unwrap()
+    };
+    assert_eq!(queue().tasks[0].status, TaskStatus::Blocked);
+    assert_eq!(queue().tasks[1].status, TaskStatus::Pending);
+
+    let journal = || {
+        fs::read_to_string(
+            project
+                .path()
+                .join("src/.kvist-attempts/one-write-tests.jsonl"),
+        )
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|event| event["phase"] == "verification")
+        .map(|event| event["command"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>()
+    };
+    let checks = [
+        "cargo fmt --check",
+        "cargo clippy --offline --locked --all-targets -- -D warnings",
+        "cargo build --offline --locked",
+        "cargo test --offline --locked",
+    ];
+    let failed_checks = journal();
+    let (rounds, remainder) = failed_checks.as_chunks::<2>();
+    assert!(!rounds.is_empty());
+    assert!(rounds.iter().all(|round| round == &checks[..2]));
+    assert!(remainder.is_empty());
+
+    fs::remove_file(project.path().join("fail-clippy")).unwrap();
+    let reset = run_kvist(
+        &project,
+        &["task", "transition", ".", "one-write-tests", "pending"],
+    );
+    assert!(reset.status.success(), "{reset:?}");
+    let completed = run_kvist(&project, &["task", "run", "."]);
+    assert!(completed.status.success(), "{completed:?}");
+    assert!(journal().ends_with(&checks.map(str::to_owned)));
+    assert!(
+        queue()
+            .tasks
+            .iter()
+            .all(|task| task.status == TaskStatus::Completed)
+    );
+    let subjects = git(&["log", "--format=%s"]);
+    assert!(subjects.contains("complete one-write-tests execution (unaccepted)"));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn continuous_run_commit_policy_and_overlap_refusal() {
     let gateway = MockGateway::spawn(
         &gateway_text_body(r#"{"report":"Observed evidence.","decision_required":false}"#),
         std::time::Duration::ZERO,
     );
-    for (policy, expected_commits) in [("component", 2), ("manual", 1)] {
+    for (policy, expected_commits) in [("task", 9), ("component", 2), ("manual", 1)] {
         let project = continuous_project(&gateway.endpoint, policy);
+        if policy == "task" {
+            fs::write(project.path().join("unrelated"), "preserve my staging\n").unwrap();
+            assert!(
+                Command::new("git")
+                    .args(["add", "--", "unrelated"])
+                    .current_dir(project.path())
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
         let output = run_kvist(&project, &["task", "run", "."]);
         assert!(
             output.status.success(),
@@ -2865,10 +2978,18 @@ fn continuous_run_commit_policy_and_overlap_refusal() {
             .current_dir(project.path())
             .output()
             .unwrap();
-        assert_eq!(
-            String::from_utf8(log.stdout).unwrap().lines().count(),
-            expected_commits
-        );
+        let subjects = String::from_utf8(log.stdout).unwrap();
+        assert_eq!(subjects.lines().count(), expected_commits);
+        if policy == "task" {
+            assert!(subjects.contains("complete one-write-tests execution"));
+            assert!(subjects.contains("complete two-compliance-review execution"));
+            let staged = Command::new("git")
+                .args(["diff", "--cached", "--name-only"])
+                .current_dir(project.path())
+                .output()
+                .unwrap();
+            assert_eq!(staged.stdout, b"unrelated\n");
+        }
     }
     let project = continuous_project(&gateway.endpoint, "item");
     let path = project.path().join("src/src/lib.rs");

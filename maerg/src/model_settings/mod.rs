@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{KvistError, Result, config, config::Role, file_io::read_text_bounded};
 
+pub(crate) use storage::set_task_run_commit;
 pub use storage::{MutationReport, RegistryChange, mutate_registry, remove_local_profile};
 
 /// Actual definition/configuration scope, independent of the selected component.

@@ -136,6 +136,7 @@ pub(super) fn validate_phase(
     request: &SandboxRequest,
     cache: &Cache,
     scratch: &Scratch,
+    allow_projection: bool,
 ) -> Result<(), ProtocolError> {
     let native = cache
         .native
@@ -151,6 +152,7 @@ pub(super) fn validate_phase(
             child_path(&scratch.destination, "target")?,
         ),
     ];
+    let mut projected = false;
     let workspace_purpose = if acquisition {
         let lockfile = cache.lockfile.as_ref().ok_or_else(|| {
             invalid("native acquisition requires an exact writable lockfile workspace")
@@ -173,7 +175,21 @@ pub(super) fn validate_phase(
                 && grant.purpose == Purpose::Verification
                 && grant.access == Access::ReadOnly
         });
-        if !workspace_present {
+        let root = "/rust/project";
+        let manifest = child_path(&request.working_directory, "Cargo.toml")?;
+        projected = !workspace_present
+            && allow_projection
+            && path_contains(root, &request.working_directory)
+            && request
+                .grants
+                .iter()
+                .any(|grant| grant.purpose == Purpose::Context && grant.destination == manifest)
+            && request
+                .grants
+                .iter()
+                .filter(|grant| grant.purpose == Purpose::Context)
+                .all(|grant| grant.destination.starts_with("/rust/project/"));
+        if !workspace_present && !projected {
             return Err(invalid(
                 "native verification working_directory requires its read-only workspace grant",
             ));
@@ -186,17 +202,22 @@ pub(super) fn validate_phase(
     }
     require_exact_environment(request, &request.environment, &environment)?;
     require_vendored_mount(request, Purpose::Runtime, RUNTIME_BIN_MOUNT)?;
-    let mut purposes = vec![
-        Purpose::Toolchain,
-        Purpose::Runtime,
-        Purpose::Scratch,
-        workspace_purpose,
-    ];
+    let mut purposes = vec![Purpose::Toolchain, Purpose::Runtime, Purpose::Scratch];
+    if !projected {
+        purposes.push(workspace_purpose);
+    }
     if native.registry.is_some() {
         purposes.push(Purpose::Registry);
     }
     if native.git.is_some() {
         purposes.push(Purpose::DependencyCache);
     }
-    ensure_exact_cargo_purposes(request, &purposes)
+    ensure_exact_cargo_grants(
+        request
+            .grants
+            .iter()
+            .map(|grant| grant.purpose)
+            .filter(|purpose| !projected || *purpose != Purpose::Context),
+        &purposes,
+    )
 }

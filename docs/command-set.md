@@ -219,7 +219,7 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
 | Command               | Form                                                                                           | Purpose                                                                                                                                                                                                                                                                                                               |
 | --------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `task next`           | `kvist task next [COMPONENT_DIR]`                                                              | print the first ready task (no state change)                                                                                                                                                                                                                                                                          |
-| `task run`            | `kvist task run COMPONENT_DIR [TASK_ID\|N] [--stream]`                                         | omit the target for continuous dependency-ready work with per-item local checkpoint commits; an exact TASK_ID runs only that task; a bare positive integer N runs the Nth ready task (1-based, matching the numbered `tasks` listing); stop for final approval, decisions, or blockers, without per-task confirmation |
+| `task run`            | `kvist task run COMPONENT_DIR [TASK_ID\|N] [--stream]`                                         | omit the task for continuous dependency-ready work with configurable local checkpoint commits; an exact TASK_ID runs only that task; a bare positive integer N runs the Nth ready task (1-based, matching the numbered `tasks` listing); stop for final approval, decisions, or blockers, without per-task confirmation |
 | `task log`            | `kvist task log [COMPONENT_DIR] TASK_ID`                                                       | print the most recent bounded, redacted execution log                                                                                                                                                                                                                                                                 |
 | `task replay`         | `kvist task replay SESSION_JSONL [--max-turns N]`                                              | replay a recorded trajectory                                                                                                                                                                                                                                                                                          |
 | `task transition`     | `kvist task transition [COMPONENT_DIR] TASK_ID STATUS [--reason R]`                            | one audited manual status transition                                                                                                                                                                                                                                                                                  |
@@ -362,8 +362,13 @@ ID is never mistaken for a position.
 The default `[task_run] commit = "item"` checkpoints each complete TODO
 item, waiting for all its queued test, implementation and review stages. Item IDs use
 the shared prefix before those lifecycle suffixes, and item tasks must be
-contiguous. `"component"` checkpoints once at the end; `"manual"` leaves commits
-to the operator. Policy changes require `kvist task approve-policy`.
+contiguous. `"task"` checkpoints each completed task before starting the next;
+`"component"` checkpoints once at the end; `"manual"` leaves commits to the
+operator. In the TUI, press Esc and open **Auto-commit** to see or change the
+setting. The header shows the setting, executing component, task ID and queue
+position, and component completion. Policy changes require `kvist task approve-policy`;
+the menu never approves the change. A retained nonterminal run keeps its
+original checkpoint frequency.
 Automatic commits require an attached Git branch, existing HEAD, configured
 identity/signing and clean overlapping paths. Unrelated staged/unstaged changes
 are preserved. Commits are local unaccepted checkpoints, never pushes.
@@ -372,6 +377,19 @@ run; retained completed tasks are not executed again. Decisions/failed or
 interrupted effects retain existing explicit resolution/recovery requirements.
 Final execution awaits human approval; `component accept` still accepts intent,
 not implementation results.
+
+For locked Rust projects, both TUI and CLI task runs require `cargo fmt --check`,
+strict Clippy (`--all-targets -- -D warnings`), `cargo build`, and `cargo test`
+before a test or implementation task can complete. Checks run in the
+network-denied verification sandbox using the pinned toolchain; install
+Rustfmt and Clippy for that toolchain first. Build, lint, and test use offline
+locked Cargo resolution. A failing check stops that verification pass before
+later stages; a task that cannot be repaired is blocked, not checkpointed.
+Tests must work with read-only project inputs, writable scratch, and no
+network. Tests that require checkout-local writes or undeclared host files
+need sandbox-compatible fixtures.
+Non-Rust projects continue to use their approved verification commands.
+Upgrade the installed Galla runner before reapproving execution policy.
 
 Task decisions and blockers name a human-readable Markdown brief under the
 component's `.kvist/attention/`. It retains agent explanations when available

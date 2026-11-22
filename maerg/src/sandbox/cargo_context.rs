@@ -464,9 +464,25 @@ pub(super) fn prepare(
     )
 }
 
+pub(super) fn prepare_verification(
+    config: &SandboxConfig,
+    project: &Path,
+    component: &Path,
+    started: Instant,
+) -> Result<CargoContext> {
+    prepare_with_policy(
+        config,
+        project,
+        component,
+        started,
+        SnapshotPurpose::Verification,
+    )
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SnapshotPurpose {
     Authoring,
+    Verification,
     Acquisition,
     Admission,
 }
@@ -623,7 +639,10 @@ fn prepare_with_policy(
         }
         roots.insert(root, value);
     }
-    if purpose != SnapshotPurpose::Authoring {
+    if matches!(
+        purpose,
+        SnapshotPurpose::Acquisition | SnapshotPurpose::Admission
+    ) {
         let context = select_native_metadata(config, &project, &roots, started)?;
         for (path, expected) in &context.tracked {
             if manifest_inputs
@@ -648,6 +667,30 @@ fn prepare_with_policy(
             candidates.insert(root.join("Cargo.lock"));
             metadata.insert(root.join("Cargo.lock"));
         }
+        if purpose == SnapshotPurpose::Verification {
+            for name in [
+                ".rustfmt.toml",
+                "rustfmt.toml",
+                ".clippy.toml",
+                "clippy.toml",
+            ] {
+                let path = root.join(name);
+                match fs::symlink_metadata(&path) {
+                    Ok(_) => {
+                        candidates.insert(path);
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(sandbox_path_error(
+                            config,
+                            "inspect Rust quality configuration",
+                            &path,
+                            error,
+                        ));
+                    }
+                }
+            }
+        }
         if value.get("package").is_none() {
             continue;
         }
@@ -662,7 +705,10 @@ fn prepare_with_policy(
                 .to_str()
                 .ok_or_else(|| failure(config, "Cargo resource names must be UTF-8"))?;
             let path = entry.path();
-            if excluded(name)
+            if (excluded(name)
+                && !(purpose == SnapshotPurpose::Verification && name == "TODOS.yaml"))
+                || (purpose == SnapshotPurpose::Verification
+                    && matches!(name, "kvist.toml" | "skott.toml"))
                 || roots
                     .keys()
                     .any(|other| other != root && other.starts_with(&path))
@@ -686,9 +732,10 @@ fn prepare_with_policy(
         {
             continue;
         }
-        let local_writable_root = AUTHORING_WRITABLE_ROOTS
-            .iter()
-            .any(|name| path == component.join(name));
+        let local_writable_root = purpose == SnapshotPurpose::Authoring
+            && AUTHORING_WRITABLE_ROOTS
+                .iter()
+                .any(|name| path == component.join(name));
         selected.extend(track(
             config,
             &path,

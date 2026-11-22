@@ -90,10 +90,16 @@ fn run_locked(
 ) -> Result<String> {
     ensure_component_attempts_recovered(&context.component_dir)?;
     let queue = read_queue(&context.component_dir)?;
-    let groups = if config.task_run.commit == CommitFrequency::Item {
-        Some(item_groups(&queue.tasks)?)
-    } else {
-        None
+    let groups = match config.task_run.commit {
+        CommitFrequency::Item => Some(item_groups(&queue.tasks)?),
+        CommitFrequency::Task => Some(
+            queue
+                .tasks
+                .iter()
+                .map(|task| (task.id.clone(), vec![task.id.clone()]))
+                .collect(),
+        ),
+        CommitFrequency::Component | CommitFrequency::Manual => None,
     };
     let definition = definition_digest(&queue)?;
     let retained = load(context, secret)?;
@@ -326,7 +332,7 @@ fn run_locked(
             return Err(error(
                 context,
                 &format!(
-                    "no dependency-ready work can advance the active item; resolve the decision/blocker before continuing:\n{waiting}\nInspect `kvist task next {}` and retained attempt evidence; no task was unblocked automatically.",
+                    "no dependency-ready work can advance the run; resolve the decision/blocker before continuing:\n{waiting}\nInspect `kvist task next {}` and retained attempt evidence; no task was unblocked automatically.",
                     context.component_path.display()
                 ),
             ));
@@ -338,7 +344,7 @@ fn run_locked(
                 .iter()
                 .find(|(_, ids)| ids.contains(&task.id))
                 .map(|(item, _)| item.clone())
-                .ok_or_else(|| error(context, "ready task has no lifecycle item"))?;
+                .ok_or_else(|| error(context, "ready task has no checkpoint group"))?;
             ledger.active_item = Some(item);
         }
         ledger.phase = Phase::Running;
@@ -603,7 +609,7 @@ fn item_groups(tasks: &[Task]) -> Result<BTreeMap<String, Vec<String>>> {
         }
         let stem = stem.ok_or_else(|| KvistError::TaskRunFailed {
             task_id: task.id.clone(),
-            reason: "cannot infer a complete lifecycle item; use a shared ID prefix ending in write-tests, implement-code, security-audit, compliance-review, or set task_run.commit to component/manual and reapprove policy".into(),
+            reason: "cannot infer a complete lifecycle item; use a shared ID prefix ending in write-tests, implement-code, security-audit, compliance-review, or set task_run.commit to task/component/manual and reapprove policy".into(),
         })?;
         groups.entry(stem).or_default().push(task.id.clone());
     }

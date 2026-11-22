@@ -82,7 +82,7 @@ fn commit_policy_is_typed_strict_and_defaults_to_items() {
         toml::from_str::<TaskRunConfig>("").unwrap().commit,
         CommitFrequency::Item
     );
-    for value in ["item", "component", "manual"] {
+    for value in ["item", "task", "component", "manual"] {
         assert!(toml::from_str::<TaskRunConfig>(&format!("commit = {value:?}")).is_ok());
     }
     for invalid in ["commit = \"all\"", "commit = true", "commmit = \"manual\""] {

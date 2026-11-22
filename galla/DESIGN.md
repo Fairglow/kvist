@@ -280,6 +280,10 @@ acquisition is only `<cargo> fetch --locked`; test verification is only
 `<cargo> test --offline --locked`, with denied network and offline true. Native
 verification may instead use exactly
 `<cargo> metadata --offline --locked --format-version 1 --all-features`.
+Native task verification compares argv with the closed format, lint, build
+and test allowlist. Its projected Cargo workspace uses read-only context
+grants below `/rust/project`; the working directory must have a bound
+manifest. It cannot mix the projection with a whole verification grant.
 Native mode uses approved persistent registry/Git data grants, a private
 writable scratch-owned Cargo home, and its exact verification or writable
 lockfile workspace. Only deliberately selected portable-export mode uses

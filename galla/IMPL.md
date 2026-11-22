@@ -1,6 +1,31 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped native Cargo quality observation
+
+An independent source-only observer inspected validation code and test
+assertions, excluding intent, queues, prior records, and history. It did not
+execute tests. Native verification recognizes exact offline test, metadata,
+format, lint, and build argument vectors. The native validator requires denied
+network and the fixed offline environment and cache/scratch topology. Task
+verification may use read-only context grants below `/rust/project` with a
+grant for the selected working directory's manifest; metadata still uses the
+single workspace grant. Acquisition retains its exact `fetch --locked`
+operation and distinct writable topology.
+
+Protocol assertions cover exact arguments and phase-specific grant and
+environment constraints. The live fixture asserts a failing formatting check
+then successful formatting, Clippy, build, and tests on a member with a path
+dependency, with no target directory written into the workspace. These are
+assertions, not execution or acceptance evidence.
+
+Sources: `src/validation.rs`, `src/validation/native_cache.rs`;
+assertions: `tests/native_cache.rs`.
+
+An independent source-blind comparison found no concrete mismatch in this
+scope. It did not infer full workspace, dependency acquisition, or metadata
+execution coverage from the two-crate runtime evidence.
+
 ## Independent output-lock repair observations - 2026-11-08
 
 Clean-slate `repair-source-observer` inspected current source and executable

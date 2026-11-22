@@ -39,6 +39,7 @@ fn native_offline_requests_grant_only_data_and_match_locked_alias_protocol() {
             phase: Phase::Verification {
                 command,
                 lockfile_identity: &digest_label(b"lock"),
+                projection: None,
             },
         }
         .encode()
@@ -100,6 +101,7 @@ fn native_offline_requests_grant_only_data_and_match_locked_alias_protocol() {
             phase: Phase::Verification {
                 command: OfflineCommand::Metadata,
                 lockfile_identity: &digest_label(b"lock"),
+                projection: None,
             },
         }
         .encode()

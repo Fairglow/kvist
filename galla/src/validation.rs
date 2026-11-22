@@ -905,7 +905,7 @@ fn validate_acquisition(request: &SandboxRequest) -> Result<(), ProtocolError> {
         .as_ref()
         .ok_or_else(|| invalid("dependency acquisition requires writable scratch"))?;
     if cache.native.is_some() {
-        return native_cache::validate_phase(request, cache, scratch);
+        return native_cache::validate_phase(request, cache, scratch, false);
     }
     let writable = cache
         .writable
@@ -974,15 +974,22 @@ fn validate_cargo_verification(request: &SandboxRequest) -> Result<(), ProtocolE
         .cache
         .as_ref()
         .is_some_and(|cache| cache.native.is_some());
-    let test =
-        request
-            .argv
-            .iter()
-            .skip(1)
-            .map(String::as_str)
-            .eq(["test", "--offline", "--locked"]);
+    let args = request.argv.iter().skip(1).map(String::as_str);
+    let test = args.clone().eq(["test", "--offline", "--locked"]);
+    let quality = native
+        && (args.clone().eq(["fmt", "--check"])
+            || args.clone().eq([
+                "clippy",
+                "--offline",
+                "--locked",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ])
+            || args.clone().eq(["build", "--offline", "--locked"]));
     let metadata = native
-        && request.argv.iter().skip(1).map(String::as_str).eq([
+        && args.eq([
             "metadata",
             "--offline",
             "--locked",
@@ -990,9 +997,9 @@ fn validate_cargo_verification(request: &SandboxRequest) -> Result<(), ProtocolE
             "1",
             "--all-features",
         ]);
-    if !test && !metadata {
+    if !test && !metadata && !quality {
         return Err(invalid(if native {
-            "native Cargo verification argv must be exactly `<cargo> test --offline --locked` or `<cargo> metadata --offline --locked --format-version 1 --all-features`"
+            "native Cargo verification requires exact offline test, fmt, clippy, build, or metadata arguments"
         } else {
             "Cargo verification argv must be exactly `<cargo> test --offline --locked`"
         }));
@@ -1011,7 +1018,7 @@ fn validate_cargo_verification(request: &SandboxRequest) -> Result<(), ProtocolE
         .as_ref()
         .ok_or_else(|| invalid("Cargo verification requires writable target scratch"))?;
     if cache.native.is_some() {
-        return native_cache::validate_phase(request, cache, scratch);
+        return native_cache::validate_phase(request, cache, scratch, !metadata);
     }
     let approved = cache.approved.as_ref().ok_or_else(|| {
         invalid("Cargo verification requires a read-only approved Cargo-home endpoint")
@@ -1164,19 +1171,23 @@ fn ensure_exact_cargo_purposes(
     request: &SandboxRequest,
     expected_purposes: &[Purpose],
 ) -> Result<(), ProtocolError> {
-    if request.grants.len() != expected_purposes.len()
-        || request
-            .grants
+    ensure_exact_cargo_grants(
+        request.grants.iter().map(|grant| grant.purpose),
+        expected_purposes,
+    )
+}
+
+fn ensure_exact_cargo_grants(
+    purposes: impl Iterator<Item = Purpose> + Clone,
+    expected_purposes: &[Purpose],
+) -> Result<(), ProtocolError> {
+    if purposes.clone().count() != expected_purposes.len()
+        || purposes
+            .clone()
+            .any(|purpose| !expected_purposes.contains(&purpose))
+        || expected_purposes
             .iter()
-            .any(|grant| !expected_purposes.contains(&grant.purpose))
-        || expected_purposes.iter().any(|purpose| {
-            request
-                .grants
-                .iter()
-                .filter(|grant| grant.purpose == *purpose)
-                .count()
-                != 1
-        })
+            .any(|purpose| purposes.clone().filter(|actual| actual == purpose).count() != 1)
     {
         return Err(invalid(
             "Cargo phase grants must be the exact required toolchain, cache, scratch, and workspace topology",

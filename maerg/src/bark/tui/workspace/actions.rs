@@ -367,7 +367,11 @@ impl Workspace {
             }
         ) && !arguments.iter().any(|arg| arg == "--stream")
         {
-            arguments.push("--stream".into());
+            let insert_at = arguments
+                .iter()
+                .position(|arg| arg == "--")
+                .unwrap_or(arguments.len());
+            arguments.insert(insert_at, "--stream".into());
         }
         if let cli::Command::Prompt { editor: true, .. } = command {
             arguments.retain(|arg| arg != "--editor");
@@ -392,209 +396,36 @@ impl Workspace {
             });
             return Ok(());
         }
-        // Task runs are handed to Skott: Kvist owns the task-queue setup and
-        // teardown, Skott owns all agent communication. No subprocess is
-        // spawned; the embedded Skott session drives the agent loop and
-        // reports a RunSummary back.
         if let cli::Command::Task {
             command:
                 cli::TaskCommand::Run {
                     component_dir,
                     task_id,
-                    allow_control,
                     ..
                 },
         } = &command
         {
-            let all_components = component_dir.is_none()
-                || component_dir
-                    .as_ref()
-                    .is_some_and(|p| p == std::path::Path::new("."));
-            let component = if let Some(dir) = component_dir {
-                if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
-                    self.focus()
-                        .map(|f| f.to_owned())
-                        .unwrap_or_else(|| ".".to_owned())
-                } else {
-                    dir.to_string_lossy().into_owned()
-                }
-            } else {
-                self.focus()
-                    .map(|f| f.to_owned())
-                    .unwrap_or_else(|| ".".to_owned())
-            };
-            let task_id = task_id.clone().or_else(|| self.next_ready_task(&component));
-            if let Some(id) = task_id {
-                return self.start_task_run(&component, &id, *allow_control, true, all_components);
+            if self.skott.as_ref().is_some_and(|skott| skott.is_active()) {
+                return Err(io::Error::other(
+                    "end the interactive agent session before starting a task run",
+                ));
             }
-            // No task found in the target component. If we're in all-components
-            // mode (no component was specified), search across all components
-            // for a ready task.
-            if all_components {
-                let inspection = crate::project_state::inspect(&self.project)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                for comp in &inspection.components {
-                    if comp.state != crate::project_state::ComponentState::Current {
-                        continue;
-                    }
-                    let comp_path = comp.path.to_string_lossy();
-                    if comp_path == component {
-                        continue; // Already tried the focused component
-                    }
-                    if let Some(id) = self.next_ready_task(&comp_path) {
-                        self.append(&format!(
-                            "\n\n## Continuous mode\n\nNo ready task in `{}`; moving to component `{}`...\n\n",
-                            component, comp_path
-                        ))?;
-                        return self.start_task_run(&comp_path, &id, *allow_control, true, true);
-                    }
-                }
-            }
-            return Err(io::Error::other(
-                "no task ID given and no ready task found; specify a task or make one ready",
-            ));
+            let component = component_dir.as_deref().ok_or_else(|| {
+                io::Error::other("specify a component: task run COMPONENT_DIR [TASK_ID|N]")
+            })?;
+            let progress = super::TaskProgress::new(&self.project, component, task_id.as_deref())
+                .map_err(io::Error::other)?;
+            self.commit_frequency = Some(
+                crate::config::load(&self.project)
+                    .map_err(io::Error::other)?
+                    .task_run
+                    .commit,
+            );
+            self.start(arguments)?;
+            self.task_progress = Some(progress);
+            return Ok(());
         }
         self.start(arguments)
-    }
-
-    /// Starts a task run through the embedded Skott session. Kvist prepares
-    /// the task-queue state (lock, status, prompt, context), hands the prompt
-    /// to Skott, and awaits the result. When the session finishes, the pump
-    /// interprets the RunSummary and transitions the task.
-    pub(super) fn start_task_run(
-        &mut self,
-        component: &str,
-        task_id: &str,
-        allow_control: bool,
-        continuous: bool,
-        all_components: bool,
-    ) -> io::Result<()> {
-        if self.skott.as_ref().is_some_and(|skott| skott.is_active()) {
-            return Err(io::Error::other(
-                "an agent session is already active; it ends when the task finishes or is cancelled",
-            ));
-        }
-        // Kvist owns the task-queue setup.
-        let prep = crate::task_commands::prepare_task_run(
-            &self.project,
-            std::path::Path::new(component),
-            task_id,
-            allow_control,
-        )
-        .map_err(|error| io::Error::other(error.to_string()))?;
-        // Load the Skott configuration.
-        let config_path = self.project.join("skott.toml");
-        let config = skott::Config::load(&config_path).map_err(|error| {
-            io::Error::other(format!(
-                "no usable Skott configuration at {}: {}; create one with `skott init-config` or `skott setup`",
-                config_path.display(),
-                error.describe()
-            ))
-        })?;
-        // Use Kvist's role-selected model (developer, security-reviewer, or
-        // architect, per task kind), falling back to Skott's default.
-        let kvist_model_id = &prep.profile.profile;
-        let model = config
-            .models
-            .iter()
-            .find(|model| model.id == *kvist_model_id)
-            .or_else(|| config.models.iter().find(|model| model.is_default))
-            .or_else(|| config.models.first())
-            .ok_or_else(|| {
-                io::Error::other(
-                    "the Skott configuration has no selectable model; add a [[models]] entry",
-                )
-            })?
-            .clone();
-        let effort = config.default_thinking_effort;
-        let mut session = crate::skott_embedded::EmbeddedSkott::start(
-            config,
-            &model,
-            effort,
-            None,
-            skott::RunLimits::default(),
-            None,
-        )
-        .map_err(|error| io::Error::other(error.to_string()))?;
-        session
-            .submit(prep.prompt.clone())
-            .map_err(|error| io::Error::other(error.to_string()))?;
-        self.skott_continuations = 0;
-        self.skott_result_reported = false;
-        self.skott_scroll = 0;
-        self.skott_follow = true;
-        self.task_run_prep = Some(prep);
-        self.task_run_continuous = continuous;
-        self.task_run_component = if continuous {
-            Some(component.to_owned())
-        } else {
-            None
-        };
-        self.task_run_all_components = all_components;
-        self.skott = Some(session);
-        self.append(&format!(
-            "\n\n## Task run\n\nRunning task `{task_id}` via Skott agent `{model}`. Ctrl+Tab switches between the Kvist metrics, the Skott detail, and a side-by-side view.\n\n",
-            model = model.id
-        ))?;
-        self.dirty = true;
-        Ok(())
-    }
-
-    /// In cross-component continuous mode, tries to find and start a task in
-    /// the next component that has ready work.
-    pub(super) fn try_next_component(&mut self) -> io::Result<()> {
-        let inspection = crate::project_state::inspect(&self.project)
-            .map_err(|e| io::Error::other(e.to_string()))?;
-        let current_component = self.task_run_component.clone().unwrap_or_default();
-
-        // Try all components
-        for comp in &inspection.components {
-            if comp.state != crate::project_state::ComponentState::Current {
-                continue;
-            }
-            if comp.path.to_string_lossy() == current_component {
-                continue;
-            }
-            if let Some(next_task) = self.next_ready_task(&comp.path.to_string_lossy()) {
-                self.append(&format!(
-                    "\n\n## Continuous mode\n\nMoving to component `{}`...\n\n",
-                    comp.path.to_string_lossy()
-                ))?;
-                self.task_run_component = Some(comp.path.to_string_lossy().to_string());
-                self.task_run_prep = None;
-                self.skott = None;
-                self.skott_result_reported = false;
-                return self.start_task_run(
-                    &comp.path.to_string_lossy(),
-                    &next_task,
-                    false,
-                    true,
-                    self.task_run_all_components,
-                );
-            }
-        }
-
-        // No more components with ready tasks
-        self.append(
-            "\n\n## Continuous mode\n\nAll components processed. No more ready tasks.\n\n",
-        )?;
-        self.task_run_continuous = false;
-        self.task_run_component = None;
-        Ok(())
-    }
-
-    /// Finds the next ready task in the given component, if any.
-    ///
-    /// Uses the canonical queue path (`<component>/TODOS.yaml`) and the shared
-    /// [`crate::task_queue::next_ready_task_id`] definition so the TUI's
-    /// auto-selection matches `kvist status` exactly (a task is ready when it
-    /// is `pending` with every recorded dependency `completed`).
-    pub(super) fn next_ready_task(&self, component: &str) -> Option<String> {
-        let component_path = self.project.join(component);
-        let queue_path = component_path.join("TODOS.yaml");
-        let text = std::fs::read_to_string(queue_path).ok()?;
-        let queue = crate::task_queue::parse(&text).ok()?;
-        crate::task_queue::next_ready_task_id(&queue.tasks)
     }
 
     fn edit_prompt(
@@ -648,8 +479,7 @@ impl Workspace {
     ///
     /// Loads the project's `skott.toml`, selects its default model, and drives
     /// the Skott agent loop in-process. The session streams progress to the
-    /// Skott view and metrics to the Kvist view; Kvist keeps the task moving
-    /// until it is finished, blocked, or awaiting a decision.
+    /// Skott view and metrics to the Kvist view. It does not control the task queue.
     pub(super) fn start_agent_session(&mut self, prompt: &str) -> io::Result<()> {
         if self.skott.as_ref().is_some_and(|skott| skott.is_active()) {
             return Err(io::Error::other(

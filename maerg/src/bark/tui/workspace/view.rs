@@ -58,12 +58,31 @@ impl Workspace {
             ])
             .split(area)
         };
-        let heading = format!(
-            " Kvist | {} | {} | {}",
-            self.focus().as_deref().unwrap_or("(project)"),
-            self.state_label,
-            self.progress
-        );
+        let commit = self
+            .commit_frequency
+            .map_or("unavailable", |mode| mode.as_str());
+        let heading = if let Some(progress) = &self.task_progress {
+            let completion = progress.state.as_ref().map_or_else(
+                |_| "progress unavailable".into(),
+                |state| {
+                    let percent = (state.completed * 100)
+                        .checked_div(state.total)
+                        .unwrap_or(0);
+                    format!("{}/{} complete ({percent}%)", state.completed, state.total)
+                },
+            );
+            format!(
+                " Kvist | {} | {completion} | Auto-commit: {commit}",
+                progress.component
+            )
+        } else {
+            format!(
+                " Kvist | Auto-commit: {commit} | {} | {} | {}",
+                self.focus().as_deref().unwrap_or("(project)"),
+                self.state_label,
+                self.progress
+            )
+        };
         frame.render_widget(
             Paragraph::new(sanitize(&heading))
                 .style(raised.fg(accent).add_modifier(Modifier::BOLD)),
@@ -74,24 +93,14 @@ impl Workspace {
             .as_ref()
             .map(|run| format!(" | RUNNING {}s", run.started.elapsed().as_secs()))
             .unwrap_or_default();
-        let stats = if let (Some(prep), Some(skott)) = (&self.task_run_prep, &self.skott) {
-            let phase = if skott.result().finished {
-                "processing result"
-            } else if skott.app.status.is_empty() || skott.app.status == "ready" {
-                "starting agent"
-            } else {
-                &skott.app.status
-            };
-            format!(
-                " Task {}/{} {} | {} | {} turns · {} tools | {:.0}s",
-                prep.queue_position.0,
-                prep.queue_position.1,
-                prep.task_id,
-                phase,
-                skott.metrics().turns,
-                skott.metrics().tools_executed,
-                prep.started.elapsed().as_secs_f64()
-            )
+        let stats = if let Some(progress) = &self.task_progress {
+            match &progress.state {
+                Ok(state) => match &state.active {
+                    Some((position, id)) => format!(" Task {position}/{}: {id}{run}", state.total),
+                    None => format!(" No active task{run}"),
+                },
+                Err(error) => format!(" Task progress unavailable: {error}"),
+            }
         } else {
             format!(
                 " {} | sandbox: {} | model: {} | locks: {} live / {} stale{}",

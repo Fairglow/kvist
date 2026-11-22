@@ -9,6 +9,7 @@ mod menus;
 mod model_menu_tests;
 mod model_menus;
 mod preferences;
+mod task_progress;
 mod view;
 
 use std::io::{self, IsTerminal};
@@ -38,7 +39,9 @@ use crate::bark::{
     prefill::ComponentPrefill,
     tree::{CommandNode, build_root},
 };
+use crate::config::CommitFrequency;
 use crate::skott_embedded::{ActivePane, ContinuationDecision, EmbeddedSkott, SkottResult};
+use task_progress::TaskProgress;
 
 /// The maximum automatic continuations Kvist submits for one agent session
 /// before it stops forcing progress and surfaces the result for a decision.
@@ -93,6 +96,8 @@ pub(super) struct Workspace {
     pending_page: Option<menus::Page>,
     preferences: preferences::Preferences,
     running: Option<Running>,
+    task_progress: Option<TaskProgress>,
+    commit_frequency: Option<CommitFrequency>,
     streams: [Stream; 2],
     redactions: Vec<String>,
     status: StatusContext,
@@ -114,19 +119,6 @@ pub(super) struct Workspace {
     /// Last known inner height (rows) of the Skott body, used to clamp the
     /// scroll offset without re-deriving the layout in the input path.
     skott_viewport: usize,
-    task_run_prep: Option<crate::task_commands::TaskRunPrep>,
-    /// When true, the current task run was started without an explicit task ID,
-    /// so after completion the workspace should automatically start the next
-    /// ready task (continuous mode). When false, the user specified an exact
-    /// task ID and the workspace should stop after that one task.
-    task_run_continuous: bool,
-    /// The component path for the current continuous task run, used to resolve
-    /// the next ready task after the current one completes.
-    task_run_component: Option<String>,
-    /// When true, the continuous task run should proceed across all components
-    /// (no specific component was requested). When false, it's limited to the
-    /// current component.
-    task_run_all_components: bool,
 }
 
 pub(crate) fn available() -> bool {
@@ -293,13 +285,12 @@ pub(crate) fn run(project: &Path) -> Result<()> {
                     // visible so the user can decide how to proceed.
                     std::thread::sleep(Duration::from_millis(100));
                     // If the user pressed Ctrl+C during the retry, cancel the
-                    // stuck Skott session and clear the task-run state so the
+                    // stuck Skott session so the
                     // loop can recover and reach the normal event handling.
                     if sav::take_interrupted() {
                         if let Some(skott) = &mut workspace.skott {
                             skott.cancel();
                         }
-                        workspace.task_run_prep = None;
                         workspace.skott = None;
                         workspace.dirty = true;
                         workspace.notice =
@@ -366,6 +357,8 @@ impl Workspace {
             pending_page: None,
             preferences,
             running: None,
+            task_progress: None,
+            commit_frequency: None,
             streams: Default::default(),
             redactions: Vec::new(),
             state_label: String::new(),
@@ -381,10 +374,6 @@ impl Workspace {
             skott_scroll: 0,
             skott_follow: true,
             skott_viewport: 1,
-            task_run_prep: None,
-            task_run_continuous: false,
-            task_run_component: None,
-            task_run_all_components: false,
         };
         workspace.refresh();
         workspace.append(&format!(
@@ -404,6 +393,7 @@ impl Workspace {
     fn refresh(&mut self) {
         match crate::config::load(&self.project) {
             Ok(config) => {
+                self.commit_frequency = Some(config.task_run.commit);
                 self.redactions = config
                     .agent
                     .roles
@@ -423,6 +413,7 @@ impl Workspace {
                 self.redactions.dedup();
             }
             Err(error) => {
+                self.commit_frequency = None;
                 self.notice = format!("Configuration unavailable: {error}");
             }
         }
@@ -628,54 +619,20 @@ impl Workspace {
             // for a human decision instead of looping forever). A terminal
             // result is reported to the Kvist view exactly once.
             if skott.result().finished && !self.skott_result_reported {
-                // For task runs, loop detection (Stalled) is not an accepted
-                // outcome: Kvist pushes back with guidance instead of blocking.
-                // The agent must reach complete, blocked, or decision point.
-                let decision = if self.task_run_prep.is_some()
-                    && matches!(
-                        skott.result().stop_reason,
-                        Some(sav::runtime::StopReason::Stalled)
-                    ) {
-                    Some(ContinuationDecision::Continue)
-                } else {
-                    skott.result().decision()
-                };
-                match decision {
+                match skott.result().decision() {
                     Some(ContinuationDecision::Continue)
                         if self.skott_continuations < MAX_SKOTT_CONTINUATIONS =>
                     {
                         self.skott_continuations = self.skott_continuations.saturating_add(1);
                         let attempt = self.skott_continuations;
                         let turns = skott.metrics().turns;
-                        // For a task run, Kvist records the continuation in the
-                        // attempt journal and hands a task-aware prompt back to
-                        // Skott. The task stays InProgress; Skott keeps working.
-                        let prompt = if let Some(prep) = &self.task_run_prep {
-                            // Kvist-authored guidance: tells the agent what
-                            // happened and that it must reach an accepted
-                            // state (complete, blocked, or decision point).
-                            let stop = format!("{:?}", skott.result().stop_reason);
-                            let guidance = format!(
-                                "Kvist task-run continuation {attempt}/{MAX_SKOTT_CONTINUATIONS}. \
-                                 Task `{}` stopped with stop reason {stop} after {turns} turn(s) \
-                                 without reaching an accepted outcome. Reconcile what you have \
-                                 done, then keep working until the task is complete, you are \
-                                 blocked for a concrete reason, or a human decision is required. \
-                                 Those are the only accepted outcomes.\n\nOriginal task:\n{}",
-                                prep.task_id, prep.prompt
-                            );
-                            prep.push_back(&guidance)
-                                .map_err(|error| io::Error::other(error.to_string()))?;
-                            guidance
-                        } else {
-                            format!(
-                                "Continue the task. You returned control after {turns} turn(s) \
-                                 without finishing and without a blocking reason. Review what \
-                                 remains and keep working until the task is complete, you are \
-                                 blocked for a concrete reason, or a human decision is required. \
-                                 (automatic continuation {attempt}/{MAX_SKOTT_CONTINUATIONS})"
-                            )
-                        };
+                        let prompt = format!(
+                            "Continue the task. You returned control after {turns} turn(s) \
+                             without finishing and without a blocking reason. Review what \
+                             remains and keep working until the task is complete, you are \
+                             blocked for a concrete reason, or a human decision is required. \
+                             (automatic continuation {attempt}/{MAX_SKOTT_CONTINUATIONS})"
+                        );
                         match skott.submit(prompt) {
                             Ok(()) => {
                                 self.dirty = true;
@@ -693,145 +650,8 @@ impl Workspace {
                         // Finished, blocked, or out of continuations: surface it.
                         self.skott_result_reported = true;
                         let result = skott.result().clone();
-                        let metrics = skott.metrics().clone();
                         let model_stats = skott.app.stats_line();
-                        // If this was a task run, Kvist performs the task-queue
-                        // teardown and displays only the resulting task
-                        // transition; the generic agent result is not shown.
-                        // Otherwise, show the agent result as before.
-                        if self.task_run_prep.is_some() {
-                            use sav::runtime::StopReason;
-                            let summary = sav::runtime::RunSummary {
-                                stop_reason: result.stop_reason,
-                                answer: result.answer.clone(),
-                                turns: metrics.turns,
-                                tools_executed: metrics.tools_executed,
-                                cancelled: matches!(
-                                    result.stop_reason,
-                                    Some(StopReason::Cancelled)
-                                ),
-                                exhausted: matches!(result.stop_reason, Some(StopReason::Limit(_))),
-                                budget_exhausted: false,
-                                failure: result.failure.clone(),
-                            };
-                            // Kvist owns the queue teardown. In continuous mode a
-                            // broken or invalid task must not halt the run: record
-                            // the failure and let the loop move on to the next
-                            // ready task or component. The failed task stays in
-                            // its current state (in-progress) and is skipped by
-                            // the ready-task selection, so it is retried only on
-                            // an explicit, later run.
-                            let task_run_failed = self.task_run_continuous;
-                            let message = match self
-                                .task_run_prep
-                                .as_mut()
-                                .expect("task run preparation present")
-                                .complete(&summary, result.answer.clone())
-                            {
-                                Ok(message) => message,
-                                Err(error) if task_run_failed => {
-                                    let error = error.to_string();
-                                    self.append(&format!(
-                                        "\n\n## Continuous mode\n\nTask `{task}` could not be finalized ({error}); continuing with the next ready task.\n\n",
-                                        task = self
-                                            .task_run_component
-                                            .as_deref()
-                                            .unwrap_or("<component>")
-                                    ))?;
-                                    format!("Task run failed: {error}")
-                                }
-                                Err(error) => return Err(io::Error::other(error.to_string())),
-                            };
-                            let task_seconds = self
-                                .task_run_prep
-                                .as_ref()
-                                .map_or(0.0, |prep| prep.started.elapsed().as_secs_f64());
-                            self.append(&format!(
-                                "\n\n{message}\n\n**Task activity:** {} turns · {} tool proposals · {task_seconds:.1}s.\n",
-                                metrics.turns, metrics.tools_executed,
-                            ))?;
-                            if !model_stats.is_empty() {
-                                self.append(&format!("\n**Skott metrics:** {model_stats}\n"))?;
-                            }
-                            // The task run reached a terminal state (completed,
-                            // blocked, or awaiting-decision); release the
-                            // per-component operation lock now so a subsequent
-                            // run of the same component can start without a
-                            // manual `task unlock`. The lock would otherwise
-                            // persist until the process exits. A failed release
-                            // does not abort the shell (the task outcome is
-                            // already recorded); it surfaces a warning and
-                            // leaves the retained lock for an explicit unlock.
-                            if let Err(error) = self
-                                .task_run_prep
-                                .as_mut()
-                                .expect("task run preparation present")
-                                .release_lock()
-                            {
-                                self.append(&format!(
-                                    "\n\nWarning: the task run finished but its component lock could not be released ({error}); run `kvist task unlock` if a later run reports the component is locked.\n",
-                                ))?;
-                                self.notice =
-                                    "Task lock release failed; run `kvist task unlock` if needed"
-                                        .into();
-                            }
-                            // Close the transcript entry with the same footer a
-                            // subprocess command produces, so a task run never
-                            // ends mid-sentence without a completion marker.
-                            let finished = matches!(
-                                result.stop_reason,
-                                Some(sav::runtime::StopReason::Completed)
-                            );
-                            self.last_failed = !finished;
-                            self.append(&format!(
-                                "\n\n**Command {}** (exit status: {}).\n\n",
-                                if finished { "finished" } else { "failed" },
-                                if finished { "0" } else { "1" }
-                            ))?;
-                            self.refresh();
-                            // In continuous mode, if the task completed successfully
-                            // and there's another ready task, automatically start it.
-                            if self.task_run_continuous
-                                && finished
-                                && let Some(component) = self.task_run_component.clone()
-                            {
-                                if let Some(next_task) = self.next_ready_task(&component) {
-                                    self.append(&format!(
-                                        "\n\n## Continuous mode\n\nStarting next ready task `{next_task}` in `{component}`...\n\n"
-                                    ))?;
-                                    // Reset for the next task
-                                    self.task_run_prep = None;
-                                    self.skott = None;
-                                    self.skott_result_reported = false;
-                                    self.start_task_run(
-                                        &component,
-                                        &next_task,
-                                        false,
-                                        true,
-                                        self.task_run_all_components,
-                                    )?;
-                                } else if self.task_run_all_components {
-                                    // Try the next component
-                                    self.try_next_component()?;
-                                } else {
-                                    self.append(&format!(
-                                        "\n\n## Continuous mode\n\nAll ready tasks in `{component}` are complete.\n\n"
-                                    ))?;
-                                    self.task_run_continuous = false;
-                                    self.task_run_component = None;
-                                }
-                            } else {
-                                // The run is terminal; drop the (now lock-free)
-                                // preparation so the process does not retain a
-                                // dead handle for the rest of the session. The
-                                // lock was already released above (or flagged if
-                                // it could not be), so dropping the handle only
-                                // clears it.
-                                self.task_run_prep = None;
-                            }
-                        } else {
-                            self.report_skott_result(&result, &model_stats)?;
-                        }
+                        self.report_skott_result(&result, &model_stats)?;
                     }
                 }
             }
@@ -847,6 +667,13 @@ impl Workspace {
         let Some(run) = &mut self.running else {
             return Ok(());
         };
+        if self
+            .task_progress
+            .as_mut()
+            .is_some_and(TaskProgress::refresh)
+        {
+            self.dirty = true;
+        }
         let events = run.drain();
         let status = run.poll()?;
         let mut batch = String::new();
@@ -895,6 +722,7 @@ impl Workspace {
                 }
             ))?;
             self.running.take();
+            self.task_progress = None;
             self.prompt_file.take();
             self.refresh();
             if !self.capture_failed {

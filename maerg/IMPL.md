@@ -1,6 +1,35 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped task execution and Rust quality observation
+
+An independent source-only observer inspected scoped implementation and test
+assertions, excluding intent, queues, prior records, and history. It did not
+execute tests. The workspace streams `task run` through supervised command
+dispatch, separate from embedded Skott. The header samples the executing
+component's task state at most every 500 ms, showing the declared queue position
+and completed count; the fixture distinguishes it from transcript focus.
+The Auto-commit menu exposes Task, Item, Component, and Manual. Continuous
+Task mode uses one checkpoint group per task ID, and the checkpoint is not
+acceptance.
+
+The Rust quality path records ordered command results and stops at the first
+failure. It uses a read-only Cargo workspace projection; explicit
+implementation runs still require finalization. The orchestration regression
+asserts that Clippy failure blocks execution, prevents advancement and commits,
+and that a reset and successful verification run all four stages before a
+checkpoint. The working-directory test policy remains component-scoped.
+
+Sources: `src/bark/tui/workspace/`, `src/task_commands.rs`,
+`src/task_commands/continuous.rs`, `src/sandbox.rs`; assertions:
+`tests/task_commands.rs` and `src/bark/tui/workspace/task_progress.rs`.
+
+An independent source-blind comparison found no concrete mismatch in this
+scope. It did not establish the exact total/percentage display or unchanged
+approval from the supplied observation alone. The bounded execution evidence
+does not establish verification of the full Kvist checkout under Kvist;
+checkout-local writes and host-only fixtures remain limitations.
+
 ## Protected rollover and embedded progress observations - 2026-11-22
 
 Independent `implementation-observer` inspected current source and test

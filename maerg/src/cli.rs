@@ -632,10 +632,10 @@ pub enum TaskCommand {
     /// Run an external AI agent to execute a task, tracking progress and token usage.
     ///
     /// An exact TASK_ID runs only that task. Without it, execute ready tasks
-    /// continuously, checkpointing complete items until final approval,
+    /// continuously, applying the configured checkpoint policy until final approval,
     /// a decision, or a blocker. No confirmation or `all` selector is needed.
     Run {
-        /// Explicit component directory; omit to run across all components continuously.
+        /// Component directory. The workspace requires an explicit component.
         #[arg(value_name = "COMPONENT_DIR")]
         component_dir: Option<PathBuf>,
         /// Exact task ID; omit to run component work continuously.

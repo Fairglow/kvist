@@ -61,6 +61,12 @@ Tests MUST cover accepted native phases, absent endpoints, mutations of
 authority/environment/argv, mutually exclusive source modes, no promotion,
 and real offline Cargo resolution without data-cache writes.
 
+Native verification MUST admit only the additional exact formatter, linter,
+and build operations required by protected task completion. A workspace
+verification view MUST restrict build inputs to read-only grants under the
+dedicated Cargo project mount and leave network, cache and write authority
+unchanged. Tests MUST reject argument and workspace grant mutations.
+
 This human-approved native-cache increment has an explicit local advisory
 exception while receipt enforcement is unavailable. It records no acceptance,
 receipt, implementer-derived IMPL, security certification or compliance result.

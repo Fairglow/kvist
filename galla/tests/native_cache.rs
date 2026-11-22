@@ -164,6 +164,207 @@ fn native_metadata_accepts_exact_verification_with_optional_data_roots() {
 }
 
 #[test]
+fn native_quality_accepts_exact_commands_and_only_projected_read_only_inputs() {
+    for argv in [
+        vec!["fmt", "--check"],
+        vec![
+            "clippy",
+            "--offline",
+            "--locked",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ],
+        vec!["build", "--offline", "--locked"],
+        vec!["test", "--offline", "--locked"],
+    ] {
+        let mut value = request(false, true, true);
+        value["argv"] = json!(
+            std::iter::once("/workspace/toolchain/bin/cargo")
+                .chain(argv)
+                .collect::<Vec<_>>()
+        );
+        validate(&value).unwrap();
+        let grants = value["grants"].as_array_mut().unwrap();
+        let workspace = grants
+            .iter_mut()
+            .find(|grant| grant["purpose"] == "verification")
+            .unwrap();
+        workspace["purpose"] = json!("context");
+        workspace["destination"] = json!("/rust/project/member/Cargo.toml");
+        value["working_directory"] = json!("/rust/project/member");
+        validate(&value).unwrap();
+
+        let mut extra_arg = value.clone();
+        extra_arg["argv"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("--workspace"));
+        assert!(validate(&extra_arg).is_err());
+        let mut outside_project = value.clone();
+        outside_project["grants"]
+            .as_array_mut()
+            .unwrap()
+            .push(grant("/unrelated", "context", "read-only"));
+        assert!(validate(&outside_project).is_err());
+        value["working_directory"] = json!("/rust/project/other");
+        assert!(validate(&value).is_err());
+    }
+}
+
+#[test]
+fn native_quality_runs_rust_tools_on_a_read_only_workspace_member() {
+    use std::{fs, os::unix::fs::symlink, path::PathBuf, process::Command};
+
+    let root = tempfile::tempdir().unwrap();
+    for dir in ["app/src", "peer/src", "runtime", "scratch"] {
+        fs::create_dir_all(root.path().join(dir)).unwrap();
+    }
+    for (path, contents) in [
+        (
+            "Cargo.toml",
+            "[workspace]\nmembers=['app','peer']\nresolver='3'\n",
+        ),
+        (
+            "Cargo.lock",
+            "version = 4\n[[package]]\nname='app'\nversion='0.1.0'\ndependencies=['peer']\n[[package]]\nname='peer'\nversion='0.1.0'\n",
+        ),
+        (
+            "app/Cargo.toml",
+            "[package]\nname='app'\nversion='0.1.0'\nedition='2024'\n[dependencies]\npeer={path='../peer'}\n",
+        ),
+        (
+            "peer/Cargo.toml",
+            "[package]\nname='peer'\nversion='0.1.0'\nedition='2024'\n",
+        ),
+        ("peer/src/lib.rs", "pub fn value() -> u8 {\n    42\n}\n"),
+    ] {
+        fs::write(root.path().join(path), contents).unwrap();
+    }
+    let app_source = root.path().join("app/src/lib.rs");
+    fs::write(&app_source, "pub fn run()->u8{peer::value()}\n").unwrap();
+    let sysroot = Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .output()
+        .unwrap();
+    assert!(sysroot.status.success(), "{sysroot:?}");
+    let sysroot = PathBuf::from(String::from_utf8(sysroot.stdout).unwrap().trim())
+        .canonicalize()
+        .unwrap();
+    for tool in [
+        "cargo",
+        "rustc",
+        "rustdoc",
+        "cargo-fmt",
+        "rustfmt",
+        "cargo-clippy",
+        "clippy-driver",
+    ] {
+        assert!(
+            sysroot.join("bin").join(tool).is_file(),
+            "missing Rust tool: {tool}"
+        );
+        symlink(
+            format!("/workspace/toolchain/bin/{tool}"),
+            root.path().join("runtime").join(tool),
+        )
+        .unwrap();
+    }
+    for tool in ["cc", "ar", "as"] {
+        symlink(
+            format!("/usr/bin/{tool}"),
+            root.path().join("runtime").join(tool),
+        )
+        .unwrap();
+    }
+    let probe = Command::new(env!("CARGO_BIN_EXE_galla"))
+        .arg("--kvist-sandbox-probe-v1")
+        .env_clear()
+        .output()
+        .unwrap();
+    assert!(probe.status.success(), "{probe:?}");
+    let probe: Value = serde_json::from_slice(&probe.stdout).unwrap();
+    let mut value = request(false, false, false);
+    value["identities"]["runner"] = probe["runner"]["digest"].clone();
+    value["identities"]["backend"] = json!({
+        "kind": "bubblewrap", "path": probe["backend"]["path"],
+        "digest": probe["backend"]["digest"]
+    });
+    value["working_directory"] = json!("/rust/project/app");
+    let grants = value["grants"].as_array_mut().unwrap();
+    grants.truncate(3);
+    for (grant, source) in grants.iter_mut().zip([
+        sysroot,
+        root.path().join("runtime"),
+        root.path().join("scratch"),
+    ]) {
+        grant["source"] = json!(source);
+    }
+    for relative in [
+        "Cargo.toml",
+        "Cargo.lock",
+        "app/Cargo.toml",
+        "app/src",
+        "peer/Cargo.toml",
+        "peer/src",
+    ] {
+        let mut input = grant(&format!("/rust/project/{relative}"), "context", "read-only");
+        input["source"] = json!(root.path().join(relative));
+        grants.push(input);
+    }
+    value["identities"]["mount_plan"] = json!(galla::protocol::mount_plan_identity(
+        &validate(&value).unwrap().grants
+    ));
+    let mut run = |args: &[&str]| {
+        let argv = std::iter::once("/workspace/toolchain/bin/cargo")
+            .chain(args.iter().copied())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        value["identities"]["command"] = json!(galla::protocol::command_identity(&argv));
+        value["argv"] = json!(argv);
+        let output = execute_request(&value);
+        fs::remove_dir(root.path().join("scratch/cargo-home")).unwrap_or_else(|error| {
+            panic!("could not reset private Cargo home: {error}; {output:?}");
+        });
+        output
+    };
+    let bad_format = run(&["fmt", "--check"]);
+    assert_eq!(bad_format.status.code(), Some(1), "{bad_format:?}");
+    assert!(String::from_utf8_lossy(&bad_format.stdout).contains("Diff in /rust/project/app"));
+    fs::write(
+        &app_source,
+        "#[test]\nfn calls_peer() {\n    assert_eq!(peer::value(), 42);\n}\n",
+    )
+    .unwrap();
+    for args in [
+        &["fmt", "--check"][..],
+        &[
+            "clippy",
+            "--offline",
+            "--locked",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ][..],
+        &["build", "--offline", "--locked"][..],
+        &["test", "--offline", "--locked"][..],
+    ] {
+        let output = run(args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if args[0] == "test" {
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        }
+    }
+    assert!(!root.path().join("target").exists());
+}
+
+#[test]
 fn native_metadata_rejects_other_commands_flags_authority_and_environment() {
     let original = metadata_request(true, true);
     let mut mutations = vec![];
