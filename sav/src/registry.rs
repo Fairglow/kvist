@@ -390,7 +390,7 @@ fn secret_argument(argument: &str) -> bool {
         "password",
         "authorization",
         "bearer ",
-        "--token",
+        "--token=",
         "--secret",
         "credential",
         "private_key",

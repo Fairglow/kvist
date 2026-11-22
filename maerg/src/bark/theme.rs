@@ -17,6 +17,7 @@
 
 use std::{
     io::{self, IsTerminal, Read, Write},
+    os::fd::AsFd,
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
@@ -25,7 +26,7 @@ use std::{
 use crate::KvistError;
 
 /// Maximum accepted size of a user theme spec.
-pub const MAX_THEME_SPEC_BYTES: u64 = 8 * 192;
+pub const MAX_THEME_SPEC_BYTES: u64 = 8 * 1024;
 
 /// Registry index of the built-in dark theme.
 pub const DARK_ID: u16 = 0;
@@ -863,7 +864,28 @@ pub fn probe_terminal_background() -> Option<(u8, u8, u8)> {
     let mut byte = [0u8; 1];
     let stdin = io::stdin();
     let mut handle = stdin.lock();
+    // A raw-mode terminal read blocks until a byte arrives, so the deadline
+    // must be enforced with `poll` rather than checked only before each read:
+    // a non-responding terminal would otherwise block the probe forever. The
+    // descriptor is scoped to the poll call so its borrow of `handle` ends
+    // before the (mutable) read below.
     while Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let milliseconds = remaining.as_millis().clamp(1, u128::from(u16::MAX)) as u16;
+        let ready = {
+            let descriptor = nix::poll::PollFd::new(handle.as_fd(), nix::poll::PollFlags::POLLIN);
+            nix::poll::poll(
+                &mut [descriptor],
+                nix::poll::PollTimeout::from(milliseconds),
+            )
+        };
+        match ready {
+            // A zero ready count is the timeout: stop probing.
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(nix::errno::Errno::EINTR) => continue,
+            Err(_) => break,
+        }
         match handle.read(&mut byte) {
             Ok(1) => {
                 data.push(byte[0]);
@@ -1070,6 +1092,15 @@ agent_background = "black"
         assert_eq!(Theme::by_id(id).name(), "test-custom-rt");
         assert_eq!(Theme::by_id(id).palette().prompt, "32");
         assert_eq!(match_preference("test-custom-rt"), Preference::Named(id));
+    }
+
+    #[test]
+    fn theme_spec_cap_is_the_documented_eight_kibibytes() {
+        // The contract, requirements, and design all state an 8 KiB spec cap.
+        // Pin the exact value so a regression to a smaller bound (which the
+        // fifo/link test would not catch, since it reads the constant) is a
+        // hard compile-time-visible failure.
+        assert_eq!(MAX_THEME_SPEC_BYTES, 8 * 1024);
     }
 
     #[test]

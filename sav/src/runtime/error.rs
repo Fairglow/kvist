@@ -59,6 +59,12 @@ pub enum Error {
     /// A required approved local resource was unavailable before dispatch.
     #[error("tool `{tool}` requires a local prerequisite: {reason}")]
     ToolPrerequisite { tool: String, reason: String },
+    /// The installed galla runner could not be resolved or bound before dispatch.
+    #[error("the installed galla runner is unavailable: {reason}")]
+    RunnerUnavailable { reason: String },
+    /// The runner's verified enforcement backend was incomplete before dispatch.
+    #[error("the verified enforcement backend is unavailable: {reason}")]
+    BackendUnavailable { reason: String },
     /// Other terminal host execution failure; effects may have occurred.
     #[error("host execution failed: {reason}")]
     Host { reason: String },

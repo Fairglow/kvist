@@ -18,7 +18,6 @@ impl Parent {
         let name = path
             .file_name()
             .ok_or_else(|| fail(&path, "missing filename"))?;
-        #[cfg(target_os = "linux")]
         {
             use nix::{
                 fcntl::{OFlag, openat},
@@ -54,15 +53,6 @@ impl Parent {
             parent.verify()?;
             Ok(parent)
         }
-        #[cfg(not(target_os = "linux"))]
-        {
-            let file = File::open(&original).map_err(|error| fail(&path, error.to_string()))?;
-            Ok(Self {
-                file,
-                original,
-                destination: path,
-            })
-        }
     }
 
     fn verify(&self) -> Result<()> {
@@ -73,7 +63,6 @@ impl Parent {
             .file
             .metadata()
             .map_err(|error| fail(&self.original, error.to_string()))?;
-        #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
             if observed.dev() != opened.dev() || observed.ino() != opened.ino() {
@@ -148,34 +137,19 @@ pub(super) fn safe_path(path: &Path, missing: bool) -> Result<()> {
 }
 
 fn hardlinked(metadata: &Metadata) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        metadata.is_file() && metadata.nlink() != 1
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = metadata;
-        false
-    }
+    use std::os::unix::fs::MetadataExt;
+    metadata.is_file() && metadata.nlink() != 1
 }
 
 fn identical(a: &Metadata, b: &Metadata) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        a.dev() == b.dev()
-            && a.ino() == b.ino()
-            && a.len() == b.len()
-            && a.mtime() == b.mtime()
-            && a.mtime_nsec() == b.mtime_nsec()
-            && a.ctime() == b.ctime()
-            && a.ctime_nsec() == b.ctime_nsec()
-    }
-    #[cfg(not(unix))]
-    {
-        a.len() == b.len() && a.modified().ok() == b.modified().ok()
-    }
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev()
+        && a.ino() == b.ino()
+        && a.len() == b.len()
+        && a.mtime() == b.mtime()
+        && a.mtime_nsec() == b.mtime_nsec()
+        && a.ctime() == b.ctime()
+        && a.ctime_nsec() == b.ctime_nsec()
 }
 
 pub(super) fn read_bytes(path: &Path) -> Result<Vec<u8>> {
@@ -190,7 +164,6 @@ pub(super) fn read_bytes(path: &Path) -> Result<Vec<u8>> {
     let parent = Parent::open(path)?;
     let mut options = OpenOptions::new();
     options.read(true);
-    #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits());

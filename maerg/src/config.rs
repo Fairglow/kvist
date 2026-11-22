@@ -1406,40 +1406,26 @@ fn invalid_configuration(config_path: &Path, reason: &str) -> KvistError {
 /// Returns the standard user-specific global configuration path for Kvist.
 ///
 /// `KVIST_CONFIG_PATH` overrides resolution entirely; otherwise the path is
-/// resolved from XDG (Unix/macOS) or `%APPDATA%` (Windows) conventions.
-/// Test isolation is the caller's responsibility and is enforced in tests by
-/// setting `KVIST_CONFIG_PATH` or `XDG_CONFIG_HOME` on the child process, never
-/// by special-casing Cargo inside this resolver.
+/// resolved from XDG conventions. Test isolation is the caller's responsibility
+/// and is enforced in tests by setting `KVIST_CONFIG_PATH` or `XDG_CONFIG_HOME`
+/// on the child process, never by special-casing Cargo inside this resolver.
 pub fn global_user_config_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("KVIST_CONFIG_PATH") {
         return Some(PathBuf::from(path));
     }
-    if cfg!(windows) {
-        std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .map(|path| path.join("kvist").join("config.toml"))
-    } else {
-        // Unix / macOS conforming to XDG standards
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .map(|path| path.join(".config"))
-            });
-        base.map(|path| path.join("kvist").join("config.toml"))
-    }
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|path| path.join(".config"))
+        });
+    base.map(|path| path.join("kvist").join("config.toml"))
 }
 
 /// Returns the standard system-wide global configuration path for Kvist.
 pub fn global_system_config_path() -> Option<PathBuf> {
-    if cfg!(windows) {
-        std::env::var_os("ProgramData")
-            .map(PathBuf::from)
-            .map(|path| path.join("kvist").join("config.toml"))
-    } else {
-        Some(PathBuf::from("/etc/kvist/config.toml"))
-    }
+    Some(PathBuf::from("/etc/kvist/config.toml"))
 }
 
 const DEFAULT_GLOBAL_CONFIG_TEMPLATE: &str = r#"# Kvist Global User Configuration

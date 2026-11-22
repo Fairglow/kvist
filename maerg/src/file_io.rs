@@ -114,20 +114,12 @@ pub(crate) fn replace_file_atomically(destination: &Path, contents: &str) -> Res
 
 /// Synchronizes a directory after a durable entry change where supported.
 pub(crate) fn sync_directory(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::fs::File;
-        File::open(path)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|source| KvistError::Io {
-                operation: "sync parent directory",
-                path: path.to_path_buf(),
-                source,
-            })
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        Ok(())
-    }
+    use std::fs::File;
+    File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|source| KvistError::Io {
+            operation: "sync parent directory",
+            path: path.to_path_buf(),
+            source,
+        })
 }

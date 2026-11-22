@@ -756,10 +756,14 @@ impl NativeRuntime {
                         Err(error) => {
                             if matches!(error, Error::Cancelled) {
                                 cancellation.cancel();
-                            } else if matches!(
-                                error,
-                                Error::ToolPolicy { .. } | Error::ToolRender { .. }
-                            ) {
+                            } else if matches!(error, Error::ToolPolicy { .. }) {
+                                // A host policy refusal is a typed, not-executed
+                                // denial: the run fails closed and surfaces the
+                                // refusal instead of silently continuing to
+                                // invent work the host never granted.
+                                summary.failure = Some(error.describe());
+                                summary.stop_reason.get_or_insert(StopReason::Failed);
+                            } else if matches!(error, Error::ToolRender { .. }) {
                                 record_notice(sink, recorder, error.describe())?;
                             } else {
                                 summary.failure = Some(error.describe());

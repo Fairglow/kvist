@@ -2464,3 +2464,361 @@ Their corrections implement the human-approved native design; the same
 source-blind comparer re-observed all three conflicts closed. No production
 behavior was re-evaluated; broader test failures remain visible and acceptance
 metadata remains unchanged.
+
+## Clean-slate shell-theme and scroll-pager observations - 2026-11-20
+
+Derived in a clean-slate source-only context from `maerg/src/bark/theme.rs`,
+`maerg/src/bark/scroll_pager.rs`, `maerg/src/bark/pager.rs`,
+`maerg/src/bark/style.rs`, `maerg/src/bark/status.rs`,
+`maerg/src/bark/stream.rs`, `maerg/src/bark.rs`,
+`maerg/src/bark/tui/render.rs`, `maerg/src/bark/tui/workspace/actions.rs`,
+and `maerg/src/file_io.rs`, together with their in-crate `#[cfg(test)]`
+suites and the bounded integration evidence in `tests/tui_workspace.rs` and
+`tests/shell_smoke.rs`. No intent documents, queues, prior records, prior
+reviews, or Git history were read for this observation.
+
+### Theme registry and palette
+
+A process-wide registry (`OnceLock<Mutex<Vec<ThemeDef>>>`) holds the built-in
+`dark` (id 0, the default) and `light` (id 1) themes; every accessor recovers
+the inner data after lock poisoning. A user TOML spec, when loaded, registers
+a third theme. A `Palette` is 17 explicit RGB SGR roles (prompt, component,
+failure, indicator, border, dim, red, green, yellow, blue, magenta, cyan,
+agent_background, agent_foreground, panel_background,
+selection_background, selection_foreground). `Palette::dark()` and
+`Palette::light()` are independent explicit `38;2`/`48;2` RGB tables: a
+near-black `48;2;9;13;18` agent-result canvas and a clear-white
+`48;2;255;255;255` canvas, with distinct raised panel backgrounds and
+selection surfaces.
+
+### Theme resolution
+
+`Theme::resolve(project_dir)` first applies the color contract:
+`NO_COLOR` (any value), `CLICOLOR=0`, or `TERM=dumb` yields the plain theme;
+otherwise styling is enabled when `CLICOLOR_FORCE` is set to any value other
+than `0` or when stdout is a terminal. It then loads the user theme file
+(once per process), reads the first non-empty preference in the order
+`KVIST_THEME`, project-local `.kvist/theme`, and
+`$XDG_CONFIG_HOME/kvist/theme` (defaulting to `~/.config/kvist/theme`), and
+classifies it: `dark`/`light` (case-insensitive) select the built-ins, a
+registered name resolves to its id, and a value containing a path separator
+or a `.toml` suffix is loaded as a spec file; an unresolvable or unreadable
+path reports a `tracing::warn!` and falls back to detection, which probes the
+terminal background (OSC 11) and otherwise defaults to dark.
+
+### User theme spec
+
+The spec is a TOML document with `name` (1-32 characters of `[a-z0-9-]`,
+lower-cased; uppercase is rejected), an optional `mode` (`dark` default or
+`light`; any other value is rejected), and a `[colors]` table mapping known
+roles to a `#rgb`/`#rrggbb` hex value, a named ANSI color (fixed lookup
+table), or a 0-255 index. Unknown roles, invalid TOML, and invalid color
+values are rejected with an actionable `ThemeSpecInvalid` diagnostic before
+registration. Files are read through `read_text_bounded` with `O_NOFOLLOW |
+O_NONBLOCK`, an `is_file()` check, and a hard cap of `MAX_THEME_SPEC_BYTES =
+8 * 1024` (8 KiB); an over-size file yields `ThemeSpecTooLarge`.
+
+### OSC 11 probe
+
+`probe_terminal_background` issues the query only when both stdin and stdout
+are terminals, enters raw mode on `/dev/tty` via a `RawModeGuard` that
+restores the prior termios on drop, and reads the response with a 150 ms
+deadline enforced by `nix::poll` (so a non-responding terminal does not block
+indefinitely) and a 256-byte response cap. `parse_osc11` accepts
+`ESC]11;rgb:RR/GG/BB` terminated by BEL or `ESC\`; the surface is classified
+by relative luminance (weight 0.2126/0.7152/0.0722, threshold 128), and a
+light surface selects the light theme while everything else keeps dark.
+
+### Persistence
+
+`save_preference` validates the value (built-in name, registered name, or an
+absolute path) and writes only to `project_dir/.kvist/theme` through
+`replace_file_atomically` (same-directory temp file, sync, rename, directory
+sync). The TUI route (`bark/tui/workspace/actions.rs`) additionally calls
+`private_directory` (which rejects parent traversal and symlinked
+directories) before persisting.
+
+### Builtins, prompt, and streaming
+
+The `theme` builtin renders `render_theme_overview`: the current theme first,
+then every registered theme as a live titled box drawn in that theme (prompt
+line, separator rule, agent-result bar, status badge), plus the customization
+pointers. The completion menu's `theme set` candidates carry a one-line
+sample preview rendered in the theme itself (the prompt verb and indicator,
+styled by the theme) as their description, not the full live box. `theme
+set <NAME|PATH>` in the workspace shell REPL
+resolves the value, persists it, applies the new palette to the session and
+the stream manager (so a running session switches live), and reports the
+outcome; the TUI menu route resolves, persists, and applies. The prompt
+renders a single full-width dim separator rule (`├──…`) above the input line
+(`render_prompt_left`), the short prompt below it, and `right_prompt_on_last_line`
+places the status badge on the input line's right edge. On an empty buffer,
+`KvistHinter` renders the dim ghost key hints (`key_hints`), which keep whole
+`KEY action` groups and drop from the tail until they fit the width left over
+for the short prompt and the badge; when they would overlap the badge,
+reedline drops the badge. Streaming task execution renders one `Agent
+Working` titled box that stays open across the live output and the result;
+the result rows are padded to the box inner width and styled with the
+agent-result role, and the box closes once.
+
+### Plain-text degradation and contrast
+
+`Theme::plain` makes every style helper the identity, so the plain theme is
+byte-identity for the shell renderers. The in-crate test
+`built_in_surfaces_have_measured_text_and_edge_contrast` asserts, for both
+built-in themes, that the main/secondary/accent text meets 4.5:1 against the
+canvas and the raised panel, that the border and meaningful edges meet 3:1,
+that the raised surface differs from the canvas, and that the selection
+surface meets 4.5:1. It does not certify arbitrary user palettes.
+
+### Scroll pager
+
+`pager_policy` is a pure function: it pages only when `KVIST_NO_PAGER` is
+unset, stdout is a terminal, and the line count exceeds the probed terminal
+height minus one row (a 15-line fallback when the height is unknown).
+`display_output` applies it and prints directly whenever the pager is
+unavailable or fails, so output is never lost. `scroll_pager::page` returns
+`false` when the terminal size is unknown or below 10 columns by 3 rows, or
+when raw mode or the alternate screen cannot be taken. While running, it
+re-wraps the text at the terminal width minus a two-column gutter, draws each
+content line at column 0 of its own terminal row (crossterm `MoveTo` takes
+the column first), and renders the one-column scrollbar in the last column
+(`█` for the thumb, dim `·` for the track). The thumb is
+`scrollbar_geometry(total, visible, offset)`: a document that fits fills the
+track, the thumb is proportional to the output and never shorter than two
+rows, and both size and position are proportional to the offset. The event
+loop supports quit (`q`/`Q`/`Esc`/`Ctrl+C`), one-line scrolling (arrows,
+`j`/`k`), page scrolling (`PageUp`/`PageDown`), top/bottom jumps (`g`/`G`,
+Home/End), half-page (`d`/`u`), and the mouse wheel (three lines); resize
+events re-wrap and clamp the offset. On exit the pager reprints the last
+visible line (like `less`) and restores the terminal. The in-crate
+`scroll_pager` tests pin the per-row/column-0 render, the full-height
+rendering, the last-column scrollbar, and the geometry (fit-fills-track,
+proportionality, the two-row floor, and offset tracking); the `pager` tests
+pin the never-page policy (no terminal or env override) and the paging
+threshold; `tests/tui_workspace.rs` exercises loading the XDG user theme,
+persisting a menu `theme set` to `.kvist/theme`, and entering/leaving the
+alternate screen; `tests/shell_smoke.rs` keeps the pager disengaged with a
+known window size and `KVIST_NO_PAGER`.
+
+
+## Clean-slate TUI and transcript observations - 2026-11-20
+
+Derived in a clean-slate source-only context from the changed TUI and
+transcript sources — `maerg/src/bark/tui.rs`, `maerg/src/bark/tui/workspace.rs`,
+`maerg/src/bark/tui/{storage,process,render,editor}.rs`,
+`maerg/src/bark/tui/workspace/{actions,view,menus,model_menus,bindings,preferences,menu_tests}.rs`,
+`maerg/src/bark/{prefill,completion,status,locks,stream,runs,tree}.rs`,
+`maerg/src/bark.rs`, `maerg/src/presentation.rs`, `maerg/src/cli.rs`,
+`maerg/src/skott_embedded.rs` (interface surface) — together with their in-crate
+`#[cfg(test)]` suites and the bounded integration evidence in
+`tests/tui_workspace.rs`, `tests/shell_smoke.rs`, `tests/view_switching.rs`,
+and `tests/completions.rs`. No intent documents, queues, prior implementation
+records, prior reviews, or Git history were read for this observation.
+
+### Entry, degradation, and finiteness
+
+`bare_invocation` (`cli.rs`) starts the shell only when neither `--json` nor
+non-interactive stdin/stdout applies; redirected or piped invocations print a
+finite status overview (or help outside a project), and `--json` always returns
+a finite machine-readable report. `Command::Shell { path }` resolves a project
+directory (omitted = nearest project at or above cwd) and calls the same shell
+entry, so `kvist shell [PROJECT_DIR]` remains an explicit entry. The TUI gate
+`tui::available()` requires stdin and stdout terminals, absence of
+`NO_COLOR`, `CLICOLOR` other than `0`, `TERM` other than `dumb`, and a
+terminal at least 40 columns by 10 rows; otherwise the line-oriented
+`run_shell` path runs. Piped stdin in that path fails with an actionable
+`ShellNotInteractive` diagnostic (`tests/shell_smoke.rs`).
+
+### Host ownership, child isolation, and reap
+
+The TUI owns raw mode and the alternate screen through `TerminalGuard`
+(also mouse capture and bracketed paste); restore runs on every exit path and
+on `Drop`. `Running::spawn_program` spawns the current executable with an
+argument vector, `NO_COLOR=1`, `CLICOLOR=0`, removed `CLICOLOR_FORCE`,
+`KVIST_NO_PAGER=1`, `TERM=dumb`, piped stdin/stdout/stderr, and its own process
+group. Two bounded reader threads decode UTF-8, report invalid or truncated
+input as `Output::Error`, and cap one pending record at 16 MiB. Cancellation
+signals the whole process group (SIGINT, SIGKILL after 5 s; a child that ends
+with unclosed streams is SIGKILLed after 2 s), and `Running::drop` kills,
+waits, and joins so a quit or a persistent terminal error never leaves the
+owned command running (`tests/tui_workspace.rs` exits cleanly only after the
+child is reaped; the `Drop` kill path is exercised by the in-crate tests).
+
+### Markdown projection of live output and reports
+
+Every line or JSON record is passed through `presentation::report_redacted`
+before persistence: JSON reports are projected into headings, lists, and
+tables (with `report`/`markdown`/`message`/`content`/`text`/`output`/
+`log_content`/`replay` string fields re-rendered as Markdown), while non-JSON
+lines are sanitized. Carriage-return progress rewrites are collapsed to their
+terminal-visible final line. Unknown report fields are retained as
+`- **key:** value` lines, so structured metadata stays inspectable.
+`tests/tui_workspace.rs` pins that a stubbed agent emitting a JSON `report`
+string produces readable Markdown (`# Agent report`, `**Readable** output.`,
+`| Key | Value |`) in the stored transcript, with no `"report":` escape
+artifact and no raw escape byte. In-crate `process.rs` tests pin
+record-boundary decoding and byte-exact preservation of ordinary Markdown
+across every read size.
+
+### Rendering boundary and terminal-control inertness
+
+`render::markdown` renders the stored Markdown with the `blad` renderer at the
+host's width and panel background, then feeds the renderer's byte stream
+through a `vte::Parser` that maps only a fixed set of SGR codes to ratatui
+styles and ignores every other escape sequence; the result is styled spans.
+The in-crate test `authored_controls_do_not_become_terminal_actions` pins that
+an embedded OSC `ESC]52;c;secretBEL` sequence produces no raw escape byte in
+any rendered span, and the PTY test pins the same for the stored transcript.
+The command footer, candidate list, menu labels, and status rows are sanitized
+the same way before drawing.
+
+### Responsive execution, navigation, and paste
+
+The event loop pumps the child and the embedded Skott session before each draw
+and polls input with a 50 ms timeout, so PageUp/PageDown, the mouse wheel,
+mouse-drag seeking on the scrollbar column, and Ctrl+Home/End remain live while
+a command runs (input while running answers the child's stdin; editing is
+suspended). Ctrl+C cancels the owned command, never quits; Ctrl+Q and the menu
+Quit share one path: idle exit, or an explicit "cancel and quit?" confirmation
+while work is active, followed by cancellation/reaping. Bracketed paste is
+enabled; `Workspace::paste` inserts the text into the editor, whose `insert`
+rewrites embedded newlines and tabs to spaces and drops other control
+characters, so a pasted multiline block becomes one editable line that runs
+only on an individual Enter. In menus, paste filters the searchable component
+or model list (bounded at 256 bytes) and never mutates the hidden command
+draft (`tests/tui_workspace.rs` drives paste and the PTY path; the in-crate
+`menu_tests` pin the routing and the search bound).
+
+### Layout: heading, transcript window, footer
+
+`view.rs` draws a two-line status heading (active component or `(project)`,
+state label, `N/M tasks` progress; then branch, `sandbox:`, `model:`,
+`N live / M stale` locks, and a RUNNING elapsed row), a bounded transcript
+window with a right-hand scrollbar, and a three-row command footer (input
+line, key-hint/notice row, and the input block border). The in-crate
+`layout_has_status_transcript_scrollbar_and_command_footer` test pins that the
+rendered 80x24 buffer contains `Kvist`, `(project)`, `sandbox:`, `model:`,
+`Transcript`, rendered Markdown, `Command`, and `F1 help`, and that raw
+Markdown markers do not appear. The transcript window title shows
+`Transcript {segment}/{count} | following|paused`, and a vertical
+`Scrollbar` tracks the position within the loaded segment; the title and the
+scrollbar do not claim counts for segments that were not loaded.
+
+### Status heading facts and scope
+
+`StatusContext::load` reads the configured sandbox backend and default model
+(degrading to `none` when the configuration is absent or invalid) and
+`locks::scan` distinguishes live from stale lock files. The state label and
+task progress come from `project_state::inspect` filtered to the focused
+component, or to the whole project when no component is selected; `change_focus`
+is refused while a command is running, reopens the per-scope transcript and
+command history, saves the previous scope's preferences, clears the input
+line, and appends a `# Focus:` marker. `tests/tui_workspace.rs` pins the
+project-level status table in the project transcript after bare `cd`, and the
+component-level `## Component:` heading in the component transcript after
+`cd .`, plus `# Focus: (project)` / `# Focus:` on the respective returns.
+
+### Visible component prefill
+
+`ComponentPrefill` (a reedline highlighter plus abbreviation map) inserts the
+selected component into the real edit buffer when the next positional argument
+is a vacant component slot, detected by `component_position` walking the
+clap-derived tree: every command whose next positional is a `COMPONENT_DIR` —
+`task run`, `task next`, `task transition`, `task log`, `task unlock`,
+`task recover`, `task finalize`, `component validate`, `component accept` — is
+filled; the `tasks` and `run` builtins and bare `status` are visibly filled as
+well (the in-crate prefill tests pin those eleven forms; the slot detection
+also covers `task unlock`, which the test list does not include); `cd` is
+never filled (including the reedline abbreviation and highlight hooks); an
+explicit or partially typed component, a command-named component (quoted as
+`./name`), a dash-leading path (quoted as `./-name`), and flag values are left
+untouched; and a manual deletion suppresses refill until the next submission,
+after which deletion permits another component. Focus is only read between
+submissions. Quoting is applied for the shell parser (spaces, quotes,
+backslashes). In-crate `prefill.rs` tests pin all of this, including a real
+reedline buffer assertion and clap round-trips of the inserted text.
+Separately, the dispatch path inserts the focused component into omitted
+component arguments of eight command forms before spawn (`task next`,
+`task log`, `task transition`, `task unlock`, `task recover`,
+`task finalize`, `component validate`, `component accept`; the line-oriented
+shell has an equivalent `inject_command_focus`), while `task run` — and the
+`run`/`tasks` builtins — resolve the component directly from focus in their
+own dispatch branches. A command submitted without the visible insertion still
+targets the focused component; that insertion is the dispatch fallback, not
+the visible prefill the requirement names. The three lists (slot detection,
+fallback list, run branch) agree in effect on this surface but are maintained
+separately.
+
+### Footer surface, completion, and key help
+
+The footer input dispatches every line through the same `cli::Cli` parser as
+the standalone CLI (plus the shell builtins `cd`, `tasks`, `overview`, `run`,
+`help`, `history`, `journal`, `last`, `locks`, `theme`, `agent`, `prompt`,
+`settings`, `exit`/`quit`), and the completion candidates come from the same
+clap-derived command tree, so the static surface cannot drift; dynamic values
+(components, task IDs with status/title descriptions, the next-ready marker,
+models, roles, branches, themes) come from a `DynamicState` snapshot that is
+reloaded after each command. Tab/Shift+Tab navigate, Enter accepts a visible
+candidate before submission, and Up/Down recall command history. Keyboard
+shortcut help is rendered from one `BINDINGS` table both as the idle footer
+hint line (`footer()`, the `menu`/`help`/`complete`/`scroll`/`view`/`cancel`/
+`quit`/`agent` hint groups, the same fit-and-drop-tail strategy as the
+line-oriented shell's `key_hints`) and as the F1 help table; the standalone
+`skott` TUI renders its shortcut list as a plain two-column line list in its
+help overlay, which this table format does not replicate.
+
+### Transcript storage and reachability
+
+Transcript segments live in a private `.kvist/transcript/` directory per scope
+(project scope at the project root, focused scope under the component):
+`private_directory` rejects parent traversal and symlinked components and
+creates missing directories 0o700; every file is opened `O_NOFOLLOW |
+O_NONBLOCK`, required to be a regular file with one hard link and mode 0o600,
+and reads are bounded (1 MiB for command history, 16 MiB for a segment).
+Segments target 1 MiB and an indivisible top-level Markdown block is capped at
+16 MiB (explicit `FileTooLarge` failure with cancellation, never truncation).
+Rotation merges the current segment with the pending delta, cuts only at
+top-level Markdown block boundaries, persists the new pages before replacing
+the old page (an interrupted rotation can duplicate, never lose), and syncs
+file and directory. A per-directory `.writer` lock (try-lock, released on
+drop, including a briefly fork-inherited descriptor) refuses a second
+workspace; `append` re-checks the file length before writing. Command history
+is `commands.json` in the same private directory, bounded to 500 entries and
+1 MiB, and entries over 8192 bytes are refused on load. Only the selected
+segment is read into memory; older segments are reachable by navigation
+(PageUp crossing segment boundaries, Ctrl+Home to segment 0) and by the
+History menu (the 100 newest segments), never by loading the whole history.
+`tests/tui_workspace.rs` exercises real per-component transcripts, restoration
+on focus return, and the stored Markdown content; the in-crate `storage.rs`
+tests pin rotation, restoration, link/writer refusal, and component scoping.
+
+### Recording failure and evidence status
+
+`Workspace::append` is the single persistence entry (redact, then sanitize,
+then write); append failures are reported: the in-loop handler records them as
+visible `## Error` documents in the notice bar and transcript, terminal-death
+errors break the loop with a restored terminal, and capture failures cancel
+the running command and record an explicit `Command capture failed` entry.
+The `journal` builtin reports the transcript directory, segment count, and
+bytes-to-rotation, and both the `journal` text and the F1 help text state the
+transcript is local diagnostic state, not workflow or compliance evidence.
+
+### Bounds inventory
+
+Editor input 8192 bytes; one pending child-output record 16 MiB; one segment
+16 MiB (target 1 MiB); one command history file 1 MiB (500 entries, 8192-byte
+entry cap); one menu search 256 bytes; one theme spec 8 KiB; the embedded Skott
+event log 2000 retained lines; the transcript viewport one bounded segment at
+a time. None of these grows with total history size.
+
+### Observed evidence limits
+
+The PTY test (`tests/tui_workspace.rs`) pins the entry, report rendering,
+prefill round-trip, settings persistence, and exit paths on a real terminal;
+it does not pin the exact heading wording beyond the `Kvist`/`(project)`/
+`sandbox:`/`model:` fragments, and it does not execute a `task run` through the
+embedded Skott path in the TUI. The in-crate `view.rs` and `menu_tests.rs`
+suites pin layout, scroll, seek, focus restoration, quit/cancel, paste
+routing, and active-command setting refusal; they are not execution proof of
+the live terminal.

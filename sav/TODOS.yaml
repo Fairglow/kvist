@@ -854,15 +854,15 @@ tasks:
     purpose: "Retain discrepancies for human arbitration."
     expected_outcome: "Observed behavior and comparison limits persist beside the component."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "shared-runtime-security-audit"
     requirements:
       - "REQUIREMENTS.md#AR-REQ-SHARED-RUNTIME"
     timestamps:
       created_at: "2026-10-23T22:00:00Z"
-      updated_at: "2026-10-29T11:58:47Z"
-      completed_at: null
+      updated_at: "2026-11-21T04:41:34Z"
+      completed_at: "2026-11-21T04:41:34Z"
     blocked_reason: null
     recovery_state: null
   - id: "active-model-write-tests"
@@ -1379,15 +1379,15 @@ tasks:
     purpose: "Make delegation to the approved isolation layer executable and fail closed without it."
     expected_outcome: "Tests fail closed unless every declared filesystem, process, environment, network, and resource restriction is enforced."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "sa-01-compliance-review"
     requirements:
       - "DESIGN.md#Security-and-resource-design"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-11-21T05:48:38Z"
+      completed_at: "2026-11-21T05:48:38Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-03-implement-code"
@@ -1397,15 +1397,15 @@ tasks:
     purpose: "Delegate least-authority isolation to the approved layer with no silent fallback when the runner or backend is unavailable."
     expected_outcome: "Strict Linux runs expose only approved resources and tools, report backend capabilities, and fail before launch on incomplete enforcement."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "sa-03-write-tests"
     requirements:
       - "DESIGN.md#Security-and-resource-design"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-11-21T07:39:47Z"
+      completed_at: "2026-11-21T07:39:47Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-03-security-audit"
@@ -1415,7 +1415,7 @@ tasks:
     purpose: "Independently challenge every claimed Linux isolation guarantee."
     expected_outcome: "No strict mode ships with an unresolved high-confidence escape or silent degradation."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "sa-03-implement-code"
     requirements:
@@ -1423,8 +1423,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-11-21T08:09:50Z"
+      completed_at: "2026-11-21T08:09:50Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-03-compliance-review"
@@ -1434,7 +1434,7 @@ tasks:
     purpose: "Retain independent assurance evidence and explicit limitations."
     expected_outcome: "The review either confirms the documented assurance tier or blocks release with precise discrepancies."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "sa-03-security-audit"
     requirements:
@@ -1442,8 +1442,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-11-21T08:48:39Z"
+      completed_at: "2026-11-21T08:48:39Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-08-write-tests"
@@ -1471,7 +1471,7 @@ tasks:
     purpose: "Create a small stable seam that keeps provider libraries replaceable and leaves authorization, execution, promotion, and compliance evidence with the embedding host."
     expected_outcome: "Public runtime contracts contain no Kvist, Rig, or provider SDK type and cannot directly execute tools, access credentials, broaden resources, promote artifacts, or write canonical compliance evidence."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "sa-08-write-tests"
     requirements:
@@ -1479,8 +1479,8 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-10-29T23:16:27Z"
-      completed_at: null
+      updated_at: "2026-11-21T09:45:25Z"
+      completed_at: "2026-11-21T09:45:25Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-08-security-audit"
@@ -1490,7 +1490,7 @@ tasks:
     purpose: "Find authority confusion and confused-deputy paths before host services or provider adapters depend on the interfaces."
     expected_outcome: "No model or adapter type can authorize or execute an effect, enable an untested capability, or insert unbounded unredacted provider state into host evidence."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "sa-08-implement-code"
     requirements:
@@ -1498,8 +1498,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
+      updated_at: "2026-11-21T10:37:31Z"
+      completed_at: "2026-11-21T10:37:31Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-08-compliance-review"
@@ -1509,7 +1509,7 @@ tasks:
     purpose: "Record independent evidence that the canonical runtime seam is stable enough for host broker and transport experiments."
     expected_outcome: "The review classifies every interface and records provider leakage, host coupling, missing failure states, or authority ambiguity for arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "sa-08-security-audit"
     requirements:
@@ -1517,8 +1517,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
+      updated_at: "2026-11-21T11:34:29Z"
+      completed_at: "2026-11-21T11:34:29Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-04-write-tests"
@@ -1528,7 +1528,7 @@ tasks:
     purpose: "Specify complete mediation and side-effect-aware retry behavior independently of a provider."
     expected_outcome: "Tests reject unknown tools, schemas, destinations, credentials, ambiguous outcomes, and unsafe retries."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "sa-08-compliance-review"
     requirements:
@@ -1537,8 +1537,8 @@ tasks:
       - "DESIGN.md#Security-and-resource-design"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-11-21T13:38:52Z"
+      completed_at: "2026-11-21T13:38:52Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-04-implement-code"
@@ -1548,7 +1548,7 @@ tasks:
     purpose: "Give callers a provider-neutral pre-approved action contract with deterministic enforcement evidence."
     expected_outcome: "Every tool and provider action requires an explicit host authorization before execution and every retry has machine-verifiable rationale without the component inventing grants or compliance evidence."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "sa-04-write-tests"
     requirements:
@@ -1557,8 +1557,8 @@ tasks:
       - "DESIGN.md#Security-and-resource-design"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-11-21T15:01:18Z"
+      completed_at: "2026-11-21T15:01:18Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-04-security-audit"
@@ -1568,7 +1568,7 @@ tasks:
     purpose: "Find authorization or data-exfiltration bypasses before strict contracts expose brokered capabilities."
     expected_outcome: "Independent review leaves no unresolved high-confidence authorization bypass."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "sa-04-implement-code"
     requirements:
@@ -1577,8 +1577,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-11-21T15:36:24Z"
+      completed_at: "2026-11-21T15:36:24Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-04-compliance-review"
@@ -1588,7 +1588,7 @@ tasks:
     purpose: "Prevent provider-specific behavior from weakening the common contract unnoticed."
     expected_outcome: "The review records compliance by capability and provider or blocks unsupported combinations."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "sa-04-security-audit"
     requirements:
@@ -1597,82 +1597,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-05-write-tests"
-    title: "Define deferred platform conformance tests"
-    description: "Design a backend conformance suite and native CI prerequisites for macOS process containment and Windows AppContainer, restricted-token, and Job Object behavior."
-    context: "The Linux-only maintainer cannot responsibly enable platforms whose authority and termination semantics are not tested natively."
-    purpose: "Keep portable contracts explicit while preventing nominal support from outrunning evidence."
-    expected_outcome: "A common suite defines required behavior and each platform has a documented native test and maintenance owner."
-    kind: test
-    status: pending
-    depends_on:
-      - "sa-04-compliance-review"
-    requirements:
-      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
-    timestamps:
-      created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-05-implement-code"
-    title: "Restore independently tested platforms"
-    description: "Implement platform backends only after selecting maintainable native macOS and Windows isolation mechanisms and provisioning their required native test matrices."
-    context: "Conditional compilation alone cannot establish equivalent filesystem, process-tree, credential, or network guarantees."
-    purpose: "Restore platforms without contaminating provider-neutral policy or silently weakening strict execution."
-    expected_outcome: "Each enabled platform advertises a tested assurance tier and fails closed for unsupported contract dimensions."
-    kind: implementation
-    status: pending
-    depends_on:
-      - "sa-05-write-tests"
-    requirements:
-      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
-    timestamps:
-      created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-05-security-audit"
-    title: "Audit restored platform backends"
-    description: "Run platform-native security reviews covering containment, process trees, links and reparse points, credentials, environment, network, resources, and backend failure."
-    context: "Platform restoration changes the trusted computing base and cannot inherit Linux review evidence."
-    purpose: "Require native independent scrutiny before a platform is represented as supported."
-    expected_outcome: "Every enabled backend has platform-specific findings resolved or explicitly blocking release."
-    kind: security-audit
-    status: pending
-    depends_on:
-      - "sa-05-implement-code"
-    requirements:
-      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-05-compliance-review"
-    title: "Review restored platform compliance"
-    description: "Compare source-derived native behavior with the common contract and each platform assurance statement."
-    context: "Cross-platform labels must not imply guarantees that differ silently by operating system."
-    purpose: "Preserve an explicit evidence boundary for every supported platform."
-    expected_outcome: "A separate review certifies or rejects each platform and records non-equivalent behavior."
-    kind: compliance-review
-    status: pending
-    depends_on:
-      - "sa-05-security-audit"
-    requirements:
-      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-11-21T16:32:48Z"
+      completed_at: "2026-11-21T16:32:48Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-06-write-tests"

@@ -927,27 +927,16 @@ struct TaskLockSnapshot {
 #[derive(Clone, PartialEq, Eq)]
 struct TaskLockFileIdentity {
     length: u64,
-    #[cfg(unix)]
     device: u64,
-    #[cfg(unix)]
     inode: u64,
 }
 
 fn task_lock_file_identity(metadata: &fs::Metadata) -> TaskLockFileIdentity {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        TaskLockFileIdentity {
-            length: metadata.len(),
-            device: metadata.dev(),
-            inode: metadata.ino(),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        TaskLockFileIdentity {
-            length: metadata.len(),
-        }
+    use std::os::unix::fs::MetadataExt;
+    TaskLockFileIdentity {
+        length: metadata.len(),
+        device: metadata.dev(),
+        inode: metadata.ino(),
     }
 }
 
@@ -1100,15 +1089,7 @@ pub(crate) fn lock_owner_appears_live(contents: &str) -> bool {
     else {
         return false;
     };
-    #[cfg(target_os = "linux")]
-    {
-        Path::new("/proc").join(pid.to_string()).is_dir()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = pid;
-        false
-    }
+    Path::new("/proc").join(pid.to_string()).is_dir()
 }
 
 fn valid_task_lock_record(contents: &str) -> bool {
@@ -6925,15 +6906,9 @@ fn approval_state_paths(
 }
 
 fn user_state_base() -> Option<PathBuf> {
-    if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
-    } else {
-        std::env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
-            })
-    }
+    std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
 }
 
 fn load_or_create_approval_secret(state_root: &Path) -> Result<Vec<u8>> {

@@ -230,6 +230,160 @@ pub const JOURNAL_WRITE_POISONING: &str =
 /// **Assessment:** Correct. This prevents false completion records.
 pub const JOURNAL_NO_FAKE_TERMINATION: &str = "Dropping journal does not fabricate terminal result";
 
+// === EXECUTION-BACKEND DELEGATION ===
+
+/// **Finding:** The installed galla runner is resolved to a canonical,
+/// regular, non-symlink file and content-hashed before any effect is
+/// dispatched. A missing, unreadable, or symlinked runner is a
+/// `RunnerUnavailable` refusal with no unconstrained host fallback.
+///
+/// Source: `src/runtime/execution_backend.rs` — `resolve_runner`
+///
+/// **Assessment:** Correct. The runner identity is bound to the exact
+/// executable bytes, preventing substitution attacks.
+pub const RUNNER_RESOLUTION_CANONICAL: &str =
+    "Runner resolved to canonical regular non-symlink file, content-hashed before dispatch";
+
+/// **Finding:** The runner's capability probe is bounded by a fixed deadline
+/// (30 s) and a maximum response size (64 KiB). A runner that times out,
+/// emits diagnostics on standard error, declares an unsupported protocol or
+/// version, reports a non-Bubblewrap backend, or confirms incomplete
+/// namespace/session capabilities is a `BackendUnavailable` refusal.
+///
+/// Source: `src/runtime/execution_backend.rs` — `probe`
+///
+/// **Assessment:** Correct. The probe is fail-closed: any deviation from the
+/// version-one Bubblewrap attestation refuses before dispatch.
+pub const PROBE_TRUST_FAIL_CLOSED: &str =
+    "Capability probe bounded by deadline and size, fail-closed on any deviation";
+
+/// **Finding:** The probe response is deserialized with `deny_unknown_fields`,
+/// so an unrecognized or omitted capability is rejected rather than silently
+/// accepted. The runner digest the probe self-attests is compared against the
+/// bound identity; a mismatch is a `RunnerUnavailable` refusal.
+///
+/// Source: `src/runtime/execution_backend.rs` — `ProbeWire`, `ExecutionBackend::new`
+///
+/// **Assessment:** Correct. The closed wire shape prevents a runner from
+/// smuggling extra fields or omitting required capabilities.
+pub const PROBE_RESPONSE_CLOSED: &str =
+    "Probe response is closed (deny_unknown_fields) and runner digest is cross-checked";
+
+/// **Finding:** The version-one request is rendered with a fixed protocol
+/// identifier (`kvist-sandbox-request-v1`), a fixed phase (`authoring`), and
+/// approval-bound identities (runner, backend, command, mount plan, policy,
+/// toolchain) recomputed with the canonical encodings the runner re-digests.
+/// The runner independently verifies these identities before enforcement.
+///
+/// Source: `src/runtime/execution_backend.rs` — `render_request`, `command_identity`, `mount_plan_identity`
+/// Source: `galla/src/enforcement.rs` — `verify_request_identities`
+///
+/// **Assessment:** Correct. The identity binding is end-to-end: the producer
+/// and the runner both recompute the same digests, so a tampered request is
+/// refused before any effect.
+pub const PROTOCOL_BINDING_END_TO_END: &str =
+    "Request identities recomputed by both producer and runner, end-to-end binding";
+
+/// **Finding:** The sandbox environment starts empty (`--clearenv`) and only
+/// explicitly mapped variables are set. The `HOME` and `PATH` variables are
+/// fixed to sandbox destinations. The galla validation layer rejects
+/// dangerous environment names (`LD_*`, `*_PROXY`, `GIT_ASKPASS`,
+/// `CARGO_REGISTRY_TOKEN`, etc.) in non-authoring phases, preventing
+/// credential and loader injection.
+///
+/// Source: `galla/src/enforcement.rs` — bwrap argument construction (`--clearenv`, `--setenv`)
+/// Source: `galla/src/validation.rs` — `validate_environment_shape`, `is_dangerous_environment_name`
+///
+/// **Assessment:** Correct. The environment is closed by default; only
+/// explicitly approved variables are mapped, and dangerous names are
+/// rejected in phases where they could exfiltrate credentials or redirect
+/// the dynamic linker.
+pub const ENVIRONMENT_CLOSED_BY_DEFAULT: &str =
+    "Sandbox environment starts empty, only explicit variables mapped, dangerous names rejected";
+
+/// **Finding:** The delegated effect is supervised with a wall-time deadline
+/// (default 15 minutes) and a combined output capture limit (default 1 MiB).
+/// The supervision loop polls cancellation and the deadline at a 10 ms
+/// interval, draining pipes non-blockingly so a silent runner cannot block
+/// the loop indefinitely.
+///
+/// Source: `src/runtime/execution_backend.rs` — `delegate`, `drain_bounded`, `set_nonblocking`
+///
+/// **Assessment:** Correct. Both wall time and output are bounded, and the
+/// supervision loop cannot be blocked by a runner that produces no output.
+pub const DELEGATION_TIMEOUT_AND_OUTPUT_BOUNDED: &str =
+    "Delegated effect supervised with wall-time deadline and output capture limit";
+
+/// **Finding:** On every delegation outcome — success, timeout, cancellation,
+/// or error — the complete runner process group is reaped with `SIGKILL`
+/// before the outcome is returned. No runner descendant outlives the
+/// delegation.
+///
+/// Source: `src/runtime/execution_backend.rs` — `delegate` (killpg on every path)
+///
+/// **Assessment:** Correct. Cleanup is unconditional; the process group is
+/// killed before the outcome is constructed, so no orphaned runner process
+/// can outlive the delegation.
+pub const DELEGATION_CLEANUP_UNCONDITIONAL: &str =
+    "Runner process group reaped with SIGKILL on every delegation outcome";
+
+/// **Finding:** When the runner or its backend is unavailable, the backend
+/// refuses before dispatch with `RunnerUnavailable` or `BackendUnavailable`.
+/// The runtime surfaces the refusal, records the effect as not executed
+/// (`tools_executed == 0`), and never substitutes an unconstrained host
+/// execution. The `rebind` check re-hashes the runner and backend
+/// immediately before dispatch and fails closed when either identity has
+/// drifted since the probe bound it.
+///
+/// Source: `src/runtime/execution_backend.rs` — `ExecutionBackend::new`, `rebind`, `ToolExecutor::execute`
+/// Source: `sav/tests/execution_backend_delegation.rs` — fail-closed tests
+///
+/// **Assessment:** Correct. The fail-closed refusal path is end-to-end:
+/// the backend refuses, the runtime surfaces the refusal, and no host
+/// execution is substituted. The `rebind` check prevents a runner or
+/// backend that is replaced between the probe and the dispatch from
+/// silently changing the enforcement backend.
+pub const FAIL_CLOSED_NO_HOST_FALLBACK: &str =
+    "Unavailable runner or backend refuses before dispatch, no unconstrained host fallback";
+
+/// **Finding:** The workspace directory mounted read-write at `/workspace`
+/// is a host-authority value bound at construction
+/// (`ExecutionBackend::new`); the model's intent argument can no longer
+/// redirect the read-write grant to an arbitrary host path. The `/usr` tree
+/// is mounted read-only at `/usr`. The mount plan identity is recomputed
+/// from these grants and verified by the runner before enforcement. The
+/// workspace vendor mask (`/workspace/.kvist/vendored`) is additionally
+/// masked read-only in the authoring phase, preventing the sandbox from
+/// modifying the vendored dependency material.
+///
+/// Source: `src/runtime/execution_backend.rs` — `ExecutionBackend::new` (workspace binding), `render_request` (grants, mount plan)
+/// Source: `galla/src/enforcement.rs` — `add_workspace_vendor_mask`
+///
+/// **Assessment:** Correct. The workspace grant source is host-bound, so the
+/// model cannot redirect the read-write mount to an arbitrary host directory;
+/// the mount plan is approval-bound and the workspace vendor mask prevents
+/// the sandbox from tampering with the read-only vendored registry.
+pub const MOUNT_PLAN_APPROVAL_BOUND: &str =
+    "Mount plan identity recomputed and verified, workspace vendor masked read-only";
+
+/// **Finding:** The workspace directory and the extra environment variables
+/// are host-authority values bound at `ExecutionBackend::new` construction.
+/// The model's intent argument supplies only the command line (`argv`); a
+/// model-supplied `working_directory` or `environment` object is ignored.
+/// This closes two confused-deputy paths: the model could not redirect the
+/// read-write workspace grant to an arbitrary host path, and it could not
+/// inject loader or credential variables (e.g. `LD_PRELOAD`,
+/// `CARGO_REGISTRY_TOKEN`) into the sandbox environment.
+///
+/// Source: `src/runtime/execution_backend.rs` — `ExecutionBackend::new`, `render_request`
+///
+/// **Assessment:** Correct. Both the workspace grant source and the extra
+/// environment variables are bound by the host at construction, so the
+/// untrusted model cannot widen its own authority by redirecting the
+/// read-write mount or injecting environment variables. Only the command
+/// line remains model-controlled.
+pub const WORKSPACE_AND_ENVIRONMENT_HOST_BOUND: &str = "Workspace grant and extra environment variables are host-bound at construction; the model supplies only argv";
+
 // === REMAINING LIMITATIONS ===
 
 /// **Limitation:** Loop detection is heuristic.
@@ -287,6 +441,78 @@ pub const GUIDANCE_NO_STRUCTURE_VALIDATION: &str =
 pub const JOURNAL_NO_CRYPTO_AUTHENTICATION: &str =
     "Journal records lack cryptographic authentication";
 
+/// **Limitation:** The probe qualifies the backend with `--unshare-all`
+/// (including cgroup), but the enforcement path uses `--unshare-cgroup-try`,
+/// which tolerates cgroup unshare failure. The reported `Namespaces`
+/// capabilities do not include cgroup, so the probe's `complete()` check does
+/// not require it. The probe is therefore stricter than the enforcement: a
+/// host that fails the probe's cgroup requirement is refused, but a host that
+/// passes the probe may still run the enforcement without cgroup isolation if
+/// cgroup unshare is flaky at enforcement time.
+///
+/// Source: `galla/src/probe.rs` — `qualify_backend` (`--unshare-all`)
+/// Source: `galla/src/enforcement.rs` — bwrap argument construction (`--unshare-cgroup-try`)
+///
+/// **Impact:** On a host with flaky cgroup support, the enforcement may run
+/// without cgroup isolation even though the probe confirmed it. This is not
+/// a high-confidence escape (the other namespaces are still enforced) but is
+/// a silent degradation of the cgroup isolation guarantee.
+pub const CGROUP_PROBE_ENFORCEMENT_DISCREPANCY: &str = "Probe requires cgroup unshare (--unshare-all) but enforcement tolerates its failure (--unshare-cgroup-try)";
+
+/// **Limitation:** The probe honors a `GALLA_TEST_BACKEND` environment
+/// override that lets it exercise a non-trusted executable (for example a
+/// failing stub). The override is honored only in the advisory capability
+/// probe; the enforcement path re-locates the backend independently and never
+/// consults this variable. A test could therefore pass the probe with a stub
+/// backend while the enforcement uses the real one.
+///
+/// Source: `galla/src/probe.rs` — `probe` (`GALLA_TEST_BACKEND`)
+/// Source: `galla/src/enforcement.rs` — `locate_backend` (independent re-location)
+///
+/// **Impact:** The probe's capability attestation may not reflect the backend
+/// the enforcement actually uses. This is by design for testing and is not a
+/// host-escape, but it means the probe's trust is advisory, not binding on
+/// the enforcement path.
+pub const PROBE_TEST_BACKEND_OVERRIDE: &str =
+    "Probe honors a test-only backend override that the enforcement path ignores";
+
+/// **Limitation:** The runner recomputes the runner, command, and mount-plan
+/// identities from the request content but only shape-checks the policy
+/// identity. The policy identity is a deterministic function of the command
+/// identity (which is recomputed), so a tampered policy identity cannot
+/// decouple the approval from the approved command. The host is trusted to
+/// have set a consistent policy identity. This is not a bypass, but the
+/// runner does not independently verify the policy identity against the
+/// command identity.
+///
+/// Source: `galla/src/enforcement.rs` — `verify_request_identities`
+/// Source: `galla/src/validation.rs` — `validate_identities`
+/// Source: `sav/src/runtime/execution_backend.rs` — `render_request` (policy identity)
+///
+/// **Impact:** The policy identity is host-asserted and not independently
+/// recomputed by the runner. A host that sets an inconsistent policy identity
+/// would not be caught by the runner, but the command identity (which the
+/// policy identity is derived from) is recomputed, so the approval is still
+/// bound to the approved command.
+pub const POLICY_IDENTITY_HOST_ASSERTED: &str = "Runner recomputes runner/command/mount-plan identities but only shape-checks the policy identity";
+
+/// **Limitation:** The runner's environment validation rejects dangerous
+/// environment names (`LD_*`, `*_PROXY`, `GIT_ASKPASS`, `CARGO_REGISTRY_TOKEN`,
+/// etc.) in non-authoring phases but allows them in the authoring phase. The
+/// authoring environment is host-bound (the host supplies the extra environment
+/// at construction, and the model's environment argument is ignored), so the
+/// host controls the authoring environment and would not set a dangerous name.
+/// This is not a bypass, but the authoring phase relaxes the check.
+///
+/// Source: `galla/src/validation.rs` — `validate_environment_shape`, `is_dangerous_environment_name`
+/// Source: `sav/src/runtime/execution_backend.rs` — `render_request` (environment)
+///
+/// **Impact:** The authoring phase allows dangerous environment names because
+/// the environment is host-bound. A host that sets a dangerous environment name
+/// in the authoring phase would not be caught by the runner, but the host is
+/// trusted to have set a safe environment.
+pub const AUTHORING_ENVIRONMENT_HOST_BOUND: &str = "Authoring phase relaxes the dangerous-environment-name check because the environment is host-bound";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +544,19 @@ mod tests {
         assert!(!RECOVERY_BUDGET_PER_PROMPT.is_empty());
         assert!(!GUIDANCE_NO_STRUCTURE_VALIDATION.is_empty());
         assert!(!JOURNAL_NO_CRYPTO_AUTHENTICATION.is_empty());
+        assert!(!RUNNER_RESOLUTION_CANONICAL.is_empty());
+        assert!(!PROBE_TRUST_FAIL_CLOSED.is_empty());
+        assert!(!PROBE_RESPONSE_CLOSED.is_empty());
+        assert!(!PROTOCOL_BINDING_END_TO_END.is_empty());
+        assert!(!ENVIRONMENT_CLOSED_BY_DEFAULT.is_empty());
+        assert!(!DELEGATION_TIMEOUT_AND_OUTPUT_BOUNDED.is_empty());
+        assert!(!DELEGATION_CLEANUP_UNCONDITIONAL.is_empty());
+        assert!(!FAIL_CLOSED_NO_HOST_FALLBACK.is_empty());
+        assert!(!MOUNT_PLAN_APPROVAL_BOUND.is_empty());
+        assert!(!WORKSPACE_AND_ENVIRONMENT_HOST_BOUND.is_empty());
+        assert!(!CGROUP_PROBE_ENFORCEMENT_DISCREPANCY.is_empty());
+        assert!(!PROBE_TEST_BACKEND_OVERRIDE.is_empty());
+        assert!(!POLICY_IDENTITY_HOST_ASSERTED.is_empty());
+        assert!(!AUTHORING_ENVIRONMENT_HOST_BOUND.is_empty());
     }
 }

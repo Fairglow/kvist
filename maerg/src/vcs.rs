@@ -13,7 +13,6 @@ use std::{
     process::{Command, Stdio},
 };
 
-#[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 
 use crate::config::VcsSelection;
@@ -400,10 +399,7 @@ fn git_ignored(
         .iter()
         .flat_map(|path| {
             let pathspec = git_pathspec(path);
-            #[cfg(unix)]
             let mut bytes: Vec<u8> = pathspec.as_encoded_bytes().to_vec();
-            #[cfg(not(unix))]
-            let mut bytes: Vec<u8> = pathspec.to_string_lossy().into_owned().into_bytes();
             bytes.push(b'\0');
             bytes
         })
@@ -556,17 +552,9 @@ fn batch_paths(paths: Vec<PathBuf>) -> (Vec<Vec<PathBuf>>, BTreeSet<PathBuf>) {
 /// Encodes a repository-relative path as Git pathspec input.
 ///
 /// Git pathspec matching is byte-oriented and non-UTF-8 names are legal on
-/// Unix, so Unix paths keep their exact encoded bytes. Other platforms render
-/// the path with Git's canonical forward-slash separator.
+/// Linux, so paths keep their exact encoded bytes.
 fn git_pathspec(path: &Path) -> OsString {
-    #[cfg(unix)]
-    {
-        OsString::from_vec(path.as_os_str().as_encoded_bytes().to_vec())
-    }
-    #[cfg(not(unix))]
-    {
-        OsString::from(path.to_string_lossy().replace('\\', "/"))
-    }
+    OsString::from_vec(path.as_os_str().as_encoded_bytes().to_vec())
 }
 
 fn batch_jj_queries(queries: Vec<JjQuery>) -> Vec<Vec<JjQuery>> {
@@ -627,33 +615,11 @@ fn trim_command_line_ending(mut output: Vec<u8>) -> Vec<u8> {
     if output.last() == Some(&b'\n') {
         output.pop();
     }
-    #[cfg(windows)]
-    if output.last() == Some(&b'\r') {
-        output.pop();
-    }
     output
 }
 
-fn path_from_bytes(bytes: &[u8], vcs: &str) -> std::result::Result<PathBuf, String> {
-    #[cfg(unix)]
-    {
-        let _ = vcs;
-        Ok(PathBuf::from(OsString::from_vec(bytes.to_vec())))
-    }
-    #[cfg(not(unix))]
-    {
-        let mut s = String::from_utf8(bytes.to_vec())
-            .map_err(|_| format!("{vcs} returned a non-UTF-8 path"))?;
-        if s.starts_with('/') {
-            if s.starts_with("/opt/target/wine/drive_c") {
-                s = s.replace("/opt/target/wine/drive_c", "C:");
-            } else {
-                s = format!("Z:{}", s);
-            }
-            s = s.replace('/', "\\");
-        }
-        Ok(PathBuf::from(s))
-    }
+fn path_from_bytes(bytes: &[u8], _vcs: &str) -> std::result::Result<PathBuf, String> {
+    Ok(PathBuf::from(OsString::from_vec(bytes.to_vec())))
 }
 
 fn is_normal_relative(path: &Path) -> bool {

@@ -3106,21 +3106,16 @@ fn checked_runner_launch(
     VerifiedRunnerLaunch::create(expected_runner)
 }
 
-/// A portable, security-hardened runner launch handle.
+/// A security-hardened runner launch handle.
 ///
-/// On Linux, it uses `execve` for direct binary execution with no shell,
-/// environment pollution, and no path traversal. The runner binary is copied
-/// to a secure, user-owned state directory before execution.
-///
-/// On non-Linux platforms, it falls back to `Command::spawn` with `env_clear()`
-/// as a portable alternative that still avoids shell interpretation. The same
-/// environment allowlist is enforced in both cases.
+/// It uses direct binary execution with no shell, environment pollution, and
+/// no path traversal. The runner binary is copied to a secure, user-owned
+/// state directory before execution.
 ///
 /// Invariant: the runner binary is copied to a secure, user-owned state
 /// directory with restricted permissions (`0o500` file, `0o700` directory) before
 /// execution.
 struct VerifiedRunnerLaunch {
-    #[cfg(target_os = "linux")]
     _file: File,
     _copy_path: PathBuf,
     launch_path: PathBuf,
@@ -3174,49 +3169,25 @@ impl VerifiedRunnerLaunch {
         let temp_dir = tempfile::tempdir_in(
             std::env::var("KVIST_TEMPORARY_DIR")
                 .ok()
-                .unwrap_or_else(|| {
-                    std::env::var("TMPDIR").unwrap_or_else(|_| {
-                        std::env::var("TMP").unwrap_or_else(|_| {
-                            std::env::var("TEMP").unwrap_or_else(|_| ".".into())
-                        })
-                    })
-                }),
+                .unwrap_or_else(|| std::env::var("TMPDIR").unwrap_or_else(|_| ".".into())),
         )
         .map_err(|source| KvistError::SandboxUnavailable {
             runner: expected_runner.canonical_path.clone(),
             reason: format!("create secure runner state directory: {source}"),
         })?;
 
-        #[cfg(target_os = "linux")]
-        {
-            let (file, copy_path, launch_path) = create_descriptor_bound_copy(
-                canonical_path,
-                &temp_dir,
-                &bytes,
-                is_directory_runner,
-            )?;
-            Ok(Self {
-                _file: file,
-                _copy_path: copy_path,
-                launch_path,
-                _temp_dir: temp_dir,
-            })
-        }
-
-        #[cfg(not(target_os = "linux"))]
-        {
-            let (_file, copy_path, launch_path) = create_descriptor_bound_copy(
-                canonical_path,
-                &temp_dir,
-                &bytes,
-                is_directory_runner,
-            )?;
-            Ok(Self {
-                _copy_path: copy_path,
-                launch_path,
-                _temp_dir: temp_dir,
-            })
-        }
+        let (file, copy_path, launch_path) = create_descriptor_bound_copy(
+            canonical_path,
+            &temp_dir,
+            &bytes,
+            is_directory_runner,
+        )?;
+        Ok(Self {
+            _file: file,
+            _copy_path: copy_path,
+            launch_path,
+            _temp_dir: temp_dir,
+        })
     }
 
     fn command(&self, config: &SandboxConfig) -> Command {
@@ -3231,7 +3202,6 @@ impl VerifiedRunnerLaunch {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn create_descriptor_bound_copy(
     runner_path: &Path,
     temp_dir: &tempfile::TempDir,
@@ -3304,20 +3274,6 @@ fn create_descriptor_bound_copy(
     Ok((file, copy_path, launch_path))
 }
 
-#[cfg(not(target_os = "linux"))]
-fn create_descriptor_bound_copy(
-    _runner_path: &Path,
-    _temp_dir: &tempfile::TempDir,
-    _bytes: &[u8],
-    _is_directory_runner: bool,
-) -> Result<(File, PathBuf, PathBuf)> {
-    Err(KvistError::SandboxUnavailable {
-        runner: _runner_path.to_string_lossy().into_owned(),
-        reason: "descriptor-bound verified execution is only supported on Linux".to_owned(),
-    })
-}
-
-#[cfg(target_os = "linux")]
 fn secure_copy_directory_or_file(
     runner_path: &Path,
     temp_dir_path: &Path,
@@ -3379,7 +3335,6 @@ fn secure_copy_directory_or_file(
 }
 
 /// Returns the SHA-256 hash of the given path as a hexadecimal string.
-#[cfg(target_os = "linux")]
 fn sha256_hash(path: &Path) -> String {
     let mut hasher = Sha256::new();
     if let Ok(contents) = fs::read(path) {

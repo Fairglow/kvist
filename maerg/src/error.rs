@@ -34,7 +34,7 @@ pub enum KvistError {
     },
     /// Initialization would follow a project-root symbolic link.
     #[error(
-        "refusing to initialize through link-like path `{path}` (symbolic link or Windows reparse point)"
+        "refusing to initialize through link-like path `{path}` (symbolic link)"
     )]
     ProjectPathIsSymlink {
         /// Symbolic-link path supplied to `kvist init`.
@@ -48,7 +48,7 @@ pub enum KvistError {
     },
     /// Initialization would follow an artifact-directory symbolic link.
     #[error(
-        "refusing to write artifacts through link-like path `{path}` (symbolic link or Windows reparse point)"
+        "refusing to write artifacts through link-like path `{path}` (symbolic link)"
     )]
     ArtifactParentIsSymlink {
         /// Symbolic-link parent path.
@@ -169,7 +169,7 @@ pub enum KvistError {
     },
     /// Discovery would follow a symbolic-link component root.
     #[error(
-        "refusing to discover components through link-like path `{path}` (symbolic link or Windows reparse point)"
+        "refusing to discover components through link-like path `{path}` (symbolic link)"
     )]
     ComponentRootIsSymlink {
         /// Symbolic-link component-root path.
@@ -250,7 +250,7 @@ pub enum KvistError {
     },
     /// Loading configuration would follow a symbolic-link project root.
     #[error(
-        "refusing to load project configuration through link-like path `{path}` (symbolic link or Windows reparse point)"
+        "refusing to load project configuration through link-like path `{path}` (symbolic link)"
     )]
     ProjectRootIsSymlink {
         /// Symbolic-link project-root path.
@@ -303,7 +303,7 @@ pub enum KvistError {
     },
     /// Loading configuration would follow a symbolic link.
     #[error(
-        "refusing to load project configuration through link-like path `{path}` (symbolic link or Windows reparse point)"
+        "refusing to load project configuration through link-like path `{path}` (symbolic link)"
     )]
     ProjectConfigurationIsSymlink {
         /// Symbolic-link configuration path.
@@ -403,7 +403,7 @@ pub enum KvistError {
     },
     /// Component-document generation would follow a component-directory symlink.
     #[error(
-        "refusing to create component documents through link-like path `{path}` (symbolic link or Windows reparse point)"
+        "refusing to create component documents through link-like path `{path}` (symbolic link)"
     )]
     ComponentDirectoryIsSymlink {
         /// Symbolic-link component-directory path.
@@ -447,7 +447,7 @@ pub enum KvistError {
     },
     /// Validation would follow a symbolic-link component document.
     #[error(
-        "refusing to validate component document through link-like path `{path}` (symbolic link or Windows reparse point)"
+        "refusing to validate component document through link-like path `{path}` (symbolic link)"
     )]
     ComponentDocumentIsSymlink {
         /// Symbolic-link document path.
