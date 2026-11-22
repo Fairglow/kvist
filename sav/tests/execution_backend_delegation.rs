@@ -65,6 +65,7 @@ impl ModelTransport for ScriptedModel {
                 model: "native".into(),
                 response_id: None,
                 provider_request_id: None,
+                timings: None,
                 usage: None,
             }),
             _ => Ok(ModelTurn {
@@ -76,6 +77,7 @@ impl ModelTransport for ScriptedModel {
                 model: "native".into(),
                 response_id: None,
                 provider_request_id: None,
+                timings: None,
                 usage: None,
             }),
         }

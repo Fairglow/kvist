@@ -216,6 +216,17 @@ fn llama_server_rejects_template_tokens_in_manual_model_ids() {
 }
 
 #[test]
+fn rejects_quoted_manual_model_ids_that_would_escape_the_template() {
+    let mut reader = Cursor::new("2\nhttp://127.0.0.1:1\n2\n' --single-turn\n");
+    let mut writer = Vec::new();
+
+    let error = collect_profile(&mut reader, &mut writer, std::path::Path::new("."))
+        .expect_err("reject quote-bearing model ID");
+
+    assert!(error.to_string().contains("without braces or quotes"));
+}
+
+#[test]
 fn ollama_default_materializes_the_selected_endpoint() {
     let mut reader = Cursor::new("3\nhttp://127.0.0.1:1\n1\n\n\n");
     let mut writer = Vec::new();

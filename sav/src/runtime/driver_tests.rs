@@ -29,6 +29,7 @@ fn assistant_helper_only_accepts_normal_nonblank_final_answers() {
             model: "test".into(),
             response_id: None,
             provider_request_id: None,
+            timings: None,
             usage: None,
         });
         assert_eq!(session.answer.as_deref(), expected);
@@ -70,6 +71,7 @@ impl ModelTransport for FlakyTransport {
             model: "test".into(),
             response_id: None,
             provider_request_id: None,
+            timings: None,
             usage: None,
         })
     }
@@ -119,6 +121,7 @@ fn retry_test_parts<'a>(
         cumulative_total: 0,
         cumulative_output: 0,
         decode_seconds: 0.0,
+        rollovers: 0,
     };
     let _ = skott;
     (request, cancellation, budget, progress)

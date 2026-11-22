@@ -98,6 +98,9 @@ pub enum Error {
     /// The provider returned a non-success response; its body is intentionally omitted.
     #[error("model provider returned HTTP status {status}")]
     ModelProviderStatus { status: u16 },
+    /// The provider explicitly rejected the request for exceeding its serving context.
+    #[error("provider rejected the request because it exceeds the serving context")]
+    ModelContextExceeded,
 
     /// Provider response headers or body exceeded a hard bound.
     #[error("model provider exceeded the {max_bytes}-byte response limit")]
@@ -158,6 +161,17 @@ pub enum Error {
 }
 
 impl Error {
+    /// Metadata absence or transient access failure can use a local hint.
+    pub fn is_optional_capacity_unavailable(&self) -> bool {
+        self.is_retryable()
+            || matches!(
+                self,
+                Self::ModelProviderStatus {
+                    status: 404 | 405 | 501
+                }
+            )
+    }
+
     /// Whether this failure is a transient, temporal condition that a bounded
     /// retry may recover from.
     ///

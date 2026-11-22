@@ -15,6 +15,7 @@ fn turn(text: &str, length: bool) -> ModelTurn {
         model: "fixture".into(),
         response_id: None,
         provider_request_id: None,
+        timings: None,
         usage: None,
     }
 }

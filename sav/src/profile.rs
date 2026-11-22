@@ -121,6 +121,9 @@ pub fn upsert_profile(path: &Path, profile: &ModelProfile) -> Result<()> {
     }
     let verified = parse_document(path, &contents)?;
     profiles_from_document(path, &verified)?;
+    if existed {
+        reject_linked_configuration(path, "inspect profile configuration before replacement")?;
+    }
     persist_configuration(path, contents.as_bytes(), existed)
 }
 
@@ -227,17 +230,7 @@ pub(crate) fn is_valid_profile_name(name: &str) -> bool {
 }
 
 pub(crate) fn read_configuration(path: &Path) -> Result<String> {
-    let metadata = fs::symlink_metadata(path).map_err(|source| Error::Io {
-        operation: "inspect profile configuration",
-        path: path.to_path_buf(),
-        source,
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-        return Err(invalid_configuration(
-            path,
-            "configuration must be a regular non-link file",
-        ));
-    }
+    let metadata = reject_linked_configuration(path, "inspect profile configuration")?;
     if metadata.len() > MAX_PROFILE_CONFIG_BYTES {
         return Err(invalid_configuration(
             path,
@@ -346,6 +339,29 @@ pub(crate) fn persist_configuration(path: &Path, contents: &[u8], existed: bool)
             path: parent.to_path_buf(),
             source,
         })
+}
+
+/// Rejects symlinked and non-regular configuration paths before any open.
+///
+/// This closes the window in which a locally writable parent directory lets an
+/// attacker swap a regular configuration file for a link to a privileged file
+/// between the `symlink_metadata` check and the follow-open.
+pub(crate) fn reject_linked_configuration(
+    path: &Path,
+    operation: &'static str,
+) -> Result<std::fs::Metadata> {
+    let metadata = fs::symlink_metadata(path).map_err(|source| Error::Io {
+        operation,
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+        return Err(invalid_configuration(
+            path,
+            "configuration must be a regular non-link file",
+        ));
+    }
+    Ok(metadata)
 }
 
 fn invalid_configuration(path: &Path, reason: impl Into<String>) -> Error {

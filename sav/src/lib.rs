@@ -44,8 +44,8 @@ pub use interrupt::{
 };
 pub use model::{
     CancellationToken, FinishReason, LocalModelProvider, ModelMessage, ModelRequest,
-    ModelStreamEvent, ModelTransport, ModelTurn, ModelUsage, ReasoningEffort, ToolChoice,
-    ToolDefinition, ToolIntent,
+    ModelStreamEvent, ModelTimings, ModelTransport, ModelTurn, ModelUsage, ReasoningEffort,
+    ToolChoice, ToolDefinition, ToolIntent,
 };
 pub use profile::{
     MAX_PROFILE_CONFIG_BYTES, ModelProfile, default_profile_config_path, load_profile,

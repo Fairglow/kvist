@@ -10,7 +10,8 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     CancellationToken, Error, FinishReason, LocalModelProvider, ModelMessage, ModelRequest,
-    ModelStreamEvent, ModelTransport, ModelTurn, ModelUsage, Result, ToolChoice, ToolIntent,
+    ModelStreamEvent, ModelTimings, ModelTransport, ModelTurn, ModelUsage, Result, ToolChoice,
+    ToolIntent,
 };
 
 const MAX_DEADLINE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -101,6 +102,7 @@ struct OpenAiStreamState {
     current_event: Option<String>,
     pending_data: String,
     usage: Option<ModelUsage>,
+    timings: Option<ModelTimings>,
 }
 
 #[derive(Debug)]
@@ -113,6 +115,7 @@ struct OllamaStreamState {
     finish_reason: Option<FinishReason>,
     model: Option<String>,
     usage: Option<ModelUsage>,
+    timings: Option<ModelTimings>,
     provider_ids: HashSet<String>,
 }
 
@@ -232,14 +235,14 @@ impl DirectModelTransport {
         }
         match self.provider {
             LocalModelProvider::LlamaServer => {
-                // Router mode lists every registered model's context_length via
-                // /models without loading or switching. A 404 means standalone
-                // mode, which falls back to /props?model= (which may load the model).
-                match self.llama_router_context_limit(model, cancellation) {
-                    Ok(limit) => Ok(limit),
-                    Err(Error::ModelProviderStatus { status: 404 }) => {
-                        self.llama_standalone_context_limit(model, cancellation)
-                    }
+                let deadline = Instant::now() + self.deadline.min(MAX_CAPACITY_DISCOVERY);
+                // Many routers list the model but omit serving capacity.
+                match self.llama_router_context_limit(model, cancellation, deadline) {
+                    Ok(Some(limit)) => Ok(Some(limit)),
+                    Ok(None)
+                    | Err(Error::ModelProviderStatus {
+                        status: 404 | 405 | 501,
+                    }) => self.llama_standalone_context_limit(model, cancellation, deadline),
                     Err(error) => Err(error),
                 }
             }
@@ -254,11 +257,12 @@ impl DirectModelTransport {
         &self,
         model: &str,
         cancellation: &CancellationToken,
+        deadline: Instant,
     ) -> Result<Option<usize>> {
         let bytes = get_bounded(
             &format!("http://{}", self.endpoint.authority),
             "/models",
-            self.deadline.min(MAX_CAPACITY_DISCOVERY),
+            Self::capacity_remaining(deadline)?,
             1024 * 1024,
             cancellation,
         )?;
@@ -281,11 +285,12 @@ impl DirectModelTransport {
         &self,
         model: &str,
         cancellation: &CancellationToken,
+        deadline: Instant,
     ) -> Result<Option<usize>> {
         let bytes = get_bounded(
             &format!("http://{}", self.endpoint.authority),
             &format!("/props?model={}", query_component(model)),
-            self.deadline.min(MAX_CAPACITY_DISCOVERY),
+            Self::capacity_remaining(deadline)?,
             1024 * 1024,
             cancellation,
         )?;
@@ -496,8 +501,18 @@ impl DirectModelTransport {
             deadline,
             watchdogs,
             self.max_response_bytes,
+            true,
             on_body,
         )
+    }
+
+    fn capacity_remaining(deadline: Instant) -> Result<Duration> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            Err(Error::ModelTransportTimedOut)
+        } else {
+            Ok(remaining)
+        }
     }
 
     fn connect(&self, cancellation: &CancellationToken, deadline: Instant) -> Result<TcpStream> {
@@ -576,6 +591,7 @@ pub(crate) fn get_bounded(
         expires,
         watchdogs,
         max_response_bytes,
+        false,
         &mut |chunk| {
             body.extend_from_slice(chunk);
             Ok(false)
@@ -621,6 +637,17 @@ fn connect_endpoint(
 }
 
 impl ModelTransport for DirectModelTransport {
+    fn serving_context(
+        &self,
+        model: &str,
+        cancellation: &CancellationToken,
+        deadline: Duration,
+    ) -> Result<Option<usize>> {
+        let mut transport = self.clone();
+        transport.deadline = transport.deadline.min(deadline);
+        transport.context_limit(model, cancellation)
+    }
+
     fn complete(
         &self,
         request: &ModelRequest,
@@ -1326,12 +1353,14 @@ impl BodyWatchdog {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_response(
     mut stream: TcpStream,
     cancellation: &CancellationToken,
     deadline: Instant,
     watchdogs: ResponseWatchdogs,
     max_response_bytes: usize,
+    classify_generation_errors: bool,
     on_body: &mut dyn FnMut(&[u8]) -> Result<bool>,
 ) -> Result<()> {
     let mut received = Vec::new();
@@ -1380,11 +1409,39 @@ fn read_response(
         }
     })?;
     let (status, content_length, chunked) = parse_response_head(head)?;
+    let initial = received.split_off(header_end);
     if !(200..300).contains(&status) {
+        if classify_generation_errors && matches!(status, 400 | 413 | 422) {
+            let mut body = Vec::new();
+            let mut watchdog = BodyWatchdog::new(
+                deadline.min(Instant::now() + Duration::from_secs(1)),
+                initial.is_empty(),
+                None,
+                None,
+            );
+            let read = read_framed_body(
+                stream,
+                initial,
+                content_length,
+                chunked,
+                cancellation,
+                &mut watchdog,
+                max_response_bytes.min(8192),
+                &mut |chunk| {
+                    body.extend_from_slice(chunk);
+                    Ok(false)
+                },
+            );
+            if cancellation.is_cancelled() {
+                return Err(Error::ModelTransportCancelled);
+            }
+            if read.is_ok() && parse_json(&body).is_ok_and(|value| is_context_rejection(&value)) {
+                return Err(Error::ModelContextExceeded);
+            }
+        }
         return Err(Error::ModelProviderStatus { status });
     }
 
-    let initial = received[header_end..].to_vec();
     let ttft_opt = if watchdogs.is_streaming {
         Some(watchdogs.ttft_watchdog_timeout)
     } else {
@@ -1397,6 +1454,29 @@ fn read_response(
     };
 
     let mut body_watchdog = BodyWatchdog::new(deadline, initial.is_empty(), ttft_opt, cadence_opt);
+    read_framed_body(
+        stream,
+        initial,
+        content_length,
+        chunked,
+        cancellation,
+        &mut body_watchdog,
+        max_response_bytes,
+        on_body,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn read_framed_body(
+    mut stream: TcpStream,
+    initial: Vec<u8>,
+    content_length: Option<usize>,
+    chunked: bool,
+    cancellation: &CancellationToken,
+    body_watchdog: &mut BodyWatchdog,
+    max_response_bytes: usize,
+    on_body: &mut dyn FnMut(&[u8]) -> Result<bool>,
+) -> Result<()> {
     if chunked {
         let mut socket = BufferedSocket {
             stream,
@@ -1405,7 +1485,7 @@ fn read_response(
         read_chunked_body(
             &mut socket,
             cancellation,
-            &mut body_watchdog,
+            body_watchdog,
             max_response_bytes,
             on_body,
         )?;
@@ -1748,6 +1828,9 @@ fn remaining_poll_timeout(deadline: Instant) -> Result<Duration> {
 
 fn parse_openai_unary(body: &[u8], request: &ModelRequest) -> Result<ModelTurn> {
     let root = parse_json(body)?;
+    if is_context_rejection(&root) {
+        return Err(Error::ModelContextExceeded);
+    }
     let choice = root
         .get("choices")
         .and_then(Value::as_array)
@@ -1777,11 +1860,15 @@ fn parse_openai_unary(body: &[u8], request: &ModelRequest) -> Result<ModelTurn> 
         response_id: optional_bounded_string(root.get("id"), "response identity", 256)?,
         provider_request_id: None,
         usage: parse_openai_usage(root.get("usage"))?,
+        timings: llama_timings(&root),
     })
 }
 
 fn parse_ollama_unary(body: &[u8], request: &ModelRequest) -> Result<ModelTurn> {
     let root = parse_json(body)?;
+    if is_context_rejection(&root) {
+        return Err(Error::ModelContextExceeded);
+    }
     if root.get("done").and_then(Value::as_bool) != Some(true) {
         return malformed("Ollama unary response is not terminal");
     }
@@ -1808,6 +1895,7 @@ fn parse_ollama_unary(body: &[u8], request: &ModelRequest) -> Result<ModelTurn> 
         response_id: None,
         provider_request_id: None,
         usage: parse_ollama_usage(&root)?,
+        timings: ollama_timings(&root),
     })
 }
 
@@ -1827,6 +1915,7 @@ impl StreamDecoder {
                 current_event: None,
                 pending_data: String::new(),
                 usage: None,
+                timings: None,
             }),
             LocalModelProvider::Ollama => StreamState::Ollama(OllamaStreamState {
                 requested_model: request.model.clone(),
@@ -1837,6 +1926,7 @@ impl StreamDecoder {
                 finish_reason: None,
                 model: None,
                 usage: None,
+                timings: None,
                 provider_ids: HashSet::new(),
             }),
         };
@@ -2065,15 +2155,15 @@ impl OpenAiStreamState {
         if self.terminal {
             return malformed("SSE data followed terminal marker");
         }
-        if self.current_event.as_deref() == Some("error") {
-            return malformed("SSE stream reported an error event");
-        }
         if self.current_event.as_deref() == Some("ping") && (data == "{}" || data == "null") {
             return Ok(false);
         }
 
         let chunk = parse_json(data.as_bytes())?;
-        if chunk.get("error").is_some() {
+        if is_context_rejection(&chunk) {
+            return Err(Error::ModelContextExceeded);
+        }
+        if chunk.get("error").is_some() || self.current_event.as_deref() == Some("error") {
             return malformed("streaming response reported a provider error");
         }
         self.model = optional_bounded_string(chunk.get("model"), "model identity", 256)?
@@ -2082,6 +2172,14 @@ impl OpenAiStreamState {
             .or(self.request_id.take());
         if let Some(usage) = parse_openai_usage(chunk.get("usage"))? {
             self.usage = Some(usage);
+        }
+        if let Some(timing) = llama_timings(&chunk) {
+            let prior = self.timings.unwrap_or_default();
+            self.timings = Some(ModelTimings {
+                prompt_seconds: timing.prompt_seconds.or(prior.prompt_seconds),
+                generation_seconds: timing.generation_seconds.or(prior.generation_seconds),
+                cached_input_tokens: timing.cached_input_tokens.or(prior.cached_input_tokens),
+            });
         }
         let choices = match chunk.get("choices") {
             Some(Value::Array(choices)) => choices.as_slice(),
@@ -2155,6 +2253,7 @@ impl OpenAiStreamState {
             response_id,
             provider_request_id,
             usage: self.usage,
+            timings: self.timings,
         })
     }
 }
@@ -2173,6 +2272,12 @@ impl OllamaStreamState {
             return malformed("NDJSON record followed terminal record");
         }
         let chunk = parse_json(line.as_bytes())?;
+        if is_context_rejection(&chunk) {
+            return Err(Error::ModelContextExceeded);
+        }
+        if chunk.get("error").is_some() {
+            return malformed("streaming response reported a provider error");
+        }
         self.model = optional_bounded_string(chunk.get("model"), "model identity", 256)?
             .or(self.model.take());
         let mut progress = false;
@@ -2210,6 +2315,7 @@ impl OllamaStreamState {
                 !self.tool_intents.is_empty(),
             )?);
             self.usage = parse_ollama_usage(&chunk)?;
+            self.timings = ollama_timings(&chunk);
         }
         Ok(progress)
     }
@@ -2233,6 +2339,7 @@ impl OllamaStreamState {
             response_id: None,
             provider_request_id: None,
             usage: self.usage,
+            timings: self.timings,
         })
     }
 }
@@ -2241,6 +2348,90 @@ fn parse_json(body: &[u8]) -> Result<Value> {
     serde_json::from_slice(body).map_err(|_| Error::MalformedModelResponse {
         reason: "provider returned invalid JSON".to_owned(),
     })
+}
+
+fn is_context_rejection(body: &Value) -> bool {
+    let Some(error) = body.get("error") else {
+        return false;
+    };
+    if ["code", "type"].iter().any(|field| {
+        matches!(
+            error.get(field).and_then(Value::as_str),
+            Some("context_length_exceeded" | "exceed_context_size" | "exceed_context_size_error")
+        )
+    }) {
+        return true;
+    }
+    error
+        .as_str()
+        .or_else(|| error.get("message").and_then(Value::as_str))
+        .is_some_and(|message| {
+            let message = message.to_ascii_lowercase();
+            [
+                "the request exceeds the available context size",
+                "input length exceeds maximum context length",
+                "prompt is too long for the context window",
+                "the conversation does not fit in the context",
+            ]
+            .iter()
+            .any(|prefix| message.starts_with(prefix))
+                || message
+                    .strip_prefix("request (")
+                    .and_then(|tail| {
+                        tail.split_once(" tokens) exceeds the available context size (")
+                    })
+                    .is_some_and(|(count, _)| {
+                        !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+        })
+}
+
+fn seconds(value: Option<&Value>, units: f64) -> Option<f64> {
+    let seconds = value?.as_f64()? / units;
+    (seconds.is_finite() && seconds > 0.0).then_some(seconds)
+}
+
+fn llama_timings(root: &Value) -> Option<ModelTimings> {
+    let timings = ModelTimings {
+        prompt_seconds: seconds(root.pointer("/timings/prompt_ms"), 1000.0),
+        generation_seconds: seconds(root.pointer("/timings/predicted_ms"), 1000.0),
+        cached_input_tokens: root
+            .pointer("/usage/prompt_tokens_details/cached_tokens")
+            .or_else(|| root.pointer("/timings/cache_n"))
+            .and_then(Value::as_u64),
+    };
+    (timings != ModelTimings::default()).then_some(timings)
+}
+
+fn ollama_timings(root: &Value) -> Option<ModelTimings> {
+    let timings = ModelTimings {
+        prompt_seconds: seconds(root.get("prompt_eval_duration"), 1e9),
+        generation_seconds: seconds(root.get("eval_duration"), 1e9),
+        cached_input_tokens: None,
+    };
+    (timings != ModelTimings::default()).then_some(timings)
+}
+#[cfg(test)]
+mod context_error_tests {
+    use super::*;
+
+    #[test]
+    fn only_known_context_error_envelopes_are_classified() {
+        for body in [
+            json!({"error":{"type":"exceed_context_size","n_prompt_tokens":9000,"n_ctx":8192}}),
+            json!({"error":{"code":"context_length_exceeded","message":"private prompt"}}),
+            json!({"error":"input length exceeds maximum context length"}),
+        ] {
+            assert!(is_context_rejection(&body));
+        }
+        for body in [
+            json!({"error":{"message":"unknown model"}}),
+            json!({"error":{"message":"invalid request","code":400}}),
+            json!({"message":"context_length_exceeded"}),
+        ] {
+            assert!(!is_context_rejection(&body));
+        }
+    }
 }
 
 fn sanitize_sse_diagnostic(input: &str, max_chars: usize) -> String {

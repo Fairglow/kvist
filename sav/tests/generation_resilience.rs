@@ -38,6 +38,7 @@ fn turn(text: String, reasoning: Option<String>, tools: bool, length: bool) -> M
         model: "fixture".into(),
         response_id: None,
         provider_request_id: None,
+        timings: None,
         usage: None,
     }
 }

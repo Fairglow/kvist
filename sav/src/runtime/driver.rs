@@ -55,7 +55,9 @@ fn stopping_reason(
 ) -> StopReason {
     summary.stop_reason.unwrap_or_else(|| match result {
         Err(Error::RunBudget { resource, .. }) => StopReason::Limit(*resource),
-        Err(Error::ContextBudget { .. }) => StopReason::Limit(BudgetResource::Context),
+        Err(Error::ContextBudget { .. } | Error::ModelContextExceeded) => {
+            StopReason::Limit(BudgetResource::Context)
+        }
         Err(Error::Cancelled | Error::ModelTransport { .. }) if cancellation.is_cancelled() => {
             budget
                 .stop_reason(cancellation)
@@ -127,7 +129,7 @@ fn deliver_guidance<S: EventSink>(
         let mut delivered = false;
         controls.deliver_if_open(|| {
             if !cancellation.is_cancelled() {
-                session.push_user(message.text);
+                session.push_guidance(message.text);
                 delivered = true;
             }
         })?;
@@ -227,6 +229,7 @@ pub struct NativeRuntime {
     /// Limits shared by the complete prompt rather than reset on retries.
     pub limits: RunLimits,
     generation_loop_detection: bool,
+    context_rollover: bool,
 }
 
 impl Default for NativeRuntime {
@@ -243,6 +246,7 @@ impl NativeRuntime {
             retry,
             limits: RunLimits::default(),
             generation_loop_detection: true,
+            context_rollover: false,
         }
     }
 
@@ -250,6 +254,12 @@ impl NativeRuntime {
     /// Tool protection, authority, recording and resource limits remain active.
     pub fn with_generation_loop_detection(mut self, enabled: bool) -> Self {
         self.generation_loop_detection = enabled;
+        self
+    }
+
+    /// Enables fresh-conversation recovery from confirmed context exhaustion.
+    pub fn with_context_rollover(mut self) -> Self {
+        self.context_rollover = true;
         self
     }
 
@@ -483,7 +493,25 @@ impl NativeRuntime {
         let mut generation_recovery = RecoveryBudget::default();
         let mut read_pages = VecDeque::new();
         let mut next_attempt = 1;
-        let mut next_reserve = self.limits.response_reserve;
+        let mut base_reserve = context.response_reserve(self.limits.response_reserve);
+        let mut next_reserve = base_reserve;
+        let mut rollovers = 0u64;
+        let mut last_rollover_tools = None;
+        let original = self
+            .context_rollover
+            .then(|| {
+                session.original_task.clone().or_else(|| {
+                    session
+                        .messages
+                        .iter()
+                        .rev()
+                        .find_map(|message| match message {
+                            crate::ModelMessage::User(text) => Some(text.clone()),
+                            _ => None,
+                        })
+                })
+            })
+            .flatten();
         let mut unattended_turns = 0u32;
         let mut result = (|| {
             loop {
@@ -513,11 +541,54 @@ impl NativeRuntime {
                         reason: "generation attempt limit after guidance".into(),
                     });
                 }
-                let Some((request, compaction)) = session.prepare_request(context, next_reserve)?
-                else {
-                    break;
+                let estimate = session.estimate_context_tokens(session.tool_defs.len());
+                if context.should_compact(estimate.saturating_add(next_reserve as usize))
+                    && session.messages.len() > 1
+                {
+                    sink.send(Event::Note(
+                        "Checking context and compacting eligible history…".into(),
+                    ))?;
+                }
+                let prepared = session.prepare_request(context, next_reserve);
+                let (request, compaction) = match prepared {
+                    Ok(Some(prepared)) => prepared,
+                    Ok(None) => break,
+                    Err(Error::ContextBudget { .. })
+                        if original.is_some()
+                            && session.messages.len() > 1
+                            && last_rollover_tools != Some(summary.tools_executed) =>
+                    {
+                        base_reserve = self.rollover(
+                            session,
+                            transport,
+                            sink,
+                            cancellation,
+                            context,
+                            recorder,
+                            budget,
+                            original.as_deref().unwrap_or_default(),
+                            base_reserve,
+                        )?;
+                        next_attempt = 1;
+                        next_reserve = base_reserve;
+                        last_rollover_tools = Some(summary.tools_executed);
+                        rollovers = rollovers.saturating_add(1);
+                        usage.telemetry.rollovers = rollovers;
+                        usage.telemetry.context_observed = false;
+                        self.emit_progress(
+                            sink,
+                            session,
+                            context,
+                            &usage,
+                            started_at,
+                            generation_seconds,
+                        )?;
+                        continue;
+                    }
+                    Err(error) => return Err(error),
                 };
                 if let Some(compaction) = compaction {
+                    usage.telemetry.context_observed = false;
                     record_notice(
                         sink,
                         recorder,
@@ -549,6 +620,7 @@ impl NativeRuntime {
                         // decode time (this turn's streamed estimate is added on).
                         cumulative_output: usage.output,
                         decode_seconds: generation_seconds,
+                        rollovers,
                     },
                     &mut generation_seconds,
                     &mut usage,
@@ -589,7 +661,7 @@ impl NativeRuntime {
                             .then(StreamLoopDetector::default);
                         return Err(Error::Steering {
                             attempt: 1,
-                            reserve: self.limits.response_reserve,
+                            reserve: base_reserve,
                         });
                     }
                     if let Some(report) = report {
@@ -607,6 +679,37 @@ impl NativeRuntime {
                         next_reserve = reserve;
                         continue;
                     }
+                    Err(Error::ModelContextExceeded)
+                        if original.is_some()
+                            && last_rollover_tools != Some(summary.tools_executed) =>
+                    {
+                        base_reserve = self.rollover(
+                            session,
+                            transport,
+                            sink,
+                            cancellation,
+                            context,
+                            recorder,
+                            budget,
+                            original.as_deref().unwrap_or_default(),
+                            base_reserve,
+                        )?;
+                        next_attempt = 1;
+                        next_reserve = base_reserve;
+                        last_rollover_tools = Some(summary.tools_executed);
+                        rollovers = rollovers.saturating_add(1);
+                        usage.telemetry.rollovers = rollovers;
+                        usage.telemetry.context_observed = false;
+                        self.emit_progress(
+                            sink,
+                            session,
+                            context,
+                            &usage,
+                            started_at,
+                            generation_seconds,
+                        )?;
+                        continue;
+                    }
                     Err(Error::RepetitiveGeneration { report, .. }) => {
                         if controls.is_shutdown() {
                             cancellation.cancel();
@@ -615,7 +718,7 @@ impl NativeRuntime {
                             break;
                         }
                         next_attempt = 1;
-                        next_reserve = self.limits.response_reserve;
+                        next_reserve = base_reserve;
                         if controls.has_pending() {
                             continue;
                         }
@@ -658,11 +761,27 @@ impl NativeRuntime {
                     }
                 };
                 next_attempt = 1;
-                next_reserve = self.limits.response_reserve;
+                if context.probe_after_load {
+                    base_reserve = context.refresh_serving(
+                        transport,
+                        &session.model.model,
+                        cancellation,
+                        budget.remaining(),
+                        base_reserve,
+                    )?;
+                    let message = format!(
+                        "Serving capacity after model load: {} tokens ({})",
+                        context.limit_tokens(),
+                        context.capacity_source()
+                    );
+                    record_notice(sink, recorder, message)?;
+                }
+                next_reserve = base_reserve;
                 if let Err(error) = validate_turn(&turn_value) {
                     summary.failure = Some(error.describe());
                     break;
                 }
+
                 let intents = session.apply_assistant(turn_value);
                 let terminal = intents.is_empty();
                 let mut batch_report = None;
@@ -825,10 +944,7 @@ impl NativeRuntime {
                     sink,
                     session,
                     context,
-                    usage.input,
-                    usage.output,
-                    usage.total,
-                    usage.provenance(),
+                    &usage,
                     started_at,
                     generation_seconds,
                 )?;
@@ -885,10 +1001,7 @@ impl NativeRuntime {
                 sink,
                 session,
                 context,
-                usage.input,
-                usage.output,
-                usage.total,
-                usage.provenance(),
+                &usage,
                 started_at,
                 generation_seconds,
             )
@@ -911,6 +1024,64 @@ impl NativeRuntime {
             });
         }
         result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn rollover<M: ModelTransport, S: EventSink>(
+        &self,
+        session: &mut AgentSession,
+        transport: &M,
+        sink: &S,
+        cancellation: &CancellationToken,
+        context: &mut ContextManager,
+        recorder: &mut Option<&mut dyn Recorder>,
+        budget: &PromptBudget,
+        original: &str,
+        reserve: u32,
+    ) -> Result<u32> {
+        record_notice(
+            sink,
+            recorder,
+            "Context exhausted; starting a fresh conversation for the same task.".into(),
+        )?;
+        let reserve = context.refresh_serving(
+            transport,
+            &session.model.model,
+            cancellation,
+            budget.remaining(),
+            reserve,
+        )?;
+        if let Some(reason) = budget.stop_reason(cancellation) {
+            return Err(match reason {
+                StopReason::Limit(resource) => Error::RunBudget {
+                    resource,
+                    reason: "during context rollover".into(),
+                },
+                _ => Error::Cancelled,
+            });
+        }
+        let predecessor = match recorder {
+            Some(recorder) => {
+                recorder.rollover(context.limit_tokens(), context.capacity_source(), reserve)?
+            }
+            None => None,
+        };
+        let handoff = session.restart_context(original, predecessor.as_deref());
+        context.clear_history();
+        if let Some(recorder) = recorder {
+            recorder.on_prompt(&handoff)?;
+            recorder.session_start()?;
+        }
+        record_notice(
+            sink,
+            recorder,
+            format!(
+                "Fresh context ready: {} tokens ({}).",
+                context.limit_tokens(),
+                context.capacity_source()
+            ),
+        )?;
+        Ok(reserve)
     }
 
     /// Streams one turn, retrying transient failures with bounded backoff.
@@ -1132,11 +1303,24 @@ impl NativeRuntime {
                 },
                 attempt_deadline,
             );
-            let seconds = decode_clock.seconds();
+            let seconds = result
+                .as_ref()
+                .ok()
+                .and_then(|turn| turn.timings)
+                .and_then(|timings| timings.generation_seconds)
+                .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+                .unwrap_or_else(|| decode_clock.seconds());
             generation_secs += seconds;
             *total_generation_seconds += seconds;
             let reported_usage = result.as_ref().ok().and_then(|turn| turn.usage);
-            usage.observe(reported_usage);
+            match &result {
+                Ok(turn) => usage.observe_turn(turn, &attempt_request, seconds),
+                Err(crate::Error::ModelContextExceeded) => {
+                    usage.dirty = true;
+                    usage.telemetry.context_observed = false;
+                }
+                Err(_) => usage.observe(None),
+            }
             let mut reported_exhaustion = false;
             if let Some(reported) = reported_usage
                 && let Some(remaining) = tokens_remaining
@@ -1319,10 +1503,7 @@ impl NativeRuntime {
         sink: &S,
         session: &AgentSession,
         context: &ContextManager,
-        input_tokens: u64,
-        output_tokens: u64,
-        total_tokens: u64,
-        token_accounting: TokenAccounting,
+        usage: &AttemptUsage,
         started_at: Instant,
         generation_seconds: f64,
     ) -> Result<()> {
@@ -1330,22 +1511,33 @@ impl NativeRuntime {
         // turn so far over their combined decode seconds, on the same basis as
         // the live `t/s`, so the two are comparable (prompt tokens and
         // inter-turn gaps excluded).
-        let average = token_rate(output_tokens, generation_seconds);
-        let context_tokens = session.estimate_context_tokens(session.tool_definitions().len());
+        let average = token_rate(usage.output, generation_seconds);
+        let context_tokens = if usage.telemetry.context_observed {
+            usage.context_tokens
+        } else {
+            session.estimate_context_tokens(session.tool_definitions().len())
+        };
         sink.send(Event::Progress {
-            token_accounting,
-            input_tokens,
-            output_tokens,
+            token_accounting: usage.provenance(),
+            input_tokens: usage.input,
+            output_tokens: usage.output,
             context_tokens,
             context_limit: context.limit_tokens(),
-            context_utilization: session.utilization(context, session.tool_definitions().len()),
-            compaction_progress: session
-                .compaction_progress(context, session.tool_definitions().len()),
+            context_utilization: context.utilization(context_tokens),
+            compaction_progress: context.compaction_progress(context_tokens),
             compactions: context.compactions(),
-            generation_tokens_per_sec: average,
+            generation_tokens_per_sec: if usage.telemetry.generation_provider {
+                usage.generation_rate
+            } else {
+                average
+            },
             average_tokens_per_sec: average,
-            total_tokens,
+            total_tokens: usage.total,
             elapsed_secs: started_at.elapsed().as_secs_f64().max(1e-9),
+            telemetry: super::session::ProgressTelemetry {
+                capacity_source: context.capacity_source(),
+                ..usage.telemetry
+            },
         })
     }
 }

@@ -81,6 +81,7 @@ fn control_checks_bound_large_event_work_and_latch_stream_and_unary_interruption
         model: "fixture".into(),
         response_id: None,
         provider_request_id: None,
+        timings: None,
         usage: None,
     };
     let mut checks = 0;

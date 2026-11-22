@@ -38,6 +38,6 @@ pub use retry::{
 };
 pub use session::validate_turn;
 pub use session::{
-    AgentSession, Event, EventSink, MAX_TOOL_RESULT_BYTES, MAX_TURNS, ModelIdentity, Recorder,
-    RunLimits, RunSummary, TokenAccounting, ToolExecutor,
+    AgentSession, Event, EventSink, MAX_TOOL_RESULT_BYTES, MAX_TURNS, ModelIdentity,
+    ProgressTelemetry, Recorder, RunLimits, RunSummary, TokenAccounting, ToolExecutor,
 };

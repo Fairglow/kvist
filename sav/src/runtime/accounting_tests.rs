@@ -37,6 +37,7 @@ fn answer() -> ModelTurn {
         model: "native-model".into(),
         response_id: None,
         provider_request_id: None,
+        timings: None,
         usage: None,
     }
 }
@@ -116,6 +117,7 @@ fn live_progress_keeps_input_output_and_total_cumulative() {
             cumulative_total: 120,
             cumulative_output: 20,
             decode_seconds: 2.0,
+            rollovers: 0,
         },
         8,
         1.0,
@@ -204,6 +206,7 @@ fn measured_decode(provider: &TimedProvider, sink: &Sink, backoff: Duration) -> 
                 cumulative_total: 0,
                 cumulative_output: 0,
                 decode_seconds: 0.0,
+                rollovers: 0,
             },
             &mut 0.0,
             &mut AttemptUsage::default(),
@@ -357,6 +360,8 @@ fn native_live_totals_preserve_provider_usage_and_post_turn_rate_convention() {
         total_tokens,
         generation_tokens_per_sec,
         average_tokens_per_sec,
+        context_tokens,
+        telemetry,
         ..
     } = last
     else {
@@ -366,7 +371,149 @@ fn native_live_totals_preserve_provider_usage_and_post_turn_rate_convention() {
         (*input_tokens, *output_tokens, *total_tokens),
         (110, 120, 237)
     );
+    assert_eq!(*context_tokens, 110);
+    assert!(telemetry.context_observed);
     assert_eq!(generation_tokens_per_sec, average_tokens_per_sec);
+}
+
+struct OverflowTransport {
+    attempts: AtomicUsize,
+    probes: AtomicUsize,
+    reject_successor: bool,
+}
+
+impl ModelTransport for OverflowTransport {
+    fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> crate::Result<ModelTurn> {
+        unreachable!("streaming required")
+    }
+
+    fn stream(
+        &self,
+        request: &ModelRequest,
+        _: &CancellationToken,
+        _: &mut dyn FnMut(ModelStreamEvent) -> crate::Result<()>,
+    ) -> crate::Result<ModelTurn> {
+        match self.attempts.fetch_add(1, Ordering::SeqCst) {
+            0 => {
+                let mut turn = answer();
+                turn.finish_reason = FinishReason::ToolCalls;
+                turn.tool_intents.push(ToolIntent {
+                    id: "observe-once".into(),
+                    provider_id: None,
+                    name: "observe".into(),
+                    arguments: serde_json::json!({}),
+                });
+                Ok(turn)
+            }
+            1 => {
+                assert!(
+                    request
+                        .messages
+                        .iter()
+                        .any(|message| matches!(message, ModelMessage::ToolResult { .. }))
+                );
+                Err(crate::Error::ModelContextExceeded)
+            }
+            2 => {
+                let [ModelMessage::System(_), ModelMessage::User(handoff)] =
+                    request.messages.as_slice()
+                else {
+                    panic!("rollover must remove prior calls and results from model history");
+                };
+                assert!(
+                    handoff.contains("original task")
+                        && handoff.contains("Recent tool observations")
+                );
+                if self.reject_successor {
+                    return Err(crate::Error::ModelContextExceeded);
+                }
+                let mut turn = answer();
+                turn.usage = Some(ModelUsage {
+                    input_tokens: 32,
+                    output_tokens: 20,
+                    total_tokens: 52,
+                });
+                turn.timings = Some(crate::ModelTimings {
+                    generation_seconds: Some(0.5),
+                    prompt_seconds: Some(0.25),
+                    cached_input_tokens: Some(16),
+                });
+                Ok(turn)
+            }
+            _ => panic!("must not retry rejected context"),
+        }
+    }
+
+    fn serving_context(
+        &self,
+        model: &str,
+        _: &CancellationToken,
+        _: Duration,
+    ) -> crate::Result<Option<usize>> {
+        assert_eq!(model, "native-model");
+        self.probes.fetch_add(1, Ordering::SeqCst);
+        Ok(Some(16_384))
+    }
+
+    fn deadline(&self) -> Duration {
+        Duration::from_secs(2)
+    }
+}
+
+#[test]
+fn context_rejection_rolls_over_without_replay_or_false_completion() {
+    for reject_successor in [false, true] {
+        let transport = OverflowTransport {
+            attempts: AtomicUsize::new(0),
+            probes: AtomicUsize::new(0),
+            reject_successor,
+        };
+        let sink = Sink::default();
+        let result = NativeRuntime::default().with_context_rollover().run(
+            &mut session(vec![tool()]),
+            &transport,
+            &Executor,
+            &sink,
+            &CancellationToken::new(),
+            &mut ContextManager::for_model(8192),
+            None,
+        );
+        assert_eq!(transport.attempts.load(Ordering::SeqCst), 3);
+        assert_eq!(transport.probes.load(Ordering::SeqCst), 1);
+        if reject_successor {
+            assert!(matches!(result, Err(Error::ModelContextExceeded)));
+        } else {
+            let summary = result.unwrap();
+            assert!(summary.success());
+            assert_eq!((summary.turns, summary.tools_executed), (3, 1));
+            let events = sink.events.lock().unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event,
+                        Event::Finished { .. } | Event::PromptEnd { .. } | Event::Failed(_)
+                    ))
+                    .count(),
+                1
+            );
+            assert!(events.iter().any(|event| matches!(
+                event,
+                Event::Progress {
+                    context_tokens: 52,
+                    context_limit: 16384,
+                    generation_tokens_per_sec: 40.0,
+                    telemetry: crate::runtime::ProgressTelemetry {
+                        rollovers: 1,
+                        generation_provider: true,
+                        cached_input_tokens: Some(16),
+                        ..
+                    },
+                    ..
+                }
+            )));
+        }
+    }
 }
 
 #[test]

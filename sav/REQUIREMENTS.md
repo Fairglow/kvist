@@ -75,6 +75,14 @@ authority through narrow interfaces.
 
 ## Functional requirements
 
+### AR-REQ-PROVIDER-CONTEXT
+
+Native transports MUST distinguish confirmed provider context overflow from
+other request failures without exposing raw provider error text. The shared
+loop MUST support fresh-context handoff without renewing task budgets or
+replaying tool calls. Progress MUST prefer reported usage and decode timings,
+label estimates, and expose successful context reductions and handoffs.
+
 ### AR-REQ-RESILIENCE
 
 Within its documented bounded detection windows, native resilience MUST

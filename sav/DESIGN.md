@@ -239,8 +239,17 @@ before returning them. No model-qualified GET or inference is used.
 
 ## Selected-model capacity and usage
 
+Classify context rejection from bounded generation-error envelopes, not HTTP
+status or `finish_reason: length` alone. Rollover clears in-memory conversation
+and compaction summary, but keeps prompt-budget, control and tool-loop state.
+Do not replace the original task with a rolling summary. Refuse another
+rollover if a fresh conversation made no tool progress. Use terminal provider
+counts for observed occupancy and provider decode time for generation rate
+when supplied.
+
 Capacity fixtures model llama-server's initial `/models` request separately
-from the `/props?model=` fallback after HTTP 404. Ollama fixtures accept only
+from the `/props?model=` fallback when the listing lacks selected capacity
+or is unsupported. Ollama fixtures accept only
 `/api/ps`, without a llama-server preflight. Assert exact routes before replying;
 keep missing and invalid selected-model metadata distinct.
 
@@ -250,7 +259,7 @@ maximum. Preserve `min(profile_deadline, host_remaining)` construction and
 unchanged cadence, retry and byte bounds; perform validation before I/O.
 
 Direct transport reuses bounded loopback GET for llama-server router model
-capacity, falling back only on HTTP 404 to model-qualified properties, and for
+capacity, falling back to model-qualified properties when needed, and for
 Ollama loaded-model metadata. Encode the model query as percent
 escaped UTF-8, validate positive integer capacity within 1048576 tokens, and
 return absent capacity distinctly. Limit discovery to 1 MiB and the caller's

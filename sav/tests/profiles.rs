@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, os::unix::fs::symlink};
 
 use sav::{ModelProfile, load_profiles, upsert_profile};
 use tempfile::TempDir;
@@ -82,4 +82,34 @@ fn rejects_invalid_profile_names_before_writing() {
 
     assert!(error.to_string().contains("profile name"));
     assert!(!path.exists());
+}
+
+#[test]
+fn rejects_symlinked_configuration_on_load() {
+    let directory = TempDir::new().expect("configuration directory");
+    let target = directory.path().join("real.toml");
+    fs::write(&target, "schema_version = 1\n").expect("write target");
+    let link = directory.path().join("config.toml");
+    symlink(&target, &link).expect("create symlink");
+
+    let error = load_profiles(&link).expect_err("symlink must be rejected");
+    assert!(error.to_string().contains("non-link"));
+}
+
+#[test]
+fn rejects_symlinked_configuration_on_upsert() {
+    let directory = TempDir::new().expect("configuration directory");
+    let target = directory.path().join("real.toml");
+    fs::write(&target, "schema_version = 1\n").expect("write target");
+    let link = directory.path().join("config.toml");
+    symlink(&target, &link).expect("create symlink");
+
+    let error = upsert_profile(&link, &profile("local", "/bin/echo '{prompt}'"))
+        .expect_err("symlink must be rejected");
+    assert!(error.to_string().contains("non-link"));
+    // The symlink target must remain untouched.
+    assert_eq!(
+        fs::read_to_string(&target).expect("read target"),
+        "schema_version = 1\n"
+    );
 }

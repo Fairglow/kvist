@@ -48,6 +48,12 @@ steering/replay capabilities are disclosed rather than emulated.
 
 ## Shared native runtime API (ADR 0015)
 
+`ModelContextExceeded` is not retryable against the same request. Native hosts
+can opt into rollover: a fresh conversation keeps the original task and
+bounded recent observations, and may link its exact predecessor. It does not
+create a new task allowance. `ModelTurn` reports optional provider timings.
+Progress distinguishes observed context from an estimate of the next request.
+
 ### Operational diagnostics and stopping causes
 
 `BudgetResource` is a stable snake-case enum: `WallTime`, `ModelTokens`,

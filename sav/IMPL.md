@@ -1,6 +1,24 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Provider context and accounting observations - 2026-11-22
+
+Independent `implementation-observer` inspected current source and test
+assertions only; it excluded intent, task queues, prior records and history,
+and did not execute tests. The transport considers bounded JSON error bodies
+on generation HTTP 400, 413 or 422 responses. It recognizes specific error
+codes, types and message forms instead of treating all such statuses as context
+rejection. The opt-in runtime repeats rollover only if the intervening run
+executed a tool. It refreshes capacity, links the predecessor through the
+recorder, restarts with the original task, clears compaction history and
+emits progress. Streamed output estimates are separate from measured provider
+usage and decode timings. The accounting fixtures assert refreshed capacity,
+no replay of prior calls or results in the successor request, one rollover
+and propagation when the successor is also rejected.
+
+Sources: `src/direct_transport.rs`, `src/runtime/{context,driver,session}.rs`.
+Fixture assertions: `src/runtime/accounting_tests.rs`.
+
 ## Final shared offline resolver observations - 2026-11-06
 
 Independent clean-slate `final-rust-impl-observer` inspected source and test

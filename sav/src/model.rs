@@ -192,6 +192,17 @@ pub struct ModelUsage {
     pub total_tokens: u64,
 }
 
+/// Optional provider measurements for a completed request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct ModelTimings {
+    /// Provider prompt evaluation time in seconds.
+    pub prompt_seconds: Option<f64>,
+    /// Provider output evaluation time in seconds.
+    pub generation_seconds: Option<f64>,
+    /// Prompt tokens reused from the provider cache.
+    pub cached_input_tokens: Option<u64>,
+}
+
 /// Complete provider-neutral result for one model turn.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelTurn {
@@ -215,6 +226,9 @@ pub struct ModelTurn {
     pub provider_request_id: Option<String>,
     /// Token accounting when supplied.
     pub usage: Option<ModelUsage>,
+    /// Provider evaluation and cache measurements, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timings: Option<ModelTimings>,
 }
 
 /// Ordered events emitted while decoding a streaming model turn.
@@ -259,6 +273,16 @@ impl CancellationToken {
 
 /// Provider-neutral model transport boundary.
 pub trait ModelTransport {
+    /// Serving capacity lookup with a caller-owned time bound, when supported.
+    fn serving_context(
+        &self,
+        _model: &str,
+        _cancellation: &CancellationToken,
+        _deadline: Duration,
+    ) -> Result<Option<usize>> {
+        Ok(None)
+    }
+
     /// Performs one non-streaming model turn.
     fn complete(
         &self,

@@ -135,6 +135,7 @@ impl ModelTransport for Provider {
             model: "fixture".into(),
             response_id: None,
             provider_request_id: None,
+            timings: None,
             usage: Some(ModelUsage {
                 input_tokens: 10,
                 output_tokens: 20,

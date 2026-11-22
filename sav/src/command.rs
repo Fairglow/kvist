@@ -26,6 +26,7 @@ pub fn render_command_with_reasoning_effort(
             reason: "template must contain a program".to_owned(),
         });
     };
+    validate_program_token(&program)?;
     if program.contains("{reasoning_effort}") {
         return Err(Error::InvalidCommandTemplate {
             reason: "{reasoning_effort} cannot select the executable".to_owned(),
@@ -132,7 +133,29 @@ pub fn split_raw_command(template: &str) -> Result<(String, Vec<String>)> {
         });
     }
     let program = arguments.remove(0);
+    validate_program_token(&program)?;
     Ok((program, arguments))
+}
+
+/// Rejects program tokens that could be truncated by the kernel, contain
+/// control characters, or exceed the bounded executable-path limit.
+fn validate_program_token(program: &str) -> Result<()> {
+    if program.trim().is_empty() {
+        return Err(Error::InvalidCommandTemplate {
+            reason: "program token must not be blank".to_owned(),
+        });
+    }
+    if program.len() > 4096 {
+        return Err(Error::InvalidCommandTemplate {
+            reason: "program token exceeds 4096 bytes".to_owned(),
+        });
+    }
+    if program.bytes().any(|b| b == 0 || b < 0x20 || b == 0x7f) {
+        return Err(Error::InvalidCommandTemplate {
+            reason: "program token must be printable ASCII without NUL or control bytes".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn parse_arguments(template: &str) -> Result<Vec<String>> {

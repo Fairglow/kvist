@@ -22,6 +22,7 @@ fn rejected_continuity_is_rolled_back_before_a_novel_correction() {
         model: "test".into(),
         response_id: None,
         provider_request_id: None,
+        timings: None,
         usage: None,
     };
     for _ in 0..2 {

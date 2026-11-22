@@ -10,6 +10,50 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "provider-context-write-tests"
+    title: "write_tests: provider context rejection and measured progress"
+    description: "Exercise typed provider context rejection, same-task rollover, no effect replay, and provider metrics."
+    context: "A provider can reject a request that fits the local context estimate."
+    purpose: "Pin recovery and accounting at the native boundary."
+    expected_outcome: "Fixture evidence covers ordinary errors, fresh-context success and no-progress rejection."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#AR-REQ-PROVIDER-CONTEXT"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:06:39Z", completed_at: "2026-11-22T18:06:39Z" }
+  - id: "provider-context-implement-code"
+    title: "implement_code: provider context and rollover"
+    description: "Normalize provider errors and metrics and retain task budgets across a fresh conversation."
+    context: "Loopback and runtime fixtures pass for the recognized rejection, successor request and provider telemetry."
+    purpose: "Recover from context exhaustion without changing effect authority."
+    expected_outcome: "A rollover continues the exact logical task with observable usage and context provenance."
+    kind: implementation
+    status: completed
+    depends_on: ["provider-context-write-tests"]
+    requirements: ["REQUIREMENTS.md#AR-REQ-PROVIDER-CONTEXT"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:24:12Z", completed_at: "2026-11-22T18:24:12Z" }
+  - id: "provider-context-security-audit"
+    title: "security_audit: context rollover authority"
+    description: "Independently inspect bounded diagnostics, replay behavior and existing task limits."
+    context: "The rollover keeps the existing execution owner and introduces a new provider-response classification."
+    purpose: "Check the provider and continuation trust boundaries."
+    expected_outcome: "Independent security findings or a scoped no-finding result."
+    kind: security-audit
+    status: pending
+    depends_on: ["provider-context-implement-code"]
+    requirements: ["REQUIREMENTS.md#AR-REQ-PROVIDER-CONTEXT"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:06:39Z", completed_at: null }
+  - id: "provider-context-compliance-review"
+    title: "compliance_review: provider context and metrics"
+    description: "Compare independent observations and tests with the controlled requirements, contract and design."
+    context: "Preliminary comparison leaves evidence gaps for budget continuity and provider-specific telemetry. Formal review follows the security audit."
+    purpose: "Retain discrepancies for human arbitration."
+    expected_outcome: "Separate source-blind comparison; no automatic acceptance."
+    kind: compliance-review
+    status: pending
+    depends_on: ["provider-context-security-audit"]
+    requirements: ["REQUIREMENTS.md#AR-REQ-PROVIDER-CONTEXT"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:06:39Z", completed_at: null }
   - id: "native-cache-write-tests"
     title: "write_tests: native offline Cargo scripts"
     description: "Pin native wrapper defaults, explicit export configuration and private administration links."
@@ -1645,7 +1689,7 @@ tasks:
     purpose: "Find command, filesystem, and authority-boundary defects before other applications trust stored profiles."
     expected_outcome: "High-confidence setup vulnerabilities are remediated or retained as explicit blockers without treating provider verification as sandbox evidence."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "sa-06-implement-code"
     requirements:
@@ -1653,8 +1697,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-29T21:30:04Z"
-      updated_at: "2026-08-29T21:30:04Z"
-      completed_at: null
+      updated_at: "2026-11-22T01:01:03Z"
+      completed_at: "2026-11-22T01:01:03Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-06-compliance-review"
@@ -1664,7 +1708,7 @@ tasks:
     purpose: "Preserve independent evidence for the extracted configuration boundary."
     expected_outcome: "The review classifies every setup and integration requirement and records discrepancies for explicit arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "sa-06-security-audit"
     requirements:
@@ -1672,8 +1716,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-29T21:30:04Z"
-      updated_at: "2026-08-29T21:30:04Z"
-      completed_at: null
+      updated_at: "2026-11-22T04:18:52Z"
+      completed_at: "2026-11-22T04:18:52Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-07-write-tests"
@@ -1722,7 +1766,7 @@ tasks:
     purpose: "Find command substitution, interactive blocking, authority escalation, and misleading qualification defects before saved profiles are trusted."
     expected_outcome: "High-confidence provider qualification vulnerabilities are remediated or retained as explicit blockers."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "sa-07-implement-code"
     requirements:
@@ -1730,8 +1774,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-29T22:42:17Z"
-      updated_at: "2026-08-29T22:42:17Z"
-      completed_at: null
+      updated_at: "2026-11-22T04:42:21Z"
+      completed_at: "2026-11-22T04:42:21Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-07-compliance-review"
@@ -1741,7 +1785,7 @@ tasks:
     purpose: "Preserve independent evidence for adopting provider-specific profiles."
     expected_outcome: "The review classifies every provider qualification requirement and records discrepancies for explicit arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "sa-07-security-audit"
     requirements:
@@ -1749,8 +1793,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-29T22:42:17Z"
-      updated_at: "2026-08-29T22:42:17Z"
-      completed_at: null
+      updated_at: "2026-11-22T06:35:43Z"
+      completed_at: "2026-11-22T06:35:43Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-12-write-tests"
@@ -1799,7 +1843,7 @@ tasks:
     purpose: "Find network, deserialization, resource-exhaustion, leakage, and authority-confusion defects before the native loop relies on the transport."
     expected_outcome: "No unresolved high-confidence issue permits destination escape, secret disclosure, unbounded input, silent capability downgrade, tool execution, or false terminal success."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "sa-12-implement-code"
     requirements:
@@ -1807,8 +1851,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
+      updated_at: "2026-11-22T08:17:29Z"
+      completed_at: "2026-11-22T08:17:29Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-12-compliance-review"
@@ -1818,7 +1862,7 @@ tasks:
     purpose: "Provide independent evidence that the first native transport is complete enough for the bounded loop and remains replaceable."
     expected_outcome: "The review approves exact provider/server/model combinations, records unsupported capabilities and objective supply-chain measurements, and blocks native-loop use for every unevaluated or discrepant deployment."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "sa-12-security-audit"
     requirements:
@@ -1827,8 +1871,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
+      updated_at: "2026-11-22T09:40:31Z"
+      completed_at: "2026-11-22T09:40:31Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-10-write-tests"
@@ -1838,7 +1882,7 @@ tasks:
     purpose: "Define enforceable native agent behavior without importing provider-specific loops or allowing a model to certify task completion."
     expected_outcome: "Tests prove with fake host services that model output cannot cause an effect before typed authorization and that every terminal run emits bounded replayable events; enabling Kvist native mode still requires the root authority review."
     kind: test
-    status: pending
+    status: blocked
     depends_on:
       - "sa-04-compliance-review"
       - "sa-12-compliance-review"
@@ -1847,9 +1891,9 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-11-22T10:27:59Z"
       completed_at: null
-    blocked_reason: null
+    blocked_reason: "agent run ended without an allowed outcome (stop: Some(Failed), failure: model request failed: model provider returned HTTP status 400)"
     recovery_state: null
   - id: "sa-10-implement-code"
     title: "Implement bounded native agent loop"

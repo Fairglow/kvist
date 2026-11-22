@@ -28,6 +28,11 @@ pub enum Error {
         model: Option<String>,
         reason: String,
     },
+    /// A definitive provider context rejection, with no replay implied.
+    #[error(
+        "provider serving context exceeded; use a larger serving window or reduce irreducible task input"
+    )]
+    ModelContextExceeded,
     /// A request and its generation reserve do not fit, even after compaction
     /// removed every reducible turn.
     #[error(
@@ -103,6 +108,7 @@ impl From<crate::Error> for Error {
     fn from(error: crate::Error) -> Self {
         match error {
             crate::Error::ModelTransportCancelled => Self::Cancelled,
+            crate::Error::ModelContextExceeded => Self::ModelContextExceeded,
             crate::Error::RepetitiveGeneration { report } => Self::RepetitiveGeneration {
                 report,
                 usage: None,

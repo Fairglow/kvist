@@ -102,6 +102,7 @@ impl ModelTransport for Provider {
             usage: None,
             response_id: None,
             provider_request_id: None,
+            timings: None,
         })
     }
     fn stream(

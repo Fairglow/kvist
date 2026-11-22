@@ -513,6 +513,356 @@ pub const POLICY_IDENTITY_HOST_ASSERTED: &str = "Runner recomputes runner/comman
 /// trusted to have set a safe environment.
 pub const AUTHORING_ENVIRONMENT_HOST_BOUND: &str = "Authoring phase relaxes the dangerous-environment-name check because the environment is host-bound";
 
+// === PROVIDER CLI QUALIFICATION ===
+
+/// **Finding:** Executable discovery is bounded by a 10-second idle and
+/// attempt timeout with a 64 KiB output limit and zero retries. A provider
+/// executable that hangs, emits repeating output, or exceeds the output bound
+/// is refused before any profile is persisted.
+///
+/// Source: `src/setup.rs` — `probe_cli_version` (idle 10 s, attempt 10 s,
+/// 64 KiB, `max_retries: 0`, `detect_loops: false`)
+///
+/// **Assessment:** Correct. The probe is fail-closed: any timeout, output
+/// limit, or non-zero exit status is a refusal. The `detect_loops: false`
+/// setting is acceptable because the 10-second attempt timeout bounds a
+/// repeating-output provider to 10 seconds of wall time.
+pub const EXECUTABLE_DISCOVERY_BOUNDED: &str =
+    "Executable discovery bounded by 10 s idle/attempt, 64 KiB output, zero retries";
+
+/// **Finding:** Fallback executable paths are validated as regular,
+/// non-symlink files before and after canonicalization. A symlinked or
+/// non-regular fallback path is refused before any probe or qualification.
+///
+/// Source: `src/setup.rs` — `resolve_setup_file` (validate_regular_file before
+/// and after canonicalize), `validate_custom_executable` (executable bit check)
+///
+/// **Assessment:** Correct. The double validation closes the TOCTOU window in
+/// which a locally writable parent directory lets an attacker swap a regular
+/// file for a link to a privileged file between the initial check and the
+/// canonicalize. The executable-bit check ensures the fallback is actually
+/// runnable.
+pub const FALLBACK_PATH_VALIDATED: &str =
+    "Fallback paths validated as regular non-symlink files before and after canonicalization";
+
+/// **Finding:** The supervised command's stdin is set to `Stdio::null()`, so a
+/// probed or qualified provider executable cannot block on interactive stdin.
+/// The supervisor's own stdin is read via `read_input`, which treats EOF as
+/// `Error::Cancelled` and treats `\x1b`/`cancel`/`q` as cancellation.
+///
+/// Source: `src/supervisor.rs` — `run_attempt` (`.stdin(Stdio::null())`)
+/// Source: `src/setup.rs` — `read_input` (EOF → `Error::Cancelled`)
+///
+/// **Assessment:** Correct. A provider executable that tries to read from
+/// stdin receives immediate EOF, not a blocking read. The supervisor's own
+/// stdin handling is cancellation-safe: EOF and escape sequences are treated
+/// as cancellation, not as I/O errors.
+pub const STDIN_HANDLING_NULL_AND_CANCELLATION_SAFE: &str =
+    "Supervised command stdin is null; supervisor stdin treats EOF and escape as cancellation";
+
+/// **Finding:** Generated permission flags in external-agent profiles are
+/// checked for inline credentials. The `secret_argument` function rejects any
+/// argv entry containing `api-key`, `access-token`, `password`,
+/// `authorization`, `bearer `, `--token=`, `--secret`, `credential`,
+/// `private_key`, `private-key`, `client_secret`, `client-secret`, or `cookie`.
+///
+/// Source: `src/registry.rs` — `Profile::validate` (calls `secret_argument`
+/// on each argv entry)
+///
+/// **Assessment:** Correct. The credential check is applied to every argv
+/// entry in the external-agent profile, not just the first. A profile that
+/// embeds a credential in any argument is refused before persistence.
+pub const GENERATED_PERMISSION_FLAGS_CREDENTIAL_CHECKED: &str =
+    "Generated permission flags checked for inline credentials in every argv entry";
+
+/// **Finding:** Model selectors are bounded to 1–256 printable ASCII bytes
+/// without braces or quotes. The `validate_model_id` function rejects empty,
+/// oversized, non-printable, or brace/quote-bearing model IDs. The
+/// `validate_model_selector` function rejects blank, oversized, or
+/// control-bearing model selectors.
+///
+/// Source: `src/catalog.rs` — `validate_model_id` (1–256 printable ASCII, no
+/// braces)
+/// Source: `src/direct_transport.rs` — `validate_model_selector` (nonblank,
+/// control-free ASCII ≤ 256 bytes)
+///
+/// **Assessment:** Correct. The model ID bound prevents a model ID from
+/// smuggling shell metacharacters or template placeholders into the rendered
+/// command. The brace/quote rejection prevents a model ID from escaping the
+/// template's quoting context.
+pub const MODEL_SELECTORS_BOUNDED: &str =
+    "Model selectors bounded to 1–256 printable ASCII without braces or quotes";
+
+/// **Finding:** Exact command verification renders the stored command through
+/// `render_command` (shell-free, quoted) and runs it under bounded supervision
+/// with a 30-second idle timeout, 300-second attempt timeout, 64 KiB output
+/// limit, zero retries, and loop detection. The `command_spec` function
+/// substitutes `{prompt}`, `{model}`, `{cwd}`, `{reasoning_effort}`, and
+/// `{context_files}` without a shell.
+///
+/// Source: `src/setup.rs` — `verify_profile` (renders via `render_command`,
+/// runs under `run_supervised_capture` with 30 s / 300 s / 64 KiB / 0 retry /
+/// `detect_loops: true`)
+/// Source: `src/registry.rs` — `ExternalAgent::command_spec` (shell-free
+/// substitution, bounded to 256 entries / 2 MiB / no NUL)
+///
+/// **Assessment:** Correct. The exact-command verification is fail-closed:
+/// any timeout, output limit, loop detection, or non-zero exit status is a
+/// refusal. The shell-free rendering prevents command injection through the
+/// prompt or model ID. The zero-retry policy prevents automatic replay of a
+/// non-idempotent qualification.
+pub const EXACT_COMMAND_VERIFICATION_FAIL_CLOSED: &str =
+    "Exact command verification is shell-free, bounded, and fail-closed with zero retries";
+
+/// **Finding:** Error redaction is streaming longest-match at UTF-8
+/// boundaries. The `StreamRedactor` absorbs deltas, scans for the longest
+/// matching secret, and emits `[REDACTED]` in its place. The carry buffer
+/// retains a suffix that could be the prefix of a longer secret, so a secret
+/// split across two deltas is still redacted.
+///
+/// Source: `maerg/src/agent/redaction.rs` — `StreamRedactor::absorb` /
+/// `StreamRedactor::scan` (longest-match, UTF-8 boundary carry)
+///
+/// **Assessment:** Correct. The streaming redaction is split-safe: a secret
+/// that spans two deltas is held in the carry buffer until the full match is
+/// available. The longest-match rule prevents a shorter secret from being
+/// redacted in preference to a longer one that shares a prefix.
+pub const ERROR_REDACTION_STREAMING_AND_SPLIT_SAFE: &str =
+    "Error redaction is streaming longest-match at UTF-8 boundaries, split-safe across deltas";
+
+/// **Limitation:** The `sav setup` command treats the setup action itself as
+/// the host-execution acknowledgement without a separate
+/// `--allow-host-execution` flag, while `sav run` and `sav models` require
+/// explicit `--allow-host-execution` and `--allow-host-discovery` flags
+/// respectively. The asymmetry is by design: the setup action is an explicit
+/// operator choice that acknowledges host discovery and qualification, not
+/// any later external-agent execution. However, a non-interactive host that
+/// invokes `sav setup` without an interactive terminal will still perform
+/// host discovery and qualification without a separate acknowledgement flag.
+///
+/// Source: `src/setup.rs` — `run_registry_setup` (no `--allow-host-execution`
+/// flag; the setup action is the acknowledgement)
+/// Source: `src/main.rs` — `run` (requires `--allow-host-execution`),
+/// `models` (requires `--allow-host-discovery`)
+///
+/// **Impact:** A non-interactive host that invokes `sav setup` will perform
+/// host discovery and qualification without a separate acknowledgement flag.
+/// This is not a high-confidence escape (the setup action is still an
+/// explicit operator choice) but is a silent degradation of the
+/// acknowledgement boundary compared to `sav run` and `sav models`.
+pub const SETUP_HOST_ACKNOWLEDGEMENT_ASYMMETRY: &str = "sav setup treats the setup action as the host-execution acknowledgement without a separate flag, unlike sav run and sav models";
+
+// === DIRECT MODEL TRANSPORT ===
+
+/// **Finding:** The direct transport's destination is fixed to a numeric
+/// loopback address and cannot escape it. `parse_endpoint` requires an
+/// ASCII `http://` endpoint with no user information, query, fragment, or
+/// provider path, then rejects any host that is not a numeric loopback IP
+/// (`IpAddr::from_str` followed by `ip.is_loopback()`). A hostname, a
+/// non-loopback literal, or a missing port is refused at construction, before
+/// any socket is opened. The `Host` header is the same bounded authority, so
+/// a crafted endpoint cannot redirect the request to another destination.
+///
+/// Source: `src/direct_transport.rs` — `parse_endpoint`, `split_authority`,
+/// `parse_port` (numeric loopback only)
+/// Source: `sav/tests/model_transport.rs` — `rejects_non_loopback_and_non_http_endpoints`
+///
+/// **Assessment:** Correct. Destination escape is impossible: the only
+/// connectable socket address is a loopback literal, and no redirect or
+/// alternate authority is ever followed.
+pub const TRANSPORT_LOOPBACK_ONLY: &str = "Direct transport binds to a numeric loopback address; no destination escape or redirect following";
+
+/// **Finding:** The direct transport follows no HTTP redirects. It issues a
+/// single `POST` with `Connection: close` and reads exactly one response. A
+/// non-2xx status is surfaced as `ModelProviderStatus { status }` with the
+/// response body intentionally omitted; the transport never re-issues the
+/// request against a `Location` header or any other destination.
+///
+/// Source: `src/direct_transport.rs` — `execute_with_body`, `read_response`
+/// (single request, `Connection: close`, non-2xx → `ModelProviderStatus`)
+///
+/// **Assessment:** Correct. There is no redirect-handling code path, so a
+/// provider cannot steer the request off loopback or to a second host.
+pub const TRANSPORT_NO_REDIRECT_FOLLOWING: &str =
+    "Direct transport issues one request and follows no redirect";
+
+/// **Finding:** The direct transport routes no credentials. It sends only
+/// `Host`, `Content-Type`, `Accept`, `Content-Length`, and `Connection`
+/// headers — never an `Authorization` header, cookie, or bearer token — and
+/// it is constructed from a plain loopback endpoint string, not from a
+/// credential-bearing URL. The model selector is bounded to 1–256 control-free
+/// ASCII bytes and is percent-encoded (`query_component`) before it appears in
+/// the `/props?model=` query, so a selector cannot smuggle a header line or
+/// inject a credential into the request.
+///
+/// Source: `src/direct_transport.rs` — `execute_with_body` (fixed header set),
+/// `validate_model_selector`, `query_component`
+///
+/// **Assessment:** Correct. No credential material is read, embedded, or
+/// echoed; the model selector is bounded and percent-encoded before use.
+pub const TRANSPORT_NO_CREDENTIAL_ROUTING: &str = "Direct transport sends no Authorization/cookie header and percent-encodes the bounded model selector";
+
+/// **Finding:** Every untrusted input to the direct transport is bounded.
+/// Response headers are capped at 64 KiB (`MAX_HEADER_BYTES`); each SSE/NDJSON
+/// record at 1 MiB (`MAX_RECORD_BYTES`); the whole response body at the
+/// configured `max_response_bytes` (hard ceiling 16 MiB); the serialized
+/// request at 8 MiB (`MAX_REQUEST_BYTES`); the canonical message text at 8
+/// MiB (`MAX_MESSAGE_BYTES`); the output schema at 256 KiB / 32 levels / 4096
+/// nodes; and the message and tool counts at 1024 and 128 respectively.
+/// Chunked bodies are bounded both by the declared size and by the running
+/// total before any byte is delivered.
+///
+/// Source: `src/direct_transport.rs` — `read_response`, `read_chunked_body`,
+/// `validate_request`, `validate_output_schema`, `checked_text_total`
+///
+/// **Assessment:** Correct. No unbounded input path exists; every counter is
+/// checked before the corresponding allocation or delivery.
+pub const TRANSPORT_INPUT_BOUNDED: &str =
+    "Direct transport bounds headers, records, body, request, messages, schema, and counts";
+
+/// **Finding:** Both stream decoders require an explicit terminal record
+/// before they assemble a turn, so a truncated stream cannot be reported as a
+/// complete success. The OpenAI decoder sets `terminal` only on `[DONE]` and
+/// `finish` returns `MalformedModelResponse` when it is absent; the Ollama
+/// decoder sets `terminal` only on `done: true` and likewise fails without it.
+/// A data payload after the terminal marker is a `MalformedModelResponse`, and
+/// an SSE `error` event or a chunk with an `error` field is a
+/// `MalformedModelResponse`, so a provider that reports failure cannot be
+/// folded into a silent success.
+///
+/// Source: `src/direct_transport.rs` — `OpenAiStreamState::finish`,
+/// `OllamaStreamState::finish`, `process_data_payload` (terminal + error)
+/// Source: `sav/tests/model_transport.rs` — `streaming_without_terminal_record_fails`,
+/// `ollama_stream_requires_terminal_record_and_emits_complete_intent`
+///
+/// **Assessment:** Correct. No false terminal success: a stream that never
+/// reaches its terminal record, or that reports an error, is a failure.
+pub const TRANSPORT_TERMINAL_REQUIRED: &str =
+    "Direct transport requires an explicit terminal record and treats provider errors as failures";
+
+/// **Finding:** Tool-call identity and arguments are bounded, deduplicated,
+/// and never silently downgraded. Stream tool-call indices are capped at 128,
+/// a single call's identity cannot change mid-stream, and duplicate provider
+/// identities are a `DuplicateToolCall`. Arguments are parsed as JSON objects;
+/// when a provider emits malformed arguments, the transport either repairs
+/// them or records a synthetic `_malformed_arguments_error` payload (with a
+/// sanitized preview) so the turn can recover — it never drops the call or
+/// invents arguments. The repaired or synthetic payload is still a JSON
+/// object, so a downstream executor sees a well-formed, bounded argument
+/// object rather than raw provider text.
+///
+/// Source: `src/direct_transport.rs` — `merge_openai_tool_deltas`,
+/// `finish_openai_tool_calls`, `parse_openai_tool_calls`,
+/// `parse_lenient_tool_arguments`, `repair_tool_arguments_json`
+///
+/// **Assessment:** Correct. Tool identity is bounded and deduplicated, and
+/// malformed arguments degrade to a bounded synthetic object rather than a
+/// silent capability downgrade or an untrusted raw string.
+pub const TRANSPORT_TOOL_IDENTITY_AND_ARGS: &str = "Direct transport bounds and deduplicates tool identity and degrades malformed arguments to a bounded object";
+
+/// **Finding:** Cancellation is cooperative and is never retried. Every
+/// read, write, and event-delivery step calls `check_cancelled`, and a
+/// cancelled request returns `ModelTransportCancelled`, which
+/// `Error::is_retryable` classifies as non-retryable. A deadline breach
+/// returns `ModelTransportTimedOut` (or the more specific TTFT/cadence/slot
+/// timeout), which is retryable and is mapped by the watchdog so the caller
+/// can distinguish a stalled provider from a genuine turn deadline.
+///
+/// Source: `src/direct_transport.rs` — `check_cancelled`, `check_deadline`,
+/// `BodyWatchdog::map_error`
+/// Source: `src/error.rs` — `Error::is_retryable`
+///
+/// **Assessment:** Correct. Cancellation is preserved end-to-end and is not
+/// disguised as a transport failure or replayed automatically.
+pub const TRANSPORT_CANCELLATION_NOT_RETRYABLE: &str =
+    "Direct transport cancellation is cooperative, distinct, and non-retryable";
+
+/// **Finding:** The time-to-first-token and inter-token cadence watchdogs are
+/// distinct and are not reset by provider heartbeats. The TTFT watchdog
+/// (`BodyWatchdog::ttft`) arms from the first body byte and is replaced by the
+/// cadence watchdog once any body arrives. The cadence watchdog arms only on
+/// real progress (`observe_body(progress)`), so a provider that emits empty
+/// control frames, `ping` events, or usage-only frames does not extend the
+/// cadence deadline. A stalled stream therefore times out with
+/// `InterTokenCadenceTimedOut` rather than hanging until the turn deadline.
+///
+/// Source: `src/direct_transport.rs` — `BodyWatchdog::observe_body`,
+/// `BodyWatchdog::read_deadline`, `process_data_payload` (progress flags)
+/// Source: `sav/tests/model_transport.rs` — `inter_token_cadence_watchdog_aborts_hung_stream`,
+/// `cadence_ignores_heartbeats_empty_control_and_usage_frames_in_every_framing`
+///
+/// **Assessment:** Correct. Heartbeats and empty frames do not reset the
+/// cadence watchdog, so a hung stream is bounded by the cadence timeout.
+pub const TRANSPORT_WATCHDOG_NOT_RESET_BY_HEARTBEATS: &str =
+    "Direct transport TTFT and cadence watchdogs are distinct and not reset by heartbeats";
+
+/// **Finding:** Malformed streams fail closed. A non-UTF-8 record, a record
+/// that is not valid JSON, an unsupported `Transfer-Encoding`, a conflicting
+/// `Content-Length`/`chunked` framing, a chunk missing its CRLF, or a body
+/// that exceeds its declared `Content-Length` is a `MalformedModelResponse`
+/// or `ModelResponseLimitExceeded`. The transport never substitutes a default
+/// or silently recovers a malformed frame.
+///
+/// Source: `src/direct_transport.rs` — `parse_response_head`,
+/// `read_chunked_body`, `StreamDecoder::process_line`, `read_response`
+///
+/// **Assessment:** Correct. Malformed framing and records are failures, not
+/// silent recovery, so a crafted stream cannot be folded into a valid turn.
+pub const TRANSPORT_MALFORMED_STREAMS_FAIL_CLOSED: &str =
+    "Direct transport fails closed on malformed framing, records, and JSON";
+
+/// **Finding:** Provider error leakage is bounded to the HTTP status and to
+/// sanitized diagnostics. A non-2xx response is surfaced as
+/// `ModelProviderStatus { status }` with the response body intentionally
+/// omitted, so a provider error page cannot leak request or credential data.
+/// SSE `event`/`id`/`retry` values and unrecognized JSON fields are passed
+/// through `sanitize_sse_diagnostic`, which escapes control characters and
+/// truncates to a bounded preview before they reach `tracing` or `eprintln`.
+///
+/// Source: `src/direct_transport.rs` — `read_response` (non-2xx body omitted),
+/// `sanitize_sse_diagnostic`, `warn_extra_json_fields`
+///
+/// **Assessment:** Correct. No TRACE or error path echoes raw provider or
+/// request bytes; diagnostics are sanitized and bounded.
+pub const TRANSPORT_ERROR_LEAKAGE_SANITIZED: &str =
+    "Direct transport error paths omit the provider body and sanitize diagnostics";
+
+/// **Finding:** Unknown provider extensions are non-fatal and do not widen
+/// authority. An unrecognized SSE field, an unrecognized JSON object field in
+/// a tool call, or an unsupported `event` type is logged through
+/// `warn_extra_json_fields` or `sanitize_sse_diagnostic` and the stream
+/// continues; the field is ignored, not interpreted as a capability. The
+/// only fields that change turn state are the bounded, validated ones
+/// (content, reasoning, tool calls, finish reason, usage, model, id).
+///
+/// Source: `src/direct_transport.rs` — `warn_extra_json_fields`,
+/// `OpenAiStreamState::process_line` (unknown field → warn + continue)
+///
+/// **Assessment:** Correct. Raw provider extensions are ignored, not
+/// promoted to capability, so a provider cannot silently add a tool or widen
+/// the turn's authority through an unrecognized field.
+pub const TRANSPORT_UNKNOWN_EXTENSIONS_IGNORED: &str =
+    "Direct transport ignores unknown provider extensions without widening authority";
+
+/// **Limitation:** The direct transport trusts the loopback provider it is
+/// configured to talk to. A compromised or misconfigured local model server
+/// on the same host can serve crafted responses; the transport's parser
+/// bounds, terminal requirement, and error handling prevent a silent
+/// capability downgrade or a false terminal success, but they do not
+/// authenticate the provider. Provider identity is an operator configuration
+/// choice, not a receipt-derived grant, and the transport does not mint
+/// evidence about the provider's integrity.
+///
+/// Source: `src/direct_transport.rs` — `DirectModelTransport::new` (operator
+/// configuration), `parse_endpoint` (loopback only)
+///
+/// **Impact:** A local provider that is itself untrusted can still serve a
+/// well-formed but adversarial response. The transport bounds the blast
+/// radius (no destination escape, no false success, no silent downgrade) but
+/// does not authenticate the provider. This is a documented trust boundary,
+/// not a defect: the operator selects the loopback provider explicitly.
+pub const TRANSPORT_TRUSTS_LOOPBACK_PROVIDER: &str = "Direct transport trusts the operator-selected loopback provider; parser bounds bound the blast radius but do not authenticate it";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,5 +908,25 @@ mod tests {
         assert!(!PROBE_TEST_BACKEND_OVERRIDE.is_empty());
         assert!(!POLICY_IDENTITY_HOST_ASSERTED.is_empty());
         assert!(!AUTHORING_ENVIRONMENT_HOST_BOUND.is_empty());
+        assert!(!EXECUTABLE_DISCOVERY_BOUNDED.is_empty());
+        assert!(!FALLBACK_PATH_VALIDATED.is_empty());
+        assert!(!STDIN_HANDLING_NULL_AND_CANCELLATION_SAFE.is_empty());
+        assert!(!GENERATED_PERMISSION_FLAGS_CREDENTIAL_CHECKED.is_empty());
+        assert!(!MODEL_SELECTORS_BOUNDED.is_empty());
+        assert!(!EXACT_COMMAND_VERIFICATION_FAIL_CLOSED.is_empty());
+        assert!(!ERROR_REDACTION_STREAMING_AND_SPLIT_SAFE.is_empty());
+        assert!(!SETUP_HOST_ACKNOWLEDGEMENT_ASYMMETRY.is_empty());
+        assert!(!TRANSPORT_LOOPBACK_ONLY.is_empty());
+        assert!(!TRANSPORT_NO_REDIRECT_FOLLOWING.is_empty());
+        assert!(!TRANSPORT_NO_CREDENTIAL_ROUTING.is_empty());
+        assert!(!TRANSPORT_INPUT_BOUNDED.is_empty());
+        assert!(!TRANSPORT_TERMINAL_REQUIRED.is_empty());
+        assert!(!TRANSPORT_TOOL_IDENTITY_AND_ARGS.is_empty());
+        assert!(!TRANSPORT_CANCELLATION_NOT_RETRYABLE.is_empty());
+        assert!(!TRANSPORT_WATCHDOG_NOT_RESET_BY_HEARTBEATS.is_empty());
+        assert!(!TRANSPORT_MALFORMED_STREAMS_FAIL_CLOSED.is_empty());
+        assert!(!TRANSPORT_ERROR_LEAKAGE_SANITIZED.is_empty());
+        assert!(!TRANSPORT_UNKNOWN_EXTENSIONS_IGNORED.is_empty());
+        assert!(!TRANSPORT_TRUSTS_LOOPBACK_PROVIDER.is_empty());
     }
 }

@@ -85,6 +85,10 @@ fn estimate_intent_tokens(intent: &crate::ToolIntent) -> usize {
     serialized_tokens(intent).saturating_add(MESSAGE_OVERHEAD_TOKENS)
 }
 
+pub(super) fn estimate_tool_output(intent: &crate::ToolIntent) -> usize {
+    estimate_intent_tokens(intent)
+}
+
 fn message_tokens(message: &ModelMessage) -> usize {
     let mut total = MESSAGE_OVERHEAD_TOKENS;
     match message {
@@ -147,6 +151,10 @@ pub struct ContextManager {
     /// Rolling summary text representing compacted history.
     summary: String,
     compactions: u64,
+    serving_hint: Option<(usize, &'static str)>,
+    capacity_source: &'static str,
+    automatic_reserve: bool,
+    pub(super) probe_after_load: bool,
 }
 
 impl ContextManager {
@@ -174,12 +182,99 @@ impl ContextManager {
             keep_full_turns,
             summary: String::new(),
             compactions: 0,
+            serving_hint: None,
+            capacity_source: "local",
+            automatic_reserve: false,
+            probe_after_load: false,
         }
     }
 
     /// The hard context limit, in tokens.
     pub fn limit_tokens(&self) -> usize {
         self.limit_tokens
+    }
+
+    /// Associates a selected model's resolved window with its fallback policy.
+    pub fn set_serving_policy(
+        &mut self,
+        hint: Option<(usize, &'static str)>,
+        source: &'static str,
+        automatic_reserve: bool,
+        probe_after_load: bool,
+    ) {
+        self.serving_hint = hint;
+        self.capacity_source = source;
+        self.automatic_reserve = automatic_reserve;
+        self.probe_after_load = probe_after_load;
+    }
+
+    /// Provenance of the current capacity budget, not of token usage.
+    pub fn capacity_source(&self) -> &'static str {
+        self.capacity_source
+    }
+
+    pub(super) fn response_reserve(&self, configured: u32) -> u32 {
+        if self.automatic_reserve {
+            (self.limit_tokens / 4).clamp(1, 8192) as u32
+        } else {
+            configured
+        }
+    }
+
+    /// Clears per-conversation compaction state without resetting its counter.
+    pub fn clear_history(&mut self) {
+        self.summary.clear();
+    }
+
+    /// Refreshes the serving window for a selected model, returning the applicable reserve.
+    pub fn refresh_serving(
+        &mut self,
+        transport: &impl crate::ModelTransport,
+        model: &str,
+        cancellation: &crate::CancellationToken,
+        remaining: std::time::Duration,
+        reserve: u32,
+    ) -> Result<u32> {
+        self.probe_after_load = false;
+        let deadline = remaining.min(std::time::Duration::from_secs(2));
+        if cancellation.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        if deadline.is_zero() {
+            return Err(Error::RunBudget {
+                resource: super::BudgetResource::WallTime,
+                reason: "serving capacity discovery".into(),
+            });
+        }
+        let discovered = match transport.serving_context(model, cancellation, deadline) {
+            Ok(limit) => limit.map(|limit| (limit, "provider")).or(self.serving_hint),
+            Err(error) if error.is_optional_capacity_unavailable() => {
+                tracing::warn!(%model, %error, "serving capacity refresh unavailable");
+                self.serving_hint
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if let Some((limit, source)) = discovered {
+            let reserve = if self.automatic_reserve {
+                (limit / 4).clamp(1, 8192) as u32
+            } else {
+                reserve
+            };
+            if !(2..=1_048_576).contains(&limit) || limit <= reserve as usize {
+                return Err(Error::Config {
+                    path: None,
+                    reason: "serving context must exceed the selected response reserve".into(),
+                });
+            }
+            if self.limit_tokens != limit {
+                self.limit_tokens = limit;
+                self.warmup_tokens = limit.saturating_sub(limit.div_ceil(4));
+            }
+            self.capacity_source = source;
+            Ok(reserve)
+        } else {
+            Ok(reserve)
+        }
     }
 
     /// The warm-up threshold at or above which compaction begins, in tokens.

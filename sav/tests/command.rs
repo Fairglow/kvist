@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use sav::{ReasoningEffort, render_command, render_command_with_reasoning_effort};
+use sav::{
+    ReasoningEffort, render_command, render_command_with_reasoning_effort, split_raw_command,
+};
 
 #[test]
 fn renders_prompt_context_and_target_without_a_shell() {
@@ -124,4 +126,36 @@ fn reasoning_effort_requires_and_renders_an_explicit_placeholder() {
     )
     .expect_err("reject ignored reasoning effort");
     assert!(error.to_string().contains("{reasoning_effort}"));
+}
+
+#[test]
+fn rejects_program_tokens_with_control_bytes() {
+    let error = render_command(
+        "agent\x00 --prompt '{prompt}'",
+        "hello",
+        &[],
+        Path::new("."),
+    )
+    .expect_err("NUL in program");
+    assert!(error.to_string().contains("control bytes"));
+}
+
+#[test]
+fn rejects_program_tokens_exceeding_the_bound() {
+    let long_program = "a".repeat(4097);
+    let error = render_command(
+        &format!("{long_program} --prompt '{{prompt}}'"),
+        "hello",
+        &[],
+        Path::new("."),
+    )
+    .expect_err("oversized program");
+    assert!(error.to_string().contains("4096"));
+}
+
+#[test]
+fn rejects_control_byte_program_in_split_raw_command() {
+    let error =
+        split_raw_command("agent\x1b --prompt '{prompt}'").expect_err("control byte program");
+    assert!(error.to_string().contains("control bytes"));
 }

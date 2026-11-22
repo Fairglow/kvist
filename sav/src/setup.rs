@@ -829,12 +829,13 @@ fn invalid_model_selection(choice_count: usize) -> Error {
 fn validate_model_id(model: &str) -> Result<()> {
     if model.is_empty()
         || model.len() > 256
-        || !model
-            .bytes()
-            .all(|byte| (b' '..=b'~').contains(&byte) && !matches!(byte, b'{' | b'}'))
+        || !model.bytes().all(|byte| {
+            (b' '..=b'~').contains(&byte) && !matches!(byte, b'{' | b'}' | b'\'' | b'"')
+        })
     {
         return Err(Error::ProfileSetup {
-            reason: "model ID must be 1-256 printable ASCII bytes without braces".to_owned(),
+            reason: "model ID must be 1-256 printable ASCII bytes without braces or quotes"
+                .to_owned(),
         });
     }
     Ok(())
