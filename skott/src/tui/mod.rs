@@ -29,7 +29,6 @@ use sav::ReasoningEffort;
 use self::app::{App, KeyAction};
 use self::startup::Job;
 use crate::config::{Config, Model};
-use crate::context::ContextManager;
 use crate::error::{Error, Result};
 use crate::executor::SandboxExecutor;
 use crate::host::HostExecutor;
@@ -505,7 +504,7 @@ impl SessionBuilder {
                 run::system_prompt(&self.config.tool_policy.write_root)
             },
         );
-        let context = ContextManager::for_model(budgets.context_limit);
+        let context = budgets.context();
         let mut recorder = if self.no_logs {
             None
         } else {

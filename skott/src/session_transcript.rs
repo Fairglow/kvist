@@ -25,6 +25,7 @@ pub struct SessionTranscript {
     live: Option<RunJournal>,
     live_number: u64,
     terminal_summary: Option<RunSummary>,
+    model: Option<String>,
 }
 
 impl SessionTranscript {
@@ -39,14 +40,26 @@ impl SessionTranscript {
         // The transcript directory uses the same naming convention as the journal
         // files (session-{id}) so it can be found by matching the session id.
         let transcript_dir = format!("session-{}", log.session_id());
-        let transcript = TranscriptWriter::new(&transcript_dir, log_dir, model)?;
+        let directory = log
+            .journal_path()
+            .parent()
+            .ok_or_else(|| io::Error::other("session journal has no parent directory"))?;
+        let transcript = TranscriptWriter::new(&transcript_dir, directory, model)?;
         Ok(Self {
             log,
             transcript,
             live: None,
             live_number: 0,
             terminal_summary: None,
+            model: model.map(str::to_owned),
         })
+    }
+
+    /// Opens an operational record outside the agent's writable workspace.
+    pub fn open_private_workspace(workdir: &Path, model: &str) -> Result<Self> {
+        let directory = crate::headless::control_log_directory(None, workdir)?;
+        Self::open(&directory, format!("skott-{model}"), Some(model))
+            .map_err(|source| crate::error::io_error("open embedded session record", None, source))
     }
 
     /// Attaches caller-supplied operational scope.
@@ -146,6 +159,42 @@ impl SessionTranscript {
 }
 
 impl Recorder for SessionTranscript {
+    fn rollover(&mut self, limit: usize, source: &str, reserve: u32) -> Result<Option<String>> {
+        let directory = self.transcript.session_dir();
+        let predecessor = directory.join("session.json");
+        let log_dir = directory
+            .parent()
+            .ok_or_else(|| crate::error::Error::Recording {
+                reason: "transcript has no parent directory".into(),
+            })?;
+        let mut successor = Self::open(log_dir, self.log.task_id(), self.model.as_deref())
+            .map_err(|error| crate::error::io_error("open context successor", None, error))?;
+        if let Some(mut metadata) = self.log.metadata().cloned() {
+            metadata.context_limit = limit;
+            metadata.context_source = source.into();
+            metadata.response_reserve = reserve;
+            let path = predecessor
+                .strip_prefix(&metadata.working_directory)
+                .ok()
+                .map(|path| {
+                    if matches!(
+                        metadata.execution_scope,
+                        crate::session_log::ExecutionScope::HostUnconfined
+                    ) {
+                        predecessor.clone()
+                    } else {
+                        Path::new(&metadata.write_root).join(path)
+                    }
+                });
+            successor = successor.with_metadata(metadata);
+            self.seal_for_rollover(&successor)?;
+            *self = successor;
+            return Ok(Some(path.unwrap_or(predecessor).display().to_string()));
+        }
+        self.seal_for_rollover(&successor)?;
+        *self = successor;
+        Ok(Some(predecessor.display().to_string()))
+    }
     fn tool_failure(&mut self, failure: &crate::session::ToolFailure) -> Result<()> {
         let failure = crate::operational::safe_failure(failure);
         self.log.tool_failure(&failure)?;
@@ -225,7 +274,8 @@ impl Recorder for SessionTranscript {
         let idx = self.log.turn_start(turn)?;
         self.live_record(json!({"type":"model_result","data":{
             "model":turn.model,"text":bounded_text(&turn.text),"text_truncated":turn.text.len()>8192,
-            "finish_reason":turn.finish_reason,"tool_count":turn.tool_intents.len(),"usage":turn.usage
+            "finish_reason":turn.finish_reason,"tool_count":turn.tool_intents.len(),"usage":turn.usage,
+            "timings":turn.timings
         }}), false)?;
         if let Some(reasoning) = turn.reasoning.as_deref()
             && !reasoning.is_empty()
@@ -234,6 +284,7 @@ impl Recorder for SessionTranscript {
                 .record_reasoning(reasoning)
                 .map_err(|e| crate::error::io_error("record transcript reasoning", None, e))?;
         }
+
         Ok(idx)
     }
 
@@ -328,6 +379,26 @@ impl Recorder for SessionTranscript {
                 })?;
         }
         Ok(())
+    }
+}
+
+impl SessionTranscript {
+    fn seal_for_rollover(&mut self, successor: &Self) -> Result<()> {
+        self.notice(&format!(
+            "Continued in {}.",
+            successor
+                .transcript
+                .session_dir()
+                .join("session.json")
+                .display()
+        ))?;
+        self.session_finish(&RunSummary {
+            stop_reason: Some(crate::session::StopReason::Limit(
+                crate::session::BudgetResource::Context,
+            )),
+            budget_exhausted: true,
+            ..RunSummary::default()
+        })
     }
 }
 

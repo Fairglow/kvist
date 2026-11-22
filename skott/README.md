@@ -232,7 +232,7 @@ complete, commented example. Key points:
 - Explicit `models` overrides declare a local provider (`llama-server` or
   `ollama`), base URL, provider model name, and a per-turn deadline. Serving
   context is discovered for the selected model, not assumed to be 8192 tokens.
-  Set per-model `context_limit` when the server cannot report its actual window
+  Set per-model `context_limit` as a fallback when the server cannot report its actual window
   (including an unloaded Ollama model). `response_reserve` controls the initial
   generation budget; by default it is up to 8192 tokens or a quarter of a small
   window. CLI budget overrides take precedence.
@@ -399,7 +399,12 @@ before any tools execute. Attempts share the prompt's time/token limits; a
 truncated proposal or unknown-effect tool call is never replayed.
 Summaries are bounded and lossy; older file references may be dropped when
 fitting them to the available context. Context estimates are heuristic rather
-than a guarantee of exact provider-token accounting.
+than a guarantee of exact provider-token accounting. Both Skott views prefer
+provider usage and decode timings and mark estimated context with `~`. Context
+rejection starts a fresh conversation for the same task, with links between
+recorded sessions and bounded observations for the agent. It does not issue
+another copy of prior tool calls or reset the task budget. A fresh context
+that still cannot fit the task is reported as a blocker.
 
 For Rust, startup resolves an already installed standard rustup toolchain from
 the workspace's `rust-toolchain.toml`/`rust-toolchain` pin or the user's default.

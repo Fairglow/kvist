@@ -71,6 +71,7 @@ impl ModelTransport for Provider {
             model: "test".into(),
             response_id: None,
             provider_request_id: None,
+            timings: None,
             usage: None,
         })
     }
@@ -375,8 +376,8 @@ fn headless_binary_opt_in_steers_quiet_generation_without_disclosing_capability(
                 .unwrap_or(0);
             let mut body = vec![0; size];
             socket.read_exact(&mut body).unwrap();
-            if headers.starts_with("GET ") {
-                let body = json!({"model":"test"}).to_string();
+            if headers.starts_with("GET /models ") {
+                let body = json!({"data":[{"id":"test","context_length":8192}]}).to_string();
                 write!(
                     socket,
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -385,6 +386,7 @@ fn headless_binary_opt_in_steers_quiet_generation_without_disclosing_capability(
                 .unwrap();
                 continue;
             }
+            assert!(headers.starts_with("POST /v1/chat/completions "));
             generation += 1;
             requests
                 .send(serde_json::from_slice::<Value>(&body).unwrap())

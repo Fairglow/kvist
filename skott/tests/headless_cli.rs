@@ -9,6 +9,189 @@ fn trial(finish: &str) -> std::process::Output {
     trial_text(finish, "OK", true).0
 }
 
+fn request(stream: &mut std::net::TcpStream) -> (String, Vec<u8>) {
+    use std::io::{BufRead, BufReader};
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut reader = BufReader::new(stream);
+    let mut method = String::new();
+    reader.read_line(&mut method).unwrap();
+    let mut length = 0;
+    loop {
+        let mut line = String::new();
+        assert!(reader.read_line(&mut line).unwrap() > 0);
+        if line == "\r\n" {
+            break;
+        }
+        if let Some(value) = line.strip_prefix("Content-Length: ") {
+            length = value.trim().parse().unwrap();
+        }
+    }
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body).unwrap();
+    (method.trim_end().into(), body)
+}
+
+fn respond(stream: &mut std::net::TcpStream, status: &str, body: &str) {
+    write!(
+        stream,
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+}
+
+#[test]
+fn confirmed_http_overflow_rotates_the_exact_session_and_only_then_completes() {
+    for overflow in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        let logs = root.path().join("private");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = listener.local_addr().unwrap();
+        let config = root.path().join("skott.toml");
+        std::fs::write(&config, format!(
+                    "schema_version=1\ndefault_provider='llama-server'\n[[models]]\nid='test'\n\
+                     provider='llama-server'\nbase_url='http://{endpoint}'\nmodel='test'\ncontext_limit=4096\n"
+                )).unwrap();
+        let server = std::thread::spawn(move || {
+            let capacity = |stream: &mut std::net::TcpStream, limit: usize| {
+                assert_eq!(request(stream).0, "GET /models HTTP/1.1");
+                respond(
+                    stream,
+                    "200 OK",
+                    &json!({"data":[{"id":"test","context_length":limit}]}).to_string(),
+                );
+            };
+            capacity(&mut listener.accept().unwrap().0, 16384);
+            let (mut original, _) = listener.accept().unwrap();
+            let (method, body) = request(&mut original);
+            assert_eq!(method, "POST /v1/chat/completions HTTP/1.1");
+            assert_eq!(
+                serde_json::from_slice::<Value>(&body).unwrap()["max_tokens"],
+                4096
+            );
+            respond(
+                &mut original,
+                "400 Bad Request",
+                if overflow {
+                    r#"{"error":{"type":"exceed_context_size","message":"private diagnostic","n_ctx":16384,"n_prompt_tokens":16400}}"#
+                } else {
+                    r#"{"error":{"type":"invalid_request_error","message":"private diagnostic"}}"#
+                },
+            );
+            if !overflow {
+                return None;
+            }
+            capacity(&mut listener.accept().unwrap().0, 32768);
+            let (mut fresh, _) = listener.accept().unwrap();
+            let (method, body) = request(&mut fresh);
+            assert_eq!(method, "POST /v1/chat/completions HTTP/1.1");
+            let body: Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(body["max_tokens"], 8192);
+            assert_eq!(body["messages"].as_array().unwrap().len(), 2);
+            let prompt = body["messages"][1]["content"].as_str().unwrap().to_owned();
+            respond(
+                &mut fresh,
+                "200 OK",
+                &format!(
+                    "data: {}\n\ndata: [DONE]\n\n",
+                    json!({"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}],
+                            "usage":{"prompt_tokens":3000,"completion_tokens":20,"total_tokens":3020},
+                            "timings":{"prompt_ms":250,"predicted_ms":500,"cache_n":100}})
+                ),
+            );
+            Some(prompt)
+        });
+        let output = Command::new(env!("CARGO_BIN_EXE_skott"))
+            .args(["--headless", "--json", "--config"])
+            .arg(config)
+            .arg("--log-dir")
+            .arg(&logs)
+            .arg("--cwd")
+            .arg(&work)
+            .arg("Reply with the original task outcome")
+            .output()
+            .unwrap();
+        let records: Vec<Value> = String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(!format!("{records:?}").contains("private diagnostic"));
+        assert_eq!(
+            output.status.success(),
+            overflow,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let prompt = server.join().unwrap();
+        if let Some(prompt) = prompt {
+            assert!(prompt.contains("Reply with the original task outcome"));
+            assert!(prompt.contains("entries") && prompt.contains("messages/"));
+            let index = prompt
+                .lines()
+                .find_map(|line| line.strip_prefix("Previous session index: "))
+                .unwrap();
+            let previous: Value = serde_json::from_slice(&std::fs::read(index).unwrap()).unwrap();
+            let original = previous["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["kind"] == "user")
+                .unwrap();
+            let original_path = std::path::Path::new(index)
+                .parent()
+                .unwrap()
+                .join(original["path"].as_str().unwrap());
+            assert!(
+                std::fs::read_to_string(original_path)
+                    .unwrap()
+                    .contains("Reply with the original task outcome")
+            );
+            assert_eq!(previous["status"], "completed");
+            assert_eq!(
+                std::fs::read_dir(&logs)
+                    .unwrap()
+                    .filter(|entry| entry.as_ref().unwrap().path().is_dir())
+                    .count(),
+                2
+            );
+            let progress = records
+                .iter()
+                .rev()
+                .find(|record| record["event"]["type"] == "progress")
+                .unwrap();
+            let data = &progress["event"]["data"];
+            assert_eq!(
+                (
+                    data["context_tokens"].as_u64(),
+                    data["context_limit"].as_u64()
+                ),
+                (Some(3020), Some(32768))
+            );
+            assert_eq!(data["generation_tokens_per_sec"], 40.0);
+            assert_eq!(data["telemetry"]["rollovers"], 1);
+            assert_eq!(records.last().unwrap()["event"]["data"]["answer"], "done");
+        } else {
+            assert!(
+                !records
+                    .iter()
+                    .any(|record| record["event"]["type"] == "finished")
+            );
+            assert_eq!(
+                std::fs::read_dir(&logs)
+                    .unwrap()
+                    .filter(|entry| entry.as_ref().unwrap().path().is_dir())
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
 fn trial_text(finish: &str, content: &str, json_output: bool) -> (std::process::Output, String) {
     let root = tempfile::tempdir().unwrap();
     let work = root.path().join("work");
@@ -30,28 +213,16 @@ fn trial_text(finish: &str, content: &str, json_output: bool) -> (std::process::
     let finish = finish.to_owned();
     let content = content.to_owned();
     let server = std::thread::spawn(move || {
+        let (mut metadata, _) = listener.accept().unwrap();
+        assert_eq!(request(&mut metadata).0, "GET /models HTTP/1.1");
+        respond(
+            &mut metadata,
+            "200 OK",
+            r#"{"data":[{"id":"test","context_length":8192}]}"#,
+        );
         let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        let mut request = Vec::new();
-        let mut byte = [0];
-        while !request.ends_with(b"\r\n\r\n") {
-            stream.read_exact(&mut byte).unwrap();
-            request.push(byte[0]);
-            assert!(request.len() < 64 * 1024);
-        }
-        let headers = String::from_utf8(request).unwrap();
-        let length: usize = headers
-            .lines()
-            .find_map(|line| {
-                let (key, value) = line.split_once(':')?;
-                key.eq_ignore_ascii_case("content-length")
-                    .then(|| value.trim().parse().unwrap())
-            })
-            .unwrap();
-        let mut body = vec![0; length];
-        stream.read_exact(&mut body).unwrap();
+        let (method, body) = request(&mut stream);
+        assert_eq!(method, "POST /v1/chat/completions HTTP/1.1");
         let request: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(request["max_tokens"], 1024);
         let delta = serde_json::json!({"model":"test","choices":[{"index":0,"delta":{"content":content},"finish_reason":null}]});

@@ -177,6 +177,13 @@ External-agent profiles are not native transports.
 
 ## Interactive startup and shutdown
 
+The provider's advertised serving context wins over a CLI or profile hint.
+On unsupported or temporarily unavailable metadata, the CLI hint wins over
+the profile hint. A rollover continues the submitted task without a terminal
+result between conversations. When recording, the next prompt identifies the
+previous `session.json` and explains its relative message paths. Private
+records outside the workspace are not exposed by new sandbox grants.
+
 The prompt is editable while model, toolchain and serving-capacity discovery
 run in the background. Submissions wait for validated startup resources and
 model selection. CLI and interactive model choices take precedence over late

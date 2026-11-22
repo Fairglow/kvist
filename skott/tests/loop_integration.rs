@@ -108,6 +108,7 @@ fn tool_turn(text: &str, tool: &str, arguments: serde_json::Value) -> ModelTurn 
         model: "test-model".to_owned(),
         response_id: None,
         provider_request_id: None,
+        timings: None,
         usage: Some(ModelUsage {
             input_tokens: 20,
             output_tokens: 10,
@@ -127,6 +128,7 @@ fn answer_turn(text: &str) -> ModelTurn {
         model: "test-model".to_owned(),
         response_id: None,
         provider_request_id: None,
+        timings: None,
         usage: Some(ModelUsage {
             input_tokens: 12,
             output_tokens: 6,
@@ -561,9 +563,7 @@ fn tool_call_is_executed_and_result_is_fed_back() {
 }
 
 #[test]
-fn a_denied_shell_command_is_reported_but_not_fatal() {
-    // A denylisted destructive command; the executor refuses it before any
-    // sandbox request, and the loop must keep going.
+fn a_denied_shell_command_stops_without_dispatch_and_reports_the_policy_failure() {
     let transport = ScriptedTransport::new(vec![
         tool_turn(
             "destroying everything",
@@ -592,17 +592,25 @@ fn a_denied_shell_command_is_reported_but_not_fatal() {
         &mut recorder,
     );
 
-    assert_eq!(summary.turns, 2);
+    assert_eq!(summary.turns, 1);
     assert_eq!(summary.tools_executed, 0);
-    assert_eq!(summary.answer.as_deref(), Some("refused and recovered"));
+    assert!(summary.answer.is_none());
+    assert_eq!(
+        summary.stop_reason,
+        Some(skott::session::StopReason::Failed)
+    );
     assert!(executor.executed().is_empty());
     let events = sink.events();
     assert!(events.iter().any(|e| matches!(
         e,
         Event::ToolResult { name, failed, .. } if name == "shell" && *failed
     )));
-    assert!(events.iter().any(|e| matches!(e, Event::Note(_))));
-    assert!(!events.iter().any(|e| matches!(e, Event::Failed(_))));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::ToolFailure { failure, .. }
+            if failure.category == skott::session::ToolFailureCategory::Denied
+                && failure.effects == skott::session::EffectCertainty::NotExecuted
+    )));
 }
 
 #[test]
@@ -883,10 +891,9 @@ fn progress_is_emitted_after_each_turn_with_cumulative_totals() {
 fn average_is_comparable_to_generation_rate_over_decode_time() {
     // The whole-session average must be on the same basis as the live `t/s`:
     // output tokens over decode time, so prompt tokens and inter-turn gaps do
-    // not inflate it. Every progress report therefore carries an average
-    // equal to `generation_tokens_per_sec`. The old implementation used
-    // cumulative (input + output) tokens over wall clock, which ran far above
-    // the decode-only speed, so a mismatch here would catch a regression.
+    // not inflate it. With no provider timing, the completed-turn speed is
+    // the session's decode average. During streaming the current turn's
+    // estimated speed is independent of that average.
     let transport = ScriptedTransport::new(vec![
         tool_turn(
             "inspect the file",
@@ -914,7 +921,15 @@ fn average_is_comparable_to_generation_rate_over_decode_time() {
     let reports: Vec<Event> = sink
         .events()
         .into_iter()
-        .filter(|e| matches!(e, Event::Progress { .. }))
+        .filter(|e| {
+            matches!(
+                e,
+                Event::Progress {
+                    token_accounting: skott::session::TokenAccounting::Provider,
+                    ..
+                }
+            )
+        })
         .collect();
     assert!(
         reports.len() >= 2,
@@ -2512,7 +2527,7 @@ fn unanswered_tool_calls(messages: &[ModelMessage]) -> usize {
 }
 
 #[test]
-fn a_denied_tool_still_records_a_tool_result_for_the_next_turn() {
+fn a_denied_tool_still_records_a_paired_result_without_requesting_another_turn() {
     // A tool the executor refuses must still produce a tool result in the
     // conversation, so the next request never ends on an unanswered assistant
     // tool call. A real OpenAI-compatible backend rejects such a request with
@@ -2546,16 +2561,17 @@ fn a_denied_tool_still_records_a_tool_result_for_the_next_turn() {
         )
         .expect("loop completes without error");
 
-    assert_eq!(summary.turns, 2);
+    assert_eq!(summary.turns, 1);
     assert_eq!(summary.tools_executed, 0);
-    assert_eq!(summary.answer.as_deref(), Some("refused and continued"));
-    // Every request the loop sent kept the assistant->tool sequence valid, so a
-    // backend would never reject it.
-    for request in transport.requests() {
-        assert_eq!(
-            unanswered_tool_calls(&request.messages),
-            0,
-            "request ended on unanswered assistant tool calls"
-        );
-    }
+    assert!(summary.answer.is_none());
+    assert_eq!(
+        transport.requests().len(),
+        1,
+        "policy denial ends inference"
+    );
+    assert!(matches!(
+        session.messages().last(),
+        Some(ModelMessage::ToolResult { name, .. }) if name == "shell"
+    ));
+    assert_eq!(unanswered_tool_calls(session.messages()), 0);
 }

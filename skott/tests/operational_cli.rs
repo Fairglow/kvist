@@ -77,6 +77,17 @@ fn trial_with_read_validation(
                 headers.push(byte[0]);
             }
             let headers = String::from_utf8(headers).unwrap();
+            if headers.starts_with("GET /models ") {
+                let body = r#"{"data":[{"id":"test","context_length":32768}]}"#;
+                write!(
+                    socket,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+                continue;
+            }
+            assert!(headers.starts_with("POST /v1/chat/completions "));
             let length: usize = headers
                 .lines()
                 .find_map(|line| {

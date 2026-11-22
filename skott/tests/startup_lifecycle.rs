@@ -78,7 +78,7 @@ impl Provider {
                     serde_json::from_slice(&body).unwrap()
                 };
                 requests.send((path.clone(), body.clone())).unwrap();
-                if path.starts_with(block_path) {
+                if path == block_path {
                     loop {
                         if stopping.load(Ordering::SeqCst) {
                             return;
@@ -150,6 +150,22 @@ impl Provider {
         self.requests
             .recv_timeout(Duration::from_secs(3))
             .expect("provider request")
+    }
+
+    fn next_inference(&self) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let (path, body) = self
+                .requests
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("provider inference request");
+            match path.as_str() {
+                "/v1/chat/completions" => return body,
+                "/props" | "/models" => {}
+                path if path.starts_with("/props?model=") => {}
+                path => panic!("unexpected provider request: {path}"),
+            }
+        }
     }
 }
 
@@ -381,8 +397,7 @@ fn interactive_control_socket_cancels_quiet_provider_without_becoming_context_or
         path.display()
     );
     tui.type_text(b"operator controlled task\r\r");
-    let (route, request) = provider.next();
-    assert_eq!(route, "/v1/chat/completions");
+    let request = provider.next_inference();
     assert!(!request.to_string().contains(path.to_str().unwrap()));
     let reply = send_control(&path, &ControlRequest::cancel(71), Duration::from_secs(1)).unwrap();
     assert_eq!(reply.status, "cancellation_requested");
@@ -678,8 +693,7 @@ fn submitted_prompts_wait_for_router_discovery_and_use_the_loaded_model() {
     provider.release.send(()).unwrap();
     assert_eq!(provider.next().0, "/models");
     for prompt in ["first-pending", "second-pending"] {
-        let (path, request) = provider.next();
-        assert_eq!(path, "/v1/chat/completions");
+        let request = provider.next_inference();
         assert_eq!(request["model"], "Model-B");
         assert!(
             request["messages"]
@@ -708,16 +722,12 @@ fn manual_model_choice_survives_a_late_active_model_result() {
     tui.type_text(b"\t\tmanual-choice\r\r");
     tui.wait_for("manual-choice");
     provider.release.send(()).unwrap();
-    let requests = [provider.next(), provider.next()];
-    assert!(requests.iter().any(|(path, _)| path == "/models"));
-    let (_, request) = requests
-        .iter()
-        .find(|(path, _)| path == "/v1/chat/completions")
-        .unwrap();
+    assert_eq!(provider.next().0, "/models");
+    let request = provider.next_inference();
     assert_eq!(request["model"], "Model-A");
     tui.wait_for("answer-ready");
     tui.type_text(b"after-discovery\r\r");
-    let (_, request) = provider.next();
+    let request = provider.next_inference();
     assert_eq!(request["model"], "Model-A");
     tui.quit();
 }

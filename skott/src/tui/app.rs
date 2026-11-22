@@ -132,6 +132,9 @@ pub const EFFORTS: [ReasoningEffort; 7] = [
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Stats {
     pub token_accounting: crate::session::TokenAccounting,
+    pub telemetry: sav::runtime::ProgressTelemetry,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
     /// Output tokens per second of wall time spent generating: the speed the
     /// user expects `tok/s` to mean, comparable to what `llama-server`
     /// reports. `None` before the first report carrying a measurement (a
@@ -602,6 +605,7 @@ impl App {
             }
             Event::ToolCall { description, .. } => {
                 self.flush_pending();
+                self.status = "running tool".to_owned();
                 self.note(self.theme.info, &format!("→ tool: {description}"));
             }
             Event::ToolResult {
@@ -620,6 +624,7 @@ impl App {
                 } else {
                     ("✓", "finished")
                 };
+                self.status = format!("tool {state}");
                 self.note(
                     style,
                     &format!(
@@ -654,6 +659,11 @@ impl App {
             }
             Event::Note(text) => {
                 self.flush_pending();
+                if text.starts_with("Checking context and compacting") {
+                    self.status = "compacting context".into();
+                } else if text.starts_with("Context exhausted;") {
+                    self.status = "opening fresh context".into();
+                }
                 self.note(self.theme.dim, &text);
             }
             Event::ToolFailure {
@@ -669,6 +679,9 @@ impl App {
             }
             Event::Progress {
                 token_accounting,
+                input_tokens,
+                output_tokens,
+                telemetry,
                 generation_tokens_per_sec,
                 average_tokens_per_sec,
                 context_tokens,
@@ -699,6 +712,9 @@ impl App {
                 };
                 self.stats = Some(Stats {
                     token_accounting,
+                    telemetry,
+                    input_tokens,
+                    output_tokens,
                     generation_tokens_per_sec,
                     average_tokens_per_sec,
                     context_tokens,
@@ -970,10 +986,58 @@ impl App {
     pub fn stats_line_for_width(&self, width: usize) -> String {
         let full = self.stats_line();
         if unicode_width::UnicodeWidthStr::width(full.as_str()) <= width {
-            full
-        } else {
-            self.format_stats_line(true)
+            return full;
         }
+        let compact = self.format_stats_line(true);
+        if unicode_width::UnicodeWidthStr::width(compact.as_str()) <= width {
+            return compact;
+        }
+        let Some(stats) = self.stats else {
+            return String::new();
+        };
+        let context_marker = if stats.telemetry.context_observed {
+            ""
+        } else {
+            "~"
+        };
+        let usage_marker = match stats.token_accounting {
+            crate::session::TokenAccounting::Provider => "",
+            crate::session::TokenAccounting::Estimated => "~",
+            crate::session::TokenAccounting::Unavailable => "≥",
+        };
+        let mut parts = vec![
+            format!(
+                "ctx {context_marker}{:.0}% {}/{}",
+                stats.utilization.clamp(0.0, 1.0) * 100.0,
+                format_number(stats.context_tokens as f64),
+                format_number(stats.context_limit as f64)
+            ),
+            format!("{} comp", stats.compactions),
+            format!(
+                "{usage_marker}{} tok",
+                format_number(stats.total_tokens as f64)
+            ),
+            format_elapsed(stats.elapsed_secs),
+        ];
+        if stats.telemetry.rollovers > 0 {
+            parts.insert(2, format!("{} fresh", stats.telemetry.rollovers));
+        }
+        if let Some(rate) = stats.generation_tokens_per_sec {
+            parts.push(format!("{} t/s", format_number(rate)));
+        }
+        let mut line = String::new();
+        for part in parts {
+            let needed = unicode_width::UnicodeWidthStr::width(line.as_str())
+                + usize::from(!line.is_empty()) * 3
+                + unicode_width::UnicodeWidthStr::width(part.as_str());
+            if needed <= width {
+                if !line.is_empty() {
+                    line.push_str(" · ");
+                }
+                line.push_str(&part);
+            }
+        }
+        line
     }
 
     fn format_stats_line(&self, compact: bool) -> String {
@@ -985,6 +1049,9 @@ impl App {
         // Both the estimate and the provider figure pad to the same width so the
         // "t/s" label stays in one column across the transition.
         let speed = match (stats.token_accounting, stats.generation_tokens_per_sec) {
+            (_, Some(rate)) if stats.telemetry.generation_provider => {
+                format!("{:>6}", format_number(rate))
+            }
             (crate::session::TokenAccounting::Unavailable, _) => "      ?".to_owned(),
             (crate::session::TokenAccounting::Estimated, Some(rate)) => {
                 format!("{:>6}", format!("~{}", format_number(rate)))
@@ -997,14 +1064,20 @@ impl App {
         let average = format!("{:>5}", format_number(stats.average_tokens_per_sec));
         let limit = format_number(stats.context_limit as f64);
         let current = format_number(stats.context_tokens as f64);
+        let marker =
+            if !stats.telemetry.context_observed && !stats.telemetry.capacity_source.is_empty() {
+                "~"
+            } else {
+                ""
+            };
         let context = if compact {
             format!(
-                "ctx {:.0}% {current}/{limit}",
+                "ctx {marker}{:.0}% {current}/{limit}",
                 stats.utilization.clamp(0.0, 1.0) * 100.0
             )
         } else {
             format!(
-                "ctx {}{:>5.0}% {current:>width$}/{limit}",
+                "ctx {marker}{}{:>5.0}% {current:>width$}/{limit}",
                 bargraph(stats.utilization, 8),
                 stats.utilization.clamp(0.0, 1.0) * 100.0,
                 width = limit.len()
@@ -1018,6 +1091,9 @@ impl App {
             context,
             format!("compactions {}", stats.compactions),
         ];
+        if stats.telemetry.rollovers > 0 {
+            parts.push(format!("fresh {}", stats.telemetry.rollovers));
+        }
         if !compact && stats.compaction_progress > 0.0 {
             let eta_suffix = match stats.eta_secs {
                 Some(secs) => format!(" (in {})", format_eta(secs)),
@@ -1040,6 +1116,12 @@ impl App {
                     format!("~{}", format_number(stats.total_tokens as f64))
                 )
             }
+            crate::session::TokenAccounting::Unavailable if stats.total_tokens > 0 => {
+                format!(
+                    "{} tok observed (partial)",
+                    format_number(stats.total_tokens as f64)
+                )
+            }
             crate::session::TokenAccounting::Unavailable => "provider usage unavailable".into(),
         };
         if compact {
@@ -1053,6 +1135,22 @@ impl App {
                 "{usage_part} · {:>7}",
                 format_elapsed(stats.elapsed_secs)
             ));
+            if !stats.telemetry.capacity_source.is_empty() {
+                parts.push(format!(
+                    "{} in / {} out",
+                    format_number(stats.input_tokens as f64),
+                    format_number(stats.output_tokens as f64)
+                ));
+                if stats.telemetry.capacity_source != "provider" {
+                    parts.push(format!("limit: {}", stats.telemetry.capacity_source));
+                }
+            }
+            if let Some(seconds) = stats.telemetry.prompt_seconds {
+                parts.push(format!("prefill {seconds:.1}s"));
+            }
+            if let Some(cached) = stats.telemetry.cached_input_tokens {
+                parts.push(format!("{} cached", format_number(cached as f64)));
+            }
         }
         parts.join(if compact { " · " } else { "  ·  " })
     }
@@ -3622,6 +3720,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.02,
             compaction_progress: 0.0,
+            telemetry: Default::default(),
             compactions: 0,
             generation_tokens_per_sec: 42.0,
             average_tokens_per_sec: 95.0,
@@ -3638,8 +3737,7 @@ table_sep = { fg = "gray" }
         assert!(!line.contains("compaction "));
         app.stats.as_mut().unwrap().token_accounting = crate::session::TokenAccounting::Unavailable;
         let line = app.stats_line();
-        assert!(line.contains("provider usage unavailable"));
-        assert!(!line.contains("512 tok"));
+        assert!(line.contains("512 tok observed (partial)"));
         assert!(line.contains("? t/s"));
         app.stats.as_mut().unwrap().token_accounting = crate::session::TokenAccounting::Estimated;
         assert!(app.stats_line().contains("~512 tok"));
@@ -3658,6 +3756,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.77,
             compaction_progress: 0.08,
+            telemetry: Default::default(),
             compactions: 0,
             generation_tokens_per_sec: 40.0,
             average_tokens_per_sec: 90.0,
@@ -3672,6 +3771,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.89,
             compaction_progress: 0.33,
+            telemetry: Default::default(),
             compactions: 0,
             generation_tokens_per_sec: 40.0,
             average_tokens_per_sec: 90.0,
@@ -3689,6 +3789,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.24,
             compaction_progress: 0.0,
+            telemetry: Default::default(),
             compactions: 0,
             generation_tokens_per_sec: 40.0,
             average_tokens_per_sec: 90.0,
@@ -3713,6 +3814,7 @@ table_sep = { fg = "gray" }
                 context_limit: 32768,
                 context_utilization: 0.3,
                 compaction_progress: 0.0,
+                telemetry: Default::default(),
                 compactions: 0,
                 generation_tokens_per_sec: rate,
                 average_tokens_per_sec: avg,
@@ -3749,6 +3851,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.5,
             compaction_progress: 0.4,
+            telemetry: Default::default(),
             compactions: 0,
             generation_tokens_per_sec: 50.0,
             average_tokens_per_sec: 50.0,
@@ -3770,6 +3873,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.4,
             compaction_progress: 0.3,
+            telemetry: Default::default(),
             compactions: 0,
             generation_tokens_per_sec: 50.0,
             average_tokens_per_sec: 50.0,
@@ -3785,6 +3889,7 @@ table_sep = { fg = "gray" }
             context_limit: 8192,
             context_utilization: 0.5,
             compaction_progress: 0.45,
+            telemetry: Default::default(),
             compactions: 0,
             generation_tokens_per_sec: 50.0,
             average_tokens_per_sec: 50.0,
@@ -3809,6 +3914,7 @@ table_sep = { fg = "gray" }
                 context_limit: 8192,
                 context_utilization: 0.5,
                 compaction_progress: 0.4,
+                telemetry: Default::default(),
                 compactions: 0,
                 generation_tokens_per_sec: 50.0,
                 average_tokens_per_sec: 50.0,
@@ -3833,6 +3939,7 @@ table_sep = { fg = "gray" }
                 context_limit: 8192,
                 context_utilization: 0.5,
                 compaction_progress: 0.4,
+                telemetry: Default::default(),
                 compactions: 0,
                 generation_tokens_per_sec: 50.0,
                 average_tokens_per_sec: 50.0,
@@ -3858,6 +3965,7 @@ table_sep = { fg = "gray" }
                 context_limit: 8192,
                 context_utilization: 0.5,
                 compaction_progress: 0.4,
+                telemetry: Default::default(),
                 compactions: 0,
                 generation_tokens_per_sec: 50.0,
                 average_tokens_per_sec: 50.0,

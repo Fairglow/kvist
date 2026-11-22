@@ -282,6 +282,10 @@ impl SessionLog {
         self
     }
 
+    pub(crate) fn metadata(&self) -> Option<&SessionMetadata> {
+        self.metadata.as_ref()
+    }
+
     /// Location of the version-one journal.
     pub fn journal_path(&self) -> &Path {
         &self.journal_path

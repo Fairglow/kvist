@@ -10,6 +10,50 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "context-rollover-write-tests"
+    title: "write_tests: provider-first capacity and durable rollover"
+    description: "Exercise startup precedence, genuine HTTP context rejection, terminal output and the exact predecessor index."
+    context: "A configured hint could override the serving window and provider rejection could terminate the task."
+    purpose: "Prove the same task completes in a new recorded conversation."
+    expected_outcome: "Loopback fixtures distinguish capacity metadata and context rejection from ordinary inference failures."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-CONTEXT-ROLLOVER"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:24:12Z", completed_at: "2026-11-22T18:24:12Z" }
+  - id: "context-rollover-implement-code"
+    title: "implement_code: linked sessions and shared Skott stats"
+    description: "Prefer serving metadata, rotate recordings within the run, and expose shared metrics."
+    context: "Loopback fixtures pass for provider-first capacity and the exact linked predecessor followed by a terminal answer."
+    purpose: "Keep the task moving without losing the historical record."
+    expected_outcome: "Standalone, batch and embedded hosts share runtime recovery and useful observations."
+    kind: implementation
+    status: completed
+    depends_on: ["context-rollover-write-tests"]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-CONTEXT-ROLLOVER"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:24:12Z", completed_at: "2026-11-22T18:24:12Z" }
+  - id: "context-rollover-security-audit"
+    title: "security_audit: linked session isolation"
+    description: "Independently inspect predecessor selection, private link handling, and tool authority across rollover."
+    context: "Rollover sends a predecessor reference to the model without adding any workspace grant."
+    purpose: "Preserve workspace and diagnostic boundaries."
+    expected_outcome: "Independent findings with explicit evidence limits."
+    kind: security-audit
+    status: pending
+    depends_on: ["context-rollover-implement-code"]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-CONTEXT-ROLLOVER"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:06:39Z", completed_at: null }
+  - id: "context-rollover-compliance-review"
+    title: "compliance_review: context recovery and observability"
+    description: "Compare independent implementation observations and tests with the controlled intent."
+    context: "Preliminary comparison leaves evidence gaps for no-recorder recovery and an interactive terminal session. Formal review follows the security audit."
+    purpose: "Retain discrepancies for human arbitration."
+    expected_outcome: "A separate source-blind comparison; no automatic acceptance."
+    kind: compliance-review
+    status: pending
+    depends_on: ["context-rollover-security-audit"]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-CONTEXT-ROLLOVER"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:06:39Z", completed_at: null }
   - id: "native-admission-write-tests"
     title: "write_tests: exact native Git check admission"
     description: "Cover actual offline Git admission and missing-source failure despite a matching lock-only receipt."

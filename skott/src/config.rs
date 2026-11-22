@@ -52,7 +52,7 @@ pub struct Model {
     /// one entry per provider may be marked default.
     #[serde(default)]
     pub is_default: bool,
-    /// Explicit serving context when discovery is unavailable or overridden.
+    /// Fallback context hint when serving capacity cannot be discovered.
     #[serde(default)]
     pub context_limit: Option<usize>,
     /// Explicit generation reserve; absence chooses a window-aware default.
@@ -88,6 +88,22 @@ pub struct ModelBudgets {
     pub context_source: &'static str,
     pub response_source: &'static str,
     pub limits: crate::session::RunLimits,
+    context_hint: Option<(usize, &'static str)>,
+    probe_after_load: bool,
+}
+
+impl ModelBudgets {
+    /// Builds a context window with the same discovery policy for fresh contexts.
+    pub fn context(self) -> crate::context::ContextManager {
+        let mut context = crate::context::ContextManager::for_model(self.context_limit);
+        context.set_serving_policy(
+            self.context_hint,
+            self.context_source,
+            self.response_source == "automatic",
+            self.probe_after_load,
+        );
+        context
+    }
 }
 
 impl Model {
@@ -113,22 +129,44 @@ impl Model {
         mut limits: crate::session::RunLimits,
         cancellation: &sav::CancellationToken,
     ) -> Result<ModelBudgets> {
-        let (context_limit, context_source) = if let Some(limit) = context_override {
-            (limit, "CLI")
-        } else if let Some(limit) = self.context_limit {
-            (limit, "configuration")
+        let context_hint = context_override
+            .map(|limit| (limit, "CLI"))
+            .or_else(|| self.context_limit.map(|limit| (limit, "configuration")));
+        let transport = self.transport()?;
+        // Without a hint a provider that is loading has more time to respond.
+        let deadline = if context_hint.is_some() {
+            std::time::Duration::from_secs(2)
         } else {
-            let discovery = self.transport()?.context_limit(
-                &self.model, cancellation,
-            ).map_err(|error| Error::Config {
-                path: None,
-                reason: format!("could not discover serving capacity for `{}` ({error}); set models.context_limit or --context-limit to the server's actual capacity", self.id),
-            })?;
-            (discovery.ok_or_else(|| Error::Config {
-                path: None,
-                reason: format!("serving capacity for `{}` is unavailable; configure models.context_limit or --context-limit (no 8192-token default is assumed)", self.id),
-            })?, "provider")
+            sav::ModelTransport::deadline(&transport)
         };
+        let (capacity, probe_after_load) = match sav::ModelTransport::serving_context(
+            &transport,
+            &self.model,
+            cancellation,
+            deadline,
+        ) {
+            Ok(capacity) => (capacity, capacity.is_none()),
+            Err(sav::Error::ModelTransportCancelled) => return Err(Error::Cancelled),
+            Err(error) if error.is_optional_capacity_unavailable() => {
+                tracing::warn!(model = %self.id, %error, "serving capacity unavailable");
+                (None, true)
+            }
+            Err(error) => {
+                return Err(Error::Config {
+                    path: None,
+                    reason: format!(
+                        "could not discover serving capacity for `{}`: {error}",
+                        self.id
+                    ),
+                });
+            }
+        };
+        let (context_limit, context_source) = capacity.map(|limit| (limit, "provider"))
+            .or(context_hint)
+            .ok_or_else(|| Error::Config {
+                path: None,
+                reason: format!("serving capacity for `{}` is unavailable; set models.context_limit or --context-limit as a fallback hint", self.id),
+            })?;
         if !(2..=1_048_576).contains(&context_limit) {
             return Err(Error::Config {
                 path: None,
@@ -155,6 +193,8 @@ impl Model {
             context_source,
             response_source,
             limits,
+            context_hint,
+            probe_after_load,
         })
     }
 

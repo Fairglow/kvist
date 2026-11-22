@@ -1,6 +1,24 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Serving capacity and linked session observations - 2026-11-22
+
+Independent `implementation-observer` inspected current source and test
+assertions only; it excluded intent, task queues, prior records and history,
+and did not execute tests. Configuration resolves serving capacity ahead of
+CLI and profile hints and retains a deferred-probe flag when appropriate.
+The recorder opens a successor, carries available context metadata, seals the
+predecessor, switches the active record and returns the predecessor reference
+for the handoff. The TUI distinguishes estimated occupancy, usage and speed
+from provider observations and surfaces cache usage and rollover count.
+The headless fixture checks a second capacity lookup, the original task in
+the successor prompt, and a predecessor index that resolves to the actual
+original user message. It also verifies that an ordinary invalid request
+does not rotate the record or report completion.
+
+Sources: `src/config.rs`, `src/session_transcript.rs`, `src/tui/app.rs`.
+Fixture assertions: `tests/{model_budgets,headless_cli}.rs`.
+
 ## Bounded inspection recovery observations - 2026-11-07
 
 `tool-recovery-source-observer` independently inspected current

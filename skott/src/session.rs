@@ -78,6 +78,10 @@ pub trait ToolExecutor: Send + Sync {
 /// full reasoning trace here is what keeps thinking inspectable even after
 /// compaction removes it from the model context.
 pub trait Recorder: Send {
+    /// Seals and starts a fresh operational record, if supported.
+    fn rollover(&mut self, _limit: usize, _source: &str, _reserve: u32) -> Result<Option<String>> {
+        Ok(None)
+    }
     /// Records a provisional live provider event before UI delivery.
     fn model_event(&mut self, _event: &sav::ModelStreamEvent) -> Result<()> {
         Ok(())
@@ -210,6 +214,7 @@ impl Skott {
     ) -> Result<RunSummary> {
         let runner = sav::runtime::NativeRuntime::with_retry(self.max_turns, self.retry)
             .with_limits(self.limits)?
+            .with_context_rollover()
             .with_generation_loop_detection(self.generation_loop_detection);
         let mut recorder = recorder.map(RecordBridge);
         let shared_recorder = recorder
@@ -353,6 +358,14 @@ impl<S: EventSink> sav::runtime::EventSink for SinkBridge<'_, S> {
 }
 struct RecordBridge<'a>(&'a mut dyn Recorder);
 impl sav::runtime::Recorder for RecordBridge<'_> {
+    fn rollover(
+        &mut self,
+        limit: usize,
+        source: &str,
+        reserve: u32,
+    ) -> sav::runtime::Result<Option<String>> {
+        self.0.rollover(limit, source, reserve).map_err(Into::into)
+    }
     fn model_event(&mut self, event: &sav::ModelStreamEvent) -> sav::runtime::Result<()> {
         self.0.model_event(event).map_err(Into::into)
     }

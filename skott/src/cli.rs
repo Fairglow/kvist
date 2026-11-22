@@ -113,7 +113,7 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub log_dir: Option<PathBuf>,
 
-    /// Override serving context in tokens (otherwise model config or discovery).
+    /// Context hint in tokens if the provider does not advertise serving capacity.
     #[arg(long, value_name = "TOKENS")]
     pub context_limit: Option<usize>,
 

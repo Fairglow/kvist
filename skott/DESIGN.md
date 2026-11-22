@@ -1114,6 +1114,12 @@ only narrow the sandbox grant.
 
 ## Terminal UI
 
+Reuse Sav's same-run rollover in the worker and batch paths. Rotate only the
+record owned by this run, never select a predecessor by directory age. Keep
+forward progress possible without logs by supplying the original task and
+bounded observations in the handoff. The standalone App owns the Skott stats
+format used by both terminal hosts.
+
 Startup resolves the selected default or override directory through one
 canonical existing-directory validator shared with headless execution, before
 terminal setup or tool selection. Markdown rows — answer blocks and reasoning

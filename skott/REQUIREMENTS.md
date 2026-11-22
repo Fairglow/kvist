@@ -934,6 +934,15 @@ Successful use produces:
 
 ## Security-first runtime hardening
 
+### RUN-REQ-CONTEXT-ROLLOVER
+
+Skott MUST query serving capacity for each model session; configuration and
+CLI limits are hints when metadata is unavailable. Confirmed context exhaustion
+MUST continue the same task in a fresh model conversation, link the exact
+predecessor when recording is enabled, and preserve task allowances and
+authority. A fresh conversation that cannot make progress MUST fail explicitly.
+Both TUI hosts MUST show the same Skott metrics and compaction or rollover state.
+
 This extension implements the P0/P1 recommendations from an upstream
 coding-agent runtime comparison. The user's improvement
 request authorizes these conservative changes; remote authority and automatic

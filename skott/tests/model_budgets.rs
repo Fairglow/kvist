@@ -70,3 +70,46 @@ fn unavailable_discovery_requests_explicit_capacity_instead_of_assuming_8192() {
         .unwrap_err();
     assert!(error.describe().contains("context_limit"), "{error}");
 }
+
+#[test]
+fn provider_capacity_supersedes_both_hints() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    let (_dir, mut config) = model("context_limit=262144\n");
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    config.models[0].base_url = format!("http://{}", listener.local_addr().unwrap());
+    let worker = std::thread::spawn(move || {
+        for (route, body) in [
+            ("/models", r#"{"data":[{"id":"test"}]}"#),
+            (
+                "/props?model=test",
+                r#"{"default_generation_settings":{"n_ctx":16384}}"#,
+            ),
+        ] {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = String::new();
+            BufReader::new(&mut stream).read_line(&mut request).unwrap();
+            assert!(request.starts_with(&format!("GET {route} ")), "{request}");
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        }
+    });
+    let budget = config.models[0]
+        .resolve_budgets(Some(4096), None, RunLimits::default())
+        .unwrap();
+    worker.join().unwrap();
+    assert_eq!(
+        (budget.context_limit, budget.context_source),
+        (16384, "provider")
+    );
+    assert_eq!(budget.limits.response_reserve, 4096);
+}

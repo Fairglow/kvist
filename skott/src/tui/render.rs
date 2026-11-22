@@ -875,6 +875,7 @@ mod tests {
             context_limit: 81920,
             context_utilization: 0.366,
             compaction_progress: 0.0,
+            telemetry: Default::default(),
             compactions: 0,
             generation_tokens_per_sec: 62.0,
             average_tokens_per_sec: 214.0,

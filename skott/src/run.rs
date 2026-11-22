@@ -346,7 +346,7 @@ where
                     }
                     break;
                 }
-                session.push_user(text);
+                session.begin_task(text);
                 // Skott owns the completion policy. The agent must reach one of
                 // the three accepted outcomes — complete, blocked for a concrete
                 // reason, or awaiting a human decision. When it returns control
@@ -963,6 +963,7 @@ mod tests {
                 model: "test".into(),
                 response_id: None,
                 provider_request_id: None,
+                timings: None,
                 usage: None,
             })
         }
@@ -1113,6 +1114,7 @@ mod tests {
                     model: "test".into(),
                     response_id: None,
                     provider_request_id: None,
+                    timings: None,
                     usage: None,
                 })
             } else {
@@ -1126,6 +1128,7 @@ mod tests {
                     model: "test".into(),
                     response_id: None,
                     provider_request_id: None,
+                    timings: None,
                     usage: None,
                 })
             }

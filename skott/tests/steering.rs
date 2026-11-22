@@ -97,6 +97,7 @@ fn tool_turn(text: &str, tool: &str, arguments: serde_json::Value) -> ModelTurn 
         model: "test-model".to_owned(),
         response_id: None,
         provider_request_id: None,
+        timings: None,
         usage: Some(ModelUsage {
             input_tokens: 20,
             output_tokens: 10,
@@ -115,6 +116,7 @@ fn answer_turn(text: &str) -> ModelTurn {
         model: "test-model".to_owned(),
         response_id: None,
         provider_request_id: None,
+        timings: None,
         usage: Some(ModelUsage {
             input_tokens: 12,
             output_tokens: 6,

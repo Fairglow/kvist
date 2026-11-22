@@ -303,8 +303,8 @@ pub fn run_with_controls(
         eprintln!("{}", crate::error::terminal_text(note));
     }
     crate::session::Recorder::on_prompt(&mut log, prompt)?;
-    session.push_user(prompt);
-    let mut context = crate::context::ContextManager::for_model(budgets.context_limit);
+    session.begin_task(prompt);
+    let mut context = budgets.context();
     let sink = OutputSink {
         output: Mutex::new(Output {
             writer: std::io::stdout(),
