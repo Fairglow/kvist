@@ -1,6 +1,33 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped automatic task selection observation - 2026-11-23
+
+An independent source-only observer inspected implementation and test
+assertions, not intent, queues, prior records, or history. It did not run tests.
+
+Bare `task run` visits current components sequentially, skips queues with no
+ready work, and reports exhaustion (both selectors are null in JSON). An explicit
+component scopes the run; a second argument selects one exact ID or ready-list
+position. The continuous executor reloads the queue and requires all direct and
+transitive dependencies to be complete. A decision holds its task and
+dependents while independent tasks and subsequent components can proceed;
+execution errors stop the pass.
+
+The authenticated component ledger defers item/task checkpoints if scheduling
+continues beyond an unfinished decision-held group. The deferred checkpoint
+is local and unaccepted, and is not published until component completion.
+The TUI forwards bare runs to the supervised subprocess without substituting
+transcript focus. It polls candidate queues, excludes pre-existing in-progress
+tasks, and follows new active tasks across components.
+
+Sources: `src/task_commands.rs`, `src/task_commands/continuous.rs`,
+`src/cli.rs`, and `src/bark/tui/workspace/`. Assertions:
+`workspace_task_run_continues_past_decisions_without_running_dependent_tasks`,
+`workspace_task_run_completes_both_components_then_reports_no_ready_work`,
+`project_progress_follows_active_tasks_between_queues`, and
+`bare_kvist_hosts_completion_reports_and_restorable_component_history`.
+
 ## Scoped task execution and Rust quality observation
 
 An independent source-only observer inspected scoped implementation and test

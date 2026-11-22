@@ -274,9 +274,21 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
     wait_for(&pty.master, &mut output, || {
         transcript(dir.path()).contains("Command finished")
     });
+    write(&pty.master, b"task run\r").unwrap();
+    wait_for(&pty.master, &mut output, || {
+        let stored = transcript(dir.path());
+        stored.contains("No more ready tasks") && stored.matches("Command finished").count() >= 2
+    });
     write(&pty.master, b"cd .\r").unwrap();
     wait_for(&pty.master, &mut output, || {
         transcript(&component).matches("# Focus:").count() >= 2
+    });
+    write(&pty.master, b"task run ").unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    write(&pty.master, b"\x7f\x7f\r").unwrap();
+    wait_for(&pty.master, &mut output, || {
+        let stored = transcript(&component);
+        stored.contains("No more ready tasks") && stored.matches("Command finished").count() >= 7
     });
     write(&pty.master, b"\x1b[5~").unwrap();
     std::thread::sleep(Duration::from_millis(100));

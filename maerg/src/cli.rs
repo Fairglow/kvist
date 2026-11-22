@@ -632,13 +632,13 @@ pub enum TaskCommand {
     /// Run an external AI agent to execute a task, tracking progress and token usage.
     ///
     /// An exact TASK_ID runs only that task. Without it, execute ready tasks
-    /// continuously, applying the configured checkpoint policy until final approval,
-    /// a decision, or a blocker. No confirmation or `all` selector is needed.
+    /// continuously with the configured checkpoint policy. Decisions hold
+    /// dependent work, not independent ready tasks. No confirmation is needed.
     Run {
-        /// Component directory. The workspace requires an explicit component.
+        /// Component directory; omit to run ready work across the project.
         #[arg(value_name = "COMPONENT_DIR")]
         component_dir: Option<PathBuf>,
-        /// Exact task ID; omit to run component work continuously.
+        /// Exact task ID or numbered ready task; omit for continuous work.
         #[arg(value_name = "TASK_ID")]
         task_id: Option<String>,
         /// Optional flag to stream agent stdout and stderr directly to the console.
@@ -1306,23 +1306,20 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
-                let component = project.resolve_component(component_dir.as_deref())?;
-                let message = task_commands::run_task_or_item_with_controls(
-                    &project.project_dir,
-                    &component,
+                let (component, message) = task_commands::run_selection(
+                    &project,
+                    component_dir.as_deref(),
                     task_id.as_deref(),
                     stream,
                     allow_control,
                 )?;
-                let task_id_field = match task_id.as_deref() {
-                    Some(id) => format!("\"{id}\""),
-                    None => "null".to_owned(),
-                };
-                Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"task-run\",\"component_dir\":\"{}\",\"task_id\":{task_id_field},\"message\":\"{}\"}}",
-                    component.to_string_lossy().replace('\\', "\\\\"),
-                    message.replace('\n', "\\n").replace('"', "\\\"")
-                )))
+                Ok(CommandOutput::message(serde_json::json!({
+                    "status": "success",
+                    "command": "task-run",
+                    "component_dir": component.as_deref().map(Path::to_string_lossy),
+                    "task_id": task_id,
+                    "message": message,
+                }).to_string()))
             }
             Command::Task {
                 command: TaskCommand::Log {
@@ -1943,15 +1940,14 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
-                let component = project.resolve_component(component_dir.as_deref())?;
-                task_commands::run_task_or_item_with_controls(
-                    &project.project_dir,
-                    &component,
+                task_commands::run_selection(
+                    &project,
+                    component_dir.as_deref(),
                     task_id.as_deref(),
                     stream,
                     allow_control,
                 )
-                .map(CommandOutput::message)
+                .map(|(_, message)| CommandOutput::message(message))
             }
             Command::Task {
                 command:
@@ -3359,6 +3355,7 @@ mod tests {
             help.contains("Exact task ID"),
             "help missing exact task ID form"
         );
+        assert!(help.contains("across the project"));
     }
 
     #[test]

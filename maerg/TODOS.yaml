@@ -6794,3 +6794,52 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "workspace-task-run-write-tests"
+    title: "write_tests: cover automatic task component selection"
+    description: "Exercise a bare run across components, no ready work, and decisions that leave dependencies pending while independent work continues."
+    context: "The TUI stopped accepting a bare run after adopting supervised execution."
+    purpose: "Prevent regressions in automatic component selection and dependency handling."
+    expected_outcome: "Independent work completes, and decision-dependent tasks stay pending."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
+    timestamps: { created_at: "2026-11-22T23:47:00Z", updated_at: "2026-11-22T23:53:40Z", completed_at: "2026-11-22T23:53:40Z" }
+  - id: "workspace-task-run-implement-code"
+    title: "implement_code: restore project-wide task scheduling"
+    description: "Use the protected component executor from CLI and workspace, and retain live progress without changing focus."
+    context: "Use the human-requested semantics without claiming an advisory receipt."
+    purpose: "Restore automatic scheduling without bypassing supervised execution."
+    expected_outcome: "Each runnable component retains its own locks, evidence, and checkpoint boundaries."
+    kind: implementation
+    status: completed
+    depends_on: ["workspace-task-run-write-tests"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
+      - "REQUIREMENTS.md#REQ-TASK-RUN-FEEDBACK-AND-QUALITY"
+    timestamps: { created_at: "2026-11-22T23:47:00Z", updated_at: "2026-11-22T23:53:40Z", completed_at: "2026-11-22T23:53:40Z" }
+  - id: "workspace-task-run-security-audit"
+    title: "security_audit: inspect project-wide task authority"
+    description: "Independently check component isolation, policy approval, cancellation, and checkpoint boundaries."
+    context: "Independent gate; no implementer certification."
+    purpose: "Check that scheduler continuation does not widen authority."
+    expected_outcome: "Independent findings identify any broken authority boundaries."
+    kind: security-audit
+    status: pending
+    depends_on: ["workspace-task-run-implement-code"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
+    timestamps: { created_at: "2026-11-22T23:47:00Z", updated_at: "2026-11-22T23:47:00Z", completed_at: null }
+  - id: "workspace-task-run-compliance-review"
+    title: "compliance_review: compare automatic scheduling against intent"
+    description: "Compare independent observations and regression test evidence against the controlled intent."
+    context: "Keep source observation separate from intent comparison."
+    purpose: "Retain discrepancies for human arbitration."
+    expected_outcome: "The comparison records verified behavior and its limits without accepting work."
+    kind: compliance-review
+    status: pending
+    depends_on: ["workspace-task-run-security-audit"]
+    requirements:
+      - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
+    timestamps: { created_at: "2026-11-22T23:47:00Z", updated_at: "2026-11-22T23:47:00Z", completed_at: null }

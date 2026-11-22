@@ -808,12 +808,19 @@ unchanged host locks, and cover invalid dependency paths.
 ### REQ-CONTINUOUS-EXECUTION
 
 Bare `task run COMPONENT` MUST execute dependency-ready tasks iteratively,
-without confirmation or a task-count ceiling, until all execution is complete,
-a decision/blocker occurs, or cancellation is requested. An explicit task ID
+without confirmation or a task-count ceiling, until ready work is exhausted
+or execution cannot safely proceed. An explicit task ID
 MUST execute only that task and retain prerequisite checks. `all`, item-prefix
 execution and `run-all` MUST NOT be alternate batch interfaces.
-The component argument MUST remain required, including after an editable
-shell prefill has been deleted; neither focus nor cwd may supply it implicitly.
+With no component argument, `task run` MUST select current components with
+dependency-ready tasks across the project in stable path order. Each selected
+component MUST use the same supervised continuous execution and checkpoint
+rules. A task awaiting a decision MUST NOT run or satisfy a dependency, but
+MUST NOT stop independent ready tasks in the same or later components.
+An execution failure, unresolved effects, or cancellation MUST stop the run.
+If no component has ready work, report that outcome without starting a task.
+Deleting an editable component prefill MUST restore project scope, not
+implicitly target the focus or cwd.
 Successful execution MUST be distinct from human acceptance; default runs MUST
 not invoke human acceptance automatically. Completed component execution MUST
 durably await final human approval.
@@ -833,7 +840,10 @@ checkpoints MUST wait for all defined item tasks, including every test,
 implementation and review task belonging to that item. Configurable local commit frequency MUST default to per-item, permit
 per-task, per-component or manual commits, and be approval-bound. Per-task
 mode MUST checkpoint each successfully completed task before selecting the
-next. The TUI MUST expose the current setting and allow an idle operator to
+next. When continuing past an unfinished decision-blocked checkpoint group
+would mix its changes with later work, the executor MUST defer those automatic
+checkpoints until the component completes, without publishing unfinished work.
+The TUI MUST expose the current setting and allow an idle operator to
 change it without granting execution approval. Checkpoint commits
 MUST NOT imply acceptance, include unrelated changes, push, amend, or bypass
 signing policy. Dirty overlapping paths, concurrent changes and failed commits
@@ -846,7 +856,7 @@ stalled helper. A stopped checkpoint MUST retain recoverable known state.
 Security task observations MUST use a fresh source-only context. Compliance task work
 MUST derive source-only observations in one fresh request and compare them
 against intent in a separate source-blind request, without authoring tools.
-Host-written observations/reports MUST be durable; decisions MUST pause work,
+Host-written observations/reports MUST be durable; decisions MUST pause dependent work,
 and report existence MUST NOT itself be treated as acceptance.
 Large review evidence MUST be processed in bounded fresh-context fragments,
 with complete fragment coverage, phase-preserving synthesis and shared task
@@ -1166,11 +1176,9 @@ while intent-review receipts are unavailable.
 
 Bare `task run COMPONENT` MUST run the whole selected component: it
 MUST iterate over the component's tasks in dependency order, running each ready
-task, and MUST stop when the component is complete, when a task becomes
-blocked, or when a task reaches an awaiting-decision point. It MUST NOT
-auto-resolve a decision or unblock a blocked task; it MUST pause and report the
-exact state and the command that resolves it, so the operator can decide and
-resume. The command MUST respect the same locking, policy-approval, and
+task, and MUST stop when there is no more ready work or execution cannot
+safely proceed. It MUST NOT auto-resolve a decision or unblock a blocked task.
+The command MUST respect the same locking, policy-approval, and
 evidence guarantees as `task run`, and MUST leave durable task state for
 explicit finalize or recovery when it stops at a blocker or decision.
 

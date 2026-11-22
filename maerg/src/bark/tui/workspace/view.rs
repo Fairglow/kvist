@@ -61,7 +61,11 @@ impl Workspace {
         let commit = self
             .commit_frequency
             .map_or("unavailable", |mode| mode.as_str());
-        let heading = if let Some(progress) = &self.task_progress {
+        let task_progress = self
+            .task_progress
+            .as_ref()
+            .and_then(super::RunProgress::current);
+        let heading = if let Some(progress) = task_progress {
             let completion = progress.state.as_ref().map_or_else(
                 |_| "progress unavailable".into(),
                 |state| {
@@ -93,7 +97,7 @@ impl Workspace {
             .as_ref()
             .map(|run| format!(" | RUNNING {}s", run.started.elapsed().as_secs()))
             .unwrap_or_default();
-        let stats = if let Some(progress) = &self.task_progress {
+        let stats = if let Some(progress) = task_progress {
             match &progress.state {
                 Ok(state) => match &state.active {
                     Some((position, id)) => format!(" Task {position}/{}: {id}{run}", state.total),

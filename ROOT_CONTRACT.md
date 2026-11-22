@@ -103,8 +103,9 @@ constraint set injected into component work.
 - A component run may execute dependency-ready tasks without per-task human
   scheduling. Successful execution is not human acceptance. Policy-controlled
   local item checkpoint commits may precede final component approval; they
-  must preserve unrelated changes, never push, retain exact evidence and stop
-  on decisions, ambiguous effects or commit failures.
+  must preserve unrelated changes, never push, and retain exact evidence.
+  A decision holds dependent work; ambiguous effects or commit failures stop
+  execution.
 - Keep acceptance distinct from VCS publication. An explicit commit option may
   create a local commit containing only the exact accepted paths and
   maerg-written evidence. It must preserve unrelated worktree and index state,

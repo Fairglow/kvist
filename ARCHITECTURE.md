@@ -177,7 +177,9 @@ unrelated worktree and index state, never pushes, and remains recoverable when
 commit creation fails.
 
 **Continuous component work:** bare `task run COMPONENT` schedules ready tasks
-iteratively without confirmation. Execution completion unlocks dependencies
+iteratively without confirmation. Omitting the component schedules current
+components with ready work in turn through the same supervised executor.
+Execution completion unlocks dependencies
 but does not record human acceptance. The default item policy checkpoints
 after all of its declared test, implementation and review stages finish;
 the approved task policy checkpoints each completed stage instead. Local

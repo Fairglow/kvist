@@ -31,6 +31,7 @@ fn authenticated_inventory_ledger_can_exceed_source_file_bound() {
         definition_digest: String::from("fixture"),
         phase: Phase::Paused,
         active_item: None,
+        defer_checkpoints: false,
         completed_items: BTreeSet::new(),
         baseline: checkpoint::capture(&context).unwrap(),
         expected_head: None,

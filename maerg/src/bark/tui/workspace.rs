@@ -41,7 +41,7 @@ use crate::bark::{
 };
 use crate::config::CommitFrequency;
 use crate::skott_embedded::{ActivePane, ContinuationDecision, EmbeddedSkott, SkottResult};
-use task_progress::TaskProgress;
+use task_progress::RunProgress;
 
 /// The maximum automatic continuations Kvist submits for one agent session
 /// before it stops forcing progress and surfaces the result for a decision.
@@ -96,7 +96,7 @@ pub(super) struct Workspace {
     pending_page: Option<menus::Page>,
     preferences: preferences::Preferences,
     running: Option<Running>,
-    task_progress: Option<TaskProgress>,
+    task_progress: Option<RunProgress>,
     commit_frequency: Option<CommitFrequency>,
     streams: [Stream; 2],
     redactions: Vec<String>,
@@ -670,7 +670,7 @@ impl Workspace {
         if self
             .task_progress
             .as_mut()
-            .is_some_and(TaskProgress::refresh)
+            .is_some_and(RunProgress::refresh)
         {
             self.dirty = true;
         }

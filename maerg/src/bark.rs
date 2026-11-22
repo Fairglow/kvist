@@ -638,7 +638,7 @@ impl Shell {
         LoopAction::Continue
     }
 
-    /// `run COMPONENT_DIR [TASK_ID]`: one task or continuous component work.
+    /// `run [COMPONENT_DIR [TASK_ID]]`: one task or continuous work.
     fn handle_run(&mut self, args: &[String], line: &str) -> LoopAction {
         let (requested_component, task) = match parse_run_args(args) {
             Ok(parsed) => parsed,
@@ -649,19 +649,20 @@ impl Shell {
                 return LoopAction::Continue;
             }
         };
-        let hint = component_focus_hint(self.current_component().as_deref(), &requested_component);
-        let component = requested_component;
-        if let Some(hint) = hint {
-            println!("{}", self.theme.dim(&hint));
+        let mut command = "task run".to_owned();
+        if let Some(component) = requested_component {
+            if let Some(hint) =
+                component_focus_hint(self.current_component().as_deref(), &component)
+            {
+                println!("{}", self.theme.dim(&hint));
+            }
+            command.push(' ');
+            command.push_str(&task_commands::decisions::shell_token(&component));
+            if let Some(task) = task {
+                command.push(' ');
+                command.push_str(&task_commands::decisions::shell_token(&task));
+            }
         }
-        let component = crate::task_commands::decisions::shell_token(&component);
-        let command = match task {
-            Some(task) => format!(
-                "task run {component} {}",
-                crate::task_commands::decisions::shell_token(&task)
-            ),
-            None => format!("task run {component}"),
-        };
         self.dispatch_labeled(&command, line);
         LoopAction::Continue
     }
@@ -922,15 +923,14 @@ impl Shell {
                     },
             } => crate::context::ProjectContext::resolve(Some(&self.project_dir)).and_then(
                 |project| {
-                    let component = project.resolve_component(component_dir.as_deref())?;
-                    task_commands::run_task_or_item_with_controls(
-                        &project.project_dir,
-                        &component,
+                    task_commands::run_selection(
+                        &project,
+                        component_dir.as_deref(),
                         task_id.as_deref(),
                         stream,
                         allow_control,
                     )
-                    .map(cli::CommandOutput::message)
+                    .map(|(_, message)| cli::CommandOutput::message(message))
                 },
             ),
             cmd => cli::execute(Some(cmd), false),
@@ -1229,15 +1229,16 @@ fn parse_tasks_args(args: &[String]) -> std::result::Result<TasksArgs, String> {
     })
 }
 
-/// Parsed `run` builtin arguments: the required component and optional task.
-type RunArgs = (String, Option<String>);
+/// Parsed `run` builtin arguments: an optional component and task.
+type RunArgs = (Option<String>, Option<String>);
 
-/// Parses `run COMPONENT_DIR [TASK_ID]` (pure).
+/// Parses `run [COMPONENT_DIR [TASK_ID]]` (pure).
 fn parse_run_args(args: &[String]) -> std::result::Result<RunArgs, String> {
     match args {
-        [component] => Ok((component.clone(), None)),
-        [component, task] => Ok((component.clone(), Some(task.clone()))),
-        _ => Err("usage: run COMPONENT_DIR [TASK_ID]".to_owned()),
+        [] => Ok((None, None)),
+        [component] => Ok((Some(component.clone()), None)),
+        [component, task] => Ok((Some(component.clone()), Some(task.clone()))),
+        _ => Err("usage: run [COMPONENT_DIR [TASK_ID]]".to_owned()),
     }
 }
 
@@ -1517,9 +1518,7 @@ fn render_help(theme: Theme) -> String {
     text.push_str(
         "  tasks [COMPONENT] [--status S] list tasks; S: pending, in-progress, blocked, awaiting-decision, completed\n",
     );
-    text.push_str(
-        "  run COMPONENT [TASK]           run an exact task; omit TASK for continuous work\n",
-    );
+    text.push_str("  run [COMPONENT [TASK]]         run one task, one component, or the project\n");
     text.push_str("  last [COUNT]                   recent agent runs with tokens and log links\n");
     text.push_str("  history [COUNT]                recent editor history lines\n");
     text.push_str("  journal                        the append-only session journal\n");
@@ -1546,7 +1545,7 @@ fn render_help(theme: Theme) -> String {
     );
     text.push_str("\nWorkflow commands (after `cd COMPONENT`, omit the component argument):\n");
     text.push_str("  task next                show the next ready task\n");
-    text.push_str("  task run COMPONENT [TASK] run an exact task; omit TASK for continuous work\n");
+    text.push_str("  task run [COMPONENT [TASK]] run one task, one component, or the project\n");
     text.push_str(
         "  decision COMPONENT       inspect/discuss/plan; actions lists exact responses, do NUMBER invokes one\n",
     );
@@ -2388,15 +2387,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_run_args_requires_component_and_accepts_optional_task() {
-        assert!(parse_run_args(&[]).is_err());
+    fn parse_run_args_accepts_optional_component_and_task() {
+        assert_eq!(parse_run_args(&[]).expect("valid"), (None, None));
         assert_eq!(
             parse_run_args(&["maerg".to_owned()]).expect("valid"),
-            ("maerg".to_owned(), None)
+            (Some("maerg".to_owned()), None)
         );
         assert_eq!(
             parse_run_args(&["maerg".to_owned(), "t-1".to_owned()]).expect("valid"),
-            ("maerg".to_owned(), Some("t-1".to_owned()))
+            (Some("maerg".to_owned()), Some("t-1".to_owned()))
         );
         assert!(parse_run_args(&["a".to_owned(), "b".to_owned(), "c".to_owned()]).is_err());
     }

@@ -1429,15 +1429,20 @@ is the same closed help topic set as `kvist help` and the shell's `help`
 builtin, so it cannot drift.
 
 **Run the whole component.** Bare `task run COMPONENT_DIR` iterates the
-component's tasks in dependency order, running each ready task, and stops when
-the component is complete, when a task becomes blocked, or when a task reaches
-an awaiting-decision point. It reuses the existing `task run` selection and
+component's tasks in dependency order. Only the ready tasks run; waiting for
+a decision does not make a task a satisfied dependency. It reuses the existing `task run` selection and
 execution path for each task, so it respects the same locking, policy-approval,
 and evidence guarantees. It never auto-resolves a decision or unblocks a blocked
 task; it pauses and reports the exact state and the command that resolves it,
 leaving durable task state for explicit finalize or recovery. The loop is a
 pure function of the queue state and the per-task run result, so the stop
 conditions are unit-testable without a terminal.
+
+Project-wide `task run` walks the current components in sorted discovery path order and
+uses the component scheduler's readiness predicate on each queue. It delegates
+each selected component to the existing locked executor and advances when its
+queue is complete or only work waiting on decisions remains. It checks cancellation between
+components and does not write a project-wide ledger.
 
 **Ready work and numbered runs.** `task_queue::ready_task_ids` returns every
 ready task — `pending` with every recorded dependency `completed` — in declared
@@ -1456,6 +1461,12 @@ task execution and checkpoint recording. The task executor accepts this owned
 lock rather than reacquiring it. Explicit task execution remains single-task.
 Implementation verification records execution completion and moves continuous
 tasks to completed without creating human acceptance records.
+
+If an active checkpoint group is waiting on a decision and only tasks from
+other groups are ready, persist checkpoint deferral before crossing that group
+boundary. Preserve the original baseline and make a single deferred checkpoint
+when the component is complete; individual groups can no longer be attributed
+exactly from a common worktree and queue snapshot.
 
 The continuous ledger captures a bounded, no-link inventory of approved
 `src/` and `tests/`, `TODOS.yaml`, `IMPL.md` and host review reports. Item IDs
@@ -1489,7 +1500,9 @@ command has a five-minute deadline; test hooks may shorten that deadline.
 The workspace drives `task run` through its existing supervised command
 subprocess instead of finalizing embedded agent answers. The task header
 observes the host-owned queue for the command's resolved component, throttled
-and outside the transcript renderer. The menu edits the project TOML
+and outside the transcript renderer. With project-wide selection it follows
+new in-progress tasks across candidate queues, independently of transcript
+focus. The menu edits the project TOML
 atomically without changing the execution approval. Read-only embedded agent
 telemetry has no role in task completion.
 

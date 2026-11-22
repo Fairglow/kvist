@@ -33,6 +33,8 @@ struct Ledger {
     definition_digest: String,
     phase: Phase,
     active_item: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    defer_checkpoints: bool,
     completed_items: BTreeSet<String>,
     baseline: Snapshot,
     expected_head: Option<String>,
@@ -201,6 +203,7 @@ fn run_locked(
                 definition_digest: definition,
                 phase: Phase::Running,
                 active_item: None,
+                defer_checkpoints: false,
                 completed_items: groups
                     .as_ref()
                     .map(|groups| {
@@ -236,6 +239,7 @@ fn run_locked(
     if ledger.pending.is_some() {
         finish_checkpoint(context, &mut ledger, secret, lock)?;
     }
+    let mut latest_decision = None;
     loop {
         lock.revalidate()?;
         if sav::take_interrupted() {
@@ -283,7 +287,7 @@ fn run_locked(
         {
             if ledger.phase != Phase::AwaitingApproval {
                 record_final_state(context, &queue, config)?;
-                if ledger.policy.commit == CommitFrequency::Component {
+                if ledger.policy.commit == CommitFrequency::Component || ledger.defer_checkpoints {
                     create_checkpoint(context, &mut ledger, secret, lock, "component")?;
                 }
                 ledger.phase = Phase::AwaitingApproval;
@@ -310,6 +314,29 @@ fn run_locked(
                 })
         });
         let Some(task) = selected else {
+            if let Some(item) = &ledger.active_item
+                && let Some(ids) = groups.as_ref().and_then(|groups| groups.get(item))
+                && ids.iter().all(|id| {
+                    task_by_id(&queue.tasks, id).is_some_and(|task| {
+                        task.status == TaskStatus::Completed
+                            || waiting_on_decision(task, &queue.tasks)
+                    })
+                })
+                && queue
+                    .tasks
+                    .iter()
+                    .any(|task| task_is_ready(task, &queue.tasks))
+            {
+                // The original baseline must not be published under a different item's name.
+                ledger.defer_checkpoints = true;
+                ledger.active_item = None;
+                save(context, &mut ledger, secret)?;
+                eprintln!(
+                    "Deferring automatic checkpoints for `{}` until component completion; continuing independent work.",
+                    context.component_path.display()
+                );
+                continue;
+            }
             ledger.phase = Phase::Paused;
             save(context, &mut ledger, secret)?;
             let waiting = queue
@@ -329,6 +356,18 @@ fn run_locked(
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
+            if queue.tasks.iter().all(|task| {
+                task.status == TaskStatus::Completed || waiting_on_decision(task, &queue.tasks)
+            }) {
+                return Ok(format!(
+                    "Component `{}` has no ready tasks; remaining work is awaiting decisions:\n{waiting}\nInspect `kvist decision {}` to resolve them.{}",
+                    context.component_path.display(),
+                    decisions::component_argument(&context.component_path),
+                    latest_decision
+                        .as_ref()
+                        .map_or_else(String::new, |message| format!("\n\n{message}")),
+                ));
+            }
             return Err(error(
                 context,
                 &format!(
@@ -338,6 +377,7 @@ fn run_locked(
             ));
         };
         if let Some(groups) = groups.as_ref()
+            && !ledger.defer_checkpoints
             && ledger.active_item.is_none()
         {
             let item = groups
@@ -377,14 +417,43 @@ fn run_locked(
         save(context, &mut ledger, secret)?;
         let output = outcome?;
         eprintln!("{output}");
-        if status != TaskStatus::Completed {
-            return Ok(format!(
-                "Continuous run paused at `{}` ({}) for human attention; later tasks were not started.\n{output}",
-                task.id,
-                status_name(status)
-            ));
+        match status {
+            TaskStatus::Completed => {}
+            TaskStatus::AwaitingDecision => latest_decision = Some(output),
+            _ => {
+                return Err(error(
+                    context,
+                    &format!(
+                        "continuous task `{}` stopped in {}; later tasks were not started.\n{output}",
+                        task.id,
+                        status_name(status),
+                    ),
+                ));
+            }
         }
     }
+}
+
+fn waiting_on_decision(task: &Task, tasks: &[Task]) -> bool {
+    if task.status == TaskStatus::AwaitingDecision {
+        return true;
+    }
+    if task.status != TaskStatus::Pending {
+        return false;
+    }
+    let mut pending = task.depends_on.iter().collect::<Vec<_>>();
+    let mut visited = BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if visited.insert(id)
+            && let Some(dependency) = task_by_id(tasks, id)
+        {
+            if dependency.status == TaskStatus::AwaitingDecision {
+                return true;
+            }
+            pending.extend(&dependency.depends_on);
+        }
+    }
+    false
 }
 
 fn checkpoint_item(

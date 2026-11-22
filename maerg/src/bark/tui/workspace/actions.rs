@@ -410,11 +410,12 @@ impl Workspace {
                     "end the interactive agent session before starting a task run",
                 ));
             }
-            let component = component_dir.as_deref().ok_or_else(|| {
-                io::Error::other("specify a component: task run COMPONENT_DIR [TASK_ID|N]")
-            })?;
-            let progress = super::TaskProgress::new(&self.project, component, task_id.as_deref())
-                .map_err(io::Error::other)?;
+            let progress = super::RunProgress::new(
+                &self.project,
+                component_dir.as_deref(),
+                task_id.as_deref(),
+            )
+            .map_err(io::Error::other)?;
             self.commit_frequency = Some(
                 crate::config::load(&self.project)
                     .map_err(io::Error::other)?

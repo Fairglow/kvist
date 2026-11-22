@@ -5875,6 +5875,103 @@ pub fn run_task_or_item_with_controls(
     }
 }
 
+pub(crate) fn run_selection(
+    project: &context::ProjectContext,
+    component: Option<&Path>,
+    task_spec: Option<&str>,
+    stream: bool,
+    allow_control: bool,
+) -> Result<(Option<PathBuf>, String)> {
+    if component.is_some() || task_spec.is_some() {
+        let component = project.resolve_component(component)?;
+        let message = run_task_or_item_with_controls(
+            &project.project_dir,
+            &component,
+            task_spec,
+            stream,
+            allow_control,
+        )?;
+        return Ok((Some(component), message));
+    }
+
+    sav::install_handler();
+    let mut reports = Vec::new();
+    for context in workspace_run_components(&project.project_dir)? {
+        if sav::take_interrupted() {
+            return Err(KvistError::TaskRunFailed {
+                task_id: "project-wide run".to_owned(),
+                reason: "interrupted between components; completed work was retained".to_owned(),
+            });
+        }
+        let queue = read_queue(&context.component_dir)?;
+        if !queue
+            .tasks
+            .iter()
+            .any(|task| task_is_ready(task, &queue.tasks))
+        {
+            continue;
+        }
+        reports.push(continuous::run(
+            &project.project_dir,
+            &context.component_path,
+            stream,
+            allow_control,
+        )?);
+    }
+    reports.push(
+        "No more ready tasks in current components. Run `kvist status --unfinished` to inspect remaining work."
+            .to_owned(),
+    );
+    Ok((None, reports.join("\n\n")))
+}
+
+pub(crate) fn workspace_run_components(project_dir: &Path) -> Result<Vec<TaskContext>> {
+    let inspection = project_state::inspect(project_dir)?;
+    if inspection.state != ProjectState::Current {
+        return Err(KvistError::TaskProjectNotCurrent {
+            project_dir: project_dir.to_path_buf(),
+            state: inspection.state.name().to_owned(),
+        });
+    }
+    if let Some(reason) = inspection.discovery_error {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: project_dir.to_path_buf(),
+            reason,
+        });
+    }
+    let component_root =
+        inspection
+            .component_root
+            .ok_or_else(|| KvistError::TaskQueueUnavailable {
+                path: project_dir.to_path_buf(),
+                reason: "component root is unavailable; run `kvist doctor`".to_owned(),
+            })?;
+    let mut contexts = Vec::new();
+    if let Some(conversion) = &inspection.conversion
+        && conversion.state == crate::conversion_state::ConversionState::Accepted
+    {
+        contexts.push(TaskContext {
+            project_dir: project_dir.to_path_buf(),
+            component_path: PathBuf::from("."),
+            component_dir: project_dir.join(crate::conversion_state::CONVERSION_METADATA_DIRECTORY),
+        });
+    }
+    contexts.extend(inspection.components.into_iter().filter_map(|component| {
+        if component.state == ComponentState::Current
+            && (component.path != Path::new(".") || inspection.conversion.is_none())
+        {
+            Some(TaskContext {
+                project_dir: project_dir.to_path_buf(),
+                component_dir: project_dir.join(&component_root).join(&component.path),
+                component_path: component.path,
+            })
+        } else {
+            None
+        }
+    }));
+    Ok(contexts)
+}
+
 /// Resolves a `task run` target against the queue. An exact task ID always wins
 /// (task IDs may legally be all digits, so a real ID is never mistaken for a
 /// position). Otherwise a bare positive integer is a 1-based position in the

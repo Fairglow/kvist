@@ -1978,6 +1978,199 @@ fn continuous_project(endpoint: &str, frequency: &str) -> TempDir {
     project
 }
 
+#[cfg(target_os = "linux")]
+fn add_continuous_peer(project: &TempDir) {
+    let root = project.path();
+    fs::create_dir(root.join("z-peer")).unwrap();
+    for file in [
+        "REQUIREMENTS.md",
+        "CONTRACT.md",
+        "DESIGN.md",
+        "TODOS.yaml",
+        "IMPL.md",
+    ] {
+        fs::copy(root.join("src").join(file), root.join("z-peer").join(file)).unwrap();
+    }
+    let config_path = root.join("kvist.toml");
+    let config = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace("component_root = \"src\"", "component_root = \".\"");
+    fs::write(
+        config_path,
+        config.replace(
+            "component = \".\"",
+            &format!(
+                "component = \"src\"\ncommand = \"{}\"\n[[test_policy.commands]]\ncomponent = \"z-peer\"",
+                fake_backend().display()
+            ),
+        ),
+    )
+    .unwrap();
+    let approval = run_kvist(project, &["task", "approve-policy"]);
+    assert!(approval.status.success(), "{approval:?}");
+    let git = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(git.status.success(), "{git:?}");
+    let git = Command::new("git")
+        .args(["commit", "--quiet", "-m", "Add peer"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(git.status.success(), "{git:?}");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn workspace_task_run_completes_both_components_then_reports_no_ready_work() {
+    let gateway = MockGateway::serve(
+        |_| gateway_text_body(r#"{"report":"Observed evidence.","decision_required":false}"#),
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "task");
+    add_continuous_peer(&project);
+
+    let output = run_kvist(&project, &["task", "run"]);
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let first = stdout
+        .find("Component `src` execution is complete")
+        .unwrap();
+    let second = stdout
+        .find("Component `z-peer` execution is complete")
+        .unwrap();
+    assert!(first < second, "{stdout}");
+    for component in ["src", "z-peer"] {
+        let report = project
+            .path()
+            .join(component)
+            .join(".kvist/continuous-reviews/component.json");
+        let report: serde_json::Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
+        assert_eq!(report["state"], "awaiting-approval");
+        assert_eq!(report["human_acceptance"], false);
+    }
+    let output = run_kvist(&project, &["--json", "task", "run"]);
+    assert!(output.status.success(), "{output:?}");
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(response["component_dir"].is_null());
+    assert!(response["task_id"].is_null());
+    assert!(
+        response["message"]
+            .as_str()
+            .unwrap()
+            .contains("No more ready tasks")
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn workspace_task_run_continues_past_decisions_without_running_dependent_tasks() {
+    use maerg::task_queue::TaskStatus;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let first_decision = AtomicBool::new(true);
+    let gateway = MockGateway::serve(
+        move |body| {
+            let decision = String::from_utf8_lossy(body).contains("independent-comparison")
+                && first_decision.swap(false, Ordering::Relaxed);
+            gateway_text_body(&format!(
+                r#"{{"report":"Observed evidence.","decision_required":{decision}}}"#
+            ))
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "item");
+    add_continuous_peer(&project);
+    let first_queue = project.path().join("src/TODOS.yaml");
+    let peer_queue = project.path().join("z-peer/TODOS.yaml");
+    let mut queue = maerg::task_queue::parse(&fs::read_to_string(&first_queue).unwrap()).unwrap();
+    queue.tasks[4].depends_on.clear();
+    let mut dependent = queue.tasks[2].clone();
+    dependent.id = "waiting-security-audit".into();
+    dependent.depends_on = vec!["one-compliance-review".into()];
+    queue.tasks.push(dependent);
+    fs::write(&first_queue, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
+    let git = Command::new("git")
+        .args([
+            "commit",
+            "--quiet",
+            "-m",
+            "Add independent and decision-dependent work",
+            "--",
+            "src/TODOS.yaml",
+        ])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    assert!(git.status.success(), "{git:?}");
+
+    let output = run_kvist(&project, &["task", "run"]);
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("one-compliance-review") && stdout.contains("awaiting-decision"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("Component `z-peer` execution is complete"),
+        "{stdout}"
+    );
+    let queue = maerg::task_queue::parse(&fs::read_to_string(first_queue).unwrap()).unwrap();
+    assert_eq!(queue.tasks[3].status, TaskStatus::AwaitingDecision);
+    assert!(
+        queue.tasks[4..8]
+            .iter()
+            .all(|task| task.status == TaskStatus::Completed)
+    );
+    assert_eq!(queue.tasks[8].status, TaskStatus::Pending);
+    let peer = maerg::task_queue::parse(&fs::read_to_string(peer_queue).unwrap()).unwrap();
+    assert!(
+        peer.tasks
+            .iter()
+            .all(|task| task.status == TaskStatus::Completed)
+    );
+    let git = Command::new("git")
+        .args(["log", "--format=%s"])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    let log = String::from_utf8(git.stdout).unwrap();
+    assert!(!log.contains("checkpoint(src)"), "{log}");
+    assert_eq!(log.matches("checkpoint(z-peer)").count(), 2, "{log}");
+
+    let reopened = run_kvist(
+        &project,
+        &[
+            "task",
+            "transition",
+            "src",
+            "one-compliance-review",
+            "pending",
+        ],
+    );
+    assert!(reopened.status.success(), "{reopened:?}");
+    let resumed = run_kvist(&project, &["task", "run"]);
+    assert!(resumed.status.success(), "{resumed:?}");
+    assert!(
+        String::from_utf8(resumed.stdout)
+            .unwrap()
+            .contains("Component `src` execution is complete")
+    );
+    let git = Command::new("git")
+        .args(["show", "--format=%s", "--name-only", "HEAD"])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    let commit = String::from_utf8(git.stdout).unwrap();
+    assert!(
+        commit.starts_with("checkpoint(src): complete component execution (unaccepted)"),
+        "{commit}"
+    );
+    assert!(!commit.contains("z-peer/"), "{commit}");
+}
+
 #[test]
 #[cfg(target_os = "linux")]
 fn decision_agent_options_discussion_and_plan_never_apply_unseen_effects() {
@@ -3073,11 +3266,15 @@ fn continuous_run_pauses_on_review_decision_without_running_later_items() {
         .contains("Human arbitration required.")
     );
     let before = fs::read(project.path().join("src/TODOS.yaml")).unwrap();
-    let paused = run_kvist(&project, &["task", "run", "."]);
-    assert!(!paused.status.success());
-    let run_brief = fs::read_to_string(project.path().join("src/.kvist/attention/run.md")).unwrap();
-    assert!(run_brief.contains("one-compliance-review"));
-    assert!(run_brief.contains("awaiting-decision"));
+    let paused = run_kvist(&project, &["--json", "task", "run", "."]);
+    assert!(paused.status.success(), "{paused:?}");
+    let waiting: serde_json::Value = serde_json::from_slice(&paused.stdout).unwrap();
+    let message = waiting["message"].as_str().unwrap();
+    assert!(
+        message.contains("one-compliance-review: awaiting-decision")
+            && message.contains("kvist decision ."),
+        "{message}"
+    );
     assert_eq!(
         fs::read(project.path().join("src/TODOS.yaml")).unwrap(),
         before

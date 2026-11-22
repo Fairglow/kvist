@@ -431,7 +431,10 @@ This cryptographically signs an approval record locking the test command, runner
 ### 5.2 Running a Task
 
 ```bash
-# Run all dependency-ready work, checkpointing complete items
+# Run dependency-ready work across the project
+kvist task run
+
+# Run work in just the root component
 kvist task run .
 
 # Run a specific task with real-time output streaming
@@ -443,8 +446,10 @@ An exact `TASK` runs only that task if its prerequisites are fulfilled.
 A bare positive integer `N` runs the Nth ready task (1-based, the same
 ordering the `tasks` listing numbers), so `kvist task run . 1` runs the next
 ready task without typing its ID. Omit the target for continuous execution
-without confirmation. There are no batch selectors or separate whole-component
-command.
+without confirmation. Omit the component as well to visit current components
+with ready tasks in path order. Decisions hold only the waiting task and its
+dependents; independent work can continue in the same or another component.
+Execution failures still stop the run.
 
 In a locked Rust project, test and implementation tasks must pass Rustfmt,
 strict Clippy, build, and tests in that order. Install Rustfmt and Clippy for
@@ -473,6 +478,8 @@ unrelated staged work is preserved and nothing is pushed. Commits are
 **unaccepted checkpoints**, not human approval.
 Use `task` to checkpoint every completed task, `component` to checkpoint
 once at the end, or `manual` to disable automatic commits.
+If independent work passes an unfinished decision-blocked item or task, its
+automatic checkpoints are deferred until the component is complete.
 If Git signing is enabled, prepare the signing helper for unattended use.
 Git/signing commands honor cancellation and stop after five minutes instead of
 hanging indefinitely; signing policy is never bypassed.
@@ -537,8 +544,8 @@ done outside Kvist, or a previous run finished it — the supervised agent verif
 the existing code and tests satisfy the task and closes it with a plain summary
 and no further edits; it does not redo the work. A routine `propose_decision`
 that carries no real alternatives is auto-resolved rather than surfaced, so an
-"already done" task does not produce an empty decision. A decision pauses the run
-only when it presents a genuine contradiction with alternatives for arbitration.
+"already done" task does not produce an empty decision. A genuine decision pauses
+the affected task and its dependent work for arbitration.
 
 ### Decisions and blockers
 

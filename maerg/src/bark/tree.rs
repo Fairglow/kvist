@@ -197,7 +197,10 @@ pub fn inject_shell_builtins(root: &mut CommandNode) {
             subcommands: Vec::new(),
             flags: Vec::new(),
             positionals: vec![
-                positional("COMPONENT_DIR", &component_help),
+                positional(
+                    "COMPONENT_DIR",
+                    "Omit to run ready work across the project.",
+                ),
                 positional(
                     "TASK_ID",
                     "Task ID; omit for continuous component execution.",

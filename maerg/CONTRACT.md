@@ -345,12 +345,12 @@ The `kvist` executable provides (the authoritative design is
 - `component commit ACCEPTANCE_ID`
 - `task next [COMPONENT_DIR]`
 - `task transition [COMPONENT_DIR] TASK_ID STATUS [--reason TEXT]`
-- `task run COMPONENT_DIR [TASK_ID|N] [--stream] [--allow-control]`: an exact
+- `task run [COMPONENT_DIR [TASK_ID|N]] [--stream] [--allow-control]`: an exact
   TASK_ID runs only that task. A bare positive integer N runs the Nth ready
   task (1-based, the same ordering the `tasks` listing numbers). Without a
   target, execute ready tasks continuously in queue order, without
-  confirmation. There is no `all`, prefix selector, or separate
-  whole-component command.
+  confirmation. Omit the component too for project-wide selection. There is
+  no `all`, prefix selector, or separate whole-component command.
 - `task log [COMPONENT_DIR] TASK_ID`
 - `task replay SESSION_JSONL [--max-turns N]`
 - `task approve-policy [PROJECT_DIR]`
@@ -402,17 +402,26 @@ commands take an optional `COMPONENT_DIR`: when omitted, the nearest
 discovered component containing the current working directory is selected; when
 given, it is interpreted relative to the project's component root, and absolute
 paths outside the project are rejected. `component new` keeps its required
-directory, as does `task run`; its editable shell prefill never replaces that
-required argument with an implicit focus/cwd fallback. Failing outside a project names the missing marker and suggests
+directory. `task run` is an exception to the component fallback: its editable
+shell prefill is an explicit argument, and removing it selects project scope.
+Literal `.` still selects the root component, not the entire project.
+Failing outside a project names the missing marker and suggests
 `kvist init` or an explicit directory.
 
 `task run` without TASK_ID repeatedly reloads the queue and executes the first
 dependency-ready task. It works without terminal input. Successful continuous
 implementation execution plus verification completes execution, not acceptance,
-and does not require `task finalize` between tasks. Decisions, blocked work,
-unresolved effects and failed checkpoints stop the run; nothing is automatically
-unblocked or accepted. An all-completed queue durably awaits component approval.
+and does not require `task finalize` between tasks. A decision pauses only
+the task awaiting it and its dependents. Unresolved effects and failed
+checkpoints stop the run; nothing is automatically unblocked or accepted.
+An all-completed queue durably awaits component approval.
 Explicit single-task implementation runs retain their finalization surface.
+Project-wide execution visits current components with ready work in path
+order. It proceeds to the next component when the current one completes or
+has only work waiting on decisions, and stops when ready work is exhausted
+or execution fails. With `--json`, `component_dir` and `task_id` are `null`
+for a project-wide run. To retry a retained checkpoint in a component with no
+ready tasks, name that component explicitly.
 Newly authored unfinished work after an awaiting-approval run starts a fresh
 run from the current clean checkpoint baseline under current approved policy;
 previous work is neither replayed nor implicitly accepted. A retained
@@ -440,12 +449,15 @@ lifecycle ordering still applies. Automatic item commits wait for every task
 of that item, and implementation verification must pass before execution completion.
 Ambiguous/non-lifecycle IDs require correction or a non-item commit policy.
 Checkpoints are local, unaccepted work, never pushes or intent acceptance.
+When continuing independent work would mix changes from an unfinished
+decision-blocked checkpoint group with other groups, item/task checkpoints
+are deferred into one local checkpoint once that component completes.
 The host retains a bounded run ledger under component `.kvist/continuous.json`
 with baseline files, pending checkpoint and final awaiting-approval state.
 Only changed approved source/test paths and host-owned workflow evidence enter
 a checkpoint. Overlapping dirty/staged files are refused before execution;
-unrelated work and staged changes are preserved. Commit failure retains the
-pending checkpoint; repeating bare run retries it without rerunning tasks.
+unrelated work and staged changes are preserved. Commit failure retains the pending checkpoint; repeating `task run COMPONENT_DIR`
+retries it without rerunning tasks.
 
 The TUI task header displays the executing component (not transcript focus),
 the task ID and one-based position in `TODOS.yaml`, and completed/total and
@@ -970,8 +982,8 @@ closed value sets for `help [TOPIC]`) and dynamic completion covers component
 paths, task IDs, attempt IDs, model profile names, and the active VCS branch; dynamic sets are refreshed after
 every executed command and each source degrades independently without aborting
 the session. The shell builtins are `cd [COMPONENT_DIR]`,
-`tasks [COMPONENT_DIR] [--status STATUS] [--all]`, `run COMPONENT_DIR
-[TASK_ID|N]`, `help [TOPIC]`, `last [COUNT]`, `history [COUNT]`, `journal`,
+`tasks [COMPONENT_DIR] [--status STATUS] [--all]`, `run [COMPONENT_DIR
+[TASK_ID|N]]`, `help [TOPIC]`, `last [COUNT]`, `history [COUNT]`, `journal`,
 `locks [clean]`, `theme [set <NAME|PATH>]`, and `exit`/`quit`. `tasks` lists
 only ready (schedulable) tasks by default, numbered in queue order so row 1 is
 the next task, with the full count always shown; `--all` (or an explicit
@@ -989,8 +1001,8 @@ unchanged. Bare `cd` (or `cd -`) clears focus and returns to project scope.
 `cd` never prefills a destination. `status` visibly prefills the selected
 component even when entered without trailing whitespace; deletion remains
 effective, and `--details` expands only the chosen scope.
-`run` without a task ID starts continuous component work without
-confirmation. `prompt TASK_ID` opens the external
+`run` without a task ID starts continuous work without confirmation. If no
+component remains in the input, it runs across the project. `prompt TASK_ID` opens the external
 editor seeded with
 the task context and submits only after explicit confirmation. `theme`
 previews every available theme (the current one first, then built-ins and
@@ -1156,11 +1168,9 @@ still applies. The stable `status --format text` and `--format json` report
 forms are unchanged for non-interactive consumers.
 
 Bare `task run COMPONENT_DIR` runs the whole selected component: it iterates
-the component's tasks in dependency order, running each ready task, and stops
-when the component is complete, when a task becomes blocked, or when a task
-reaches an awaiting-decision point. It never auto-resolves a decision or
-unblocks a blocked task; it pauses and reports the exact state and the command
-that resolves it, leaving durable task state for explicit finalize or recovery.
+the component's tasks in dependency order, running each ready task. It never
+auto-resolves a decision or unblocks a blocked task; it reports waiting work
+and leaves durable task state for explicit decision resolution or recovery.
 It respects the same locking, policy-approval, and evidence guarantees as
 `task run`.
 

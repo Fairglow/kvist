@@ -38,7 +38,8 @@ them, and the help text teaches them.
    `TODOS.yaml`, making them the accepted baseline.
 4. **Tasks.** Entries in `TODOS.yaml` with a durable status
    (`pending`, `in-progress`, `blocked`, `awaiting-decision`, `completed`).
-   `kvist task run` executes one ready task with a supervised agent.
+   `kvist task run` executes ready tasks with a supervised agent; an explicit
+   task selects just one.
 
 The lifecycle every component walks:
 
@@ -110,8 +111,9 @@ Removed from the previous surface (and why):
   root). When it is given, it is interpreted relative to the project's
   component root, as before.
 - **The shell's `cd` builtin** does the same job interactively: after
-  `cd maerg`, every dispatched command — `task next`, `component
-validate`, `task run`, ... — targets `maerg` without repetition. The
+  `cd maerg`, commands such as `task next` and `component validate`
+  target `maerg` without repetition. `task run` treats the editable component
+  prefill as an explicit argument; if omitted, it runs project-wide. The
   prompt shows the focus, and typing a command that names a _different_
   component prints a one-line reminder.
 - **Failure outside a project** is never cryptic: the error names what is
@@ -219,7 +221,7 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
 | Command               | Form                                                                                           | Purpose                                                                                                                                                                                                                                                                                                               |
 | --------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `task next`           | `kvist task next [COMPONENT_DIR]`                                                              | print the first ready task (no state change)                                                                                                                                                                                                                                                                          |
-| `task run`            | `kvist task run COMPONENT_DIR [TASK_ID\|N] [--stream]`                                         | omit the task for continuous dependency-ready work with configurable local checkpoint commits; an exact TASK_ID runs only that task; a bare positive integer N runs the Nth ready task (1-based, matching the numbered `tasks` listing); stop for final approval, decisions, or blockers, without per-task confirmation |
+| `task run`            | `kvist task run [COMPONENT_DIR [TASK_ID\|N]] [--stream]`                                       | omit the component for project-wide work, or omit just the task for a single continuous component run. An exact TASK_ID runs only that task; N runs the Nth ready task (1-based, matching `tasks`). |
 | `task log`            | `kvist task log [COMPONENT_DIR] TASK_ID`                                                       | print the most recent bounded, redacted execution log                                                                                                                                                                                                                                                                 |
 | `task replay`         | `kvist task replay SESSION_JSONL [--max-turns N]`                                              | replay a recorded trajectory                                                                                                                                                                                                                                                                                          |
 | `task transition`     | `kvist task transition [COMPONENT_DIR] TASK_ID STATUS [--reason R]`                            | one audited manual status transition                                                                                                                                                                                                                                                                                  |
@@ -344,11 +346,13 @@ fallback effects. Dark/light RGB palettes independently style transcript,
 raised/selected surfaces and Blad with measured contrast.
 
 **Run the whole component.** Bare `task run COMPONENT_DIR` iterates the
-component's tasks in dependency order, running each ready task, and stops when
-the component is complete, when a task becomes blocked, or when a task reaches
-an awaiting-decision point. It never auto-resolves a decision or unblocks a
-blocked task; it pauses and reports the exact state and the command that
-resolves it, leaving durable task state for explicit finalize or recovery.
+component's tasks in dependency order, running each ready task. A task awaiting
+a decision and its dependents remain paused; unrelated ready work continues.
+Kvist leaves durable state for explicit decision resolution or recovery.
+With no component, `task run` visits current components with ready work in
+path order. It proceeds when a component finishes or has only decision-blocked
+work left, and stops on execution failure or cancellation. `.` targets only
+the root component.
 
 **Ready work and numbered runs.** The shell `tasks` builtin lists only the
 ready (schedulable) tasks, numbered in queue order so row 1 is the next task,
@@ -369,11 +373,14 @@ setting. The header shows the setting, executing component, task ID and queue
 position, and component completion. Policy changes require `kvist task approve-policy`;
 the menu never approves the change. A retained nonterminal run keeps its
 original checkpoint frequency.
+If an unfinished item or task is waiting on a decision and independent work
+continues past it, automatic checkpoints in that component are deferred
+until all its work completes.
 Automatic commits require an attached Git branch, existing HEAD, configured
 identity/signing and clean overlapping paths. Unrelated staged/unstaged changes
 are preserved. Commits are local unaccepted checkpoints, never pushes.
-On a checkpoint failure, fix the reported Git/signing problem and repeat bare
-run; retained completed tasks are not executed again. Decisions/failed or
+On a checkpoint failure, fix the reported Git/signing problem and rerun with
+the component explicitly named; retained completed tasks are not executed again. Decisions/failed or
 interrupted effects retain existing explicit resolution/recovery requirements.
 Final execution awaits human approval; `component accept` still accepts intent,
 not implementation results.

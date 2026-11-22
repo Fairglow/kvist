@@ -7,9 +7,74 @@ use std::{
 use crate::{
     Result,
     context::ProjectContext,
-    task_commands::{read_queue, resolve_task_spec, validate_context},
+    task_commands::{
+        TaskContext, read_queue, resolve_task_spec, validate_context, workspace_run_components,
+    },
     task_queue::{Task, TaskStatus},
 };
+
+pub(super) enum RunProgress {
+    Component(TaskProgress),
+    Project {
+        components: Vec<TaskProgress>,
+        current: Option<usize>,
+    },
+}
+
+impl RunProgress {
+    pub(super) fn new(
+        project: &Path,
+        component: Option<&Path>,
+        spec: Option<&str>,
+    ) -> Result<Self> {
+        if let Some(component) = component {
+            return TaskProgress::new(project, component, spec).map(Self::Component);
+        }
+        let components = workspace_run_components(project)?
+            .into_iter()
+            .map(|context| TaskProgress::for_context(context, None))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self::Project {
+            components,
+            current: None,
+        })
+    }
+
+    pub(super) fn current(&self) -> Option<&TaskProgress> {
+        match self {
+            Self::Component(progress) => Some(progress),
+            Self::Project {
+                components,
+                current,
+            } => current.and_then(|index| components.get(index)),
+        }
+    }
+
+    pub(super) fn refresh(&mut self) -> bool {
+        match self {
+            Self::Component(progress) => progress.refresh(),
+            Self::Project {
+                components,
+                current,
+            } => {
+                let mut changed = false;
+                for progress in components.iter_mut() {
+                    changed |= progress.refresh();
+                }
+                if let Some(active) = components.iter().position(|progress| {
+                    progress
+                        .state
+                        .as_ref()
+                        .is_ok_and(|state| state.active.is_some())
+                }) {
+                    changed |= Some(active) != *current;
+                    *current = Some(active);
+                }
+                changed
+            }
+        }
+    }
+}
 
 pub(super) struct TaskProgress {
     pub(super) component: String,
@@ -28,12 +93,16 @@ pub(super) struct QueueProgress {
 }
 
 impl TaskProgress {
-    pub(super) fn new(project: &Path, component: &Path, spec: Option<&str>) -> Result<Self> {
+    fn new(project: &Path, component: &Path, spec: Option<&str>) -> Result<Self> {
         let component = ProjectContext {
             project_dir: project.to_path_buf(),
         }
         .resolve_component(Some(component))?;
-        let context = validate_context(project, &component)?;
+        Self::for_context(validate_context(project, &component)?, spec)
+    }
+
+    fn for_context(context: TaskContext, spec: Option<&str>) -> Result<Self> {
+        let component = context.component_path;
         let queue = read_queue(&context.component_dir)?;
         let selected = spec.and_then(|spec| resolve_task_spec(&queue.tasks, spec));
         let already_active = queue
@@ -108,6 +177,61 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     #[test]
+    fn project_progress_follows_active_tasks_between_queues() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut queue = crate::task_queue::parse(include_str!("../../../../TODOS.yaml")).unwrap();
+        queue.tasks.truncate(1);
+        queue.tasks[0].status = TaskStatus::Pending;
+        queue.tasks[0].timestamps.completed_at = None;
+        let write_queue = |path: &Path, queue: &crate::task_queue::TaskQueue| {
+            std::fs::write(
+                path.join("TODOS.yaml"),
+                crate::task_queue::serialize(queue).unwrap(),
+            )
+            .unwrap();
+        };
+        let mut components = Vec::new();
+        for name in ["first", "second"] {
+            let directory = dir.path().join(name);
+            std::fs::create_dir(&directory).unwrap();
+            write_queue(&directory, &queue);
+            components.push(
+                TaskProgress::for_context(
+                    TaskContext {
+                        project_dir: dir.path().into(),
+                        component_path: name.into(),
+                        component_dir: directory,
+                    },
+                    None,
+                )
+                .unwrap(),
+            );
+        }
+        let mut progress = RunProgress::Project {
+            components,
+            current: None,
+        };
+        queue.tasks[0].status = TaskStatus::InProgress;
+        write_queue(&dir.path().join("first"), &queue);
+        assert!(progress.refresh());
+        assert_eq!(progress.current().unwrap().component, "first");
+
+        queue.tasks[0].status = TaskStatus::Completed;
+        queue.tasks[0].timestamps.completed_at = Some(queue.tasks[0].timestamps.updated_at.clone());
+        write_queue(&dir.path().join("first"), &queue);
+        queue.tasks[0].status = TaskStatus::InProgress;
+        queue.tasks[0].timestamps.completed_at = None;
+        write_queue(&dir.path().join("second"), &queue);
+        if let RunProgress::Project { components, .. } = &mut progress {
+            for component in components {
+                component.next_read = Instant::now();
+            }
+        }
+        assert!(progress.refresh());
+        assert_eq!(progress.current().unwrap().component, "second");
+    }
+
+    #[test]
     fn task_header_uses_executing_component_and_declared_queue_progress() {
         let mut queue = crate::task_queue::parse(include_str!("../../../../TODOS.yaml")).unwrap();
         queue.tasks.truncate(3);
@@ -124,14 +248,14 @@ mod tests {
         *workspace.focus.lock().unwrap() = Some("transcript-focus".into());
         workspace.commit_frequency = Some(CommitFrequency::Task);
         let already_active = BTreeSet::from(["pre-existing-in-progress".into()]);
-        workspace.task_progress = Some(TaskProgress {
+        workspace.task_progress = Some(RunProgress::Component(TaskProgress {
             component: "running-component".into(),
             directory: dir.path().into(),
             selected: None,
             next_read: Instant::now(),
             state: Ok(summarize(&queue.tasks, None, &already_active)),
             already_active,
-        });
+        }));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal
             .draw(|frame| workspace.draw(frame).unwrap())

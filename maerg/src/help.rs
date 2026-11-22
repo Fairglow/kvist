@@ -102,7 +102,7 @@ Kvist core concepts
                security-audit, compliance-review), status, depends_on, and
                requirement references. A task is ready when pending with every
                (transitive) dependency completed: `kvist task next [DIR]`.
-  supervision  `kvist task run DIR` executes ready work continuously under
+  supervision  `kvist task run [DIR]` executes ready work continuously under
                approved sandbox/test policy, checkpointing complete items.
                Execution and checkpoint commits are not human acceptance.
                An exact TASK runs only that task; explicit implementation
