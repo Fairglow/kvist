@@ -55,8 +55,7 @@ pub struct Cli {
     #[clap(long, global = true, value_enum, default_value = "text")]
     mermaid: MermaidMode,
 
-    /// Tree-family (treeView/mindmap) projection: Blad's own text tree, or
-    /// Merman's raw structured_text pass-through (debug only)
+    /// Blad's default diagram projection, or Merman's native output (debug only)
     #[clap(long, global = true, value_enum, default_value = "text")]
     mermaid_tree: MermaidTreeMode,
 

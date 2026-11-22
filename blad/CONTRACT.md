@@ -550,14 +550,16 @@ Unicode/ASCII selection affects structural glyphs only.
 
 Tree-shaped families (`treeView`, `mindmap`) are admitted in a limited, growing
 form: Blad renders them through its own bounded tree projection (node and depth
-ceilings) drawn from the typed model, so Merman's internal model-evidence
-framing (`name(bytes=N)="..."`, `[id=.., level=..]`, …) never reaches the
-default output. The remaining `structured_text` families are rejected for now;
-that is a staged-support decision, not a parsing limitation. A debug-only
+ceilings) drawn from the typed model. GitGraph, Gantt, Timeline, Journey,
+Kanban, Packet and XYChart likewise use bounded Blad-owned projections.
+Merman's internal model-evidence framing never reaches the default output.
+A topology that the backend cannot route in the admitted presentation MUST
+retain source with an unsupported-content diagnostic, not a relation record
+dump or an invalid-syntax diagnostic. A debug-only
 `--mermaid-tree merman` / `RenderOptions.mermaid_tree` pass-through shows Merman's
-raw `structured_text` projection for those admitted families; that framing is
-Merman-internal (a private module, no public parse helper, no stability
-guarantee) and MUST be treated as best-effort inspection only.
+native terminal projection, including spatial views or structured records as
+emitted by the backend. This format MUST be treated as best-effort inspection
+only.
 
 Resource-limit failures MUST be visible and distinct from unsupported syntax.
 Cancellation and writer failures MUST propagate rather than become source

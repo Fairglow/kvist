@@ -1035,10 +1035,11 @@ separate unwrapped blocks. Existing horizontal overflow handles long formulas.
 
 ### P4 backend admission
 
-Admit pinned Merman 0.10 with defaults disabled and only `ascii` plus the
-flowchart, sequence, state, class and ER selectors. Merman 0.10 ships a native
-ER text backend, so no secondary backend is required; retaining five families
-justifies Merman's larger graph. The active graph excludes graphical renderer
+**Historical baseline (Merman 0.10).** P4 admitted Merman with defaults
+disabled and only `ascii` plus the flowchart, sequence, state, class and ER
+selectors. Merman 0.10 ships a native ER text backend, so no secondary backend
+is required; retaining five families justifies Merman's larger graph.
+The active graph excludes graphical renderer
 crates. Approved `kvist vendor` provisioning updated the canonical locked
 snapshot; its documented host acquisition fallback was used when sandbox
 toolchain discovery failed. The 0.10 facade (merman + merman-core/ascii/model/
@@ -1063,6 +1064,17 @@ unsupported model features are gated explicitly. Some composite-state
 crossings/cycles, namespace-plus-external-note combinations and relation
 topologies remain unsupported. Styling and elaborate shapes are text
 approximations. The exact profile is documented in `docs/USAGE.md`.
+
+**Current backend (Merman 0.11).** The upgrade retains the text-only features,
+parse-once admission, unrestricted viewport and resource policies. The adapter
+requests Strict graph presentation, classifies routing-search and port-capacity
+misses as unsupported topologies, and keeps the output guard for class/ER relation
+summaries. The upstream router now draws simple composite-state cycles.
+Merman's new GitGraph tracks, Gantt timelines and Packet bit grids attach
+semantic records to their geometry; use them for debug inspection only.
+Keep Blad's existing projection for those families and for trees: even
+Merman's label-first mindmap can append records for shaped or identified
+nodes. No downstream parsing or stripping of that framing is required.
 
 Enforced rejection ceilings: 65,536 source bytes, 8,192 lexical units, 256
 nodes/participants/containers, 512 edges/messages, nesting 32, 32,768 model
@@ -1117,7 +1129,7 @@ source range for fallback, rather than reconstructing its delimiters.
 Initial limits are 16 KiB per formula, nesting depth 32 and 64 KiB projected
 text. No macro expansion, file inclusion or executable TeX is supported.
 
-The Mermaid backend is selected from pinned Merman 0.10
+The original Mermaid backend admission selected Merman 0.10
 using the accepted corpus criteria before integration. Prefer Merman's text-only
 feature set because ER is required. One backend only; record actual dependency
 availability, licenses, feature graph and corpus measurements before admission.

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Upgraded to Merman 0.11. Simple composite-state cycles now render with both
+  directed transitions. Routing and port-capacity misses still show the
+  original source, with an unsupported-topology diagnostic.
+- The `--mermaid-tree merman` debug view now exposes native branch tracks,
+  Gantt timelines and Packet bit grids. The default view keeps Blad's bounded
+  projections for those families without the appended backend records.
+
 ## 0.3.4 (2026-11-13)
 
 - Migrated the Mermaid backend to **Merman 0.10** (facade `Renderer` /

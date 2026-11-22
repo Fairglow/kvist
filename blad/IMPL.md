@@ -233,3 +233,21 @@ The `normalize_definition_lists()` function preprocesses source before parsing:
 | Control handling | Present | `inert_source()` applied before normalization |
 | Source ranges | Included | Parser provides ranges; not used for DL-specific layout |
 | Fallible output | Yes | All writes return Result; failures propagate |
+
+## 9. Mermaid Terminal Adapter
+
+**Scope:** Independent observation of `src/main.rs`, `src/mermaid.rs` and
+`tests/mermaid_backend.rs`, with a supplied targeted nextest result (78 passed).
+
+`render_bounded` applies lexical preflight, strict semantic parsing, typed
+admission and bounded, width-independent output under a 500 ms cooperative
+deadline. The default uses Blad projections or strict spatial output and rejects
+nonspatial summaries. `--mermaid-tree merman` skips production admission gates
+but retains backend budgets; its format is not stable. `ascii_error` reports
+routing and port-capacity misses as unsupported, separately from invalid input,
+resource failures and cancellation.
+
+The targeted tests cover labelled transitions in composite cycles, a valid graph
+with insufficient ports, native GitGraph/Gantt/Packet output confined to debug
+mode, cancellation, and the exact encoded-output byte boundary. The observation
+does not establish upstream behavior beyond that evidence.

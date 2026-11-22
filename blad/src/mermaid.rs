@@ -1,4 +1,4 @@
-//! Bounded native Mermaid-to-text adapter (Merman 0.10, MIT OR Apache-2.0).
+//! Bounded native Mermaid-to-text adapter (Merman 0.11, MIT OR Apache-2.0).
 //!
 //! The admitted profile is spatial flowchart, sequence, state, class and ER:
 //! boxes/shape approximations, labelled directed connections, groups, notes,
@@ -12,23 +12,11 @@
 //! diagrams. Actors use participant boxes; some composite-state
 //! boundary/cycle routes are unsupported.
 //!
-//! Merman 0.10 exposes exactly one further *spatial* (diagrammatic) ASCII
-//! family, `xychart`; it is deliberately not admitted because that backend
-//! always prepends machine-readable data-disclosure lines (e.g. `values:` /
-//! `xDomain:` / per-point `samples=[...]`) above the chart, which a spatial
-//! text viewer must not surface.
-//!
-//! Tree-shaped families are admitted in a limited, growing form: `treeView`
-//! and `mindmap` render through this adapter's own bounded tree projection
-//! (`MermaidTreeMode::Text`, the default), drawn from the typed model, so no
-//! Merman model-evidence framing reaches the terminal. The remaining
-//! `structured_text` families (gantt, journey, kanban, packet, timeline, and
-//! the rest) are still rejected for now; that is a deliberate staged-support
-//! choice, not a parsing limitation. `MermaidTreeMode::Merman` is a
-//! debug-only pass-through that shows Merman's own raw `structured_text`
-//! projection for those admitted families; that framing is Merman-internal
-//! formatting (a private `safe_text::framing` module, no public parse helper,
-//! no stability guarantee) and is best-effort only.
+//! Blad renders `treeView`, `mindmap`, `gitGraph`, `gantt`, `timeline`,
+//! `journey`, `kanban`, `packet` and `xychart` from their typed models so no
+//! backend evidence records reach the default view. Merman's native output,
+//! including spatial tracks or structured records, is available as a
+//! best-effort debug view rather than a stable format.
 //!
 //! Labels admit only authored `<br>` line breaks (`<br/>`, `<br >`, and
 //! `<BR>` all work); they map to real text line breaks. Any *other* literal
@@ -60,8 +48,8 @@
 use std::time::Duration;
 
 use merman::ascii::{
-    AsciiColorMode, AsciiError, AsciiOutputOutcome, AsciiProjection, AsciiRenderOptions,
-    AsciiResourceLimitId, AsciiResourcePolicy, AsciiViewportPolicy,
+    AsciiColorMode, AsciiError, AsciiGraphPresentation, AsciiOutputOutcome, AsciiProjection,
+    AsciiRenderOptions, AsciiResourceLimitId, AsciiResourcePolicy, AsciiViewportPolicy,
 };
 use merman::model::resources::{InputResourceLimitId, InputResourcePolicy, ResourceProfile};
 use merman::model::{OperationLedgerError, SemanticDiagramModel};
@@ -72,18 +60,17 @@ use merman::{
 
 pub(crate) use merman::OperationControl as DiagramControl;
 
-/// Tree-family (`treeView`/`mindmap`) projection selection.
+/// Mermaid terminal projection selection.
 ///
 /// Re-exported from `theme` as the public `blad::MermaidTreeMode`. Defined here
 /// (a mermaid concept) so the `#[path]`-includer contract test crate stays
 /// self-contained.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum MermaidTreeMode {
-    /// Blad's own bounded tree projection: clean, no model-evidence framing.
+    /// Blad's admitted diagrams without backend evidence records.
     #[default]
     Text,
-    /// Debug only: show Merman's raw `structured_text` projection, including
-    /// its internal framing (best-effort; not a stable format).
+    /// Debug only: show Merman's native terminal output (not a stable format).
     Merman,
 }
 
@@ -232,18 +219,16 @@ fn render_bounded(
     if family == "xychart" && tree == MermaidTreeMode::Text {
         return render_xy_chart(artifact, ascii, &control);
     }
-    // Merman ASCII backend. For spatial (diagrammatic) families this is the
-    // production path. For structured_text families it is a debug-only
-    // pass-through (MermaidTreeMode::Merman) showing Merman's own projection
-    // including its internal framing; the projection gate is skipped in that
-    // mode. Text mode for a non-tree structured_text family is rejected below.
+    // Keep routing strict so adaptive relation records cannot substitute for a
+    // spatial rendering in the default view.
     let target = RenderTarget::Ascii(AsciiRequest {
         options: if ascii {
             AsciiRenderOptions::ascii()
         } else {
             AsciiRenderOptions::unicode()
         }
-        .with_color_mode(AsciiColorMode::Plain),
+        .with_color_mode(AsciiColorMode::Plain)
+        .with_graph_presentation(AsciiGraphPresentation::Strict),
         resources: ascii_resources(work, cells, bytes)?,
         viewport: AsciiViewportPolicy::unrestricted(),
     });
@@ -1567,6 +1552,8 @@ fn ascii_error(error: AsciiError) -> DiagramError {
         | AsciiError::OperationResourceTerminal(_) => DiagramError::Resource(message),
         AsciiError::UnsupportedDiagram { .. }
         | AsciiError::UnsupportedFeature { .. }
+        | AsciiError::RoutingSearchExhausted { .. }
+        | AsciiError::PortCapacityExceeded { .. }
         | AsciiError::FallbackUnavailable { .. } => DiagramError::Unsupported(message),
         _ => DiagramError::Invalid(message),
     }
@@ -1676,13 +1663,15 @@ mod budget_tests {
     }
 
     #[test]
-    fn merman_mode_passes_through_raw_structured_text() {
-        let source = "mindmap\n  root\n    a";
+    fn merman_mode_retains_shape_details_in_native_mindmaps() {
+        let source = "mindmap\n  root\n    leaf((Leaf))";
         let raw = render_with_tree(source, false, None, MermaidTreeMode::Merman).unwrap();
         assert!(
-            raw.contains("bytes="),
-            "debug mode shows Merman framing: {raw}"
+            raw.contains("Leaf") && raw.contains("mindmapCircle"),
+            "debug mode shows Merman's shape detail: {raw}"
         );
+        let default = render(source, false, None).unwrap();
+        assert!(default.contains("Leaf") && !default.contains("mindmapCircle"));
     }
 
     #[test]

@@ -2,7 +2,9 @@
 #[path = "../src/mermaid.rs"]
 mod mermaid;
 
-use mermaid::{DiagramControl, DiagramError, render, render_controlled};
+use mermaid::{
+    DiagramControl, DiagramError, MermaidTreeMode, render, render_controlled, render_with_tree,
+};
 
 const CORPUS: &[(&str, &[&str])] = &[
     (
@@ -110,6 +112,39 @@ fn unsupported_invalid_and_resources_are_different_errors() {
         render(&"x".repeat(65_537), false, None),
         Err(DiagramError::Resource(_))
     ));
+}
+
+#[test]
+fn native_git_gantt_and_packet_views_are_available_only_in_debug_mode() {
+    for (source, native_geometry, native_records, label) in [
+        (
+            "gitGraph\ncommit id: \"base\"\nbranch feature\ncommit id: \"change\"\ncheckout main\nmerge feature",
+            "Arrows point to the child commit",
+            "GitGraph records",
+            "change",
+        ),
+        (
+            "gantt\ndateFormat YYYY-MM-DD\nsection Work\nBuild :2024-01-01, 3d",
+            "Gantt timeline (elapsed time)",
+            "Gantt records",
+            "Build",
+        ),
+        (
+            "packet\n0-7 : \"Header\"\n8-31 : \"Payload\"",
+            "cells/bit",
+            "label(bytes=",
+            "Payload",
+        ),
+    ] {
+        let native = render_with_tree(source, true, None, MermaidTreeMode::Merman).unwrap();
+        assert!(native.contains(native_geometry), "{source}\n{native}");
+        assert!(native.contains(native_records), "{source}\n{native}");
+        assert!(native.contains(label), "{source}\n{native}");
+
+        let default = render(source, true, None).unwrap();
+        assert!(default.contains(label), "{source}\n{default}");
+        assert!(!default.contains(native_records), "{source}\n{default}");
+    }
 }
 
 #[test]
@@ -240,6 +275,51 @@ fn nested_groups_branches_cycles_notes_and_multiline_labels_are_spatial() {
 }
 
 #[test]
+fn composite_state_cycles_keep_both_directed_transitions() {
+    for suffix in ["", "\n[*] --> Running\nnote right of Running: active"] {
+        let source = format!(
+            "stateDiagram-v2\nstate Running {{\nIdle --> Busy: begin\nBusy --> Idle: finish\n}}{suffix}"
+        );
+        let text = render(&source, true, None).unwrap();
+        let lines: Vec<_> = text.lines().collect();
+        let row = |label| lines.iter().position(|line| line.contains(label)).unwrap();
+        assert!(
+            row("Running") < row("Idle") && row("Idle") < row("Busy"),
+            "{text}"
+        );
+        assert!(
+            lines[row("Idle")..row("Busy")]
+                .iter()
+                .any(|line| line.contains("<+")),
+            "missing return arrow into Idle: {text}",
+        );
+        assert!(
+            lines[row("begin")..row("Busy")]
+                .iter()
+                .any(|line| line.contains('v')),
+            "missing forward arrow into Busy: {text}",
+        );
+        assert!(text.contains("finish"), "{text}");
+        if !suffix.is_empty() {
+            assert!(text.contains("active"), "{text}");
+        }
+    }
+}
+
+#[test]
+fn a_valid_graph_with_insufficient_ports_is_unsupported_not_invalid() {
+    let source = format!(
+        "flowchart LR\nHub@{{ shape: f-circ }}\nSink[Receiver]\n{}",
+        "Hub o--o Sink\n".repeat(100),
+    );
+    let error = render(&source, true, None).unwrap_err();
+    assert!(
+        matches!(&error, DiagramError::Unsupported(detail) if detail.contains("capacity exceeded")),
+        "{error}",
+    );
+}
+
+#[test]
 fn unsupported_semantics_never_disappear_into_success() {
     for source in [
         "flowchart LR\nA --> B\nclick A \"https://example.org\"",
@@ -252,8 +332,6 @@ fn unsupported_semantics_never_disappear_into_success() {
         "classDiagram\nAnimal <|-- Dog : parent\nAnimal <|-- Dog : base",
         "classDiagram\nnamespace Domain {\nclass Reader {\n+String name\n+read()\n}\nclass Book\n}\nReader --> Book : reads\nnote for Reader \"Human\"",
         "erDiagram\nA ||--|| B : owns\nA ||..o{ B : contains",
-        "stateDiagram-v2\nstate Running {\nIdle --> Busy: begin\nBusy --> Idle: finish\n}\n[*] --> Running\nnote right of Running: active",
-        "stateDiagram-v2\nstate Running {\nIdle --> Busy: begin\nBusy --> Idle: finish\n}",
         "flowchart LR\nA[<img src=\"https://example.org/image\" alt=\"Portrait\">] --> B",
         "flowchart LR\nA[<script>Important label</script>] --> B",
     ] {

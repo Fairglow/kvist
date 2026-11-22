@@ -61,7 +61,7 @@ regex = { version = "1.13", default-features = false, features = [
     "perf",
     "unicode",
 ] }
-merman = { version = "0.10", default-features = false, features = [
+merman = { version = "0.11", default-features = false, features = [
     "ascii",
     "diagram-flowchart",
     "diagram-sequence",
@@ -70,11 +70,8 @@ merman = { version = "0.10", default-features = false, features = [
     "diagram-er",
     "diagram-tree-view",
     "diagram-mindmap",
-    # The following are backlog structured_text families. They are enabled so the
-    # debug pass-through (--mermaid-tree merman) can display Merman's raw
-    # projection for them while Blad's own bounded projections are designed; they
-    # are NOT admitted in the default Text mode. Internal merman features only —
-    # no new external dependencies.
+    # Blad projects these typed families itself by default; debug mode shows
+    # Merman's native projection.
     "diagram-git-graph",
     "diagram-gantt",
     "diagram-timeline",
@@ -86,7 +83,7 @@ merman = { version = "0.10", default-features = false, features = [
 
 [dev-dependencies]
 tempfile = "3.27"
-nix = { version = "0.31.4", default-features = false, features = [
+nix = { version = "0.32.0", default-features = false, features = [
     "fs",
     "poll",
     "process",

@@ -327,33 +327,25 @@ root
     └── Gantt
 ```
 
-### Inspecting the other (backlog) families
+### Inspecting Merman's native output
 
-The remaining structured families (`gitGraph`, `gantt`, `timeline`,
-`journey`, `kanban`, `packet`, …) are not rendered by Blad yet. You can view
-Merman's own raw text projection for them — best-effort, for evaluation only,
-including Merman's internal model-evidence framing:
+Blad has its own projections for families such as `gitGraph`, `gantt` and
+`packet`. To inspect the backend instead, use the debug view. It shows
+Merman's branch tracks, timelines and bit grids alongside semantic records:
 
 ```bash
 blad --dump demo.md --mermaid-tree merman
 ```
 
-Example source and raw output for a `gantt` diagram:
+For example, this source shows a `Gantt timeline (elapsed time)` view followed
+by `Gantt records` with each task's exact dates and details:
 
 ```mermaid
 gantt
+dateFormat YYYY-MM-DD
 title Plan
 task1 : 2024-01-01, 3d
 task2 : 2024-01-04, 2d
-```
-
-```text
-title(bytes=4)="Plan"
-section(bytes=0)=""
-  - task(bytes=6)="task1 " [id(bytes=5)="task1", order=0, range=2024-01-01 ->
-    2024-01-04, start(bytes=10)="2024-01-01", duration(bytes=2)="3d"]
-  - task(bytes=6)="task2 " [id(bytes=5)="task2", order=1, range=2024-01-04 ->
-    2024-01-06, start(bytes=10)="2024-01-04", duration(bytes=2)="2d"]
 ```
 
 ## Horizontal Rules
