@@ -377,7 +377,7 @@ fn headless_binary_opt_in_steers_quiet_generation_without_disclosing_capability(
             let mut body = vec![0; size];
             socket.read_exact(&mut body).unwrap();
             if headers.starts_with("GET /models ") {
-                let body = json!({"data":[{"id":"test","context_length":8192}]}).to_string();
+                let body = json!({"data":[{"id":"test","meta":{"n_ctx":8192}}]}).to_string();
                 write!(
                     socket,
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

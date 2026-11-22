@@ -223,7 +223,7 @@ impl LocalModel {
                 }
 
                 if request.starts_with(b"GET /models ") {
-                    let body = r#"{"data":[{"id":"kvist-test-mock","context_length":65536}]}"#;
+                    let body = r#"{"data":[{"id":"kvist-test-mock","meta":{"n_ctx":65536}}]}"#;
                     let _ = write!(
                         stream,
                         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

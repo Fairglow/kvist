@@ -1,6 +1,32 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Selected-model serving-window observations - 2026-11-22
+
+Independent `serving-window-observer` inspected scoped source and fixture
+assertions without intent, history, prior records or execution logs. It did not
+run tests. The llama-server lookup checks `/models` for the selected ID and
+reads `meta.n_ctx` if the entry is loaded or has no status value. Absent
+capacity or HTTP 404/405/501 leads to a model-qualified `/props` request
+for `default_generation_settings.n_ctx`; neither path reads training capacity.
+Ollama still reads serving capacity from the matching `/api/ps` entry.
+The probes retain bounded IDs, query encoding, loopback, response-size and
+deadline checks. Invalid advertised limits are errors.
+
+On a same-model refresh, absence or a temporary failure does not replace an
+existing provider-confirmed limit with a hint. Persistent errors propagate.
+Provider-reported numbers are range-checked, not independently verified
+against a live serving slot. The loopback fixtures cover fallback, invalid
+capacity and authorization, and protected rollover with fresh or retained
+capacity and no proposal replay. Implementer-run integration suites passed
+175 tests across Sav, Maerg and Skott, including the 196608-token CLI
+fixture with a 1048576-token training window. These fixtures do not qualify
+a live model or establish behavior for every provider.
+
+Separate source-blind `serving-window-comparator` found no concrete scoped
+discrepancy. It distinguished attributed fixture execution from live-provider
+validation. No component acceptance or certification is recorded.
+
 ## Provider context and accounting observations - 2026-11-22
 
 Independent `implementation-observer` inspected current source and test

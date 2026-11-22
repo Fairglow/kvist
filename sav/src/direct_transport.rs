@@ -242,7 +242,7 @@ impl DirectModelTransport {
                     Ok(None)
                     | Err(Error::ModelProviderStatus {
                         status: 404 | 405 | 501,
-                    }) => self.llama_standalone_context_limit(model, cancellation, deadline),
+                    }) => self.llama_props_context_limit(model, cancellation, deadline),
                     Err(error) => Err(error),
                 }
             }
@@ -250,9 +250,7 @@ impl DirectModelTransport {
         }
     }
 
-    /// Router-mode capacity discovery: /models lists every registered model with
-    /// its context_length, without loading or switching. Read-only and fast, so it
-    /// never stalls on a model load the way /props?model= can.
+    /// Read runtime capacity from the model catalog without loading a model.
     fn llama_router_context_limit(
         &self,
         model: &str,
@@ -275,13 +273,18 @@ impl DirectModelTransport {
         }
         let selected = models
             .iter()
-            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(model));
-        parse_context_limit(selected.and_then(|entry| entry.get("context_length")))
+            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(model))
+            .filter(|entry| {
+                entry
+                    .pointer("/status/value")
+                    .is_none_or(|status| status.as_str() == Some("loaded"))
+            });
+        // context_length and n_ctx_train describe the training window, not the serving slot.
+        parse_context_limit(selected.and_then(|entry| entry.pointer("/meta/n_ctx")))
     }
 
-    /// Standalone-mode capacity discovery: /props?model= may load or switch to the
-    /// requested model before answering, so it is slower than the router probe.
-    fn llama_standalone_context_limit(
+    /// Model-qualified properties can load or switch to the selected model.
+    fn llama_props_context_limit(
         &self,
         model: &str,
         cancellation: &CancellationToken,

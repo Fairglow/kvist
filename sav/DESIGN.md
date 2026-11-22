@@ -260,10 +260,13 @@ unchanged cadence, retry and byte bounds; perform validation before I/O.
 
 Direct transport reuses bounded loopback GET for llama-server router model
 capacity, falling back to model-qualified properties when needed, and for
-Ollama loaded-model metadata. Encode the model query as percent
-escaped UTF-8, validate positive integer capacity within 1048576 tokens, and
-return absent capacity distinctly. Limit discovery to 1 MiB and the caller's
-request deadline (at most 24 hours):
+Ollama loaded-model metadata. Apply the capacity validator only to the
+provider's serving field, not to training fields. Encode the model query as
+percent-escaped UTF-8, validate positive integer capacity within 1048576
+tokens, and return absent capacity distinctly. The per-model context manager
+already owns the current limit and its source; retain these across same-model
+refresh failures without transport-global state. Limit discovery to 1 MiB and
+the caller's request deadline (at most 24 hours):
 the provider may have to load, or switch to, the selected model before it
 answers a bare metadata probe, and a large local model can take minutes.
 Represent the response-header watchdog as optional: absent for metadata and

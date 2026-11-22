@@ -82,6 +82,10 @@ other request failures without exposing raw provider error text. The shared
 loop MUST support fresh-context handoff without renewing task budgets or
 replaying tool calls. Progress MUST prefer reported usage and decode timings,
 label estimates, and expose successful context reductions and handoffs.
+Capacity discovery MUST report the selected model's serving window, never a
+llama-server training limit. A fresh context for the same model MUST retain
+the last confirmed serving window when refresh is temporarily unavailable.
+Wire fixtures MUST distinguish runtime, training-only, and invalid metadata.
 
 ### AR-REQ-RESILIENCE
 

@@ -10,6 +10,50 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "serving-window-write-tests"
+    title: "write_tests: selected llama-server serving window"
+    description: "Distinguish selected runtime capacity, model-qualified fallback, and training-only metadata; exercise rollover when refresh is unavailable."
+    context: "User-directed correction. Startup regressions failed before the fix; no component acceptance or advisory receipt is claimed."
+    purpose: "Prevent training capacity from becoming a session budget."
+    expected_outcome: "Loopback regressions catch an incorrect window and loss of a confirmed limit."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#AR-REQ-PROVIDER-CONTEXT"]
+    timestamps: { created_at: "2026-11-22T23:33:37Z", updated_at: "2026-11-22T23:35:05Z", completed_at: "2026-11-22T23:35:05Z" }
+  - id: "serving-window-implement-code"
+    title: "implement_code: use and retain serving capacity"
+    description: "Read llama-server runtime metadata and preserve the provider-confirmed limit across unavailable same-model refreshes."
+    context: "175 affected integration tests and strict all-target Clippy passed. Existing loopback, discovery bounds and host fallback policies are retained."
+    purpose: "Budget requests against the actual selected serving window."
+    expected_outcome: "Only serving metadata sets a provider-confirmed limit."
+    kind: implementation
+    status: completed
+    depends_on: ["serving-window-write-tests"]
+    requirements: ["REQUIREMENTS.md#AR-REQ-PROVIDER-CONTEXT"]
+    timestamps: { created_at: "2026-11-22T23:33:37Z", updated_at: "2026-11-22T23:36:25Z", completed_at: "2026-11-22T23:36:25Z" }
+  - id: "serving-window-security-audit"
+    title: "security_audit: serving metadata trust boundary"
+    description: "Inspect model selection, metadata validation, cancellation and existing discovery bounds."
+    context: "Scoped review found no new endpoint or execution authority. Independent observation retained the limit that valid-range provider claims are not checked against a live serving slot."
+    purpose: "Check the scoped provider-response trust boundary."
+    expected_outcome: "Scoped findings or a documented no-finding result."
+    kind: security-audit
+    status: completed
+    depends_on: ["serving-window-implement-code"]
+    requirements: ["REQUIREMENTS.md#AR-REQ-PROVIDER-CONTEXT"]
+    timestamps: { created_at: "2026-11-22T23:33:37Z", updated_at: "2026-11-22T23:36:25Z", completed_at: "2026-11-22T23:36:25Z" }
+  - id: "serving-window-compliance-review"
+    title: "compliance_review: serving capacity evidence"
+    description: "Compare independent observations and regression evidence against the scoped requirements, contract and design."
+    context: "Separate source-blind comparison found no concrete scoped discrepancy and retained the absence of live-model validation. No acceptance or certification."
+    purpose: "Retain any discrepancies for human arbitration."
+    expected_outcome: "Separate source-blind comparison and recorded evidence limits."
+    kind: compliance-review
+    status: completed
+    depends_on: ["serving-window-security-audit"]
+    requirements: ["REQUIREMENTS.md#AR-REQ-PROVIDER-CONTEXT"]
+    timestamps: { created_at: "2026-11-22T23:33:37Z", updated_at: "2026-11-22T23:37:00Z", completed_at: "2026-11-22T23:37:00Z" }
   - id: "provider-context-write-tests"
     title: "write_tests: provider context rejection and measured progress"
     description: "Exercise typed provider context rejection, same-task rollover, no effect replay, and provider metrics."

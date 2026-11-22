@@ -62,7 +62,7 @@ fn confirmed_http_overflow_rotates_the_exact_session_and_only_then_completes() {
                 respond(
                     stream,
                     "200 OK",
-                    &json!({"data":[{"id":"test","context_length":limit}]}).to_string(),
+                    &json!({"data":[{"id":"test","meta":{"n_ctx":limit}}]}).to_string(),
                 );
             };
             capacity(&mut listener.accept().unwrap().0, 16384);
@@ -218,7 +218,7 @@ fn trial_text(finish: &str, content: &str, json_output: bool) -> (std::process::
         respond(
             &mut metadata,
             "200 OK",
-            r#"{"data":[{"id":"test","context_length":8192}]}"#,
+            r#"{"data":[{"id":"test","meta":{"n_ctx":8192}}]}"#,
         );
         let (mut stream, _) = listener.accept().unwrap();
         let (method, body) = request(&mut stream);
@@ -399,7 +399,7 @@ fn startup_uses_selected_serving_capacity_without_a_cli_override() {
                 request.extend_from_slice(&buffer[..count]);
             }
             let body = if expected.starts_with("GET") {
-                json!({"data":[{"id":"test","context_length":262144}]}).to_string()
+                json!({"data":[{"id":"test","context_length":1048576,"meta":{"n_ctx":196608,"n_ctx_train":1048576}}]}).to_string()
             } else {
                 posted = request[end..].to_vec();
                 format!(
@@ -447,6 +447,6 @@ fn startup_uses_selected_serving_capacity_without_a_cli_override() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(events[0]["event"]["data"]["context_limit"], 262144);
+    assert_eq!(events[0]["event"]["data"]["context_limit"], 196608);
     assert_eq!(events[0]["event"]["data"]["context_source"], "provider");
 }

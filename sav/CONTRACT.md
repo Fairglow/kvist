@@ -496,14 +496,22 @@ An absent bound leaves existing provider defaults unchanged.
 
 `DirectModelTransport::context_limit(model, cancellation)` discovers an
 optional effective serving capacity, bounded to 1..=1048576 tokens, without
-inference. llama-server first reads the selected model's `context_length` from
-`/models`; HTTP 404 alone selects model-qualified `/props` fallback. Ollama uses
-matching loaded-model `/api/ps` metadata (an untagged name also matches its
-`:latest` form). Absent metadata is `None`, malformed advertised
-metadata is an error. Discovery retains numeric-loopback-only transport,
-bounded responses and a bounded deadline. llama-server streaming requests
-include `stream_options.include_usage`; providers may still omit usage, which
+inference. llama-server first reads the selected model's runtime `meta.n_ctx`
+from `/models`, ignoring entries explicitly not loaded. If that field is
+absent or `/models` returns 404/405/501, it reads `default_generation_settings.n_ctx`
+from model-qualified `/props`. It never uses llama-server `context_length` or
+`n_ctx_train`. Ollama uses matching loaded-model `/api/ps` `context_length`
+(an untagged name also matches its `:latest` form). Absent serving metadata
+is `None`; malformed advertised serving metadata is an error. Discovery
+retains numeric-loopback-only transport, bounded responses and one bounded
+deadline. llama-server streaming requests include
+`stream_options.include_usage`; providers may still omit usage, which
 remains `None`. Canonical/wire requests fit 8 MiB, retaining all other bounds.
+
+`ContextManager::refresh_serving` refreshes the same selected model. Missing
+or temporarily unavailable capacity preserves the last provider-confirmed
+limit for that session, ahead of any local hint. Persistent failures,
+including malformed metadata, and cancellation still surface as errors.
 
 `{prompt}`, `{prompt_json}`, `{context_files}`, `{target_directory}`, and
 `{reasoning_effort}` are the documented command-template placeholders.

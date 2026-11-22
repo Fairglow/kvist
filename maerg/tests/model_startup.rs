@@ -148,7 +148,7 @@ fn events(directory: &Path) -> Vec<Value> {
 #[test]
 fn missing_unsupported_or_transient_capacity_does_not_prevent_inference() {
     for (status, body) in [
-        (200, "{}"),
+        (200, r#"{"n_ctx_train":1048576}"#),
         (404, "{}"),
         (405, "{}"),
         (501, "{}"),
@@ -158,10 +158,17 @@ fn missing_unsupported_or_transient_capacity_does_not_prevent_inference() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let selected = profile(format!("http://{}", listener.local_addr().unwrap()), None);
         let provider = thread::spawn(move || {
-            // Router mode probe: /models returns 404 to simulate standalone mode
             let (mut stream, header, _) = request(&listener);
             assert!(header.starts_with("GET /models "));
-            reply(&mut stream, 404, "{}");
+            if status == 200 {
+                reply(
+                    &mut stream,
+                    200,
+                    r#"{"data":[{"id":"fixture","context_length":1048576,"meta":{"n_ctx_train":1048576}}]}"#,
+                );
+            } else {
+                reply(&mut stream, 404, "{}");
+            }
             drop(stream);
             // Standalone mode probe: /props?model=
             let (mut stream, header, _) = request(&listener);
@@ -239,9 +246,22 @@ fn provider_capacity_wins_over_the_configured_hint() {
             reply(
                 &mut stream,
                 200,
-                r#"{"data":[{"id":"fixture","context_length":4096}]}"#,
+                if configured {
+                    r#"{"data":[{"id":"other","meta":{"n_ctx":262144}},{"id":"fixture","status":{"value":"unloaded"},"context_length":1048576,"meta":{"n_ctx":8192,"n_ctx_train":1048576}}]}"#
+                } else {
+                    r#"{"data":[{"id":"other","meta":{"n_ctx":262144}},{"id":"fixture","status":{"value":"loaded"},"context_length":1048576,"meta":{"n_ctx":4096,"n_ctx_train":1048576}}]}"#
+                },
             );
             drop(stream);
+            if configured {
+                let (mut stream, header, _) = request(&listener);
+                assert!(header.starts_with("GET /props?model=fixture "));
+                reply(
+                    &mut stream,
+                    200,
+                    r#"{"default_generation_settings":{"n_ctx":4096}}"#,
+                );
+            }
             let (mut stream, header, body) = request(&listener);
             assert!(header.starts_with("POST "));
             let body: Value = serde_json::from_slice(&body).unwrap();
@@ -263,6 +283,22 @@ fn provider_capacity_wins_over_the_configured_hint() {
 
 #[test]
 fn protected_context_overflow_continues_within_the_same_attempt() {
+    protected_context_rollover(CapacityReply::Available(16384), 16384);
+}
+
+#[test]
+fn protected_context_rollover_retains_confirmed_capacity_when_refresh_is_unavailable() {
+    protected_context_rollover(CapacityReply::Missing, 8192);
+    protected_context_rollover(CapacityReply::Transient, 8192);
+}
+
+enum CapacityReply {
+    Available(usize),
+    Missing,
+    Transient,
+}
+
+fn protected_context_rollover(refresh: CapacityReply, expected_limit: usize) {
     let directory = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let selected = profile(
@@ -270,16 +306,26 @@ fn protected_context_overflow_continues_within_the_same_attempt() {
         Some(4096),
     );
     let provider = thread::spawn(move || {
-        let capacity = |limit| {
+        let capacity = |capacity_reply| {
             let (mut stream, header, _) = request(&listener);
             assert!(header.starts_with("GET /models "));
-            reply(
-                &mut stream,
-                200,
-                &json!({"data":[{"id":"fixture","context_length":limit}]}).to_string(),
-            );
+            match capacity_reply {
+                CapacityReply::Missing => {
+                    reply(&mut stream, 200, r#"{"data":[{"id":"fixture"}]}"#);
+                    drop(stream);
+                    let (mut stream, header, _) = request(&listener);
+                    assert!(header.starts_with("GET /props?model=fixture "));
+                    reply(&mut stream, 200, "{}");
+                }
+                CapacityReply::Available(limit) => reply(
+                    &mut stream,
+                    200,
+                    &json!({"data":[{"id":"fixture","meta":{"n_ctx":limit}}]}).to_string(),
+                ),
+                CapacityReply::Transient => reply(&mut stream, 503, "{}"),
+            }
         };
-        capacity(8192);
+        capacity(CapacityReply::Available(8192));
         let (mut stream, header, _) = request(&listener);
         assert!(header.starts_with("POST "));
         reply(
@@ -287,11 +333,11 @@ fn protected_context_overflow_continues_within_the_same_attempt() {
             400,
             r#"{"error":{"code":400,"type":"exceed_context_size_error","message":"request (8193 tokens) exceeds the available context size (8192 tokens)","n_prompt_tokens":8193,"n_ctx":8192}}"#,
         );
-        capacity(16384);
+        capacity(refresh);
         let (mut stream, header, body) = request(&listener);
         assert!(header.starts_with("POST "));
         let request: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(request["max_tokens"], 4096);
+        assert_eq!(request["max_tokens"], expected_limit / 4);
         let messages = request["messages"].to_string();
         assert!(messages.contains("original task"));
         assert!(messages.contains("Predecessor: protected run"));
@@ -305,7 +351,8 @@ fn protected_context_overflow_continues_within_the_same_attempt() {
         .find(|event| event["type"] == "context_rollover")
         .unwrap();
     assert_eq!(rollover["data"]["previous_generation"], 1);
-    assert_eq!(rollover["data"]["context_limit"], 16384);
+    assert_eq!(rollover["data"]["context_limit"], expected_limit);
+    assert_eq!(rollover["data"]["source"], "provider");
     assert_eq!(rollover["data"]["proposals_replayed"], false);
 }
 
@@ -318,7 +365,7 @@ fn invalid_capacity_and_authorization_failures_do_not_become_fallbacks() {
                 if standalone {
                     r#"{"default_generation_settings":{"n_ctx":0}}"#
                 } else {
-                    r#"{"data":[{"id":"fixture","context_length":0}]}"#
+                    r#"{"data":[{"id":"fixture","meta":{"n_ctx":0},"context_length":1048576}]}"#
                 },
             ),
             (200, "not JSON"),

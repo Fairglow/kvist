@@ -226,7 +226,7 @@ impl ContextManager {
         self.summary.clear();
     }
 
-    /// Refreshes the serving window for a selected model, returning the applicable reserve.
+    /// Refreshes the same selected model, retaining its confirmed window if unavailable.
     pub fn refresh_serving(
         &mut self,
         transport: &impl crate::ModelTransport,
@@ -246,11 +246,15 @@ impl ContextManager {
                 reason: "serving capacity discovery".into(),
             });
         }
+        let fallback = self
+            .serving_hint
+            .filter(|_| self.capacity_source != "provider");
         let discovered = match transport.serving_context(model, cancellation, deadline) {
-            Ok(limit) => limit.map(|limit| (limit, "provider")).or(self.serving_hint),
+            Ok(Some(limit)) => Some((limit, "provider")),
+            Ok(None) => fallback,
             Err(error) if error.is_optional_capacity_unavailable() => {
                 tracing::warn!(%model, %error, "serving capacity refresh unavailable");
-                self.serving_hint
+                fallback
             }
             Err(error) => return Err(error.into()),
         };

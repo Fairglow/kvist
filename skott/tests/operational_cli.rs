@@ -78,7 +78,7 @@ fn trial_with_read_validation(
             }
             let headers = String::from_utf8(headers).unwrap();
             if headers.starts_with("GET /models ") {
-                let body = r#"{"data":[{"id":"test","context_length":32768}]}"#;
+                let body = r#"{"data":[{"id":"test","meta":{"n_ctx":32768}}]}"#;
                 write!(
                     socket,
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
