@@ -1137,6 +1137,7 @@ mod tests {
             model: "thinking-model".into(),
             response_id: None,
             provider_request_id: None,
+            timings: None,
             usage: Some(sav::ModelUsage {
                 input_tokens: 17455,
                 output_tokens: 8192,

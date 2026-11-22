@@ -328,7 +328,9 @@ logs. The outer execution owner finishes the diagnostic on every ordinary
 result/error path; an abrupt crash leaves a visibly incomplete journal. Model
 and authorization events precede execution, each dispatch is synchronized,
 and tool results follow observed sandbox completion. Stream text is redacted
-with the existing cross-delta redactor. The private control capability is
+with the existing cross-delta redactor. The embedded view forwards all metrics
+to the Skott App and derives task identity and phase from the Kvist harness,
+not from model text. The private control capability is
 created only on explicit CLI opt-in and is never placed in model context or
 the agent-readable journal. Controls are drained through the shared bounded
 runtime mailbox at safe boundaries; a currently executing effect completes

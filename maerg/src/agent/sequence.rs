@@ -136,6 +136,9 @@ pub(crate) fn error_stop(error: &crate::KvistError) -> StopReason {
         crate::KvistError::Runtime(sav::runtime::Error::RunBudget { resource, .. }) => {
             StopReason::Limit(*resource)
         }
+        crate::KvistError::Runtime(sav::runtime::Error::ContextBudget { .. }) => {
+            StopReason::Limit(BudgetResource::Context)
+        }
         crate::KvistError::Sav(source)
         | crate::KvistError::AgentModelRequestFailed { source, .. } => match source {
             sav::Error::Cancelled | sav::Error::ModelTransportCancelled => StopReason::Cancelled,
@@ -146,6 +149,7 @@ pub(crate) fn error_stop(error: &crate::KvistError) -> StopReason {
                 StopReason::Limit(BudgetResource::WallTime)
             }
             sav::Error::RepetitiveGeneration { .. } => StopReason::Stalled,
+            sav::Error::ModelContextExceeded => StopReason::Limit(BudgetResource::Context),
             _ => StopReason::Failed,
         },
         _ => StopReason::Failed,

@@ -38,9 +38,7 @@ use crate::bark::{
     prefill::ComponentPrefill,
     tree::{CommandNode, build_root},
 };
-use crate::skott_embedded::{
-    ActivePane, ContinuationDecision, EmbeddedSkott, SkottMetrics, SkottResult,
-};
+use crate::skott_embedded::{ActivePane, ContinuationDecision, EmbeddedSkott, SkottResult};
 
 /// The maximum automatic continuations Kvist submits for one agent session
 /// before it stops forcing progress and surfaces the result for a decision.
@@ -663,8 +661,8 @@ impl Workspace {
                                  without reaching an accepted outcome. Reconcile what you have \
                                  done, then keep working until the task is complete, you are \
                                  blocked for a concrete reason, or a human decision is required. \
-                                 Those are the only accepted outcomes.",
-                                prep.task_id
+                                 Those are the only accepted outcomes.\n\nOriginal task:\n{}",
+                                prep.task_id, prep.prompt
                             );
                             prep.push_back(&guidance)
                                 .map_err(|error| io::Error::other(error.to_string()))?;
@@ -696,6 +694,7 @@ impl Workspace {
                         self.skott_result_reported = true;
                         let result = skott.result().clone();
                         let metrics = skott.metrics().clone();
+                        let model_stats = skott.app.stats_line();
                         // If this was a task run, Kvist performs the task-queue
                         // teardown and displays only the resulting task
                         // transition; the generic agent result is not shown.
@@ -743,7 +742,17 @@ impl Workspace {
                                 }
                                 Err(error) => return Err(io::Error::other(error.to_string())),
                             };
-                            self.append(&format!("\n\n{message}\n"))?;
+                            let task_seconds = self
+                                .task_run_prep
+                                .as_ref()
+                                .map_or(0.0, |prep| prep.started.elapsed().as_secs_f64());
+                            self.append(&format!(
+                                "\n\n{message}\n\n**Task activity:** {} turns · {} tool proposals · {task_seconds:.1}s.\n",
+                                metrics.turns, metrics.tools_executed,
+                            ))?;
+                            if !model_stats.is_empty() {
+                                self.append(&format!("\n**Skott metrics:** {model_stats}\n"))?;
+                            }
                             // The task run reached a terminal state (completed,
                             // blocked, or awaiting-decision); release the
                             // per-component operation lock now so a subsequent
@@ -821,7 +830,7 @@ impl Workspace {
                                 self.task_run_prep = None;
                             }
                         } else {
-                            self.report_skott_result(&result, &metrics)?;
+                            self.report_skott_result(&result, &model_stats)?;
                         }
                     }
                 }
@@ -906,11 +915,7 @@ impl Workspace {
 
     /// Appends a terminal Skott result to the Kvist transcript so the Kvist
     /// view shows the answer (or failure) and the session metrics.
-    fn report_skott_result(
-        &mut self,
-        result: &SkottResult,
-        metrics: &SkottMetrics,
-    ) -> io::Result<()> {
+    fn report_skott_result(&mut self, result: &SkottResult, metrics: &str) -> io::Result<()> {
         let heading = match result.decision() {
             Some(ContinuationDecision::Finished) => "Agent result",
             Some(ContinuationDecision::Blocked) => "Agent blocked",
@@ -925,7 +930,9 @@ impl Workspace {
         if let Some(failure) = &result.failure {
             markdown.push_str(&format!("**Failure:** {failure}\n\n"));
         }
-        markdown.push_str(&format!("**Metrics:** {}\n\n", metrics.summary_line()));
+        if !metrics.is_empty() {
+            markdown.push_str(&format!("**Metrics:** {metrics}\n\n"));
+        }
         self.append(&markdown)
     }
 

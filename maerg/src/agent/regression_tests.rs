@@ -428,6 +428,7 @@ fn host_turn_checks_cancellation_and_expiry_before_transport_construction() {
                 &budget,
                 &[],
                 &request,
+                8192,
                 &token,
                 &live,
                 &mut 0,
@@ -597,6 +598,7 @@ fn effect_turn() -> ModelTurn {
         model: "fixture".into(),
         response_id: None,
         provider_request_id: None,
+        timings: None,
         usage: Some(sav::ModelUsage {
             input_tokens: 11,
             output_tokens: 7,

@@ -225,26 +225,23 @@ fn quiet_capacity_probe_cannot_consume_the_whole_task_budget() {
 }
 
 #[test]
-fn known_capacity_and_explicit_configuration_remain_authoritative() {
+fn provider_capacity_wins_over_the_configured_hint() {
     for configured in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let selected = profile(
             format!("http://{}", listener.local_addr().unwrap()),
-            configured.then_some(4096),
+            configured.then_some(32768),
         );
         let provider = thread::spawn(move || {
-            if !configured {
-                // Router mode probe: /models
-                let (mut stream, header, _) = request(&listener);
-                assert!(header.starts_with("GET /models "));
-                reply(
-                    &mut stream,
-                    200,
-                    r#"{"data":[{"id":"fixture","context_length":4096}]}"#,
-                );
-                drop(stream);
-            }
+            let (mut stream, header, _) = request(&listener);
+            assert!(header.starts_with("GET /models "));
+            reply(
+                &mut stream,
+                200,
+                r#"{"data":[{"id":"fixture","context_length":4096}]}"#,
+            );
+            drop(stream);
             let (mut stream, header, body) = request(&listener);
             assert!(header.starts_with("POST "));
             let body: Value = serde_json::from_slice(&body).unwrap();
@@ -259,16 +256,57 @@ fn known_capacity_and_explicit_configuration_remain_authoritative() {
             .find(|event| event["type"] == "model_budget")
             .unwrap();
         assert_eq!(budget["data"]["context_limit"], 4096);
-        assert_eq!(
-            budget["data"]["source"],
-            if configured {
-                "configuration"
-            } else {
-                "provider"
-            }
-        );
+        assert_eq!(budget["data"]["source"], "provider");
         assert_eq!(budget["data"]["serving_capacity_known"], true);
     }
+}
+
+#[test]
+fn protected_context_overflow_continues_within_the_same_attempt() {
+    let directory = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let selected = profile(
+        format!("http://{}", listener.local_addr().unwrap()),
+        Some(4096),
+    );
+    let provider = thread::spawn(move || {
+        let capacity = |limit| {
+            let (mut stream, header, _) = request(&listener);
+            assert!(header.starts_with("GET /models "));
+            reply(
+                &mut stream,
+                200,
+                &json!({"data":[{"id":"fixture","context_length":limit}]}).to_string(),
+            );
+        };
+        capacity(8192);
+        let (mut stream, header, _) = request(&listener);
+        assert!(header.starts_with("POST "));
+        reply(
+            &mut stream,
+            400,
+            r#"{"error":{"code":400,"type":"exceed_context_size_error","message":"request (8193 tokens) exceeds the available context size (8192 tokens)","n_prompt_tokens":8193,"n_ctx":8192}}"#,
+        );
+        capacity(16384);
+        let (mut stream, header, body) = request(&listener);
+        assert!(header.starts_with("POST "));
+        let request: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(request["max_tokens"], 4096);
+        let messages = request["messages"].to_string();
+        assert!(messages.contains("original task"));
+        assert!(messages.contains("Predecessor: protected run"));
+        answer(&mut stream);
+    });
+    assert!(execute(directory.path(), &selected, &[]).unwrap().success);
+    provider.join().unwrap();
+    let records = events(directory.path());
+    let rollover = records
+        .iter()
+        .find(|event| event["type"] == "context_rollover")
+        .unwrap();
+    assert_eq!(rollover["data"]["previous_generation"], 1);
+    assert_eq!(rollover["data"]["context_limit"], 16384);
+    assert_eq!(rollover["data"]["proposals_replayed"], false);
 }
 
 #[test]

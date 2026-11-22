@@ -275,6 +275,7 @@ mod tests {
                     provider: sav::LocalModelProvider::Ollama,
                     response_id: None,
                     provider_request_id: None,
+                    timings: None,
                 })
             }
             fn deadline(&self) -> Duration {

@@ -42,7 +42,7 @@ impl RunControls<'_> {
             )?;
             let delivered = self.mailbox.deliver_if_open(|| {
                 if !self.cancellation.is_cancelled() {
-                    session.push_user(format!(
+                    session.push_guidance(format!(
                         "Supplemental operator guidance; original task and approved scope remain unchanged:\n{}",guidance.text
                     ));
                 }

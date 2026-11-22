@@ -10,6 +10,50 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "provider-runtime-progress-write-tests"
+    title: "write_tests: provider capacity and protected rollover"
+    description: "Exercise mismatched capacity hints and a protected attempt that continues after provider context rejection."
+    context: "Protected authoring and embedded Skott have different runtime owners."
+    purpose: "Pin the provider-first rule and continuation without changing attempt identity."
+    expected_outcome: "Fixture evidence shows an ordinary task outcome after the rollover."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:24:12Z", completed_at: "2026-11-22T18:24:12Z" }
+  - id: "provider-runtime-progress-implement-code"
+    title: "implement_code: provider recovery and harness progress"
+    description: "Refresh protected context when needed and present task identity, phase and elapsed time beside shared Skott metrics."
+    context: "Loopback protected rollover and embedded metrics across follow-up prompts pass."
+    purpose: "Keep the harness state distinct from the model state."
+    expected_outcome: "Both views expose useful progress without treating a rollover as a task result."
+    kind: implementation
+    status: completed
+    depends_on: ["provider-runtime-progress-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:24:12Z", completed_at: "2026-11-22T18:24:12Z" }
+  - id: "provider-runtime-progress-security-audit"
+    title: "security_audit: protected attempt continuity"
+    description: "Independently inspect preserved controls, effect authority, and isolated diagnostics across rollover."
+    context: "The new conversation must not change what the protected broker is authorized to do."
+    purpose: "Check that fresh conversation state cannot renew authority or replay effects."
+    expected_outcome: "Independent findings with explicit scope."
+    kind: security-audit
+    status: pending
+    depends_on: ["provider-runtime-progress-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:06:39Z", completed_at: null }
+  - id: "provider-runtime-progress-compliance-review"
+    title: "compliance_review: protected continuation and harness metrics"
+    description: "Compare independent observations and fixture evidence with the controlled intent."
+    context: "Preliminary comparison leaves evidence gaps for protected rollover after a real tool effect and end-to-end budget continuity. Formal review follows the security audit."
+    purpose: "Retain discrepancies for human arbitration."
+    expected_outcome: "A separate source-blind comparison; no automatic acceptance."
+    kind: compliance-review
+    status: pending
+    depends_on: ["provider-runtime-progress-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
+    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:06:39Z", completed_at: null }
   - id: "task-run-reliability-write-tests"
     title: "write_tests: pin task-run lock release, transcript completion, and crash recovery"
     description: "Reproduce (a) a second `task run` of the same component in one TUI session failing with `component is locked`; (b) the transcript completion message ending mid-sentence at 500 characters with no completion footer; and (c) an embedded run interrupted mid-generation leaving the session non-terminal and the component lock stale with no durable diagnostic."

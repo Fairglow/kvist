@@ -76,58 +76,22 @@ fn protected_run_is_observable_before_provider_completion_and_is_redacted() {
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let provider = thread::spawn(move || {
-        loop {
-            let (mut stream, _) = listener.accept().expect("accept");
-            stream
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .expect("deadline");
-            // Read the full request (head plus the Content-Length body) before
-            // treating the request as received. The client writes the head and
-            // the body in separate writes, so a single read can return only the
-            // head; blocking on the release gate while the body is still in
-            // flight would close the connection mid-write and time out the turn.
-            let mut bytes = Vec::new();
-            let mut chunk = [0_u8; 8192];
-            loop {
-                let count = stream.read(&mut chunk).expect("read");
-                if count == 0 {
-                    break;
-                }
-                bytes.extend_from_slice(&chunk[..count]);
-                if let Some(split) = bytes.windows(4).position(|tail| tail == b"\r\n\r\n") {
-                    let header = String::from_utf8_lossy(&bytes[..split]).to_ascii_lowercase();
-                    let length = header
-                        .lines()
-                        .find_map(|line| line.strip_prefix("content-length:").map(str::trim))
-                        .expect("length")
-                        .parse::<usize>()
-                        .expect("number");
-                    if bytes.len() >= split + 4 + length {
-                        break;
-                    }
-                }
-            }
-            if bytes.is_empty() {
-                continue;
-            }
-
-            started_tx.send(()).expect("started");
-            release_rx
-                .recv_timeout(Duration::from_secs(3))
-                .expect("release");
-            let body = serde_json::json!({
-                "model":"private-value","message":{"role":"assistant","content":"done private-value"},
-                "done":true,"done_reason":"stop"
-            })
-            .to_string();
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-            .expect("response");
-            break;
-        }
+        let (mut stream, _) = accept_request(&listener);
+        started_tx.send(()).expect("started");
+        release_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("release");
+        let body = serde_json::json!({
+            "model":"private-value","message":{"role":"assistant","content":"done private-value"},
+            "done":true,"done_reason":"stop"
+        })
+        .to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .expect("response");
     });
     let workdir = dir.path().to_owned();
     let worker = thread::spawn(move || {
@@ -345,6 +309,15 @@ fn read_request(stream: &mut std::net::TcpStream) -> Option<serde_json::Value> {
         bytes.extend_from_slice(&chunk[..count]);
         if let Some(split) = bytes.windows(4).position(|tail| tail == b"\r\n\r\n") {
             let header = String::from_utf8_lossy(&bytes[..split]).to_ascii_lowercase();
+            if header.starts_with("get /api/ps ") {
+                write!(
+                    stream,
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                )
+                .expect("capacity is unavailable; retain the fixture's configured hint");
+                return None;
+            }
+            assert!(header.starts_with("post /api/chat "), "{header}");
             let length = header
                 .lines()
                 .find_map(|line| line.strip_prefix("content-length:").map(str::trim))
@@ -1600,6 +1573,28 @@ fn selected_context_that_cannot_fit_refuses_inference_instead_of_omitting_it() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         listener.set_nonblocking(true).expect("nonblocking");
         let endpoint = format!("http://{}", listener.local_addr().expect("address"));
+        let metadata = shared.then(|| {
+            let listener = listener.try_clone().expect("duplicate listener");
+            thread::spawn(move || {
+                let start = Instant::now();
+                loop {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            assert!(read_request(&mut stream).is_none(), "unexpected inference");
+                            break;
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(
+                                start.elapsed() < Duration::from_secs(3),
+                                "expected capacity probe"
+                            );
+                            thread::sleep(Duration::from_millis(1));
+                        }
+                        Err(error) => panic!("accept capacity probe: {error}"),
+                    }
+                }
+            })
+        });
         let selection = if shared {
             shared_profile(&endpoint, 8192)
         } else {
@@ -1631,8 +1626,11 @@ fn selected_context_that_cannot_fit_refuses_inference_instead_of_omitting_it() {
         )
         .expect_err("cannot fit selected context");
         assert!(error.to_string().contains("context"), "{error}");
+        if let Some(metadata) = metadata {
+            metadata.join().expect("metadata probe");
+        }
         assert_eq!(
-            listener.accept().expect_err("no inference or probe").kind(),
+            listener.accept().expect_err("no inference").kind(),
             std::io::ErrorKind::WouldBlock
         );
     }

@@ -222,6 +222,16 @@ impl LocalModel {
                     }
                 }
 
+                if request.starts_with(b"GET /models ") {
+                    let body = r#"{"data":[{"id":"kvist-test-mock","context_length":65536}]}"#;
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    continue;
+                }
+                assert!(request.starts_with(b"POST /v1/chat/completions "));
                 // The first turn proposes a single `write_file` tool call for the
                 // fixture's test root: the broker authorizes it and the effect
                 // loop dispatches the in-sandbox applier for it, so every

@@ -22,7 +22,7 @@ pub(super) fn model_context(
     } else {
         "provisional"
     };
-    if let Some(native) = native.filter(|_| known_limit.is_none()) {
+    if let Some(native) = native {
         let deadline = Duration::from_secs(1).min(budget.remaining() / 10);
         let transport = native.transport_bounded(deadline, 1024 * 1024)?;
         live.record(
@@ -69,7 +69,7 @@ pub(super) fn model_context(
             live.record(
                 &json!({"type":"capacity_unavailable","data":{
                     "reason":redact_bounded(&reason,redactions,1024),
-                    "action":"continue with a provisional local working budget"
+                    "action":if known_limit.is_some() {"use configured hint"} else {"use provisional working budget"}
                 }}),
                 true,
             )?;
@@ -77,7 +77,7 @@ pub(super) fn model_context(
                 "{}",
                 redact_bounded(
                     &format!(
-                        "Warning: serving capacity is unknown ({reason}); continuing with a provisional local working budget, not an asserted server limit. Configure context_limit to pin the actual capacity."
+                        "Warning: serving capacity is unknown ({reason}); continuing with a local budget, not an asserted server limit. Configure context_limit to supply a fallback hint."
                     ),
                     redactions,
                     2048,
@@ -106,13 +106,22 @@ pub(super) fn model_context(
     live.record(
         &json!({"type":"model_budget","data":{
             "context_limit":limit,"response_reserve":reserve,"source":source,
-            "serving_capacity_known":known_limit.is_some(),
+            "serving_capacity_known":source == "provider",
             "estimated_initial_input_tokens":estimated_input,
             "remaining_ms":budget.remaining().as_millis()
         }}),
         true,
     )?;
-    Ok((ContextManager::new(limit, 4), reserve))
+    let mut context = ContextManager::new(limit, 4);
+    if let Some(native) = native {
+        context.set_serving_policy(
+            native.context_limit.map(|limit| (limit, "configuration")),
+            source,
+            native.response_reserve.is_none(),
+            false,
+        );
+    }
+    Ok((context, reserve))
 }
 
 fn provisional_limit(estimated_input: usize, reserve: u32) -> Result<usize> {

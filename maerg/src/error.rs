@@ -33,9 +33,7 @@ pub enum KvistError {
         path: PathBuf,
     },
     /// Initialization would follow a project-root symbolic link.
-    #[error(
-        "refusing to initialize through link-like path `{path}` (symbolic link)"
-    )]
+    #[error("refusing to initialize through link-like path `{path}` (symbolic link)")]
     ProjectPathIsSymlink {
         /// Symbolic-link path supplied to `kvist init`.
         path: PathBuf,
@@ -47,9 +45,7 @@ pub enum KvistError {
         path: PathBuf,
     },
     /// Initialization would follow an artifact-directory symbolic link.
-    #[error(
-        "refusing to write artifacts through link-like path `{path}` (symbolic link)"
-    )]
+    #[error("refusing to write artifacts through link-like path `{path}` (symbolic link)")]
     ArtifactParentIsSymlink {
         /// Symbolic-link parent path.
         path: PathBuf,
@@ -168,9 +164,7 @@ pub enum KvistError {
         path: PathBuf,
     },
     /// Discovery would follow a symbolic-link component root.
-    #[error(
-        "refusing to discover components through link-like path `{path}` (symbolic link)"
-    )]
+    #[error("refusing to discover components through link-like path `{path}` (symbolic link)")]
     ComponentRootIsSymlink {
         /// Symbolic-link component-root path.
         path: PathBuf,

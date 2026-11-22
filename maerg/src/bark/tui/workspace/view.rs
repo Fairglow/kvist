@@ -74,15 +74,35 @@ impl Workspace {
             .as_ref()
             .map(|run| format!(" | RUNNING {}s", run.started.elapsed().as_secs()))
             .unwrap_or_default();
-        let stats = format!(
-            " {} | sandbox: {} | model: {} | locks: {} live / {} stale{}",
-            self.state.branch().unwrap_or("no-vcs"),
-            self.status.sandbox_backend,
-            self.status.default_model,
-            self.status.live_locks,
-            self.status.stale_locks,
-            run,
-        );
+        let stats = if let (Some(prep), Some(skott)) = (&self.task_run_prep, &self.skott) {
+            let phase = if skott.result().finished {
+                "processing result"
+            } else if skott.app.status.is_empty() || skott.app.status == "ready" {
+                "starting agent"
+            } else {
+                &skott.app.status
+            };
+            format!(
+                " Task {}/{} {} | {} | {} turns · {} tools | {:.0}s",
+                prep.queue_position.0,
+                prep.queue_position.1,
+                prep.task_id,
+                phase,
+                skott.metrics().turns,
+                skott.metrics().tools_executed,
+                prep.started.elapsed().as_secs_f64()
+            )
+        } else {
+            format!(
+                " {} | sandbox: {} | model: {} | locks: {} live / {} stale{}",
+                self.state.branch().unwrap_or("no-vcs"),
+                self.status.sandbox_backend,
+                self.status.default_model,
+                self.status.live_locks,
+                self.status.stale_locks,
+                run,
+            )
+        };
         frame.render_widget(
             Paragraph::new(sanitize(&stats)).style(raised.patch(render::secondary(self.theme))),
             parts[1],
@@ -425,12 +445,21 @@ impl Workspace {
         } else {
             "live"
         };
-        let line = format!(
-            " Skott {} | {} | {} ",
+        let prefix = format!(
+            " Skott {} | {} | ",
             skott.model_id().unwrap_or("unknown"),
-            status,
-            skott.metrics().summary_line()
+            status
         );
+        let stats = skott
+            .app
+            .stats_line_for_width(usize::from(area.width).saturating_sub(prefix.len()));
+        let line = if stats.is_empty() {
+            format!("{prefix}{}", skott.app.status)
+        } else if stats.chars().count() > usize::from(area.width).saturating_sub(prefix.len()) {
+            format!(" {stats}")
+        } else {
+            format!("{prefix}{stats}")
+        };
         frame.render_widget(
             Paragraph::new(sanitize(&line))
                 .style(base.patch(render::secondary(self.theme)).fg(accent)),

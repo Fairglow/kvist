@@ -113,7 +113,7 @@ fn attention_brief_compliance_comparison_records_coverage_and_limits() {
     // from the automatically run suite, and the record does not claim to be
     // a protected receipt.
     assert!(
-        record.contains("no pass/fail count from that run is asserted here"),
+        record.contains("this record asserts no pass/fail count from that run"),
         "the record must not assert execution results it did not perform"
     );
     assert!(

@@ -249,7 +249,7 @@ the root component.
 ### REQ-SHARED-RUNTIME
 
 Protected task startup MUST NOT require serving-capacity discovery to succeed.
-An explicit native context limit MUST bypass discovery. Otherwise a single
+An explicit native context limit MUST be a fallback hint. A single
 optional metadata probe MUST take at most one second and one tenth of the
 remaining task budget. Missing/unsupported metadata and transient availability
 failures MUST produce a visible, recorded warning and permit inference using a
@@ -257,11 +257,15 @@ bounded provisional working budget, not an asserted model capacity. Cancellation
 malformed metadata, invalid configuration and recording failures MUST still fail.
 The provisional budget MUST fit the complete initial request plus its output
 reserve and history headroom, without dropping approved intent or increasing
-approved wall/token/effect authority. Provider context rejection remains explicit.
+approved wall/token/effect authority. Confirmed provider context rejection MUST
+start a fresh conversation within the same protected attempt and budgets;
+rejection without subsequent progress MUST remain an explicit blocker.
 Task context MUST include only the selected task's authored queue definition,
 not unrelated tasks or queue lifecycle evidence; the complete queue MUST still
 be validated and bounded before projection. Startup diagnostics MUST distinguish
 capacity discovery from inference and report estimated request size.
+For embedded Skott, the TUI MUST share the standalone model metrics, and
+separately report task identity, task elapsed time, turns and harness phase.
 This human-requested repair has an explicit advisory exception while receipts
 are unavailable; independent observation and comparison remain separate.
 

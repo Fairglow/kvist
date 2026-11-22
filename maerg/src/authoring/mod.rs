@@ -2882,6 +2882,7 @@ mod tests {
             model: "fixture".into(),
             response_id: None,
             provider_request_id: None,
+            timings: None,
             usage: None,
         };
         let turn_plan = authorize_turn(dir.path(), &completion_turn, &policy());
@@ -2902,6 +2903,7 @@ mod tests {
             model: "fixture".into(),
             response_id: None,
             provider_request_id: None,
+            timings: None,
             usage: None,
         };
         let internal_plan = authorize_turn(dir.path(), &internal_note_turn, &policy());

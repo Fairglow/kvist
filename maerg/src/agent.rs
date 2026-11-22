@@ -711,6 +711,7 @@ fn execute_host_turn(
     budget: &TurnBudget,
     redactions: &[String],
     model_request: &ModelRequest,
+    context_limit: usize,
     cancellation: &CancellationToken,
     live: &LiveRun,
     attempts: &mut u32,
@@ -767,11 +768,7 @@ fn execute_host_turn(
     // carries no such identifier.
     let retry_policy = model_retry_policy(native);
     let estimated_input = sav::runtime::context::estimate_request(&model_request);
-    let max_context_reserve = native
-        .and_then(|model| model.context_limit)
-        .map_or(1_048_576, |limit| {
-            limit.saturating_sub(estimated_input).min(1_048_576) as u32
-        });
+    let max_context_reserve = context_limit.saturating_sub(estimated_input).min(1_048_576) as u32;
     let mut current_reserve = model_request.max_output_tokens.unwrap_or(1024);
     loop {
         model_request.max_output_tokens = Some(current_reserve);
@@ -1396,8 +1393,9 @@ fn execute_agent_inner(
     );
     let runs_dir = request.target_dir.join(".kvist").join("runs");
     ensure_real_directory(&runs_dir, "create live run directory")?;
+    let live_path = runs_dir.join(format!("{session_id}.events.jsonl"));
     let live = LiveRun::create(
-        &runs_dir.join(format!("{session_id}.events.jsonl")),
+        &live_path,
         &session_id,
         request.task_id,
         &choice.model,
@@ -1466,7 +1464,7 @@ fn execute_agent_inner(
                 reason: "protected conversation lost its original task".into(),
             })
         })?;
-        let (mut context, reserve) = startup::model_context(
+        let (mut context, mut reserve) = startup::model_context(
             choice.native.as_ref(),
             &initial_request,
             budget,
@@ -1497,6 +1495,7 @@ fn execute_agent_inner(
         let mut model_attempts = 0;
         let mut observed_paths = std::collections::BTreeSet::new();
         let mut last_action_label = "init".to_owned();
+        let mut progress_since_rollover = true;
         let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
 
         loop {
@@ -1505,6 +1504,7 @@ fn execute_agent_inner(
             }
             if steering.deliver(&mut conversation)? {
                 model_attempts = 0;
+                progress_since_rollover = true;
             }
 
             // 1. The model turn runs on the host: numeric loopback gateway only,
@@ -1522,6 +1522,11 @@ fn execute_agent_inner(
                 })?;
             if let Some(compaction) = compaction {
                 live.record(&serde_json::json!({"type":"context_compaction","data":{"completed_groups":compaction.compacted_turns,"compactions":context.compactions(),"lossy":true,"canonical_evidence":false}}),true)?;
+                eprintln!(
+                    "Context compaction {}: condensed {} completed turn groups.",
+                    context.compactions(),
+                    compaction.compacted_turns
+                );
             }
             let est_input = sav::runtime::context::estimate_request(&model_request);
             // One rich status line, rewritten in place every turn so the
@@ -1567,6 +1572,7 @@ fn execute_agent_inner(
                 budget,
                 &redactions,
                 &model_request,
+                context.limit_tokens(),
                 operation.token(),
                 &live,
                 &mut model_attempts,
@@ -1616,6 +1622,50 @@ fn execute_agent_inner(
             drop(operation);
             let turn = match generated {
                 Ok(turn) => turn,
+                Err(
+                    KvistError::Sav(ModelError::ModelContextExceeded)
+                    | KvistError::AgentModelRequestFailed {
+                        source: ModelError::ModelContextExceeded,
+                        ..
+                    },
+                ) if progress_since_rollover => {
+                    progress_since_rollover = false;
+                    let fresh = conversation.next_request().ok_or_else(|| {
+                        KvistError::Runtime(sav::runtime::Error::InvalidModelTurn {
+                            reason: "protected conversation lost its model selector".into(),
+                        })
+                    })?;
+                    if let Some(native) = choice.native.as_ref() {
+                        let remaining = budget.model_deadline(cancellation)?;
+                        let transport =
+                            native.transport_bounded(remaining, profile.max_output_bytes)?;
+                        reserve = context.refresh_serving(
+                            &transport,
+                            &fresh.model,
+                            cancellation,
+                            remaining,
+                            reserve,
+                        )?;
+                    }
+                    budget.model_deadline(cancellation)?;
+                    live.record(&serde_json::json!({"type":"context_rollover","data":{
+                        "previous_generation":generations, "completed_turns":run_turns.len(),
+                        "context_limit":context.limit_tokens(), "source":context.capacity_source(),
+                        "proposals_replayed":false
+                    }}), true)?;
+                    eprintln!(
+                        "Provider context exhausted after generation {generations}; opening a fresh conversation for the same task."
+                    );
+                    conversation.restart_context(request.prompt, None);
+                    conversation.push_user(format!(
+                        "Predecessor: protected run {session_id}, generations through {generations}. The private operator journal at {} contains ordered JSONL model attempts, broker decisions and tool outcomes; it is not a sandbox input. Use the retained observations and approved workspace tools to reconcile prior work.",
+                        redact_bounded(&live_path.display().to_string(), &redactions, 4096),
+                    ));
+                    context.clear_history();
+                    model_attempts = 0;
+                    last_action_label = "context rollover".into();
+                    continue;
+                }
                 Err(KvistError::Sav(ModelError::RepetitiveGeneration { report })) => {
                     let Some(step) = recovery.take() else {
                         live.record(
@@ -1901,6 +1951,7 @@ fn execute_agent_inner(
                 }
                 let repeatable = matches!(raw.name.as_str(), "read_file" | "list_files");
                 if repeatable && tool_tracker.is_new_observation(raw, &outcome) {
+                    progress_since_rollover |= read.outcome != ReadOutcome::Failed;
                     *accepted_generation = sav::loop_detection::StreamLoopDetector::default();
                 }
                 let redacted_content = redact_bounded(&read.content, &redactions, 65536);
@@ -2055,6 +2106,7 @@ fn execute_agent_inner(
             // can react to a failed or skipped write on a later turn.
             for record in effects {
                 if record.applied {
+                    progress_since_rollover = true;
                     observed_paths.remove(&record.destination);
                     last_action_label = format!("{} {}", record.tool, record.destination);
                 }
@@ -3175,6 +3227,7 @@ mod tests {
                 model: model.to_owned(),
                 response_id: None,
                 provider_request_id: None,
+                timings: None,
                 usage: None,
             }
         }
@@ -3443,6 +3496,7 @@ mod tests {
             &budget,
             &[],
             &test_request("fixture"),
+            8192,
             &sav::CancellationToken::new(),
             &live,
             &mut 0,
@@ -3485,6 +3539,7 @@ mod tests {
             &budget,
             &[],
             &test_request("fixture"),
+            8192,
             &sav::CancellationToken::new(),
             &live,
             &mut 0,

@@ -3176,12 +3176,8 @@ impl VerifiedRunnerLaunch {
             reason: format!("create secure runner state directory: {source}"),
         })?;
 
-        let (file, copy_path, launch_path) = create_descriptor_bound_copy(
-            canonical_path,
-            &temp_dir,
-            &bytes,
-            is_directory_runner,
-        )?;
+        let (file, copy_path, launch_path) =
+            create_descriptor_bound_copy(canonical_path, &temp_dir, &bytes, is_directory_runner)?;
         Ok(Self {
             _file: file,
             _copy_path: copy_path,

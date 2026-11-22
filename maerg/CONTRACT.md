@@ -212,17 +212,24 @@ continue with a stderr/journal warning. Malformed metadata, other persistent
 errors, cancellation and recording failures remain errors. Discovery is not
 retried and cannot consume the whole approved task budget.
 
-When capacity is unknown, the local working budget is
+When capacity is unknown, a configured limit is only a local hint. Without a
+hint, the local working budget is
 `max(32768, estimated_initial_request + response_reserve + 8192)`, capped at
 1,048,576 tokens. The reserve is explicitly configured or 8192. This is a
 provisional compaction budget, not a claim about the server's context window;
-the server may reject it explicitly. If estimated initial input, reserve and
+the server may reject it explicitly. Confirmed rejection starts a fresh
+model conversation within the same protected attempt; the predecessor's
+generation boundary is recorded in the private run journal. If estimated initial input, reserve and
 8192-token history headroom exceed that ceiling, startup fails explicitly
 instead of silently reducing headroom or truncating input.
 Known capacity retains the configured
 reserve or `min(8192, max(1, context/4))`. Diagnostics identify configured,
 provider or provisional budget provenance, estimated initial input, reserve and
 remaining wall time. Neither discovery nor fallback changes approved limits.
+For an embedded task, the Kvist harness line identifies the selected task and
+its live phase; the Skott line uses the standalone metrics and does not treat
+a context rollover as a task result. Task token totals include automatic
+follow-up prompts; context occupancy still describes only the current conversation.
 Explicit command-endpoint profiles retain their existing 8192-token local context
 and 1024-token output reserve without a metadata probe (`source: default`).
 

@@ -1,6 +1,26 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Protected rollover and embedded progress observations - 2026-11-22
+
+Independent `implementation-observer` inspected current source and test
+assertions only; it excluded intent, task queues, prior records and history,
+and did not execute tests. Native startup caps capacity discovery at the
+lesser of one second or one tenth of remaining task time. Missing, transient
+or unsupported metadata can select a local budget; malformed metadata,
+authorization failures and cancellation cannot. The protected rollover
+branch checks progress, refreshes capacity, journals the predecessor
+generation and restarts with the original task and protected-run handoff.
+The fixture asserts the `proposals_replayed` journal field and inspects the
+successor request; it does not exercise a tool effect. Embedded progress
+adds prior prompt usage, elapsed time and rollovers to current progress,
+while context remains the current conversation's measurement. The follow-up
+fixture asserts two turns and doubled token usage.
+
+Sources: `src/agent.rs`, `src/agent/startup.rs`, `src/skott_embedded.rs`,
+`src/bark/tui/workspace/view.rs`. Fixture assertions:
+`tests/model_startup.rs` and `src/skott_embedded.rs`.
+
 ## Independent boundary fixture repair observations - 2026-11-08
 
 Clean-slate `repair-source-observer` read current source/test assertions only,

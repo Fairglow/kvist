@@ -4978,6 +4978,10 @@ pub(crate) struct TaskRunPrep {
     pub(crate) lock: TaskLock,
     /// The task ID being run.
     pub(crate) task_id: String,
+    /// One-based queue position and total queue size at admission.
+    pub(crate) queue_position: (usize, usize),
+    /// Wall clock for admission, agent work and finalization.
+    pub(crate) started: std::time::Instant,
     /// The attempt ID for this run.
     pub(crate) attempt_id: String,
     /// The task kind (Test, Implementation, SecurityAudit, ComplianceReview).
@@ -5017,6 +5021,7 @@ pub(crate) fn prepare_task_run(
     task_id: &str,
     _allow_control: bool,
 ) -> Result<TaskRunPrep> {
+    let started = std::time::Instant::now();
     let context = validate_context(project_dir, component_path)?;
     let config = crate::config::load(project_dir)?;
     if config.sandbox.is_none() {
@@ -5194,6 +5199,8 @@ pub(crate) fn prepare_task_run(
         context,
         lock,
         task_id: task_id.to_owned(),
+        queue_position: (task_index + 1, queue.tasks.len()),
+        started,
         attempt_id,
         task_kind: task.kind,
         profile: agent_profile.clone(),

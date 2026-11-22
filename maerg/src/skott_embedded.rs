@@ -31,9 +31,8 @@ use sav::ReasoningEffort;
 use skott::{
     BlockBuffer, PromptSender, SessionHandle,
     config::{Config, Model},
-    context::ContextManager,
     executor::SandboxExecutor,
-    session::{AgentSession, Event, Recorder, RunLimits, StopReason},
+    session::{AgentSession, Event, Recorder, RunLimits, StopReason, TokenAccounting},
     start_session, system_prompt,
     toolchain::HostProbe,
     tools::ToolRegistry,
@@ -308,6 +307,17 @@ fn skott_error(error: skott::Error) -> KvistError {
     }
 }
 
+#[derive(Default)]
+struct PromptTotals {
+    input: u64,
+    output: u64,
+    total: u64,
+    rollovers: u64,
+    decode_seconds: f64,
+    elapsed: f64,
+    accounting: Option<TokenAccounting>,
+}
+
 /// Embedded Skott session within Kvist.
 ///
 /// Owns the Skott session lifecycle (worker thread, event channel, and prompt
@@ -321,6 +331,8 @@ pub struct EmbeddedSkott {
     receiver: Option<mpsc::Receiver<Event>>,
     prompts: Option<PromptSender>,
     metrics: SkottMetrics,
+    prior_prompts: PromptTotals,
+    current_totals: PromptTotals,
     /// Skott's own App state, used for rich rendering of the detailed view.
     pub app: SkottApp,
     /// Plain-text event log, retained for tests and the compact view.
@@ -354,6 +366,8 @@ impl EmbeddedSkott {
             receiver: None,
             prompts: None,
             metrics: SkottMetrics::default(),
+            prior_prompts: PromptTotals::default(),
+            current_totals: PromptTotals::default(),
             app,
             log: SkottEventLog::default(),
             result: SkottResult::default(),
@@ -369,7 +383,7 @@ impl EmbeddedSkott {
     /// window, and conversation, then launches the Skott worker through
     /// [`skott::start_session`]. The returned instance owns the live session
     /// and opens on the detailed Skott view. `recorder` optionally captures a
-    /// durable session record; pass `None` for an in-memory session only.
+    /// durable session record; pass `None` for the default private recorder.
     pub fn start(
         config: Config,
         model: &Model,
@@ -400,7 +414,17 @@ impl EmbeddedSkott {
             tool_defs,
             system_prompt(&config.tool_policy.write_root),
         );
-        let context = ContextManager::for_model(budgets.context_limit);
+        let context = budgets.context();
+        let recorder = match recorder {
+            Some(recorder) => Some(recorder),
+            None => Some(Box::new(
+                skott::session_transcript::SessionTranscript::open_private_workspace(
+                    &config.working_directory,
+                    &model.id,
+                )
+                .map_err(skott_error)?,
+            ) as Box<dyn Recorder>),
+        };
         let (handle, receiver, prompts) = start_session(
             session,
             transport,
@@ -429,6 +453,8 @@ impl EmbeddedSkott {
             receiver: Some(receiver),
             prompts: Some(prompts),
             metrics: SkottMetrics::default(),
+            prior_prompts: PromptTotals::default(),
+            current_totals: PromptTotals::default(),
             app,
             log: SkottEventLog::default(),
             result: SkottResult::default(),
@@ -486,7 +512,52 @@ impl EmbeddedSkott {
     /// result. Uses Skott's own `push_event` for rich rendering (reasoning
     /// blocks, markdown, tool decorations) and maintains a plain-text log for
     /// tests and the compact view.
-    fn observe(&mut self, event: Event) {
+    fn observe(&mut self, mut event: Event) {
+        if let Event::Progress {
+            token_accounting,
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            telemetry,
+            average_tokens_per_sec,
+            elapsed_secs,
+            ..
+        } = &mut event
+        {
+            let prior = &self.prior_prompts;
+            let decode_seconds = if *average_tokens_per_sec > 0.0 {
+                *output_tokens as f64 / *average_tokens_per_sec
+            } else {
+                0.0
+            };
+            *input_tokens = prior.input.saturating_add(*input_tokens);
+            *output_tokens = prior.output.saturating_add(*output_tokens);
+            *total_tokens = prior.total.saturating_add(*total_tokens);
+            telemetry.rollovers = prior.rollovers.saturating_add(telemetry.rollovers);
+            *elapsed_secs += prior.elapsed;
+            *token_accounting = match (prior.accounting, *token_accounting) {
+                (Some(TokenAccounting::Unavailable), _) | (_, TokenAccounting::Unavailable) => {
+                    TokenAccounting::Unavailable
+                }
+                (Some(TokenAccounting::Estimated), _) | (_, TokenAccounting::Estimated) => {
+                    TokenAccounting::Estimated
+                }
+                _ => TokenAccounting::Provider,
+            };
+            let decode_seconds = prior.decode_seconds + decode_seconds;
+            if prior.accounting.is_some() && decode_seconds > 0.0 {
+                *average_tokens_per_sec = *output_tokens as f64 / decode_seconds;
+            }
+            self.current_totals = PromptTotals {
+                input: *input_tokens,
+                output: *output_tokens,
+                total: *total_tokens,
+                rollovers: telemetry.rollovers,
+                decode_seconds,
+                elapsed: *elapsed_secs,
+                accounting: Some(*token_accounting),
+            };
+        }
         match &event {
             Event::Reasoning(text) => {
                 self.log.push_reasoning(text);
@@ -495,6 +566,7 @@ impl EmbeddedSkott {
                 self.log.flush_reasoning();
                 self.log.push_text(text);
             }
+            Event::Progress { .. } => {}
             _ => {
                 self.log.flush_pending();
             }
@@ -527,7 +599,7 @@ impl EmbeddedSkott {
                 self.metrics.average_tokens_per_sec = *average_tokens_per_sec;
                 self.metrics.total_tokens = *total_tokens;
                 self.metrics.elapsed_secs = *elapsed_secs;
-                // Progress is shown in the header metrics, not the event log.
+                self.app.push_event(event);
                 return;
             }
             // `Finished` and `PromptEnd` are mutually exclusive: the runtime
@@ -539,6 +611,7 @@ impl EmbeddedSkott {
                 self.result.stop_reason = Some(StopReason::Completed);
                 self.result.finished = true;
                 self.log.push(format!("✓ {}", message));
+                self.app.push_event(event);
                 return;
             }
             Event::PromptEnd { reason, .. } => {
@@ -570,16 +643,21 @@ impl EmbeddedSkott {
                 .ok_or_else(|| KvistError::SkottCommunicationFailed {
                     reason: "no active Skott session".into(),
                 })?;
-        // Show the prompt in Skott's transcript.
+        let submission =
+            prompts
+                .send(prompt.clone())
+                .map_err(|error| KvistError::SkottCommunicationFailed {
+                    reason: error.describe(),
+                })?;
+        if submission.kind == skott::SubmissionKind::Task
+            && self.current_totals.accounting.is_some()
+        {
+            self.prior_prompts = std::mem::take(&mut self.current_totals);
+        }
         self.app.push_event(Event::Note("You:".to_string()));
-        self.app.push_event(Event::Text(prompt.clone()));
+        self.app.push_event(Event::Text(prompt));
         self.result = SkottResult::default();
-        prompts
-            .send(prompt)
-            .map(|_| ())
-            .map_err(|error| KvistError::SkottCommunicationFailed {
-                reason: error.describe(),
-            })
+        Ok(())
     }
 
     /// Requests cancellation of the active turn; observed effects are retained.
@@ -781,6 +859,7 @@ pub(crate) mod tests {
             model: "fixture".into(),
             response_id: None,
             provider_request_id: None,
+            timings: None,
             usage: Some(ModelUsage {
                 input_tokens: 10,
                 output_tokens: 5,
@@ -850,7 +929,7 @@ pub(crate) mod tests {
             vec![],
             system_prompt(&config.tool_policy.write_root),
         );
-        let context = ContextManager::for_model(budgets.context_limit);
+        let context = budgets.context();
         let (handle, receiver, prompts) = start_session(
             session,
             StubTransport::default(),
@@ -1007,6 +1086,56 @@ pub(crate) mod tests {
         assert!(!skott.result().finished);
         assert_eq!(skott.result().stop_reason, None);
         assert_eq!(skott.result().decision(), None);
+        let first_total = skott.metrics().total_tokens;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !skott.result().finished && Instant::now() < deadline {
+            skott.pump();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(skott.result().finished, "the continuation should finish");
+        assert_eq!(skott.metrics().turns, 2);
+        assert_eq!(skott.metrics().total_tokens, 2 * first_total);
+    }
+
+    #[test]
+    fn embedded_metrics_render_provider_and_compaction_evidence() {
+        let mut skott = EmbeddedSkott::new();
+        skott.observe(Event::Note(
+            "Checking context and compacting eligible history…".into(),
+        ));
+        assert_eq!(skott.app.status, "compacting context");
+        skott.observe(Event::Progress {
+            token_accounting: TokenAccounting::Provider,
+            input_tokens: 1000,
+            output_tokens: 80,
+            context_tokens: 1080,
+            context_limit: 8192,
+            context_utilization: 1080.0 / 8192.0,
+            compaction_progress: 0.0,
+            telemetry: sav::runtime::ProgressTelemetry {
+                context_observed: true,
+                capacity_source: "provider",
+                generation_provider: true,
+                prompt_seconds: Some(0.5),
+                cached_input_tokens: Some(900),
+                rollovers: 1,
+            },
+            compactions: 2,
+            generation_tokens_per_sec: 40.0,
+            average_tokens_per_sec: 35.0,
+            total_tokens: 1080,
+            elapsed_secs: 3.0,
+        });
+        let line = skott.app.stats_line();
+        for value in [
+            "40 t/s",
+            "compactions 2",
+            "fresh 1",
+            "900 cached",
+            "prefill 0.5s",
+        ] {
+            assert!(line.contains(value), "{line}");
+        }
     }
 
     #[test]
@@ -1044,6 +1173,7 @@ pub(crate) mod tests {
                 context_limit: 4,
                 context_utilization: 0.5,
                 compaction_progress: 0.1,
+                telemetry: Default::default(),
                 compactions: 0,
                 generation_tokens_per_sec: 1.0,
                 average_tokens_per_sec: 1.0,
