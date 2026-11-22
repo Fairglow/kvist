@@ -19,6 +19,6 @@ hex = "0.4"
 toml = "1.2"
 semver = "1.0"
 url = "2.5"
-nix = { version = "0.31.3", default-features = false, features = ["fs"] }
+nix = { version = "0.31.4", default-features = false, features = ["fs"] }
 tempfile = "3.27"
 thiserror = "2.0"

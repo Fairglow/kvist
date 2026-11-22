@@ -86,7 +86,7 @@ merman = { version = "0.10", default-features = false, features = [
 
 [dev-dependencies]
 tempfile = "3.27"
-nix = { version = "0.31.3", default-features = false, features = [
+nix = { version = "0.31.4", default-features = false, features = [
     "fs",
     "poll",
     "process",
