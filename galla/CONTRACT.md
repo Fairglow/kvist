@@ -61,6 +61,12 @@ arguments, or a command line to run inside the sandbox:
   through the same Bubblewrap-backed isolation as the one-shot request mode.
   It never falls back to host execution, and the no-nesting guard applies
   unchanged.
+  When stdin, stdout, and stderr are terminals, debug commands use a private
+  controlling terminal. Input is relayed live, stdout and stderr are combined
+  on the terminal, and the payload receives terminal size and `TERM` (or `dumb`
+  if unset or empty). The combined stream counts toward the output limit. If
+  any standard stream is redirected, debug commands keep null payload stdin
+  and separate bounded output streams. This does not change any protocol mode.
 - The opt-in toolchain flags (`--rust <root>`, `--go <root>`, `--node <root>`,
   `--python <root>`) mount the host toolchain resources read-only and a user
   home directory `/home/<username>` as a writable tmpfs, where `<username>` is

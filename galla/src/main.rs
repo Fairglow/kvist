@@ -6,7 +6,7 @@
 //! unknown requests with an actionable diagnostic, and enforces valid requests
 //! via Bubblewrap-backed Linux isolation. It never falls back to unconstrained host execution.
 
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -177,7 +177,7 @@ fn run_exec(command_line: Vec<std::ffi::OsString>, roots: galla::exec::Toolchain
         }
     };
 
-    let request = match galla::exec::build_request_with_toolchains(
+    let mut request = match galla::exec::build_request_with_toolchains(
         &argv,
         &workdir,
         &bwrap_path,
@@ -192,12 +192,29 @@ fn run_exec(command_line: Vec<std::ffi::OsString>, roots: galla::exec::Toolchain
         }
     };
 
+    let interactive =
+        io::stdin().is_terminal() && io::stdout().is_terminal() && io::stderr().is_terminal();
+    if interactive {
+        let term = match std::env::var("TERM") {
+            Ok(term) if !term.is_empty() => term,
+            Ok(_) | Err(std::env::VarError::NotPresent) => "dumb".to_owned(),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                eprintln!("galla: TERM must be valid UTF-8 for interactive exec");
+                return ExitCode::from(2);
+            }
+        };
+        request.environment.insert("TERM".to_owned(), term);
+    }
     if let Err(error) = validation::validate(&request) {
         eprintln!("galla: {error}");
         return ExitCode::from(2);
     }
 
-    galla::enforcement::run(request)
+    if interactive {
+        galla::enforcement::run_terminal(request)
+    } else {
+        galla::enforcement::run(request)
+    }
 }
 
 fn run_probe() -> ExitCode {

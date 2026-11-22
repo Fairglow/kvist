@@ -171,6 +171,13 @@ system: the tools find their caches where they would on a host. The flags are
 opt-in: without them, only the system tree and the working directory are
 mounted, and `HOME` is the working directory.
 
+Run `galla /usr/bin/bash` from a terminal for a prompt. Type `exit` or press
+Ctrl-D to leave; Ctrl-C interrupts the foreground job. Interactive exec
+requires util-linux `setsid` at `/usr/bin/setsid` and keeps the normal
+exec limits (including the two-minute wall-time limit). Redirecting any
+standard stream keeps the noninteractive behavior: payload stdin is closed,
+and stdout and stderr stay separate.
+
 The accepted target interface for the protocol modes is the redefined
 `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` protocol described by
 [ADR 0004](../docs/decisions/0004-bubblewrap-runner-and-sandbox-v1.md). Request

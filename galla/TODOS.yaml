@@ -1864,3 +1864,71 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "interactive-exec-write-tests"
+    title: "write_tests: exercise Bash over a private terminal"
+    description: "Cover prompt input, terminal size, foreground interruption, exit status, output bounds, and redirected stream separation with real Bubblewrap."
+    context: "Human-requested debug workflow. Scoped advisory exception while receipt enforcement is unavailable; no component acceptance."
+    purpose: "Reproduce the missing prompt and protect automated I/O."
+    expected_outcome: "Terminal regressions fail before production changes and pass afterward."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-INTERACTIVE-EXEC"
+    timestamps:
+      created_at: "2026-11-22T21:05:00Z"
+      updated_at: "2026-11-22T21:08:20Z"
+      completed_at: "2026-11-22T21:08:20Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "interactive-exec-implement-code"
+    title: "implement_code: relay interactive debug commands"
+    description: "Attach a private controlling PTY for terminal exec and supervise it without changing protocol modes."
+    context: "Terminal selection is local to debug exec; existing confinement and limits remain in effect."
+    purpose: "Make interactive debug commands usable without exposing host terminal descriptors."
+    expected_outcome: "A Bash prompt accepts input and terminal controls under the existing sandbox policy."
+    kind: implementation
+    status: completed
+    depends_on: ["interactive-exec-write-tests"]
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-INTERACTIVE-EXEC"
+    timestamps:
+      created_at: "2026-11-22T21:05:00Z"
+      updated_at: "2026-11-22T21:08:20Z"
+      completed_at: "2026-11-22T21:08:20Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "interactive-exec-security-audit"
+    title: "security_audit: independently observe interactive exec"
+    description: "Derive scoped observations of terminal descriptor ownership, resource caps, and teardown from source and test evidence without intent."
+    context: "Independent source-only record; no implementer certification."
+    purpose: "Identify unintended terminal authority or supervision changes."
+    expected_outcome: "Scoped findings and limits are retained in IMPL.md."
+    kind: security-audit
+    status: completed
+    depends_on: ["interactive-exec-implement-code"]
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-INTERACTIVE-EXEC"
+    timestamps:
+      created_at: "2026-11-22T21:05:00Z"
+      updated_at: "2026-11-22T21:08:20Z"
+      completed_at: "2026-11-22T21:08:20Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "interactive-exec-compliance-review"
+    title: "compliance_review: compare interactive exec evidence"
+    description: "Compare the local intent with independent observations and attributed test results without source access."
+    context: "Separate source-blind comparison; human acceptance is separate."
+    purpose: "Preserve discrepancies for human arbitration."
+    expected_outcome: "Correspondence and limitations are recorded without acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: ["interactive-exec-security-audit"]
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-INTERACTIVE-EXEC"
+    timestamps:
+      created_at: "2026-11-22T21:05:00Z"
+      updated_at: "2026-11-22T21:08:20Z"
+      completed_at: "2026-11-22T21:08:20Z"
+    blocked_reason: null
+    recovery_state: null

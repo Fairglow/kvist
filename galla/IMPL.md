@@ -1,6 +1,40 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped interactive exec observation
+
+An independent source-only observer read current code and test assertions
+without intent, queue, prior records or history. Bare and explicit exec select
+terminal I/O only when all three standard descriptors are terminals. The
+runner reopens operator descriptors close-on-exec and gives Bubblewrap only
+the private PTY slave on descriptors 0–2. The sandbox runs `setsid --ctty
+--wait`; the host retains the PTY master. `TERM` is selected in the CLI;
+terminal selection is absent from versioned protocol dispatch.
+
+The relay switches the operator terminal to raw mode, merges the slave's output,
+relays window sizes, caps output and wall time, and samples task counts. On
+handled interruption or failure it restores terminal settings, stops the
+supervisor group if still running, and waits for the supervisor. Diagnostic
+writes can be lost on a disconnected or backpressured terminal. Uncatchable
+host signals cannot run terminal restoration.
+
+Sources: `src/main.rs`, `src/enforcement.rs`, `src/enforcement/terminal.rs`;
+assertions: `tests/interactive_exec.rs`. The author corrected the observer's
+test observation that descriptor identity could be checked before the full
+line arrived. Implementer-attributed runs: before implementation, the real-PTY
+prompt and output-bound tests failed and redirected I/O passed; after
+implementation, all four live tests passed (including Ctrl-C, Ctrl-D, resize,
+backspace editing, exit status, and host SIGTERM restoration). The redirected
+fixture supplies a nonempty input file and checks closed payload input and
+separate exact stdout/stderr. The default Galla suite passed 315 tests with
+six ignored; strict all-target Galla Clippy and affected formatting passed.
+
+A separate source-blind comparison found no contradiction in the scoped
+record. It did not infer complete process-tree teardown, confinement or
+protocol stream equivalence from the PTY tests. The tests do not induce
+wall-time or process-count breaches, stall the host output sink, or exercise
+the missing-`TERM` fallback. No component acceptance was performed.
+
 ## Scoped native Cargo quality observation
 
 An independent source-only observer inspected validation code and test

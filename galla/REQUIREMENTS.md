@@ -317,6 +317,17 @@ native data/private-admin topology to resolved mounts. Portable export
 generation remains a separate provider-capability primitive, not native
 acquisition publication.
 
+### SR-REQ-INTERACTIVE-EXEC
+
+The debug command-line interface MUST support an interactive prompt, terminal
+line editing and foreground job interruption. It MUST NOT expose the operator's
+terminal descriptors to the sandbox or broaden filesystem, network, or
+namespace authority. Wall-time, process, and output limits MUST still apply.
+Redirected debug commands and all protocol modes MUST retain their existing
+stream behavior. Verification MUST exercise a real Bubblewrap shell through
+a pseudo-terminal, including command entry, Ctrl-C, teardown and exit status,
+and distinguish that path from a redirected invocation.
+
 ### SR-REQ-TOOLCHAIN-E2E
 
 Explicit native toolchain trials MUST execute the real runner and Bubblewrap
@@ -396,8 +407,8 @@ any host loopback or general egress path.
 - The component MUST NOT import Kvist maerg implementation types.
 - Repository input and protocol input are untrusted and bounded before use.
 - The dependency graph remains small: the runtime crates are the Rust standard
-  library, `nix` for safe Linux descriptor-relative filesystem operations,
-  `serde`/`serde_json` for parsing, and `sha2`/`hex` for identities. No shell,
+  library, `nix` and `rustix` for safe Linux filesystem, process, and terminal
+  operations, `serde`/`serde_json` for parsing, and `sha2`/`hex` for identities. No shell,
   network service, daemon, credential, ambient home, or worktree runner
   installation is introduced by this revision.
 

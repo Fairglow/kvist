@@ -240,6 +240,25 @@ a substitute for its own. The enforcement path constructs one explicit
 Bubblewrap execution from a validated request, supervises it, enforces
 resources, cleans up the process tree, and returns bounded results.
 
+### Interactive debug commands
+
+Select terminal I/O locally at the debug entry point; it is not a wire
+request field. Keep Bubblewrap's new session and namespace setup. Give the
+backend only a fresh PTY slave on stdio and run util-linux
+`/usr/bin/setsid --ctty --wait` inside the sandbox to acquire that slave as
+the controlling terminal. The sandbox never receives the host terminal or
+the master descriptor. Resolve the terminal type through the existing
+validated environment; inherit no other variable for terminal support.
+
+The runner keeps the master and copies bytes in both directions using bounded
+buffers and nonblocking descriptor polling. The operator terminal is raw
+while relaying so editing and job-control keys are interpreted by the
+slave's line discipline, not by the host. Propagate window-size changes
+while polling. Account for PTY output before writing it to the host terminal
+and retain wall-time and sampled process supervision even when input is idle
+or output is blocked. On failure or host cancellation kill and reap the
+backend as needed; restore terminal attributes on normal or handled exits.
+
 ### Versioned session mode (proposal `sandboxed-external-agents`)
 
 Session mode is a separate, explicit protocol mode beside the one-shot v1

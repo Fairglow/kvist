@@ -18,6 +18,7 @@ mod host_code;
 mod native_cache;
 pub mod source;
 pub(crate) mod system_layout;
+mod terminal;
 pub mod transport;
 use transport::start as start_network_guard_proxy;
 #[cfg(test)]
@@ -198,10 +199,19 @@ fn count_processes_in_pgid(child_pid: u32) -> u64 {
         .sum()
 }
 
-/// Check if any file under the given path exceeds the size limit (recursive).
 /// Executes the request in a secure Bubblewrap sandbox, supervises its resources,
-/// and reaps the child process.
+/// and reaps the child process. Payload stdin is closed.
 pub fn run(request: SandboxRequest) -> ExitCode {
+    run_with_io(request, false)
+}
+
+/// Executes a validated debug command using a private controlling terminal.
+/// The debug CLI selects this only when all standard streams are terminals.
+pub fn run_terminal(request: SandboxRequest) -> ExitCode {
+    run_with_io(request, true)
+}
+
+fn run_with_io(request: SandboxRequest, interactive: bool) -> ExitCode {
     if let Err(reason) = crate::context::require_host() {
         eprintln!("galla: {reason}");
         return ExitCode::from(3);
@@ -480,6 +490,16 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     bwrap_args.push(request.working_directory.clone());
 
     // 11. Append the target executable and argument vector
+    if interactive {
+        if !Path::new(terminal::SETSID).is_file() {
+            eprintln!(
+                "galla: interactive exec requires util-linux setsid at {}",
+                terminal::SETSID
+            );
+            return ExitCode::from(3);
+        }
+        bwrap_args.extend(["--", terminal::SETSID, "--ctty", "--wait", "--"].map(str::to_owned));
+    }
     for arg in &request.argv {
         bwrap_args.push(arg.clone());
     }
@@ -504,9 +524,20 @@ pub fn run(request: SandboxRequest) -> ExitCode {
 
     let mut child_cmd = Command::new(&bwrap_path);
     child_cmd.args(&bwrap_args);
-    child_cmd.stdin(Stdio::null());
-    child_cmd.stdout(Stdio::piped());
-    child_cmd.stderr(Stdio::piped());
+    let terminal = if interactive {
+        match terminal::Terminal::attach(&mut child_cmd) {
+            Ok(terminal) => Some(terminal),
+            Err(error) => {
+                eprintln!("galla: cannot prepare interactive terminal: {error}");
+                return ExitCode::from(3);
+            }
+        }
+    } else {
+        child_cmd.stdin(Stdio::null());
+        child_cmd.stdout(Stdio::piped());
+        child_cmd.stderr(Stdio::piped());
+        None
+    };
 
     // Isolate the child inside its own process group
     child_cmd.process_group(0);
@@ -532,6 +563,17 @@ pub fn run(request: SandboxRequest) -> ExitCode {
             }
         }
     };
+    drop(child_cmd);
+
+    if let Some(terminal) = terminal {
+        return match terminal.supervise(&mut child, limits) {
+            Ok(code) => finish(&request, code),
+            Err(error) => {
+                terminal.report_error(&error);
+                ExitCode::from(3)
+            }
+        };
+    }
 
     let child_pid = child.id();
     let total_bytes = Arc::new(AtomicU64::new(0));
@@ -674,7 +716,7 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     }
 
     let final_status = exit_status.or(status);
-    let mut exit_code = if let Some(s) = final_status {
+    let exit_code = if let Some(s) = final_status {
         if s.success() {
             0
         } else {
@@ -683,9 +725,12 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     } else {
         1
     };
+    finish(&request, exit_code)
+}
 
+fn finish(request: &SandboxRequest, mut exit_code: i32) -> ExitCode {
     if exit_code == 0
-        && let Err(promotion_error) = inspect_and_promote_cache(&request)
+        && let Err(promotion_error) = inspect_and_promote_cache(request)
     {
         eprintln!("galla: {promotion_error}");
         exit_code = 3;
