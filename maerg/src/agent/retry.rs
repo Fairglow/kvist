@@ -127,14 +127,14 @@ impl ModelRetry<'_> {
                 "phase":self.phase,"model":self.model,"endpoint":self.endpoint,
                 "failed_attempt":*attempts,"next_attempt":*attempts+1,
                 "max_attempts":self.policy.max_attempts,"cause":cause,
-                "delay_ms":delay.as_millis(),"remaining_ms":self.budget.remaining().as_millis()
+                "delay_ms":delay.as_millis(),"remaining_ms":self.budget.remaining_limit().map(|left| left.as_millis())
             }}))
             .map_err(|error| self.failure_context(&source, error))?;
             eprintln!(
                 "{}",
                 redact_bounded(
                     &format!(
-                        "Transient model failure during {} for `{}` at {} (attempt {}/{}): {}. Retrying automatically in {:.3}s; {:.1}s task budget remains.",
+                        "Transient model failure during {} for `{}` at {} (attempt {}/{}): {}. Retrying automatically in {:.3}s; remaining task budget: {}.",
                         self.phase,
                         self.model,
                         self.endpoint,
@@ -142,7 +142,7 @@ impl ModelRetry<'_> {
                         self.policy.max_attempts,
                         cause,
                         delay.as_secs_f64(),
-                        self.budget.remaining().as_secs_f64(),
+                        self.budget.remaining_label(),
                     ),
                     self.redactions,
                     4096

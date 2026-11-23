@@ -84,6 +84,7 @@ impl LiveRun {
                     | "tool_result"
                     | "context_compaction"
                     | "context_rollover"
+                    | "task_refocus"
                     | "control"
             )
         ) || (event["type"] == "tool_recovery" && event["data"]["notice"].is_string())

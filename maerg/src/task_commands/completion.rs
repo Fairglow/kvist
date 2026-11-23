@@ -104,7 +104,7 @@ mod tests {
         std::fs::write(fixture.path().join("tests/test.rs"), "completed test").unwrap();
         let cancellation = CancellationToken::new();
         let mut profile = AgentProfile::default_for_role(Role::Developer);
-        profile.timeout_seconds = if expire { 1 } else { 30 };
+        profile.timeout_seconds = Some(if expire { 1 } else { 30 });
         let sequence =
             AuthoringSequence::with_cancellation(&profile, cancellation.clone()).unwrap();
         let mut collected = false;

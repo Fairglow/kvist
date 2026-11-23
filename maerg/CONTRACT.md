@@ -233,13 +233,14 @@ follow-up prompts; context occupancy still describes only the current conversati
 Explicit command-endpoint profiles retain their existing 8192-token local context
 and 1024-token output reserve without a metadata probe (`source: default`).
 
-Protected native authoring has no implicit 64-generation ceiling. Role
-`timeout_seconds` is a positive whole-task budget, defaults to 7200 and accepts
-up to 2,592,000 seconds (30 days). Explicit `token_limit` remains cumulative.
-Each sandbox effect is clipped to remaining task time and at most 86,400
-seconds; this does not increase runner grants. Changing role budgets changes
-approval input and requires normal policy reapproval. Guidance does not reset
-these approved budgets.
+Protected native authoring has no implicit generation or whole-task wall limit.
+When set, role `timeout_seconds` is a hard whole-task budget of 1–2,592,000
+seconds (30 days). Explicit `token_limit` remains cumulative. Tool-free reviews
+retain a 7200-second default. Each sandboxed authoring effect has at most 1800
+seconds, or the remaining approved task time if shorter. Timeout terminates
+that dispatch; an uncertain effect is retained for reconciliation, not replayed.
+Changing role budgets changes approval input and requires normal policy
+reapproval. Guidance does not reset these approved budgets.
 Delivered guidance renews model-generation attempts. Individual model requests
 retain the transport's independent 24-hour ceiling, including explicit endpoint
 profiles; shared profiles may impose shorter per-attempt deadlines.
@@ -256,6 +257,27 @@ role configuration, requires policy reapproval after changes, and never retries
 the oversized response or replays the task.
 Large streamed text deltas are split into ordered, lossless redacted text
 records without increasing the journal's 64 KiB record bound.
+
+After 15 minutes without a confirmed file change, at the next safe model-turn
+boundary Kvist directs the model to the next unmet requirement or focused
+read-only question, not to make a gratuitous edit. After a second interval
+without confirmed changes or after eight repeated-tool interventions, Kvist
+opens a fresh model context in the same attempt. A confirmed change or
+delivered operator guidance resets the interval and the intervention count.
+The time-based heuristic applies to read-only work too; it is not a judgment
+that the investigation failed. The original task, latest operator guidance and
+bounded recent tool observations carry forward; completed effects, history,
+budgets and tool-loop tracking remain intact. No call is replayed. A redacted
+notice is presented live and recorded. An explicitly approved budget still
+stops on exhaustion.
+
+`list_files` collects at most 4096 directory entries to examine per call, checks a
+cooperative five-second deadline during traversal, and returns at most 512
+entries through depth eight. Hitting a result or depth limit is marked in the
+listing. Hitting the scan bound returns a failed tool result with guidance to
+use a narrower path, not a purported complete listing.
+The host cannot preempt a single blocking filesystem syscall. Protected tools
+do not accept shell commands or arbitrary host search roots.
 
 Explicit cancellation is carried into an executing sandbox effect and
 terminates/reaps its owned process group; steering alone never cancels that
@@ -1441,10 +1463,10 @@ to implement it and `IMPL.md` MUST become stale; the component then remains in t
 awaiting-decision state until an updated advisory review is performed and accepted,
 after which `IMPL.md` is rederived from the code.
 
-The model phase runs under one shared wall-clock budget equal to the configured
-profile timeout, covering the liveness probe, every model and brokered turn, every read and effect, and every
-retry backoff; each per-attempt transport deadline is clipped to the remaining
-budget and independent transport/profile ceiling. When
+When a role timeout is configured, its shared wall-clock budget covers the
+liveness probe, model and brokered turns, reads, effects and retry backoffs.
+Each per-attempt transport deadline is clipped to the remaining task budget
+when present and the independent transport/profile ceiling. When
 the gateway accepts but a turn still hits a transient availability failure — a
 socket connection refused, timed out, interrupted, or reset error, a
 slot-allocation timeout, or an overall transport timeout — the maerg retries it

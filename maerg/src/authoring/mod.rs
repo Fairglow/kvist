@@ -193,6 +193,8 @@ pub enum ReadOutcome {
     Inspection,
     /// A failed inspection or a refused/unapplied proposal.
     Failed,
+    /// An inspection exceeded its cooperative deadline.
+    TimedOut,
     /// An authorized no-op or routine status note, not inspection progress.
     Advisory,
     /// An explicit, valid completion report from the model.
@@ -201,7 +203,7 @@ pub enum ReadOutcome {
 
 impl ReadOutcome {
     pub(crate) fn exit_code(self) -> i32 {
-        if self == Self::Failed { 1 } else { 0 }
+        i32::from(matches!(self, Self::Failed | Self::TimedOut))
     }
 }
 
@@ -1244,6 +1246,8 @@ const MAX_READ_SLICE_BYTES: usize = 64 * 1024;
 const DEFAULT_READ_LINES: usize = 1200;
 const MAX_LIST_ENTRIES: usize = 512;
 const MAX_LIST_DEPTH: usize = 8;
+const MAX_LIST_VISITS: usize = 4096;
+const LIST_SCAN_TIME: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn check_manifest_decision(
     component_root: &Path,
@@ -1918,7 +1922,7 @@ fn authorize_read_file(
             "file `{rel}` exceeds the {MAX_CONTENT_BYTES}-byte read bound"
         ));
     }
-    let text = fs::read_to_string(&resolved)
+    let text = crate::file_io::read_text_bounded(&resolved, MAX_CONTENT_BYTES)
         .map_err(|error| format!("file `{rel}` could not be read as UTF-8: {error}"))?;
     let lines: Vec<&str> = text.lines().collect();
     let total_lines = lines.len();
@@ -2054,7 +2058,37 @@ fn authorize_list_files(
         });
     }
     let mut entries = Vec::new();
-    collect_directory_entries(component_root, &resolved, 0, &mut entries)?;
+    let mut scan = ListScan {
+        started: std::time::Instant::now(),
+        visited: 0,
+        truncated: false,
+    };
+    if let Err(error) =
+        collect_directory_entries(component_root, &resolved, 0, &mut entries, &mut scan)
+    {
+        let (outcome, reason) = match error {
+            ListError::Io(error) => {
+                return Err(format!("cannot inspect directory `{rel}`: {error}"));
+            }
+            ListError::VisitLimit => (
+                ReadOutcome::Failed,
+                format!("the {MAX_LIST_VISITS}-entry scan limit"),
+            ),
+            ListError::TimedOut => (
+                ReadOutcome::TimedOut,
+                format!("the {}-second scan deadline", LIST_SCAN_TIME.as_secs()),
+            ),
+        };
+        return Ok(ReadRecord {
+            outcome,
+            call_id: intent.id.clone(),
+            tool: "list_files".to_owned(),
+            path: rel.clone(),
+            content: format!(
+                "error: listing `{rel}` reached {reason}; no complete listing is available. Use a narrower directory path or read a known relevant file."
+            ),
+        });
+    }
     let mut output = format!(
         "Directory listing for `{rel}` ({} entries):\n",
         entries.len()
@@ -2062,6 +2096,9 @@ fn authorize_list_files(
     for entry in entries {
         output.push_str(&entry);
         output.push('\n');
+    }
+    if scan.truncated {
+        output.push_str("Listing limited by entry count or depth; use a narrower directory path for more detail.\n");
     }
     Ok(ReadRecord {
         outcome: ReadOutcome::Inspection,
@@ -2072,22 +2109,62 @@ fn authorize_list_files(
     })
 }
 
+struct ListScan {
+    started: std::time::Instant,
+    visited: usize,
+    truncated: bool,
+}
+
+enum ListError {
+    Io(std::io::Error),
+    VisitLimit,
+    TimedOut,
+}
+
+impl ListScan {
+    fn check_time(&self) -> Result<(), ListError> {
+        if self.started.elapsed() >= LIST_SCAN_TIME {
+            return Err(ListError::TimedOut);
+        }
+        Ok(())
+    }
+
+    fn visit(&mut self) -> Result<(), ListError> {
+        if self.visited >= MAX_LIST_VISITS {
+            return Err(ListError::VisitLimit);
+        }
+        self.visited += 1;
+        Ok(())
+    }
+}
+
 fn collect_directory_entries(
     component_root: &Path,
     dir: &Path,
     depth: usize,
     out: &mut Vec<String>,
-) -> Result<(), String> {
+    scan: &mut ListScan,
+) -> Result<(), ListError> {
     if depth >= MAX_LIST_DEPTH || out.len() >= MAX_LIST_ENTRIES {
+        scan.truncated = true;
         return Ok(());
     }
-    let read_dir = fs::read_dir(dir).map_err(|error| format!("cannot read directory: {error}"))?;
-    let mut children: Vec<PathBuf> = read_dir
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .collect();
+    scan.check_time()?;
+    let mut read_dir = fs::read_dir(dir).map_err(ListError::Io)?;
+    let mut children = Vec::new();
+    loop {
+        scan.check_time()?;
+        let Some(entry) = read_dir.next() else {
+            break;
+        };
+        scan.visit()?;
+        children.push(entry.map_err(ListError::Io)?.path());
+    }
     children.sort();
     for child in children {
+        scan.check_time()?;
         if out.len() >= MAX_LIST_ENTRIES {
+            scan.truncated = true;
             break;
         }
         let Some(name) = child.file_name().and_then(|n| n.to_str()) else {
@@ -2096,8 +2173,10 @@ fn collect_directory_entries(
         if EXCLUDED_READ_DIRS.contains(&name) {
             continue;
         }
-        let Ok(metadata) = fs::symlink_metadata(&child) else {
-            continue;
+        let metadata = match fs::symlink_metadata(&child) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(ListError::Io(error)),
         };
         if metadata.file_type().is_symlink() {
             continue;
@@ -2105,12 +2184,12 @@ fn collect_directory_entries(
         let rel = normalized_relative(component_root, &child);
         if metadata.is_dir() {
             out.push(format!("{rel}/"));
-            collect_directory_entries(component_root, &child, depth + 1, out)?;
+            collect_directory_entries(component_root, &child, depth + 1, out, scan)?;
         } else if metadata.is_file() {
             out.push(format!("{rel} ({} bytes)", metadata.len()));
         }
     }
-    Ok(())
+    scan.check_time()
 }
 
 #[cfg(test)]
@@ -2147,6 +2226,41 @@ mod tests {
 
     fn policy() -> BrokerPolicy {
         BrokerPolicy::default()
+    }
+
+    #[test]
+    fn list_files_marks_a_bounded_result_page() {
+        let dir = tempdir().unwrap();
+        for index in 0..513 {
+            fs::write(dir.path().join(format!("entry-{index:03}")), "").unwrap();
+        }
+        let call = intent("list_files", serde_json::json!({"path":"."}));
+        let plan = authorize_intents(dir.path(), &[call], &policy());
+        let result = &plan.reads[0];
+        assert_eq!(result.outcome, ReadOutcome::Inspection);
+        assert!(result.content.contains("(512 entries)"));
+        assert!(result.content.contains("narrower directory path"));
+        assert!(!result.content.contains("entry-512"));
+    }
+
+    #[test]
+    fn directory_scan_checks_deadline_before_filesystem_access() {
+        let dir = tempdir().unwrap();
+        let mut scan = ListScan {
+            started: std::time::Instant::now() - std::time::Duration::from_secs(5),
+            visited: 0,
+            truncated: false,
+        };
+        assert!(matches!(
+            collect_directory_entries(
+                dir.path(),
+                &dir.path().join("missing"),
+                0,
+                &mut Vec::new(),
+                &mut scan
+            ),
+            Err(ListError::TimedOut)
+        ));
     }
 
     #[test]

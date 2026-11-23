@@ -173,6 +173,98 @@ fn scripted_loop(
 }
 
 #[test]
+fn persistent_read_loop_refocuses_with_recent_evidence_and_then_finishes() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    fs::create_dir(dir.path().join("src")).expect("src");
+    fs::write(dir.path().join("src/page.rs"), "// retained observation\n").expect("page");
+    let runs = dir.path().join(".kvist/runs");
+    let mut refocused = false;
+    let (result, calls) = resilience_run_scripted(
+        dir.path(),
+        move |index, request| {
+            let messages = request["messages"].as_array().expect("messages");
+            let text = messages
+                .iter()
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if text.contains("Continue the same task from a fresh context") {
+                assert!(text.contains("finish the required implementation"));
+                assert!(text.contains("retained observation"));
+                assert!(!messages.iter().any(|m| m["role"] == "tool"));
+                let trajectory = fs::read_dir(&runs)
+                    .expect("run evidence")
+                    .map(|entry| entry.expect("entry").path())
+                    .find(|path| path.to_string_lossy().ends_with(".trajectory.jsonl"))
+                    .expect("trajectory already exists");
+                let replay =
+                    sav::replay_trajectory(&trajectory, None).expect("retained trajectory");
+                assert!(replay.tool_calls_count >= 8);
+                assert_eq!(replay.final_success, None, "handoff is not completion");
+                refocused = true;
+            }
+            if refocused || index >= 16 {
+                (serde_json::json!([]), "Inspection is complete.".to_owned())
+            } else {
+                (read_call("src/page.rs"), format!("inspection {index}"))
+            }
+        },
+        None,
+    );
+    assert!(result.success, "{}", result.stderr);
+    assert!(calls < 16, "same tool loop was not broken");
+    let journal = events(dir.path());
+    assert_eq!(
+        journal
+            .iter()
+            .filter(|e| e["type"] == "context_rollover"
+                && e["data"]["reason"] == "repeated_tool_activity")
+            .count(),
+        1
+    );
+    assert_eq!(journal.iter().filter(|e| e["type"] == "run_end").count(), 1);
+}
+
+#[test]
+fn broad_directory_scan_fails_with_guidance_and_focused_read_can_continue() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    for index in 0..4097 {
+        fs::write(dir.path().join(format!("entry-{index:04}")), "").expect("file");
+    }
+    fs::create_dir(dir.path().join("src")).expect("src");
+    fs::write(dir.path().join("src/page.rs"), "// scope\n").expect("file");
+    let (result, calls) = resilience_run_scripted(
+        dir.path(),
+        |index, request| {
+            let tools = match index {
+                1 => {
+                    serde_json::json!([{"function":{"name":"list_files","arguments":{"path":"."}}}])
+                }
+                2 => {
+                    let messages = request["messages"].as_array().expect("messages");
+                    assert!(messages.iter().any(|m| {
+                        m["role"] == "tool"
+                            && m["content"]
+                                .as_str()
+                                .is_some_and(|s| s.contains("narrower"))
+                    }));
+                    read_call("src/page.rs")
+                }
+                _ => serde_json::json!([]),
+            };
+            (tools, format!("step {index}"))
+        },
+        None,
+    );
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 3);
+    let journal = events(dir.path());
+    assert!(journal.iter().any(|e| e["type"] == "tool_result"
+        && e["data"]["name"] == "list_files"
+        && e["data"]["applied"] == false));
+}
+
+#[test]
 fn phase3_repeatable_failed_reads_get_steering_and_remain_failed_results() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
     let (result, calls) = scripted_loop(dir.path(), 8, |_| read_call("src/missing.rs"));

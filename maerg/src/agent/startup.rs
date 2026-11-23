@@ -108,7 +108,7 @@ pub(super) fn model_context(
             "context_limit":limit,"response_reserve":reserve,"source":source,
             "serving_capacity_known":source == "provider",
             "estimated_initial_input_tokens":estimated_input,
-            "remaining_ms":budget.remaining().as_millis()
+            "remaining_ms":budget.remaining_limit().map(|left| left.as_millis())
         }}),
         true,
     )?;

@@ -516,12 +516,24 @@ effect sandbox against a read-only staged-intent mount, so the host never writes
 component state for an effect. A turn succeeds only when it produced a usable
 result, no intent was dropped, and every authorized effect applied.
 
-The model phase runs under one shared wall-clock budget equal to the configured
-profile timeout, covering the liveness probe, every turn attempt, and every retry
-backoff; each per-attempt transport deadline is clipped to the remaining budget
-and independent transport/profile ceiling. Enforcement occurs at phase
+The authoring sequence owns an optional monotonic hard task deadline from the
+role. Each attempt, effect and retry clips its independent limit to the
+remaining task time when configured. Tool-free reviews keep their finite
+default. Enforcement occurs at phase
 boundaries and through cooperative transport/effect cancellation, not a
 preemptive whole-task watchdog for arbitrary synchronous work.
+At safe boundaries, a separate progress clock tracks confirmed changes and
+previous interventions. A first time-based intervention injects focused
+guidance; sustained stagnation or repeated tool recovery rolls over the
+conversation using the bounded recent-observation handoff, without resetting
+the tool tracker or accounting. A confirmed change or delivered human guidance
+restarts this soft clock. The scan budget counts entries before collecting or
+sorting them, including excluded or special entries; elapsed time is checked
+between filesystem operations. Sandbox supervisors bound dispatched effects
+independently; an uncertain write result is not eligible for automatic replay.
+The trajectory is appended as turns settle. Only the current turn and bounded
+redacted summary sections stay in memory; cumulative outcome flags and counts
+are retained without collecting all prior turns.
 Before constructing each transport, check cancellation and then require a
 nonzero remaining model budget. Expiry is a transport timeout, not an invalid
 endpoint/deadline configuration error; cancellation takes precedence.

@@ -197,7 +197,7 @@ fn execute_agent_runs_the_model_turn_on_the_host_and_captures_the_response() {
         model: None,
         thinking_effort: None,
         token_limit: None,
-        timeout_seconds: 5,
+        timeout_seconds: Some(5),
         max_output_bytes: 1_024,
         redaction_values: vec![],
     };
@@ -286,7 +286,7 @@ fn execute_agent_surfaces_a_proposed_decision_and_pauses() {
         model: None,
         thinking_effort: None,
         token_limit: None,
-        timeout_seconds: 5,
+        timeout_seconds: Some(5),
         max_output_bytes: 1_024,
         redaction_values: vec![],
     };
@@ -415,7 +415,7 @@ fn execute_agent_redacts_the_decision_patch_in_the_recorded_evidence() {
         model: None,
         thinking_effort: None,
         token_limit: None,
-        timeout_seconds: 5,
+        timeout_seconds: Some(5),
         max_output_bytes: 1_024,
         redaction_values: vec![secret.to_owned()],
     };

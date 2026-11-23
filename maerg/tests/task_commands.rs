@@ -4009,7 +4009,10 @@ fn task_run_runtime_budgets_allow_large_wire_responses_and_text_deltas() {
         let output = run_kvist(&project, &arguments);
         let diagnostic = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{diagnostic}");
-        assert!(diagnostic.contains("task timeout 7200s"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("task timeout not configured"),
+            "{diagnostic}"
+        );
         assert!(
             diagnostic.contains("response limit 16777216 bytes"),
             "{diagnostic}"
@@ -4036,7 +4039,8 @@ fn task_run_runtime_budgets_allow_large_wire_responses_and_text_deltas() {
             .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
             .find(|event| event["event"]["type"] == "execution_limits")
             .expect("execution limits recorded");
-        assert_eq!(limits["event"]["data"]["task_timeout_seconds"], 7200);
+        assert!(limits["event"]["data"]["task_timeout_seconds"].is_null());
+        assert_eq!(limits["event"]["data"]["effect_deadline_seconds"], 1800);
         assert_eq!(
             limits["event"]["data"]["max_response_bytes"],
             16 * 1024 * 1024

@@ -10,6 +10,77 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "task-stall-watchdog-write-tests"
+    title: "write_tests: distinguish stagnation from execution limits"
+    description: "Exercise the progress clock, recurrence handoff, bounded directory traversal and default versus explicitly approved task time."
+    context: "The protected cargo-quality attempt continued reading for hundreds of turns without applying changes."
+    purpose: "Demonstrate that elapsed time and repeated activity drive recovery rather than false completion."
+    expected_outcome: "Fixtures show an in-attempt handoff, focused read recovery, and preserved hard limits."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-23T11:39:15Z"
+      updated_at: "2026-11-23T11:56:45Z"
+      completed_at: "2026-11-23T11:56:45Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-stall-watchdog-implement-code"
+    title: "implement_code: refocus stalled work without stopping"
+    description: "Continue the same protected attempt, bound each operation and persist turn evidence incrementally."
+    context: "An explicit policy limit remains enforceable; omission is not approval for unbounded operations."
+    purpose: "Let the model retain and use evidence while breaking repeated exploration."
+    expected_outcome: "Protected authoring can recover from stagnation without renewal of configured budgets or authority."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "task-stall-watchdog-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-23T11:39:15Z"
+      updated_at: "2026-11-23T11:56:45Z"
+      completed_at: "2026-11-23T11:56:45Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-stall-watchdog-security-audit"
+    title: "security_audit: assess protected continuation and tool limits"
+    description: "Independently assess the authority, effect certainty, and retained evidence around refocus and timeouts."
+    context: "A stopped mutation cannot be presumed safe to repeat."
+    purpose: "Check that deadline handling does not authorize or replay effects."
+    expected_outcome: "Independent findings or explicit evidence gaps."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "task-stall-watchdog-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-23T11:39:15Z"
+      updated_at: "2026-11-23T11:39:15Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-stall-watchdog-compliance-review"
+    title: "compliance_review: compare continuation with approved intent"
+    description: "Compare source-derived observations and test evidence against the continuation and operation boundaries."
+    context: "A scoped implementation record and regression evidence precede independent comparison."
+    purpose: "Keep implementation observation distinct from compliance and human acceptance."
+    expected_outcome: "A separate comparison with discrepancies available for human arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "task-stall-watchdog-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-RESILIENCE"
+    timestamps:
+      created_at: "2026-11-23T11:39:15Z"
+      updated_at: "2026-11-23T11:39:15Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "tool-loop-steering-write-tests"
     title: "write_tests: protect task continuation after repeated tools"
     description: "Script repeated reads, failures and effect proposals past the former cutoff."

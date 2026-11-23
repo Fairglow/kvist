@@ -283,7 +283,7 @@ token_limit = 10000
             format!("schema_version = 1\ncomponent_root = \"src\"\n[agent.roles.developer]\ntimeout_seconds = {seconds}\n"),
         ).expect("multi-day role policy");
         let config = config::load(project.path()).expect("explicit multi-day timeout");
-        assert_eq!(config.agent.developer.timeout_seconds, seconds);
+        assert_eq!(config.agent.developer.timeout_seconds, Some(seconds));
     }
 
     // 2b. Project-local `.kvist/config.toml` overrides root `kvist.toml`

@@ -27,7 +27,7 @@ pub(crate) struct AuthoringSequence {
 #[derive(serde::Serialize)]
 pub(crate) struct SequenceDiagnostics {
     pub elapsed_seconds: f64,
-    pub remaining_seconds: f64,
+    pub remaining_seconds: Option<f64>,
     pub model_charge: u64,
     pub remaining_model_tokens: Option<u64>,
     accounting: super::accounting::Accounting,
@@ -49,7 +49,8 @@ impl AuthoringSequence {
         profile: &AgentProfile,
         cancellation: CancellationToken,
     ) -> Result<Self> {
-        let wall = TurnBudget::new(std::time::Duration::from_secs(profile.timeout_seconds));
+        let wall =
+            TurnBudget::with_limit(profile.timeout_seconds.map(std::time::Duration::from_secs));
         let signals = SignalCancellation::start(&cancellation)?;
         Ok(Self {
             wall,
@@ -85,7 +86,7 @@ impl AuthoringSequence {
     pub(crate) fn diagnostics(&self, stop_reason: StopReason) -> SequenceDiagnostics {
         SequenceDiagnostics {
             elapsed_seconds: self.wall.started.elapsed().as_secs_f64(),
-            remaining_seconds: self.wall.remaining().as_secs_f64(),
+            remaining_seconds: self.wall.remaining_limit().map(|left| left.as_secs_f64()),
             model_charge: self.tokens.charge(),
             remaining_model_tokens: self.tokens.remaining(),
             accounting: self.tokens.accounting(),
@@ -119,9 +120,10 @@ impl AuthoringSequence {
 impl SequenceDiagnostics {
     pub(crate) fn message(&self) -> String {
         format!(
-            "Authoring sequence: elapsed {:.2}s; remaining {:.2}s; model charge {} tokens; remaining model allowance {:?}; generation corrections {}/2 used ({} remaining); tool steering {} interventions; repair rounds {} remaining; stop {:?}. Next step: {}",
+            "Authoring sequence: elapsed {:.2}s; remaining {}; model charge {} tokens; remaining model allowance {:?}; generation corrections {}/2 used ({} remaining); tool steering {} interventions; repair rounds {} remaining; stop {:?}. Next step: {}",
             self.elapsed_seconds,
-            self.remaining_seconds,
+            self.remaining_seconds
+                .map_or_else(|| "not configured".into(), |left| format!("{left:.2}s")),
             self.model_charge,
             self.remaining_model_tokens,
             self.stall_corrections_used,

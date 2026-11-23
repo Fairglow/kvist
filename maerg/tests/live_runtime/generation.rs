@@ -143,7 +143,7 @@ fn run_controlled(
             calls
         });
         let mut selected = shared_profile(&endpoint, 32768);
-        selected.timeout_seconds = SCRIPTED_TIMEOUT_SECONDS;
+        selected.timeout_seconds = Some(SCRIPTED_TIMEOUT_SECONDS);
         selected.max_output_bytes = 1024 * 1024;
         selected.token_limit = limit;
         let result = maerg::agent::execute_agent_controlled(

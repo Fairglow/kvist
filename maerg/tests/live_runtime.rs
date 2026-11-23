@@ -33,7 +33,7 @@ fn profile(endpoint: &str) -> AgentProfile {
         default_model: "fixture".into(),
         model: None,
         thinking_effort: None,
-        timeout_seconds: 5,
+        timeout_seconds: Some(5),
         token_limit: None,
         max_output_bytes: 64 * 1024,
         redaction_values: vec!["private-value".into()],
@@ -593,7 +593,7 @@ fn resilience_run_with_limit(
             calls
         });
         let mut selected = shared_profile(&endpoint, 32768);
-        selected.timeout_seconds = SCRIPTED_TIMEOUT_SECONDS;
+        selected.timeout_seconds = Some(SCRIPTED_TIMEOUT_SECONDS);
         selected.token_limit = token_limit;
         let no_effect_config = SandboxConfig {
             runner: "/usr/bin/true".into(),
@@ -1205,7 +1205,7 @@ fn protected_run_continues_beyond_64_generations() {
             }
         });
         let mut selected = shared_profile(&endpoint, 8192);
-        selected.timeout_seconds = 604_800;
+        selected.timeout_seconds = Some(604_800);
         let result = execute_agent(
             &selected,
             &gate.config,
@@ -1275,7 +1275,7 @@ fn multi_day_explicit_endpoint_run_accepts_repeated_human_guidance() {
             inference
         });
         let mut selected = profile(&endpoint);
-        selected.timeout_seconds = 604_800;
+        selected.timeout_seconds = Some(604_800);
         let result = maerg::agent::execute_agent_controlled(
             &selected,
             &SandboxConfig {
@@ -1421,7 +1421,7 @@ fn steering_retains_whole_run_usage_and_cumulative_token_limit() {
             });
             let mut selected = shared_profile(&endpoint, 8192);
             // This tests accounting, not durable-recording latency under parallel load.
-            selected.timeout_seconds = 60;
+            selected.timeout_seconds = Some(60);
             selected.token_limit = limited.then_some(7000);
             let result = maerg::agent::execute_agent_controlled(
                 &selected,
@@ -1484,7 +1484,7 @@ fn steering_before_usage_is_reported_keeps_unknown_attempt_separate() {
         respond(&mut stream, 10, 4);
     });
     let mut selected = shared_profile(&endpoint, 8192);
-    selected.timeout_seconds = 60;
+    selected.timeout_seconds = Some(60);
     selected.token_limit = Some(7000);
     let result = maerg::agent::execute_agent_controlled(
         &selected,
@@ -1585,7 +1585,7 @@ fn cancelled_generation_keeps_earlier_turn_evidence_and_usage() {
             }
         });
         let mut selected = shared_profile(&endpoint, 8192);
-        selected.timeout_seconds = 60;
+        selected.timeout_seconds = Some(60);
         let error = maerg::agent::execute_agent_controlled(
             &selected,
             &gate.config,

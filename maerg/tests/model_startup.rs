@@ -35,7 +35,7 @@ fn profile(endpoint: String, context_limit: Option<usize>) -> AgentProfile {
         default_model: "fixture".into(),
         model: None,
         thinking_effort: None,
-        timeout_seconds: 5,
+        timeout_seconds: Some(5),
         token_limit: None,
         max_output_bytes: 64 * 1024,
         redaction_values: vec![],
@@ -204,7 +204,7 @@ fn quiet_capacity_probe_cannot_consume_the_whole_task_budget() {
         let directory = tempfile::tempdir().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let mut selected = profile(format!("http://{}", listener.local_addr().unwrap()), None);
-        selected.timeout_seconds = wall_seconds;
+        selected.timeout_seconds = Some(wall_seconds);
         let provider = thread::spawn(move || {
             let (quiet, header, _) = request(&listener);
             assert!(header.starts_with("GET "));

@@ -786,18 +786,18 @@ fn partial_effects_and_usage_survive_cancellation_and_later_dispatch_failure() {
         let redactions = vec!["private-value".into(), "write_file".into()];
         let mut tokens = TokenBudget::new(None);
         tokens.finish(0, retained.turn.usage);
-        let result = record_turn_outcome(
-            &profile,
-            &request,
-            "effects",
-            &log,
-            &mut file,
-            &redactions,
-            &[retained],
-            Some(&TurnFailure::from_kvist_error(&error)),
-            &tokens,
-        )
-        .expect("retain evidence");
+        let mut history =
+            RunHistory::start(&request, "effects", &redactions, profile.max_output_bytes)
+                .expect("history");
+        history.record(&retained).expect("retain turn");
+        let result = history
+            .finish(
+                &log,
+                &mut file,
+                Some(&TurnFailure::from_kvist_error(&error)),
+                &tokens,
+            )
+            .expect("retain evidence");
         assert!(!result.success);
         assert_eq!(result.tokens_input, Some(11));
         assert_eq!(result.tokens_output, Some(7));
@@ -916,18 +916,14 @@ fn outcome_reports_known_cumulative_usage_without_treating_missing_reports_as_ze
     let path = root.join("usage.log");
     let mut log = fs::File::create(&path).expect("log");
     tokens.uncertain_attempts = 2;
-    let result = record_turn_outcome(
-        &profile,
-        &request,
-        "usage",
-        &path,
-        &mut log,
-        &[],
-        &turns,
-        None,
-        &tokens,
-    )
-    .expect("recorded");
+    let mut history =
+        RunHistory::start(&request, "usage", &[], profile.max_output_bytes).expect("history");
+    for turn in &turns {
+        history.record(turn).expect("retain turn");
+    }
+    let result = history
+        .finish(&path, &mut log, None, &tokens)
+        .expect("recorded");
     assert_eq!(result.tokens_input, Some(24));
     assert_eq!(result.tokens_output, Some(12));
     let text = fs::read_to_string(path).expect("text");

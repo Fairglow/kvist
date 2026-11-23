@@ -928,8 +928,9 @@ declarations that current work is blocked.
 
 Verification repair MUST preserve original and repair causes, effect
 uncertainty, cancellation and surfaced decisions. All authoring and repair
-rounds MUST consume one aggregate approved model wall/token budget and retain
-recurring-failure/progress history. Digest/evidence failures MUST be explicit.
+rounds MUST share any explicitly approved aggregate model wall/token budget
+and retain recurring-failure/progress history. Digest/evidence failures MUST
+be explicit.
 Repair rounds remain finite and cannot advance work without observed progress
 or an explicit complete response and clean verification.
 Tests MUST exercise false completion, changed reads, novel investigations,
@@ -941,16 +942,25 @@ Advisory intent review and scoped independent evidence do not mint receipts
 or record human implementation acceptance.
 
 A supervised task run MAY execute the agent across multiple model turns on the
-host until the agent reports completion, a decision requires human input, a fatal
-failure occurs, or the shared wall-clock budget is exhausted. The user's intent
-is at the task level or higher: scheduling MUST NOT depend on the number of
+host until the agent reports completion, a decision requires human input, a
+fatal failure occurs, or an explicitly configured resource budget is exhausted.
+The user's intent is at the task level or higher: scheduling MUST NOT depend on the number of
 intermediate turns, and normal work MUST proceed without per-turn human
 intervention.
 
-The shared wall-clock budget MUST equal the configured profile timeout and MUST
-cover the liveness probe, every turn attempt, every retry backoff, every read,
-and every brokered effect. Each per-attempt transport deadline MUST be bounded
-by the remaining budget and the independent transport/profile ceiling.
+Omitting a role's task timeout MUST NOT impose a terminal wall-clock budget.
+Prolonged lack of material progress MUST prompt an actionable next step in the
+same attempt. Persistent recurrence despite guidance MUST change the model's
+working context while retaining the task, observed state, operator guidance and
+accounting. Read-only work MUST NOT be pressured into fabricating edits.
+In-memory run evidence MUST remain bounded independently of turn count.
+Explicit role timeouts remain hard; where configured, they cover the whole
+authoring and repair sequence. Each transport attempt and brokered effect MUST
+have an independent deadline, clipped by any remaining approved task time.
+Directory traversal MUST bound work before sorting; an over-broad scan MUST
+return an actionable failure so the model can narrow it without restarting.
+Interrupted mutations with uncertain completion MUST stop for explicit
+reconciliation and MUST NOT be replayed automatically.
 Only transient gateway availability failures are retried a
 bounded number of times; response-level failures and surfaced decisions end the
 loop deterministically.

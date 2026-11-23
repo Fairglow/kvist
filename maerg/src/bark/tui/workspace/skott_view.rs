@@ -286,8 +286,13 @@ impl TaskView {
                 }
             }
             "context_compaction" => s.compactions = s.compactions.saturating_add(1),
-            "context_rollover" => s.rollovers = s.rollovers.saturating_add(1),
-            "tool_recovery" => {
+            "context_rollover" => {
+                s.rollovers = s.rollovers.saturating_add(1);
+                if let Some(notice) = data["notice"].as_str() {
+                    self.app.push_event(Event::Note(notice.to_owned()));
+                }
+            }
+            "tool_recovery" | "task_refocus" => {
                 let notice = data["notice"].as_str()?;
                 self.app.push_event(Event::Note(notice.to_owned()));
             }

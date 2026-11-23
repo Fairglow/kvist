@@ -1,8 +1,111 @@
+use std::time::{Duration, Instant};
+
 use sav::loop_detection::{ToolLoopKind, ToolLoopReport};
 use sav::runtime::AgentSession;
 
 use super::{LiveRun, RunControls, RunTurn, redact_bounded};
 use crate::Result;
+
+const FOCUS_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const MAX_RECURRENCES: u8 = 8;
+
+pub(super) struct Focus {
+    last_intervention: Instant,
+    warned: bool,
+    recurrences: u8,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Refocus {
+    Nudge,
+    Elapsed,
+    RepeatedTools,
+}
+
+impl Focus {
+    pub(super) fn new(now: Instant) -> Self {
+        Self {
+            last_intervention: now,
+            warned: false,
+            recurrences: 0,
+        }
+    }
+
+    pub(super) fn note_recurrence(&mut self) {
+        self.recurrences = self.recurrences.saturating_add(1);
+    }
+
+    pub(super) fn reset(&mut self, now: Instant) {
+        *self = Self::new(now);
+    }
+
+    pub(super) fn at_boundary(&mut self, now: Instant) -> Option<Refocus> {
+        let action = if self.recurrences >= MAX_RECURRENCES {
+            Refocus::RepeatedTools
+        } else if now.saturating_duration_since(self.last_intervention) < FOCUS_INTERVAL {
+            return None;
+        } else if self.warned {
+            Refocus::Elapsed
+        } else {
+            Refocus::Nudge
+        };
+        self.last_intervention = now;
+        self.warned = true;
+        if action != Refocus::Nudge {
+            self.recurrences = 0;
+        }
+        Some(action)
+    }
+}
+
+impl Refocus {
+    pub(super) fn apply(
+        self,
+        live: &LiveRun,
+        session: &mut AgentSession,
+        prompt: &str,
+        redactions: &[String],
+    ) -> Result<()> {
+        let (kind, reason, notice) = match self {
+            Self::Nudge => (
+                "task_refocus",
+                "no_confirmed_change",
+                "No confirmed file change for 15 minutes. Kvist is steering toward a focused next step.",
+            ),
+            Self::Elapsed => (
+                "context_rollover",
+                "no_confirmed_change",
+                "Work is still stalled. Kvist is continuing the same attempt with a fresh model context.",
+            ),
+            Self::RepeatedTools => (
+                "context_rollover",
+                "repeated_tool_activity",
+                "Repeated tool activity continued after steering. Kvist is continuing the same attempt with a fresh model context.",
+            ),
+        };
+        live.record(
+            &serde_json::json!({"type":kind,"data":{
+                "reason":reason, "notice":notice, "proposals_replayed":false
+            }}),
+            true,
+        )?;
+        if !live.presenting() {
+            eprintln!("\n{}", redact_bounded(notice, redactions, 4096));
+        }
+        if self != Self::Nudge {
+            session.restart_context(prompt, None);
+        }
+        session.push_user(
+            "Kvist refocus: Use the evidence already collected. Identify the next unmet requirement \
+             and take one concrete, authorized step toward it. If one fact is still missing, ask \
+             one focused tool query for that fact instead of repeating prior exploration. \
+             Read-only work does not require edits. Keep completed changes and do not replay \
+             prior effects. If the task is complete, report the actual result without tool calls; \
+             surface a decision only when a specific choice requires human authority.",
+        );
+        Ok(())
+    }
+}
 
 pub(super) fn effect_revision(
     component: &std::path::Path,
@@ -56,7 +159,7 @@ pub(super) fn steer(
     live: &LiveRun,
     session: &mut AgentSession,
     redactions: &[String],
-) -> Result<()> {
+) -> Result<String> {
     let attempt = interventions.saturating_add(1);
     let (cause, next_step) = match report.kind {
         ToolLoopKind::RepeatedObservation => (
@@ -105,9 +208,9 @@ pub(super) fn steer(
     {
         eprintln!("\n{}", redact_bounded(&notice, redactions, 4096));
     }
-    session.push_user(feedback);
+    session.push_user(feedback.clone());
     *interventions = attempt;
-    Ok(())
+    Ok(feedback)
 }
 
 #[cfg(test)]
@@ -115,6 +218,31 @@ mod tests {
     use super::*;
     use crate::authoring::{CheckedIntent, EffectOp};
     use std::fs;
+
+    #[test]
+    fn focus_nudges_then_refreshes_on_elapsed_stagnation_and_resets_after_progress() {
+        let start = Instant::now();
+        let interval = Duration::from_secs(900);
+        let mut focus = Focus::new(start);
+        assert_eq!(
+            focus.at_boundary(start + interval - Duration::from_millis(1)),
+            None
+        );
+        assert_eq!(focus.at_boundary(start + interval), Some(Refocus::Nudge));
+        assert_eq!(focus.at_boundary(start + interval), None);
+        assert_eq!(
+            focus.at_boundary(start + interval * 2),
+            Some(Refocus::Elapsed)
+        );
+        let progress = start + interval * 3;
+        for _ in 0..7 {
+            focus.note_recurrence();
+        }
+        focus.reset(progress);
+        focus.note_recurrence();
+        assert_eq!(focus.at_boundary(progress), None);
+        assert_eq!(focus.at_boundary(progress + interval), Some(Refocus::Nudge));
+    }
 
     fn effect() -> CheckedIntent {
         CheckedIntent {

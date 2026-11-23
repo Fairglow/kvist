@@ -130,24 +130,36 @@ envelopes, tool fragments and possibly reasoning; short visible text does not
 mean a small wire response. Increasing `response_reserve` alone does not solve
 this failure and may increase response bytes further.
 
-New protected role defaults are **7200 seconds** per task and **16777216 bytes**
-(16 MiB) per model response. This is 24 times the old task time and 256 times
-the old response budget; the configurable output maximum rises from 1 to 16 MiB.
+Protected authoring has no whole-task time limit unless the role specifies
+`timeout_seconds`. The former 7200-second default measured total elapsed time,
+not tool inactivity or file changes. Explicit timeouts remain hard and cover
+authoring and repair. Tool-free reviews still default to 7200 seconds.
+Kvist guides stalled authoring toward a focused next step after 15 minutes
+without a confirmed change; if the pattern persists it can refresh model
+context without starting a new task. Working files and evidence remain in place.
+
+The default response-byte limit is **16777216 bytes** (16 MiB).
 The same byte setting bounds each sandbox effect's combined stdout/stderr and
 the retained redacted agent log, not the whole diagnostic journal. Independent
 HTTP-header, stream-record, tool-payload and journal-record bounds remain.
-Limits are still finite. Startup prints and records effective task, request
-and byte ceilings before inference.
+Sandboxed authoring effects have at most 30 minutes per dispatch. Directory
+listings have a short scan deadline and entry limit; narrow the path if they hit
+either bound. The standalone/embedded Skott workspace uses its own native tool
+and sandbox limits. Startup prints and records the applicable task, request,
+effect and byte ceilings before inference.
 
-The separate shared native profile deadline defaults to 7200 seconds and now
-accepts 1–86400 instead of 1–600. Requests use the smaller of profile deadline,
-remaining task time and the transport ceiling. The task budget covers all turns,
-reads, effects and retries; a two-hour task does not grant two hours per turn
-indefinitely. Explicit older values, including generated `timeout_seconds = 300`
-and `max_output_bytes = 65536`, are preserved: defaults do not rewrite policy.
+The separate shared native profile deadline defaults to 7200 seconds and
+accepts 1–86400. Requests use the smallest applicable limit: profile deadline,
+remaining approved task time, and transport ceiling. Explicit older values,
+including previously generated `timeout_seconds` values and
+`max_output_bytes = 65536`, are preserved. Remove an existing role timeout if
+you want authoring to use only the independent operation limits, then reapprove
+the execution policy. Old approvals that bound the implicit timeout also need
+reapproval.
 
-For an existing architect role, edit the configuration source reported by
-`kvist agent list`, retaining its selected profile:
+To opt into a hard two-hour task deadline for the architect role, edit the
+configuration source reported by `kvist agent list`, retaining its selected
+profile:
 
 ```toml
 [agent.roles.architect]

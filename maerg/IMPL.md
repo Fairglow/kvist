@@ -1,6 +1,38 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped protected continuation observation - 2026-11-23
+
+An independent source-only observer read the budget, agent loop, broker,
+history and progress code and fixture assertions without reading intent,
+queues, prior records or history. It did not run the fixtures.
+
+An omitted protected authoring timeout leaves the aggregate wall budget
+unset. Operation deadlines remain finite and a configured task budget clips
+them. The progress clock is checked between turns; it can add guidance or
+refresh model context without dispatching earlier proposals again. The loop
+tracks novel reads for provider-context recovery separately from the wall
+clock's confirmed-change signal. The recovery fixture expects the original
+task and a recent read in the new request but no previous tool-role messages.
+
+Directory collection bounds item visits before sorting and checks elapsed
+time cooperatively. Limit failures do not return a purported complete
+listing. A sandbox effect is marked uncertain before dispatch until completion
+is confirmed; the trajectory's legacy mutation boolean conservatively includes
+uncertain effects. Turn and tool records are appended while the run is active,
+and bounded redacted summaries and cumulative usage survive a model-context
+refresh. The fixture checks that trajectory events are readable before there
+is a terminal success record.
+
+A separate source-blind comparison flagged that the file-change clock can
+also intervene in productive read-only work, and that bounded listings needed
+a visible distinction from complete listings. The contract now states the
+read-only heuristic explicitly; a fixture checks the listing limit notice.
+This is scoped implementation evidence, not acceptance. It does not
+establish that a live model will always act on guidance or that the host can
+preempt a blocking filesystem syscall. Formal audit and compliance remain
+separate queue items.
+
 ## Scoped protected tool recovery observation - 2026-11-23
 
 An independent source-only observer read the agent loop, progress and sequence

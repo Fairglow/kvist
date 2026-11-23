@@ -1541,7 +1541,9 @@ fn preserve_inherited_roles(
         let effective = effective.role(role);
         let binding = ensure_table(&mut roles[role.as_str()], "agent.roles.ROLE")?;
         binding["profile"] = value(effective.profile.as_str());
-        binding["timeout_seconds"] = value(effective.timeout_seconds as i64);
+        if let Some(seconds) = effective.timeout_seconds {
+            binding["timeout_seconds"] = value(seconds as i64);
+        }
         binding["max_output_bytes"] = value(effective.max_output_bytes as i64);
         if let Some(limit) = effective.token_limit {
             binding["token_limit"] = value(limit as i64);

@@ -19,12 +19,14 @@ mod cancellation;
 mod context;
 mod failure;
 mod generation;
+mod history;
 mod progress;
 mod retry;
 pub(crate) mod review;
 mod sequence;
 mod startup;
 use accounting::TokenBudget;
+use history::RunHistory;
 use retry::ModelRetry;
 pub(crate) use sequence::AuthoringSequence;
 pub(crate) use sequence::error_stop;
@@ -111,9 +113,7 @@ pub fn split_command(
 
 /// The brokered and applied outcomes of one model turn within a run.
 ///
-/// A run is a sequence of these; [`record_turn_outcome`](record_turn_outcome)
-/// folds them into the durable log and trajectory so intermediate turns are
-/// inspectable rather than lost.
+/// The authoring loop retains the active turn until its outcomes settle.
 struct RunTurn {
     /// The untrusted model turn.
     turn: ModelTurn,
@@ -413,31 +413,57 @@ const MODEL_TURN_MAX_ATTEMPTS: u32 = 3;
 /// In-sandbox mount destination of one staged authoring intent.
 const STAGED_INTENT_MOUNT_PATH: &str = "/workspace/authoring/intent.json";
 
-/// The shared wall-clock budget for the model phase of one task run.
-///
-/// The liveness probe, every turn attempt, and every retry backoff all draw
-/// from this single budget, so the model phase never exceeds the configured
-/// timeout by more than scheduling slack. The per-attempt transport deadline
-/// is whatever remains when the attempt starts.
+/// Optional shared wall budget; each operation retains its independent limit.
 struct TurnBudget {
     started: Instant,
-    total: Duration,
+    total: Option<Duration>,
 }
 
 impl TurnBudget {
     fn new(total: Duration) -> Self {
+        Self::with_limit(Some(total))
+    }
+
+    fn with_limit(total: Option<Duration>) -> Self {
         Self {
             started: Instant::now(),
             total,
         }
     }
 
-    /// The remaining budget, clamped at zero.
+    fn remaining_limit(&self) -> Option<Duration> {
+        self.total
+            .map(|total| total.saturating_sub(self.started.elapsed()))
+    }
+
+    /// Clip bounded operation durations against this value, never arm a timer with it.
     fn remaining(&self) -> Duration {
-        self.total.saturating_sub(self.started.elapsed())
+        self.remaining_limit().unwrap_or(Duration::MAX)
+    }
+
+    fn label(&self) -> String {
+        self.total.map_or_else(
+            || "not configured".into(),
+            |total| format!("{}s", total.as_secs()),
+        )
+    }
+
+    fn remaining_label(&self) -> String {
+        self.remaining_limit().map_or_else(
+            || "not configured".into(),
+            |left| format!("{:.1}s", left.as_secs_f64()),
+        )
     }
 
     fn model_deadline(&self, cancellation: &CancellationToken) -> Result<Duration> {
+        self.operation_deadline(cancellation, Duration::from_secs(86_400))
+    }
+
+    fn operation_deadline(
+        &self,
+        cancellation: &CancellationToken,
+        ceiling: Duration,
+    ) -> Result<Duration> {
         if cancellation.is_cancelled() {
             return Err(KvistError::Sav(ModelError::ModelTransportCancelled));
         }
@@ -445,7 +471,7 @@ impl TurnBudget {
         if remaining.is_zero() {
             return Err(KvistError::Sav(ModelError::ModelTransportTimedOut));
         }
-        Ok(remaining.min(Duration::from_secs(86_400)))
+        Ok(remaining.min(ceiling))
     }
 }
 
@@ -886,6 +912,7 @@ struct EffectRecord {
     destination: String,
     /// True when the sandboxed applier confirmed the write.
     applied: bool,
+    changed: bool,
     /// Dispatch may have mutated state, but completion was not confirmed.
     uncertain: bool,
     /// Bounded diagnostics when the effect did not apply.
@@ -896,6 +923,8 @@ struct EffectRecord {
     output_limit_exceeded: bool,
     cancelled: bool,
 }
+
+const EFFECT_DEADLINE: Duration = Duration::from_secs(30 * 60);
 
 /// Dispatches one effect: the kvist binary itself runs inside the effect
 /// sandbox against a read-only staged-intent mount. The host never writes
@@ -931,7 +960,11 @@ fn dispatch_effect(
         sandbox.config,
         execution_request,
         crate::sandbox::ExecutionOptions {
-            timeout: Some(sandbox.budget.remaining().min(Duration::from_secs(86_400))),
+            timeout: Some(
+                sandbox
+                    .budget
+                    .operation_deadline(sandbox.steering.cancellation, EFFECT_DEADLINE)?,
+            ),
             output_limit: Some(profile.max_output_bytes),
             live_stdout: None,
         },
@@ -1045,6 +1078,7 @@ fn apply_authoring_effects_with(
             tool: effect.tool.clone(),
             destination: effect.destination.clone(),
             applied: false,
+            changed: false,
             uncertain: true,
             detail: "dispatch completion unknown; state may have mutated; do not replay".into(),
             timed_out: false,
@@ -1076,6 +1110,9 @@ fn apply_authoring_effects_with(
         }
         let after = progress::effect_revision(request.target_dir, effect)?;
         let changed = record.applied && before != after;
+        if let Some(retained) = records.last_mut() {
+            retained.changed = changed;
+        }
         if changed && let Some(detector) = accepted_generation.as_deref_mut() {
             *detector = sav::loop_detection::StreamLoopDetector::default();
         }
@@ -1140,6 +1177,7 @@ fn summarize_effect(
         } else if result.output_limit_exceeded {
             text.push_str(" after exceeding its output bound");
         }
+        text.push_str("\nstate may have mutated; completion unconfirmed; do not replay");
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !stdout.trim().is_empty() {
@@ -1150,7 +1188,6 @@ fn summarize_effect(
             text.push_str("\nstderr:\n");
             text.push_str(&stderr);
         }
-        text.push_str("\nstate may have mutated; completion unconfirmed; do not replay");
         truncate_utf8(&mut text, 4096);
         text
     };
@@ -1159,6 +1196,7 @@ fn summarize_effect(
         tool: effect.tool.clone(),
         destination: effect.destination.clone(),
         applied,
+        changed: false,
         uncertain: !applied,
         detail,
         timed_out: result.timed_out,
@@ -1390,7 +1428,7 @@ fn execute_agent_inner(
         task_id = %request.task_id,
         model = %choice.model,
         log_path = %log_path.display(),
-        timeout_seconds = profile.timeout_seconds,
+        timeout_seconds = ?profile.timeout_seconds,
         "prepared host-side agent model turn"
     );
     let runs_dir = request.target_dir.join(".kvist").join("runs");
@@ -1413,6 +1451,8 @@ fn execute_agent_inner(
         )?;
     }
     let redactions = redaction_values(profile, sandbox_config);
+    let mut history =
+        RunHistory::start(&request, &session_id, &redactions, profile.max_output_bytes)?;
     controls.begin_run()?;
     let steering = RunControls {
         mailbox: controls,
@@ -1420,7 +1460,7 @@ fn execute_agent_inner(
         live: &live,
         redactions: &redactions,
     };
-    let mut run_turns: Vec<RunTurn> = Vec::new();
+    let mut current_turn: Option<RunTurn> = None;
     let AuthoringSequence {
         wall: budget,
         tokens,
@@ -1458,7 +1498,7 @@ fn execute_agent_inner(
                 choice.system_prompt.as_deref().unwrap_or_default(),
             )?,
         );
-        conversation.push_user(request.prompt);
+        conversation.begin_task(request.prompt);
         let initial_request = conversation.next_request().ok_or_else(|| {
             KvistError::Runtime(sav::runtime::Error::InvalidModelTurn {
                 reason: "protected conversation lost its original task".into(),
@@ -1483,14 +1523,16 @@ fn execute_agent_inner(
             &serde_json::json!({"type":"execution_limits","data":{
                 "task_timeout_seconds":profile.timeout_seconds,
                 "request_deadline_seconds":request_deadline.as_secs_f64(),
+                "effect_deadline_seconds":EFFECT_DEADLINE.as_secs(),
                 "max_response_bytes":profile.max_output_bytes
             }}),
             true,
         )?;
         eprintln!(
-            "Execution limits: task timeout {}s; per-request deadline at most {:.1}s; response limit {} bytes (includes protocol overhead and reasoning, not just visible text).",
-            profile.timeout_seconds,
+            "Execution limits: task timeout {}; per-request deadline at most {:.1}s; per-effect deadline at most {}s; response limit {} bytes (includes protocol overhead and reasoning, not just visible text).",
+            budget.label(),
             request_deadline.as_secs_f64(),
+            EFFECT_DEADLINE.as_secs(),
             profile.max_output_bytes,
         );
 
@@ -1499,15 +1541,35 @@ fn execute_agent_inner(
         let mut observed_paths = std::collections::BTreeSet::new();
         let mut last_action_label = "init".to_owned();
         let mut progress_since_rollover = true;
+        let mut focus = progress::Focus::new(Instant::now());
+        let mut last_tool_feedback = None;
         let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
 
         loop {
+            if let Some(turn) = current_turn.take() {
+                history.record(&turn)?;
+            }
             if cancellation.is_cancelled() || controls.is_shutdown() {
                 return Err(KvistError::Sav(ModelError::Cancelled));
             }
+            budget.model_deadline(cancellation)?;
             if steering.deliver(&mut conversation)? {
                 model_attempts = 0;
                 progress_since_rollover = true;
+                focus.reset(Instant::now());
+            }
+            let feedback = last_tool_feedback.take();
+            if let Some(action) = focus.at_boundary(Instant::now()) {
+                action.apply(&live, &mut conversation, request.prompt, &redactions)?;
+                if action != progress::Refocus::Nudge {
+                    if let Some(feedback) = feedback {
+                        conversation.push_user(feedback);
+                    }
+                    context.clear_history();
+                    model_attempts = 0;
+                    progress_since_rollover = false;
+                }
+                last_action_label = "task refocus".into();
             }
 
             // 1. The model turn runs on the host: numeric loopback gateway only,
@@ -1539,17 +1601,19 @@ fn execute_agent_inner(
             // leave stale characters; a piped stream gets a bare carriage
             // return that the capturing workspace collapses to the final update.
             {
-                let total_reads: usize = run_turns.iter().map(|t| t.reads.len()).sum();
-                let total_edits: usize = run_turns
-                    .iter()
-                    .flat_map(|t| t.effects.iter())
-                    .filter(|e| e.applied)
-                    .count();
-                let unique_files = observed_paths.len();
+                let total_reads = history.reads;
+                let total_edits = history.edits;
+                let unique_files = if observed_paths.len() == 4096 {
+                    "4096+".to_owned()
+                } else {
+                    observed_paths.len().to_string()
+                };
                 let elapsed = budget.started.elapsed().as_secs_f64();
-                let rem = budget.remaining().as_secs_f64();
+                let rem = budget.remaining_limit().map_or_else(String::new, |left| {
+                    format!(" ({:.0}s task time left)", left.as_secs_f64())
+                });
                 let line = format!(
-                    "⟳ Turn {} │ ~{:.1}k in ({:.1}k rsv) │ reads: {} ({} files) · edits: {} │ last: {} │ {:.1}s ({:.0}s rem)",
+                    "⟳ Turn {} │ ~{:.1}k in ({:.1}k rsv) │ reads: {} ({} files) · edits: {} │ last: {} │ {:.1}s{}",
                     generations,
                     est_input as f64 / 1000.0,
                     reserve as f64 / 1000.0,
@@ -1590,7 +1654,7 @@ fn execute_agent_inner(
             // Retain a completed turn before validation, controls, or any
             // effect/error path can exit the owner.
             if let Ok(turn) = &generated {
-                run_turns.push(RunTurn {
+                current_turn = Some(RunTurn {
                     turn: turn.clone(),
                     reads: vec![],
                     effects: vec![],
@@ -1654,7 +1718,7 @@ fn execute_agent_inner(
                     }
                     budget.model_deadline(cancellation)?;
                     live.record(&serde_json::json!({"type":"context_rollover","data":{
-                        "previous_generation":generations, "completed_turns":run_turns.len(),
+                        "previous_generation":generations, "completed_turns":history.turns,
                         "context_limit":context.limit_tokens(), "source":context.capacity_source(),
                         "proposals_replayed":false
                     }}), true)?;
@@ -1717,7 +1781,12 @@ fn execute_agent_inner(
                 }
             };
             sav::runtime::validate_turn(&turn)?;
-            let turn_index = run_turns.len() - 1;
+            let turn_index = history.turns;
+            let current = current_turn
+                .as_mut()
+                .ok_or_else(|| KvistError::AgentEvidenceFailed {
+                    reason: "completed model turn was not retained".into(),
+                })?;
             model_attempts = 0;
 
             // Feed the assistant message back so the model observes its own output.
@@ -1730,7 +1799,7 @@ fn execute_agent_inner(
             // 2. Broker: reduce untrusted intents to capability-bound effects.
             let plan =
                 authoring::authorize_turn(request.target_dir, &turn, &BrokerPolicy::default());
-            run_turns[turn_index].drops = plan.dropped.clone();
+            current.drops = plan.dropped.clone();
             live.record(&serde_json::json!({"type":"broker_decision","data":{
             "reads":plan.reads.len(),
             "authorized_effects":plan.effects.len(),"denied_intents":plan.dropped.len(),
@@ -1761,8 +1830,8 @@ fn execute_agent_inner(
                     );
                     recorded.push(decision.clone());
                 }
-                run_turns[turn_index].surfaced_decisions = recorded;
-                run_turns[turn_index].accepted_requests = plan.dependency_requests.clone();
+                current.surfaced_decisions = recorded;
+                current.accepted_requests = plan.dependency_requests.clone();
                 return Ok(None);
             }
 
@@ -1780,9 +1849,7 @@ fn execute_agent_inner(
                     "accepted an in-policy dependency request for acquisition"
                 );
                 accepted_requests.push(dep_request.clone());
-                run_turns[turn_index]
-                    .accepted_requests
-                    .push(dep_request.clone());
+                current.accepted_requests.push(dep_request.clone());
             }
 
             // Trigger the acquisition phase if there were accepted dependency requests.
@@ -1859,7 +1926,7 @@ fn execute_agent_inner(
             }
             *accepted_generation = candidate;
             if let Some(report) = report {
-                progress::interrupt_batch(&run_turns[turn_index], &steering, &mut conversation)?;
+                progress::interrupt_batch(current, &steering, &mut conversation)?;
                 if cancellation.is_cancelled() || controls.is_shutdown() {
                     return Err(KvistError::Sav(ModelError::Cancelled));
                 }
@@ -1917,7 +1984,9 @@ fn execute_agent_inner(
                     None
                 };
                 if is_real_file_read {
-                    observed_paths.insert(read.path.clone());
+                    if observed_paths.len() < 4096 {
+                        observed_paths.insert(read.path.clone());
+                    }
                     last_action_label = if let Some((from, to)) = range_opt {
                         format!("read {}:{from}..{to}", read.path)
                     } else {
@@ -1934,29 +2003,35 @@ fn execute_agent_inner(
                         call_id: read.call_id.clone(),
                         reason: "broker observation lost its originating model intent".into(),
                     })?;
+                let timed_out = read.outcome == ReadOutcome::TimedOut;
                 let outcome = sav::runtime::ToolOutcome {
                     exited: true,
                     status: Some(read.outcome.exit_code()),
                     stdout: read.content.as_bytes().to_vec(),
                     stderr: vec![],
-                    timed_out: false,
+                    timed_out,
                     output_limit_exceeded: false,
                     cancelled: false,
                 };
-                if read.outcome == ReadOutcome::Failed {
+                if outcome.failed() {
                     failure::record(
                         &live,
                         &read.tool,
                         &read.call_id,
-                        sav::runtime::ToolFailureCategory::InvalidRequest,
+                        if timed_out {
+                            sav::runtime::ToolFailureCategory::Timeout
+                        } else {
+                            sav::runtime::ToolFailureCategory::InvalidRequest
+                        },
                         sav::runtime::EffectCertainty::NotExecuted,
                         &read.content,
                         &redactions,
                     )?;
                 }
                 let repeatable = matches!(raw.name.as_str(), "read_file" | "list_files");
-                if repeatable && tool_tracker.is_new_observation(raw, &outcome) {
-                    progress_since_rollover |= read.outcome != ReadOutcome::Failed;
+                if repeatable && !outcome.failed() && tool_tracker.is_new_observation(raw, &outcome)
+                {
+                    progress_since_rollover = true;
                     *accepted_generation = sav::loop_detection::StreamLoopDetector::default();
                 }
                 let redacted_content = redact_bounded(&read.content, &redactions, 65536);
@@ -1964,22 +2039,17 @@ fn execute_agent_inner(
                     &read.call_id,
                     &read.tool,
                     &sav::runtime::ToolOutcome {
-                        exited: true,
-                        status: Some(read.outcome.exit_code()),
                         stdout: redacted_content.into_bytes(),
-                        stderr: vec![],
-                        timed_out: false,
-                        output_limit_exceeded: false,
-                        cancelled: false,
+                        ..outcome.clone()
                     },
                     96 * 1024,
                 );
-                run_turns[turn_index].reads.push(read.clone());
+                current.reads.push(read.clone());
                 live.record(
                     &serde_json::json!({"type":"tool_result","data":{
                         "call_id":read.call_id,"name":read.tool,
-                        "applied":read.outcome != ReadOutcome::Failed,
-                        "uncertain":false,"timed_out":false,"output_limit_exceeded":false
+                        "applied":!outcome.failed(),
+                        "uncertain":false,"timed_out":timed_out,"output_limit_exceeded":false
                     }}),
                     true,
                 )?;
@@ -1996,24 +2066,25 @@ fn execute_agent_inner(
                 }
             }
             if controls.has_pending() {
-                progress::interrupt_batch(&run_turns[turn_index], &steering, &mut conversation)?;
+                progress::interrupt_batch(current, &steering, &mut conversation)?;
                 continue;
             }
             if let Some(report) = tool_report {
-                progress::interrupt_batch(&run_turns[turn_index], &steering, &mut conversation)?;
+                progress::interrupt_batch(current, &steering, &mut conversation)?;
                 if cancellation.is_cancelled() || controls.is_shutdown() {
                     return Err(KvistError::Sav(ModelError::Cancelled));
                 }
                 if controls.has_pending() {
                     continue;
                 }
-                progress::steer(
+                focus.note_recurrence();
+                last_tool_feedback = Some(progress::steer(
                     &report,
                     tool_interventions,
                     &live,
                     &mut conversation,
                     &redactions,
-                )?;
+                )?);
                 last_action_label = "tool steering".into();
                 continue;
             }
@@ -2029,7 +2100,7 @@ fn execute_agent_inner(
                         .all(|read| read.outcome == ReadOutcome::Completion)
                     && accepted_requests.is_empty();
                 if only_completion_note && turn.text.trim().is_empty() {
-                    run_turns[turn_index].turn.text = plan
+                    current.turn.text = plan
                         .reads
                         .iter()
                         .map(|read| read.content.as_str())
@@ -2042,14 +2113,10 @@ fn execute_agent_inner(
                     continue;
                 }
                 if !controls.finish_if_idle()? {
-                    progress::interrupt_batch(
-                        &run_turns[turn_index],
-                        &steering,
-                        &mut conversation,
-                    )?;
+                    progress::interrupt_batch(current, &steering, &mut conversation)?;
                     continue;
                 }
-                let final_text = &run_turns[turn_index].turn.text;
+                let final_text = &current.turn.text;
                 if crate::authoring::explicit_incomplete_report(final_text) {
                     return Ok(Some(TurnFailure {
                         stop_reason: sav::runtime::StopReason::Failed,
@@ -2098,11 +2165,11 @@ fn execute_agent_inner(
                 &turn,
                 &session_id,
                 &live,
-                &mut run_turns[turn_index].effects,
+                &mut current.effects,
                 tool_tracker,
                 accepted_generation,
             )?;
-            let effects = &run_turns[turn_index].effects;
+            let effects = &current.effects;
 
             // Feed each effect's outcome back to the model as a tool result so it
             // can react to a failed or skipped write on a later turn.
@@ -2111,6 +2178,9 @@ fn execute_agent_inner(
                     progress_since_rollover = true;
                     observed_paths.remove(&record.destination);
                     last_action_label = format!("{} {}", record.tool, record.destination);
+                }
+                if record.changed {
+                    focus.reset(Instant::now());
                 }
                 let content = if record.applied {
                     "applied. (Note: Kvist runs `cargo test` automatically in the verification sandbox after you finish. Once all required file edits are applied, reply with a brief final summary and NO tool calls.)".to_owned()
@@ -2157,20 +2227,21 @@ fn execute_agent_inner(
                 }));
             }
             if let Some(report) = effect_report {
-                progress::interrupt_batch(&run_turns[turn_index], &steering, &mut conversation)?;
+                progress::interrupt_batch(current, &steering, &mut conversation)?;
                 if cancellation.is_cancelled() || controls.is_shutdown() {
                     return Err(KvistError::Sav(ModelError::Cancelled));
                 }
                 if controls.has_pending() {
                     continue;
                 }
-                progress::steer(
+                focus.note_recurrence();
+                last_tool_feedback = Some(progress::steer(
                     &report,
                     tool_interventions,
                     &live,
                     &mut conversation,
                     &redactions,
-                )?;
+                )?);
                 last_action_label = "tool steering".into();
                 continue;
             }
@@ -2194,17 +2265,13 @@ fn execute_agent_inner(
     };
     // Finalize once, outside the execution closure: errors must not discard
     // already completed turns or partially applied/uncertain effects.
-    let recorded = record_turn_outcome(
-        profile,
-        &request,
-        &session_id,
-        &log_path,
-        &mut log_file,
-        &redactions,
-        &run_turns,
-        failure.as_ref(),
-        tokens,
-    );
+    let final_turn = current_turn
+        .as_ref()
+        .map_or(Ok(()), |turn| history.record(turn));
+    let effect_cancelled = history.cancelled;
+    let effect_timed_out = history.timed_out;
+    let recorded = final_turn
+        .and_then(|()| history.finish(&log_path, &mut log_file, failure.as_ref(), tokens));
     let outcome = match outcome {
         Err(error) => match recorded {
             Err(recording) => Err(KvistError::AgentEvidenceFailed {
@@ -2218,17 +2285,9 @@ fn execute_agent_inner(
     };
     let closed = steering.close();
     sequence.awaiting_decision = outcome.as_ref().is_ok_and(|run| run.surfaced_decision);
-    sequence.last_stop = if run_turns
-        .iter()
-        .flat_map(|turn| &turn.effects)
-        .any(|effect| effect.cancelled)
-    {
+    sequence.last_stop = if effect_cancelled {
         sav::runtime::StopReason::Cancelled
-    } else if run_turns
-        .iter()
-        .flat_map(|turn| &turn.effects)
-        .any(|effect| effect.timed_out)
-    {
+    } else if effect_timed_out {
         sav::runtime::StopReason::Limit(sav::runtime::BudgetResource::WallTime)
     } else {
         failure
@@ -2273,325 +2332,6 @@ fn execute_agent_inner(
         });
     }
     outcome
-}
-
-/// Assembles the bounded, redacted, durable evidence for one agent run (log
-/// file, trajectory journal, structured result) and returns the result.
-///
-/// Called exactly once per run, on the success and failure paths alike, so
-/// evidence can never diverge between them: stdout carries the model's text,
-/// stderr carries the failure diagnostic (empty on a clean run), and the log
-/// records both plus the broker's decision and every effect's outcome across
-/// every turn. The run succeeds only when the final turn is a usable answer,
-/// no proposed intent was dropped, and every authorized effect applied.
-#[allow(clippy::too_many_arguments)]
-fn record_turn_outcome(
-    profile: &AgentProfile,
-    request: &AgentExecutionRequest<'_>,
-    session_id: &str,
-    log_path: &Path,
-    log_file: &mut fs::File,
-    redactions: &[String],
-    run_turns: &[RunTurn],
-    failure: Option<&TurnFailure>,
-    tokens: &TokenBudget,
-) -> Result<AgentRunResult> {
-    // The final turn is the run's answer; the earlier turns are the steps that
-    // led to it. Aggregate effects and dropped intents across the whole run so
-    // the evidence is complete regardless of which turn produced them.
-    let all_reads: Vec<ReadRecord> = run_turns
-        .iter()
-        .flat_map(|run_turn| run_turn.reads.iter().cloned())
-        .collect();
-    let all_effects: Vec<EffectRecord> = run_turns
-        .iter()
-        .flat_map(|run_turn| run_turn.effects.iter().cloned())
-        .collect();
-    let all_dropped: Vec<DroppedIntent> = run_turns
-        .iter()
-        .flat_map(|run_turn| run_turn.drops.iter().cloned())
-        .collect();
-    let all_decisions: Vec<ProposedDecision> = run_turns
-        .iter()
-        .flat_map(|run_turn| run_turn.surfaced_decisions.iter().cloned())
-        .collect();
-    let all_accepted_requests: Vec<DependencyRequest> = run_turns
-        .iter()
-        .flat_map(|run_turn| run_turn.accepted_requests.iter().cloned())
-        .collect();
-    let last_turn = run_turns.last().map(|run_turn| run_turn.turn.clone());
-
-    let turn_ok = last_turn
-        .as_ref()
-        .is_some_and(|turn| !turn.text.trim().is_empty() || !turn.tool_intents.is_empty());
-    // A surfaced decision pauses the run for the human; it is neither a success
-    // nor a failure, so force success off and report it separately.
-    let surfaced_decision = !all_decisions.is_empty();
-    let success = last_turn.is_some()
-        && turn_ok
-        && failure.is_none()
-        && all_dropped.is_empty()
-        && all_effects.iter().all(|record| record.applied)
-        && !surfaced_decision;
-
-    let mut explanation = last_turn
-        .as_ref()
-        .map(|turn| turn.text.as_str())
-        .unwrap_or_default()
-        .to_owned();
-    for decision in &all_decisions {
-        explanation.push_str(&format!("\n\n{}", decision_markdown(decision)));
-    }
-    let stdout = redact_bounded(&explanation, redactions, profile.max_output_bytes);
-    let stderr = redact_bounded(
-        failure
-            .map(|failure| failure.reason.as_str())
-            .unwrap_or_default(),
-        redactions,
-        profile.max_output_bytes,
-    );
-    let timed_out = failure.is_some_and(|failure| failure.timed_out)
-        || all_effects.iter().any(|record| record.timed_out);
-    let output_limit_exceeded = failure.is_some_and(|failure| failure.output_limit_exceeded)
-        || all_effects
-            .iter()
-            .any(|record| record.output_limit_exceeded);
-
-    let known_usage = tokens.known_usage();
-    let tokens_input = known_usage.map(|usage| usage.input_tokens.min(usize::MAX as u64) as usize);
-    let tokens_output =
-        known_usage.map(|usage| usage.output_tokens.min(usize::MAX as u64) as usize);
-    let reported = run_turns
-        .iter()
-        .filter(|run_turn| run_turn.turn.usage.is_some())
-        .count();
-    let uncertain_attempts = tokens.uncertain_attempts;
-    let accounting = tokens.accounting();
-    let mut log = format!(
-        "token accounting: known input={tokens_input:?}, known output={tokens_output:?}; \
-         reported turns={reported}, unavailable turns={}, conservatively charged/unknown attempts={uncertain_attempts}\n\
-         cumulative provenance={}; returned attempts={}, known attempts={}; complete cumulative usage={:?}\n\n",
-        run_turns.len() - reported,
-        if accounting.provenance_complete {
-            "complete"
-        } else {
-            "unavailable"
-        },
-        accounting.returned_attempts,
-        accounting.known_attempts,
-        accounting.cumulative_usage,
-    );
-    for (index, run_turn) in run_turns.iter().enumerate() {
-        if index > 0 {
-            log.push_str("\n\n");
-        }
-        let turn = &run_turn.turn;
-        log.push_str(&format!("turn {}:\n", index + 1));
-        if let Some(reasoning) = turn
-            .reasoning
-            .as_deref()
-            .filter(|text| !text.trim().is_empty())
-        {
-            log.push_str("reasoning:\n");
-            log.push_str(reasoning);
-            log.push_str("\n\n");
-        }
-        if !turn.text.trim().is_empty() {
-            log.push_str(&turn.text);
-            if !turn.text.ends_with('\n') {
-                log.push('\n');
-            }
-        }
-    }
-    if !all_reads.is_empty() || !all_effects.is_empty() || !all_dropped.is_empty() {
-        log.push_str("\n--- authoring broker ---\n");
-        for read in &all_reads {
-            log.push_str(&format!(
-                "read {} -> {} ({} bytes)\n",
-                read.tool,
-                read.path,
-                read.content.len()
-            ));
-        }
-        for record in &all_effects {
-            if record.applied {
-                log.push_str(&format!(
-                    "applied {} -> {}\n",
-                    record.tool, record.destination
-                ));
-            } else {
-                log.push_str(&format!(
-                    "FAILED {} -> {}\n{}\n",
-                    record.tool, record.destination, record.detail
-                ));
-            }
-        }
-        for dropped in &all_dropped {
-            log.push_str(&format!(
-                "dropped call {} (tool `{}`): {}\n",
-                dropped.call_id, dropped.tool, dropped.reason
-            ));
-        }
-    }
-    if !all_decisions.is_empty() || !all_accepted_requests.is_empty() {
-        log.push_str("\n--- surfaced decisions and dependency requests ---\n");
-        for decision in &all_decisions {
-            log.push_str(&format!(
-                "decision {id} ({summary}): {why}\n",
-                id = decision.call_id,
-                summary = decision.summary,
-                why = decision.why,
-            ));
-            if let Some(patch) = &decision.patch {
-                log.push_str(&format!("  patch:\n{}\n", patch));
-            }
-        }
-        for request in &all_accepted_requests {
-            log.push_str(&format!(
-                "dependency {} -> {} ({})\n",
-                request.name,
-                request.origin,
-                request.reason.as_deref().unwrap_or("accepted")
-            ));
-        }
-    }
-    if let Some(failure) = failure {
-        log.push_str("\n--- failure ---\n");
-        log.push_str(&failure.reason);
-        if !failure.reason.ends_with('\n') {
-            log.push('\n');
-        }
-    }
-    let redacted_log = redact_bounded(&log, redactions, profile.max_output_bytes);
-    log_file
-        .write_all(redacted_log.as_bytes())
-        .map_err(|source| KvistError::Io {
-            operation: "write agent log",
-            path: log_path.to_path_buf(),
-            source,
-        })?;
-    log_file.sync_all().map_err(|source| KvistError::Io {
-        operation: "sync agent log",
-        path: log_path.to_owned(),
-        source,
-    })?;
-
-    // Record the structured session trajectory journal: one dispatch/result
-    // pair per applied-or-failed effect across every turn, so `state_mutated`
-    // reflects effects that actually ran rather than the overall turn outcome.
-    let runs_dir = request.target_dir.join(".kvist").join("runs");
-    let trajectory_path = runs_dir.join(format!("{session_id}.trajectory.jsonl"));
-    let recorder = sav::TrajectoryRecorder::new(&trajectory_path);
-    let now_ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    recorder.record_event(&sav::TrajectoryEvent::SessionStart {
-        session_id: redact(session_id, redactions),
-        task_id: redact(request.task_id, redactions),
-        timestamp: now_ts,
-    })?;
-
-    for (index, run_turn) in run_turns.iter().enumerate() {
-        let turn = &run_turn.turn;
-        let turn_number = index + 1;
-        let usage = turn.usage;
-        let new_tokens = usage.map(|usage| usage.input_tokens);
-        let output_tokens = usage.map(|usage| usage.output_tokens);
-
-        recorder.record_event(&sav::TrajectoryEvent::TurnStart {
-            turn: turn_number,
-            timestamp: now_ts,
-        })?;
-        recorder.record_event(&sav::TrajectoryEvent::PromptEval {
-            turn: turn_number,
-            cached_tokens: None,
-            new_tokens,
-            eval_duration_ms: None,
-        })?;
-        for read in &run_turn.reads {
-            let args = serde_json::json!({ "path": redact(&read.path, redactions) });
-            let tool = redact(&read.tool, redactions);
-            let call_id = redact(&read.call_id, redactions);
-            recorder.record_event(&sav::TrajectoryEvent::ToolDispatch {
-                turn: turn_number,
-                call_id: call_id.clone(),
-                tool: tool.clone(),
-                args: args.clone(),
-                action_hash: sav::compute_action_hash(&tool, &args),
-            })?;
-            recorder.record_event(&sav::TrajectoryEvent::ToolResult {
-                turn: turn_number,
-                call_id,
-                tool,
-                stdout: redact_bounded(&read.content, redactions, profile.max_output_bytes),
-                stderr: String::new(),
-                exit_code: read.outcome.exit_code(),
-                bytes: read.content.len(),
-                state_mutated: false,
-            })?;
-        }
-        for record in &run_turn.effects {
-            let args =
-                serde_json::json!({ "destination": redact(&record.destination, redactions) });
-            let tool = redact(&record.tool, redactions);
-            let call_id = redact(&record.call_id, redactions);
-            recorder.record_event(&sav::TrajectoryEvent::ToolDispatch {
-                turn: turn_number,
-                call_id: call_id.clone(),
-                tool: tool.clone(),
-                args: args.clone(),
-                action_hash: sav::compute_action_hash(&tool, &args),
-            })?;
-            recorder.record_event(&sav::TrajectoryEvent::ToolResult {
-                turn: turn_number,
-                call_id,
-                tool,
-                stdout: if record.applied {
-                    "applied".to_owned()
-                } else {
-                    String::new()
-                },
-                stderr: redact_bounded(&record.detail, redactions, profile.max_output_bytes),
-                exit_code: if record.applied { 0 } else { 1 },
-                bytes: record.detail.len(),
-                // The legacy trajectory boolean cannot represent uncertainty;
-                // conservatively retain possible mutation and explain it in stderr.
-                state_mutated: record.applied || record.uncertain,
-            })?;
-        }
-        let finish_reason = serde_json::to_value(&turn.finish_reason)
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned))
-            .unwrap_or_else(|| "stop".to_owned());
-        recorder.record_event(&sav::TrajectoryEvent::TurnFinish {
-            turn: turn_number,
-            output_tokens,
-            finish_reason: redact(&finish_reason, redactions),
-        })?;
-    }
-
-    recorder.record_event(&sav::TrajectoryEvent::SessionFinish {
-        session_id: redact(session_id, redactions),
-        task_id: redact(request.task_id, redactions),
-        total_turns: run_turns.len(),
-        total_tokens: known_usage.map_or(0, |usage| {
-            usage.input_tokens.saturating_add(usage.output_tokens)
-        }),
-        success,
-    })?;
-
-    Ok(AgentRunResult {
-        success,
-        tokens_input,
-        tokens_output,
-        log_path: log_path.to_path_buf(),
-        stdout,
-        stderr,
-        timed_out,
-        output_limit_exceeded,
-        surfaced_decision,
-    })
 }
 
 fn create_run_log(logs_dir: &Path, stem: &str) -> Result<(String, PathBuf, fs::File)> {
@@ -2980,7 +2720,7 @@ mod tests {
             model: None,
             thinking_effort: None,
             token_limit: None,
-            timeout_seconds: 5,
+            timeout_seconds: Some(5),
             max_output_bytes: 1_024,
             redaction_values: vec![],
         };
@@ -3153,6 +2893,28 @@ mod tests {
             65536,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn authoring_effect_deadline_is_independent_and_a_shorter_task_deadline_clips_it() {
+        let token = CancellationToken::new();
+        let unlimited = TurnBudget::with_limit(None);
+        assert_eq!(
+            unlimited
+                .operation_deadline(&token, EFFECT_DEADLINE)
+                .unwrap(),
+            Duration::from_secs(1800),
+        );
+        let limit = Duration::from_secs(20);
+        let shorter = TurnBudget::new(limit)
+            .operation_deadline(&token, EFFECT_DEADLINE)
+            .unwrap();
+        assert!(!shorter.is_zero() && shorter <= limit);
+        let expired = TurnBudget::new(Duration::ZERO);
+        assert!(matches!(
+            expired.operation_deadline(&token, EFFECT_DEADLINE),
+            Err(KvistError::Sav(ModelError::ModelTransportTimedOut))
+        ));
     }
 
     /// The failure class a scripted transport produces.
@@ -3462,7 +3224,7 @@ mod tests {
             model: None,
             thinking_effort: None,
             token_limit: None,
-            timeout_seconds: 5,
+            timeout_seconds: Some(5),
             max_output_bytes: 1_024,
             redaction_values: vec![],
         }

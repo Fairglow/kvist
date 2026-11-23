@@ -238,8 +238,8 @@ pub struct RoleConfig {
     pub model: Option<String>,
     /// Thinking effort policy for this role (overrides profile default).
     pub thinking_effort: Option<sav::ReasoningEffort>,
-    /// Whole protected authoring task budget in seconds.
-    pub timeout_seconds: u64,
+    /// Optional hard limit for the whole protected authoring task.
+    pub timeout_seconds: Option<u64>,
     /// Token budget limit for this role.
     pub token_limit: Option<usize>,
     /// Per-response HTTP, per-effect capture, and retained agent-log byte ceiling.
@@ -280,7 +280,7 @@ impl RoleConfig {
             default_model: profile,
             model: None,
             thinking_effort: None,
-            timeout_seconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
+            timeout_seconds: None,
             token_limit: None,
             max_output_bytes: DEFAULT_AGENT_MAX_OUTPUT_BYTES,
             redaction_values: Vec::new(),
@@ -288,7 +288,7 @@ impl RoleConfig {
     }
 }
 
-pub const DEFAULT_AGENT_TIMEOUT_SECONDS: u64 = 2 * 60 * 60;
+pub const DEFAULT_REVIEW_TIMEOUT_SECONDS: u64 = 2 * 60 * 60;
 pub const MAX_AGENT_TIMEOUT_SECONDS: u64 = 30 * 24 * 60 * 60;
 pub const DEFAULT_AGENT_MAX_OUTPUT_BYTES: usize = MAX_AGENT_OUTPUT_BYTES;
 pub const MAX_AGENT_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
@@ -1459,17 +1459,14 @@ provider = "gemini"
 
 [agent.roles.architect]
 profile = "claude-default"
-timeout_seconds = 7200
 max_output_bytes = 16777216
 
 [agent.roles.developer]
 profile = "gemini-default"
-timeout_seconds = 7200
 max_output_bytes = 16777216
 
 [agent.roles.security-reviewer]
 profile = "claude-default"
-timeout_seconds = 7200
 max_output_bytes = 16777216
 "#;
 
@@ -2203,13 +2200,15 @@ fn parse_agent_resource_policy(
     table: &toml::map::Map<String, toml::Value>,
     profile: &mut RoleConfig,
 ) -> Result<()> {
-    profile.timeout_seconds = parse_agent_limit(
-        config_path,
-        table,
-        "timeout_seconds",
-        profile.timeout_seconds as usize,
-        MAX_AGENT_TIMEOUT_SECONDS as usize,
-    )? as u64;
+    if table.contains_key("timeout_seconds") {
+        profile.timeout_seconds = Some(parse_agent_limit(
+            config_path,
+            table,
+            "timeout_seconds",
+            0,
+            MAX_AGENT_TIMEOUT_SECONDS as usize,
+        )? as u64);
+    }
     profile.max_output_bytes = parse_agent_limit(
         config_path,
         table,
@@ -2706,7 +2705,7 @@ mod tests {
                 RoleConfig::default_for_role(role),
                 generated.role(role).clone(),
             ] {
-                assert_eq!(profile.timeout_seconds, 7200);
+                assert_eq!(profile.timeout_seconds, None);
                 assert_eq!(profile.max_output_bytes, 16 * 1024 * 1024);
             }
         }
@@ -2725,7 +2724,7 @@ mod tests {
             )
             .unwrap();
             let config = load_agent_file(&path).unwrap();
-            assert_eq!(config.architect.timeout_seconds, 17);
+            assert_eq!(config.architect.timeout_seconds, Some(17));
             assert_eq!(config.architect.max_output_bytes, bytes);
         }
         for bytes in [0, 16 * 1024 * 1024 + 1] {

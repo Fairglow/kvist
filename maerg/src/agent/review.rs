@@ -154,7 +154,11 @@ impl<'a> ReviewSession<'a> {
             profile,
             choice,
             task_id: task.to_owned(),
-            budget: TurnBudget::new(Duration::from_secs(profile.timeout_seconds)),
+            budget: TurnBudget::new(Duration::from_secs(
+                profile
+                    .timeout_seconds
+                    .unwrap_or(crate::config::DEFAULT_REVIEW_TIMEOUT_SECONDS),
+            )),
             tokens: TokenBudget::new(profile.token_limit),
             cancellation,
             signals: Some(signals),
@@ -172,13 +176,13 @@ impl<'a> ReviewSession<'a> {
             "type":if decision_support {"advisory_decision"} else {"independent_review"}, "task_id":task, "role":role.as_str(),
             "model":session.choice.model, "tools":false, "guidance":false,
             "human_acceptance":false,
-            "timeout_seconds":profile.timeout_seconds, "max_output_bytes":profile.max_output_bytes,
+            "timeout_seconds":session.budget.total.map(|limit| limit.as_secs()), "max_output_bytes":profile.max_output_bytes,
         }))?;
         eprintln!(
             "{}",
             redact_bounded(
                 &format!(
-                    "{}: role `{}`, selected model `{}`; {}s task budget, {}-byte combined output limit.",
+                    "{}: role `{}`, selected model `{}`; {} task budget, {}-byte combined output limit.",
                     if decision_support {
                         "Advisory decision support"
                     } else {
@@ -186,7 +190,7 @@ impl<'a> ReviewSession<'a> {
                     },
                     role.as_str(),
                     session.choice.model,
-                    profile.timeout_seconds,
+                    session.budget.label(),
                     profile.max_output_bytes,
                 ),
                 &session.redactions,

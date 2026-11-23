@@ -5729,7 +5729,7 @@ fn execute_task_under_lock(
             // Transition to Blocked
             let summary = if run_result.timed_out {
                 format!(
-                    "agent execution timed out while contacting the local model gateway. Bounded redacted logs are written to: {}",
+                    "agent execution timed out at a wall-clock deadline. Bounded redacted logs are written to: {}",
                     run_result.log_path.display()
                 )
             } else if run_result.output_limit_exceeded {
@@ -6275,17 +6275,17 @@ struct ExecutionApprovalMaterial {
     agent_source_digest: String,
     architect_template_digest: String,
     architect_token_limit: Option<usize>,
-    architect_timeout_seconds: u64,
+    architect_timeout_seconds: Option<u64>,
     architect_max_output_bytes: usize,
     architect_redaction_digest: String,
     developer_template_digest: String,
     developer_token_limit: Option<usize>,
-    developer_timeout_seconds: u64,
+    developer_timeout_seconds: Option<u64>,
     developer_max_output_bytes: usize,
     developer_redaction_digest: String,
     security_reviewer_template_digest: String,
     security_reviewer_token_limit: Option<usize>,
-    security_reviewer_timeout_seconds: u64,
+    security_reviewer_timeout_seconds: Option<u64>,
     security_reviewer_max_output_bytes: usize,
     security_reviewer_redaction_digest: String,
     sandbox_digest: String,
