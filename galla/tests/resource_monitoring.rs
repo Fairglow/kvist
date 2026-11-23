@@ -229,23 +229,34 @@ fn file_size_limit_enforced() {
 /// and kill children that exceed the limit.
 #[test]
 fn process_count_limit_enforced() {
+    let temp = tempfile::tempdir().unwrap();
+    let requirements = temp.path().join("REQUIREMENTS.md");
+    let tests = temp.path().join("tests");
+    let scratch = temp.path().join("scratch");
+    std::fs::write(&requirements, "intent").unwrap();
+    std::fs::create_dir(&tests).unwrap();
+    std::fs::create_dir(&scratch).unwrap();
     let mut request = valid_request();
-    request["resources"]["max_processes"] = json!(1);
-    // Spawn multiple background processes to exceed the limit
-    request["argv"] = json!(["/bin/sh", "-c", "sleep 10 & sleep 10 & sleep 10 & wait"]);
+    for (index, source) in [(0, requirements), (1, tests), (3, scratch)] {
+        request["grants"][index]["source"] = json!(source);
+    }
+    request["resources"]["max_processes"] = json!(16);
+    request["argv"] = json!([
+        "/bin/sh",
+        "-c",
+        "printf 'compiler output without newline' >&2; for i in $(seq 1 32); do sleep 5 & done; wait"
+    ]);
 
     let bytes = encode(&request);
     let output = run_runner(&bytes);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // The runner should detect the process count breach and kill the group
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
     assert!(
-        !output.status.success()
-            || stderr.contains("process count")
-            || stderr.contains("processes"),
-        "process count limit not enforced: exit={:?} stderr={}",
-        output.status.code(),
         stderr
+            .trim_end()
+            .ends_with("compiler output without newline\ngalla: process count limit exceeded"),
+        "{stderr}"
     );
 }
 

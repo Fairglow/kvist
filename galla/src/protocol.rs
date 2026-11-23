@@ -37,8 +37,15 @@ pub const MAX_VALUE_BYTES: usize = 4096;
 pub const MAX_WALL_TIME_MS: u64 = 24 * 60 * 60 * 1000;
 /// Maximum captured output (256 MiB).
 pub const MAX_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
-/// Maximum concurrent processes.
+/// Maximum concurrent processes and threads.
 pub const MAX_PROCESSES: u64 = 4096;
+/// Exit status of a non-interactive process-limit kill.
+pub const PROCESS_LIMIT_EXIT: u8 = 3;
+/// Terminal stderr line of a non-interactive process-limit kill.
+pub const PROCESS_LIMIT_DIAGNOSTIC: &str = "galla: process count limit exceeded";
+/// The only permitted native verification parallelism override.
+pub const SERIAL_CARGO_ENV: [(&str, &str); 2] =
+    [("CARGO_BUILD_JOBS", "1"), ("RUST_TEST_THREADS", "1")];
 /// Maximum open files.
 pub const MAX_FILES: u64 = 1 << 20;
 /// Maximum individual file size (8 GiB).

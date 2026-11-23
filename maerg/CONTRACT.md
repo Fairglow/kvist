@@ -494,6 +494,21 @@ the results of `cargo fmt --check`, `cargo clippy --offline --locked
 Missing Rustfmt or Clippy is a verification failure, not a skipped check.
 Non-Rust verification keeps the existing approved language or test commands.
 
+Protected task requests use Galla's 4096 process/thread allowance. When a
+native Rust verification stage reports a process-limit interruption, Kvist
+records it and retries that stage once in the same attempt, with one Cargo
+job and one libtest thread, without calling the model. This setting stays in
+effect for the rest of the attempt; the exact arguments, verification deadline
+and grants are unchanged. It does not constrain worker pools or subprocesses
+created by task code.
+If verification still reports this limit, Kvist gives the model one separate
+resource-recovery round with the command, limit and task-owned alternatives.
+After model changes or a completed recovery report, the full pipeline runs
+again. Later source repairs also receive the throttling context. A resource
+interruption cannot count as a test result. If it persists after that recovery,
+Kvist blocks the task and leads with the command, resource cause and corrective
+action.
+
 Security review tasks use fresh source-only context. Compliance tasks use
 separate source-only observation and source-blind comparison requests, without
 authoring tools. Host-written `IMPL.md` and item reports are observations, not
@@ -699,7 +714,8 @@ are fatal evidence failures. Initial authoring and all repairs share the
 approved role's model wall/token accounting rather than fresh per-repair
 allowances. Verification retains its separately approved enforcement limits
 and does not debit the model token allowance; elapsed sequence time still
-consumes the aggregate deadline. There are at most four repair rounds.
+consumes the aggregate deadline. There are at most four ordinary source repair
+rounds, separate from process-limit recovery.
 Only a known completed verification failure is automatically repairable;
 unknown effects, cancellation, timeout and output overflow fence recovery.
 

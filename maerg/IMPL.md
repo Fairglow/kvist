@@ -1,6 +1,23 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped verification process-limit recovery observation
+
+A source-only observer found that execution approval binds a 4,096-task
+ceiling and that a matching runner exit and terminal diagnostic triggers the
+same Cargo stage with one job and one libtest thread. No model request is
+made for that retry. Earlier stage evidence is retained and reduced
+parallelism persists through the attempt. A persisting breach receives one
+focused model round outside the source-repair budget; full verification then
+runs again. The scripted runner assertions cover same-stage recovery, full
+re-verification and the final blocker without skipping checks.
+
+A separate source-blind comparison noted that the contract did not explicitly
+describe model-free retry, full verification after model recovery, or nested
+concurrency. Those limits are now explicit. The diagnostic shares stderr with
+the payload and cannot authenticate attribution; the recovery does not broaden
+authority. No human acceptance or formal compliance certification is recorded.
+
 ## Scoped task planning observation - 2026-11-23
 
 An independent source-only observer read planning, transaction, review,

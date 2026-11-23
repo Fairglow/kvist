@@ -195,6 +195,15 @@ pub(super) fn validate_phase(
             ));
         }
         environment.push(("CARGO_NET_OFFLINE", "true".to_owned()));
+        if allow_projection
+            && crate::protocol::SERIAL_CARGO_ENV
+                .iter()
+                .any(|(name, _)| request.environment.contains_key(*name))
+        {
+            environment.extend(
+                crate::protocol::SERIAL_CARGO_ENV.map(|(name, value)| (name, value.to_owned())),
+            );
+        }
         Purpose::Verification
     };
     if request.environment.get("PATH").map(String::as_str) != Some(RUNTIME_BIN_MOUNT) {

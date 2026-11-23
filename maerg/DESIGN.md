@@ -214,9 +214,21 @@ the same attempt before further verification; preserve both causes on failure.
 Use fallible source/test digests and aggregate model accounting shared across
 initial authoring and repair invocations. Sequence elapsed time includes
 verification, but verification retains its own approved enforcement ceiling
-and does not spend model tokens. Four repair rounds are the outer bound;
+and does not spend model tokens. Four ordinary source repair rounds are the bound;
 unknown verification outcomes never authorize replay. Fresh review contexts
 remain separate.
+
+Take the process/thread allowance directly from the runner protocol. Classify
+the runner's process-limit exit and terminal diagnostic before redacting or
+truncating output; host cancellation, timeout, and overflow take precedence.
+Treat the exit status and stderr diagnostic as a recovery hint, not
+authenticated attribution or proof of success: payload output shares the
+stream. The only possible replay runs the same checks with narrower parallelism.
+Record the interrupted stage before retrying it, discard its empty Cargo
+admin mountpoint, and recompute remaining time from the original pipeline
+start. Keep the successful stages and attempt-local throttling state.
+Persistent resource failures use separate recovery accounting and a focused
+prompt, not the source-repair signature or ordinary repair allowance.
 
 Own one sequence state across authoring and verification-repair calls: original
 start/deadline, cumulative conservative model debit and known/unknown usage,
@@ -227,7 +239,7 @@ verification time, without changing verification's independent approved ceiling.
 Hash complete verification outcome/status and source/test revisions for
 bounded recurring-repair detection. Repeated unchanged evidence stops with
 focused diagnostics; actual changes permit reverification, not a fresh budget.
-Keep at most four outer repairs and never schedule after cancellation, timeout,
+Keep at most four source repairs and never schedule after cancellation, timeout,
 overflow, missing outcome, uncertain effects or retained decision.
 Source/test digest failures propagate before scheduling. Sequence state and
 diagnostics belong to the attempt, not a global mutable singleton or chat-only

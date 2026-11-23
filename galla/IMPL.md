@@ -1,6 +1,18 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped Cargo serial retry observation
+
+A source-only observer found that native Cargo verification accepts one
+optional exact pair, `CARGO_BUILD_JOBS=1` and `RUST_TEST_THREADS=1`, without
+changing its command, grants, or network checks. Process enforcement samples
+descendants and threads rather than preventing creation at the ceiling.
+The observer identified a missing line boundary after partial child stderr
+and a process-monitoring fixture with nonexistent mount sources. The
+implementation now starts the diagnostic on a fresh line, and the fixture
+uses real temporary grants and asserts the exact exit and line boundary.
+A separate source-blind comparison did not certify compliance or acceptance.
+
 ## Scoped interactive exec observation
 
 An independent source-only observer read current code and test assertions

@@ -317,6 +317,13 @@ native data/private-admin topology to resolved mounts. Portable export
 generation remains a separate provider-capability primitive, not native
 acquisition publication.
 
+Native Cargo verification MUST admit a reduced-parallelism request without
+changing the approved command, mounts or network authority; it MUST reject
+arbitrary environment overrides and keep the same resource enforcement.
+Protocol admission MUST support an allowance of 4096 processes and threads.
+Non-interactive process-limit termination MUST report a stable exit status and
+diagnostic on its own stderr line, even after unterminated payload output.
+
 ### SR-REQ-INTERACTIVE-EXEC
 
 The debug command-line interface MUST support an interactive prompt, terminal

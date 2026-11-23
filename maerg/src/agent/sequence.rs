@@ -83,6 +83,10 @@ impl AuthoringSequence {
         self.tokens.known_usage()
     }
 
+    pub(crate) fn cancellation(&self) -> &CancellationToken {
+        &self.cancellation
+    }
+
     pub(crate) fn diagnostics(&self, stop_reason: StopReason) -> SequenceDiagnostics {
         SequenceDiagnostics {
             elapsed_seconds: self.wall.started.elapsed().as_secs_f64(),

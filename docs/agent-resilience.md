@@ -45,6 +45,18 @@ component acceptance or compliance evidence is claimed by these reviews.
 
 Phase-specific executed commands, regression results, independent observations,
 comparison limitations and commit identities are recorded here as delivery
+Protected task requests allow 4,096 processes and threads. If Galla ends
+a native Cargo verification stage at that limit, Kvist records the failure
+and retries the same check in the same attempt with one Cargo job and one
+libtest thread. This preserves the exact commands, test coverage and resource
+ceiling. If serial verification still hits the limit, the agent gets a focused
+recovery round to inspect task-owned worker pools, nested parallelism and
+child-process cleanup. It is not asked to fix an imaginary compiler error
+or skip a check. A persistent failure after recovery is reported as a
+process-limit blocker, not a task timeout. Upgrade Kvist and Galla together,
+then run `kvist task approve-policy` to approve the new runner and process
+allowance.
+
 proceeds. Evidence does not claim exhaustive detection, compliance certification,
 rollback or successful live-model qualification.
 

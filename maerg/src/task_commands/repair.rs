@@ -18,6 +18,7 @@ impl RepairHistory {
             "command":outcome.command, "success":outcome.success,
             "exit_code":outcome.exit_code, "timed_out":outcome.timed_out,
             "output_limit_exceeded":outcome.output_limit_exceeded,
+            "process_limit_exceeded":outcome.process_limit_exceeded,
             "cancelled":outcome.cancelled, "stdout":outcome.stdout,
             "stderr":outcome.stderr, "revisions":revisions,
         });
@@ -27,8 +28,9 @@ impl RepairHistory {
     }
 
     pub(super) fn remember(&mut self, cause: &str, redactions: &[String]) {
-        // Five verification results and four repairs are the outer bound.
-        if self.causes.len() < 9 {
+        // Five ordinary outcomes, four repairs and one resource recovery with
+        // its outcome. The current cause is reported separately on a stop.
+        if self.causes.len() < 11 {
             self.causes.push(super::redact_bounded(
                 cause.to_owned(),
                 redactions,
@@ -42,6 +44,16 @@ impl RepairHistory {
     }
 }
 
+pub(super) fn resource_guidance(serial: bool) -> &'static str {
+    if serial {
+        "Kvist is already using one Cargo job and one libtest thread for this attempt. That does not limit pools or subprocesses started by the code under test."
+    } else {
+        "The approved verifier controls its own parallelism; the model cannot change its sandbox limits."
+    }
+}
+
+pub(super) const PROCESS_RECOVERY_ACTION: &str = "Use the preserved edits and inspect only task-owned code for excessive worker pools, nested parallel jobs, or children that are not joined/reaped. Bound their concurrency or lifetime where the evidence supports it. Do not skip, ignore, or weaken checks or change sandbox policy. If no task-owned fix is supported, report the concrete prerequisite rather than guessing.";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,6 +66,7 @@ mod tests {
             timed_out: false,
             output_limit_exceeded: false,
             cancelled: false,
+            process_limit_exceeded: false,
             stdout: "failure".into(),
             stderr: String::new(),
         }

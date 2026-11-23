@@ -265,6 +265,14 @@ pub(super) fn source_test_digests(component: &Path) -> Result<(String, String)> 
 }
 
 pub(super) fn verification_cause(result: &VerificationResult) -> String {
+    if result.process_limit_exceeded {
+        return format!(
+            "Galla ended `{}` after its {} process/thread limit was exceeded (exit {}). No compiler or test verdict was obtained.",
+            result.command,
+            galla::protocol::MAX_PROCESSES,
+            galla::protocol::PROCESS_LIMIT_EXIT
+        );
+    }
     format!(
         "test-command verification failed. Command: '{}', Exit code: {:?}.\n---\nStdout:\n{}\n---\nStderr:\n{}",
         result.command, result.exit_code, result.stdout, result.stderr,
@@ -276,6 +284,7 @@ pub(super) fn repairable(result: &VerificationResult) -> bool {
         && !result.timed_out
         && !result.output_limit_exceeded
         && !result.cancelled
+        && !result.process_limit_exceeded
         && result.exit_code.is_some_and(|code| code != 0)
         && (!result.stdout.trim().is_empty() || !result.stderr.trim().is_empty())
 }
@@ -293,6 +302,7 @@ mod tests {
             timed_out: false,
             output_limit_exceeded: false,
             cancelled: false,
+            process_limit_exceeded: false,
             stdout: "failure diagnostics".into(),
             stderr: String::new(),
         };
@@ -300,6 +310,10 @@ mod tests {
         for unsafe_outcome in [
             VerificationResult {
                 cancelled: true,
+                ..result.clone()
+            },
+            VerificationResult {
+                process_limit_exceeded: true,
                 ..result.clone()
             },
             VerificationResult {

@@ -358,6 +358,9 @@ and never contain submitted headers or tunneled bytes.
 threads; it is not a kernel admission ceiling and may overshoot between samples.
 Process names containing spaces or parentheses must not corrupt accounting.
 UID-wide NPROC limits are not imposed on unrelated host users/jobs.
+The maximum accepted allowance is 4096. A non-interactive process-limit
+termination exits 3 and ends stderr with the separate line
+`galla: process count limit exceeded`.
 
 The runner rejects unknown fields, unknown enumerants, wrong types, malformed
 `sha256:` digests, oversized input, non-canonical paths (duplicate `/`
@@ -378,7 +381,10 @@ under `/rust/project`, including the selected working directory's `Cargo.toml`,
 instead of the single verification workspace grant. Metadata admission retains
 the single workspace grant. It rejects non-denied network,
 non-offline environment, mutable cache data, or wrong cache/scratch/workspace
-topology. The runner exposes validated transport-policy value types and
+topology. Only native task verification (not metadata, acquisition or export)
+may supply the exact pair
+`CARGO_BUILD_JOBS=1` and `RUST_TEST_THREADS=1`; neither variable alone nor other
+values are admitted. The runner exposes validated transport-policy value types and
 descriptor-relative immutable generation construction, and enforces namespace,
 mount, resource, and network isolation via Bubblewrap and a local source-aware proxy;
 if enforcement prerequisites are not met, a request fails closed and never falls

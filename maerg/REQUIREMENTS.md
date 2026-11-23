@@ -510,6 +510,14 @@ on stderr and in the journal. Cancellation, invalid input and required-recording
 failures MUST NOT be retried. Effects and verification commands MUST
 NOT be replayed automatically when their effects may be unknown.
 
+Protected task requests MUST allow 4096 concurrent processes and threads.
+Verification MUST distinguish a sandbox process-limit interruption from a
+source failure. For native Rust, a known process-limit interruption MUST get
+a bounded same-stage retry with reduced parallelism, retaining the command
+and evidence. A persistent interruption MUST give the model a focused
+opportunity to address task-owned concurrency before it can block the task.
+Verification coverage, permissions and existing hard bounds MUST NOT be weakened.
+
 Ordinary execution and verification failures MUST return failure, persist a
 blocked task with the underlying cause, and identify the attempt and inspection
 and retry commands. Evidence-persistence failures MUST preserve the unresolved

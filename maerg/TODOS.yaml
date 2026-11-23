@@ -7134,3 +7134,74 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "verification-process-recovery-write-tests"
+    title: "write_tests: pin process-limit recovery during protected verification"
+    description: "Script an interrupted Clippy stage and verify the host retries it at lower parallelism before advancing."
+    context: "REQ-TASK-LIFECYCLE and the contract's locked Rust quality pipeline govern the 4096 ceiling, evidence ordering and model guidance."
+    purpose: "Catch misclassification, repeated stages and accidental verification skips."
+    expected_outcome: "The journal retains both outcomes, later stages run, and a persistent breach receives focused model recovery instead of an ordinary source repair."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-11-23T15:17:11Z"
+      updated_at: "2026-11-23T15:17:11Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "verification-process-recovery-implement-code"
+    title: "implement_code: recover protected verification from process-limit interruptions"
+    description: "Use the protocol ceiling, retain interruption evidence and retry the native Cargo stage with bounded parallelism."
+    context: "The host owns the deadline, throttling and verification disposition. No model can adjust sandbox policy."
+    purpose: "Preserve the task and approved checks when a verifier is killed for concurrency."
+    expected_outcome: "Verification uses 4096 tasks, keeps the exact commands and independently bounds resource recovery."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "verification-process-recovery-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-11-23T15:17:11Z"
+      updated_at: "2026-11-23T15:17:11Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "verification-process-recovery-security-audit"
+    title: "security_audit: inspect protected verification retry authority"
+    description: "Check that recovery cannot broaden argv, mounts, network, deadlines or model permissions."
+    context: "The stderr signal can suggest a narrower retry but cannot establish test success."
+    purpose: "Preserve the approved execution boundary during recovery."
+    expected_outcome: "Findings identify whether cancellation and resource enforcement still fail closed."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "verification-process-recovery-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-11-23T15:17:11Z"
+      updated_at: "2026-11-23T15:17:11Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "verification-process-recovery-compliance-review"
+    title: "compliance_review: compare recovery evidence with protected task intent"
+    description: "Compare source-blind observations and targeted tests with the verification recovery requirements and contract."
+    context: "An independent source observer supplies the implementation record."
+    purpose: "Surface differences without claiming human acceptance."
+    expected_outcome: "Record correspondence and limits for the ceiling, retry, evidence and final disposition."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "verification-process-recovery-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+    timestamps:
+      created_at: "2026-11-23T15:17:11Z"
+      updated_at: "2026-11-23T15:17:11Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

@@ -59,7 +59,7 @@ const SUPERVISION_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const STREAM_DRAIN_BUDGET: usize = 64 * 1024;
 
 /// Default resource bounds for a request field the caller does not specify.
-const DEFAULT_MAX_PROCESSES: u64 = 64;
+const DEFAULT_MAX_PROCESSES: u64 = galla::protocol::MAX_PROCESSES;
 const DEFAULT_MAX_FILES: u64 = 4096;
 const DEFAULT_MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
 const DEFAULT_MAX_SCRATCH_BYTES: u64 = 512 * 1024 * 1024;
@@ -72,7 +72,6 @@ const DEFAULT_MAX_OUTPUT_BYTES: u64 = 1024 * 1024;
 /// would exceed them and never saturates a converted value to `u64::MAX`.
 const MAX_WALL_TIME_MS: u64 = 24 * 60 * 60 * 1000;
 const MAX_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
-const MAX_PROCESSES: u64 = 4096;
 const MAX_FILES: u64 = 1 << 20;
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const MAX_SCRATCH_BYTES: u64 = 64 * 1024 * 1024 * 1024;
@@ -84,7 +83,6 @@ const PROBE_DEADLINE: Duration = Duration::from_secs(30);
 const _: () = {
     assert!(DEFAULT_WALL_TIME_MS <= MAX_WALL_TIME_MS);
     assert!(DEFAULT_MAX_OUTPUT_BYTES <= MAX_OUTPUT_BYTES);
-    assert!(DEFAULT_MAX_PROCESSES <= MAX_PROCESSES);
     assert!(DEFAULT_MAX_FILES <= MAX_FILES);
     assert!(DEFAULT_MAX_FILE_BYTES <= MAX_FILE_BYTES);
     assert!(DEFAULT_MAX_SCRATCH_BYTES <= MAX_SCRATCH_BYTES);
@@ -149,6 +147,56 @@ pub struct ExecutionResult {
     pub output_limit_exceeded: bool,
     /// True when the run was cancelled by SIGINT/SIGTERM.
     pub cancelled: bool,
+}
+
+impl ExecutionResult {
+    pub(crate) fn process_limit_exceeded(&self) -> bool {
+        !self.cancelled
+            && !self.timed_out
+            && !self.output_limit_exceeded
+            && self.output.status.code() == Some(i32::from(galla::protocol::PROCESS_LIMIT_EXIT))
+            && self
+                .output
+                .stderr
+                .trim_ascii_end()
+                .rsplit(|byte| *byte == b'\n')
+                .next()
+                == Some(galla::protocol::PROCESS_LIMIT_DIAGNOSTIC.as_bytes())
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn process_recovery_requires_the_runner_status_and_terminal_diagnostic() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let diagnostic = galla::protocol::PROCESS_LIMIT_DIAGNOSTIC;
+    let mut result = ExecutionResult {
+        output: std::process::Output {
+            status: std::process::ExitStatus::from_raw(3 << 8),
+            stdout: Vec::new(),
+            stderr: format!("compiler output\n{diagnostic}\n").into_bytes(),
+        },
+        timed_out: false,
+        output_limit_exceeded: false,
+        cancelled: false,
+    };
+    assert!(result.process_limit_exceeded());
+    result.cancelled = true;
+    assert!(!result.process_limit_exceeded());
+    result.cancelled = false;
+    result.output.status = std::process::ExitStatus::from_raw(101 << 8);
+    assert!(!result.process_limit_exceeded());
+    result.output.status = std::process::ExitStatus::from_raw(3 << 8);
+    result.output.stderr.extend_from_slice(b"another failure\n");
+    assert!(!result.process_limit_exceeded());
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum CargoParallelism {
+    #[default]
+    Normal,
+    Serial,
 }
 
 /// Canonical, content-addressed identity of the trusted runner.
@@ -1999,6 +2047,7 @@ pub fn execute_offline_cargo_verification(
         options,
         native_cargo::OfflineCommand::Test,
         None,
+        CargoParallelism::Normal,
         None,
     )
 }
@@ -2022,6 +2071,7 @@ pub(crate) fn execute_native_cargo_metadata(
         options,
         native_cargo::OfflineCommand::Metadata,
         None,
+        CargoParallelism::Normal,
         Some(cancellation),
     )
 }
@@ -2032,6 +2082,7 @@ fn execute_offline_cargo_request(
     options: ExecutionOptions,
     command: native_cargo::OfflineCommand,
     projection: Option<&cargo_context::CargoContext>,
+    parallelism: CargoParallelism,
     cancellation: Option<&sav::CancellationToken>,
 ) -> Result<ExecutionResult> {
     let environment: BTreeMap<String, String> = BTreeMap::new();
@@ -2094,6 +2145,7 @@ fn execute_offline_cargo_request(
                 command,
                 lockfile_identity: &request.lockfile_digest,
                 projection,
+                parallelism,
             },
         }
         .encode()?,
@@ -2377,6 +2429,9 @@ pub(crate) fn run_offline_cargo_quality_checks<T>(
     component_dir: &Path,
     timeout: Duration,
     output_limit: usize,
+    parallelism: &mut CargoParallelism,
+    cancellation: Option<&sav::CancellationToken>,
+    check_retry: impl Fn() -> Result<()>,
     mut record: impl FnMut(&str, &ExecutionResult, bool) -> Result<T>,
 ) -> Result<T> {
     with_offline_cargo_workspace(
@@ -2391,62 +2446,76 @@ pub(crate) fn run_offline_cargo_quality_checks<T>(
             let started = Instant::now();
             let mut verify = |stage: native_cargo::OfflineCommand| {
                 let command = format!("cargo {}", stage.arguments().join(" "));
-                let remaining = timeout.saturating_sub(started.elapsed());
-                if remaining.is_zero() {
-                    return Err(KvistError::SandboxUnavailable {
-                        runner: config.runner.clone(),
-                        reason: format!(
-                            "task verification exceeded its deadline before `{command}`"
-                        ),
-                    });
+                loop {
+                    let remaining = timeout.saturating_sub(started.elapsed());
+                    if remaining.is_zero() {
+                        return Err(KvistError::SandboxUnavailable {
+                            runner: config.runner.clone(),
+                            reason: format!(
+                                "task verification exceeded its deadline before `{command}`"
+                            ),
+                        });
+                    }
+                    eprintln!("Verifying: {command}");
+                    let result = execute_offline_cargo_request(
+                        config,
+                        request,
+                        ExecutionOptions {
+                            timeout: Some(remaining),
+                            output_limit: Some(output_limit),
+                            live_stdout: None,
+                        },
+                        stage,
+                        projection,
+                        *parallelism,
+                        cancellation,
+                    )?;
+                    let evidence = record(
+                        &command,
+                        &result,
+                        matches!(stage, native_cargo::OfflineCommand::Test),
+                    )?;
+                    if *parallelism == CargoParallelism::Normal && result.process_limit_exceeded() {
+                        check_retry()?;
+                        reset_cargo_home_mountpoint(request.scratch_host_dir)?;
+                        *parallelism = CargoParallelism::Serial;
+                        eprintln!(
+                            "Galla ended `{command}` after exceeding its {} process/thread limit; retrying the same check with one Cargo job and one test thread.",
+                            DEFAULT_MAX_PROCESSES
+                        );
+                        continue;
+                    }
+                    let passed = !result.cancelled
+                        && !result.timed_out
+                        && !result.output_limit_exceeded
+                        && result.output.status.success();
+                    return Ok((evidence, passed));
                 }
-                eprintln!("Verifying: {command}");
-                let result = execute_offline_cargo_request(
-                    config,
-                    request,
-                    ExecutionOptions {
-                        timeout: Some(remaining),
-                        output_limit: Some(output_limit),
-                        live_stdout: None,
-                    },
-                    stage,
-                    projection,
-                    None,
-                )?;
-                let evidence = record(
-                    &command,
-                    &result,
-                    matches!(stage, native_cargo::OfflineCommand::Test),
-                )?;
-                let passed = !result.cancelled
-                    && !result.timed_out
-                    && !result.output_limit_exceeded
-                    && result.output.status.success();
-                Ok((evidence, passed))
             };
             for stage in native_cargo::OfflineCommand::PRE_TEST_CHECKS {
                 let (evidence, passed) = verify(stage)?;
                 if !passed {
                     return Ok(evidence);
                 }
-                // Galla mounts Cargo's private admin tmpfs onto this empty
-                // placeholder. Remove only the mountpoint; keep build output.
-                let home_mountpoint = request.scratch_host_dir.join("cargo-home");
-                match fs::remove_dir(&home_mountpoint) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(source) => {
-                        return Err(KvistError::Io {
-                            operation: "reset private Cargo home mountpoint between verification stages",
-                            path: home_mountpoint,
-                            source,
-                        });
-                    }
-                }
+                reset_cargo_home_mountpoint(request.scratch_host_dir)?;
             }
             verify(native_cargo::OfflineCommand::Test).map(|(evidence, _)| evidence)
         },
     )
+}
+
+fn reset_cargo_home_mountpoint(scratch: &Path) -> Result<()> {
+    // Remove only the empty private-admin mountpoint; retain build output.
+    let path = scratch.join("cargo-home");
+    match fs::remove_dir(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(KvistError::Io {
+            operation: "reset private Cargo home mountpoint between verification stages",
+            path,
+            source,
+        }),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

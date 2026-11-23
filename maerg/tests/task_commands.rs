@@ -3044,16 +3044,9 @@ fn continuous_run_new_work_uses_a_fresh_baseline_and_approved_commit_policy() {
     assert_eq!(String::from_utf8(log.stdout).unwrap().lines().count(), 5);
 }
 
-#[test]
 #[cfg(target_os = "linux")]
-fn rust_test_task_requires_every_quality_stage_before_checkpointing() {
-    use maerg::task_queue::TaskStatus;
-
-    let gateway = MockGateway::spawn(
-        &gateway_text_body(r#"{"report":"Observed evidence.","decision_required":false}"#),
-        std::time::Duration::ZERO,
-    );
-    let project = continuous_project(&gateway.endpoint, "task");
+fn rust_quality_project(endpoint: &str) -> TempDir {
+    let project = continuous_project(endpoint, "task");
     for (path, bytes) in [
         ("Cargo.toml", "[workspace]\nmembers=['src']\nresolver='3'\n"),
         (
@@ -3064,10 +3057,35 @@ fn rust_test_task_requires_every_quality_stage_before_checkpointing() {
             "Cargo.lock",
             "version = 4\n[[package]]\nname = \"quality-fixture\"\nversion = \"0.1.0\"\n",
         ),
-        ("fail-clippy", ""),
     ] {
         fs::write(project.path().join(path), bytes).unwrap();
     }
+    let output = Command::new("git")
+        .args(["add", "--", "Cargo.toml", "Cargo.lock", "src/Cargo.toml"])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let output = Command::new("git")
+        .args(["commit", "--quiet", "-m", "Rust workspace"])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    project
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn rust_test_task_requires_every_quality_stage_before_checkpointing() {
+    use maerg::task_queue::TaskStatus;
+
+    let gateway = MockGateway::spawn(
+        &gateway_text_body(r#"{"report":"Observed evidence.","decision_required":false}"#),
+        std::time::Duration::ZERO,
+    );
+    let project = rust_quality_project(&gateway.endpoint);
+    fs::write(project.path().join("fail-clippy"), "").unwrap();
     let git = |args: &[&str]| {
         let output = Command::new("git")
             .args(args)
@@ -3077,8 +3095,6 @@ fn rust_test_task_requires_every_quality_stage_before_checkpointing() {
         assert!(output.status.success(), "{output:?}");
         String::from_utf8(output.stdout).unwrap()
     };
-    git(&["add", "--", "Cargo.toml", "Cargo.lock", "src/Cargo.toml"]);
-    git(&["commit", "--quiet", "-m", "Rust workspace"]);
     let head = git(&["rev-parse", "HEAD"]);
     let failed = run_kvist(&project, &["task", "run", "."]);
     assert!(!failed.status.success(), "{failed:?}");
@@ -3138,6 +3154,155 @@ fn rust_test_task_requires_every_quality_stage_before_checkpointing() {
     );
     let subjects = git(&["log", "--format=%s"]);
     assert!(subjects.contains("complete one-write-tests execution (unaccepted)"));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn rust_verification_process_limit_recovers_in_the_same_attempt() {
+    check_rust_verification_process_recovery(0);
+    check_rust_verification_process_recovery(1);
+    check_rust_verification_process_recovery(2);
+}
+
+#[cfg(target_os = "linux")]
+fn check_rust_verification_process_recovery(serial_failures: u8) {
+    let prompts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = prompts.clone();
+    let gateway = MockGateway::serve(
+        move |body| {
+            recorded
+                .lock()
+                .unwrap()
+                .push(extract_user_content(body).unwrap_or_default());
+            gateway_text_body("Work complete.")
+        },
+        std::time::Duration::ZERO,
+    );
+    let project = rust_quality_project(&gateway.endpoint);
+    let runner = fake_galla_path(&project);
+    let original = fs::read_to_string(&runner).unwrap();
+    fs::write(
+        &runner,
+        original.replace(
+            "    if [ -f fail-clippy ]; then",
+            r#"    printf '%s\n' "$request" >> clippy-requests.jsonl
+    case "$request" in
+      *'"CARGO_BUILD_JOBS":"1"'*'"RUST_TEST_THREADS":"1"'*)
+        if [ -f serial-failures ] && [ "$(cat serial-failures)" -gt 0 ]; then
+          failures=$(cat serial-failures)
+          printf '%s' "$((failures - 1))" > serial-failures
+          printf 'galla: process count limit exceeded\n' >&2
+          exit 3
+        fi
+        ;;
+      *) printf 'galla: process count limit exceeded\n' >&2; exit 3 ;;
+    esac
+    if [ -f fail-clippy ]; then"#,
+        ),
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("serial-failures"),
+        serial_failures.to_string(),
+    )
+    .unwrap();
+    let approval = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(approval.status.success(), "{approval:?}");
+    let output = run_kvist(&project, &["task", "run", ".", "one-write-tests"]);
+    fs::remove_file(runner).unwrap();
+    assert_eq!(output.status.success(), serial_failures < 2, "{output:?}");
+    let requests = fs::read_to_string(project.path().join("clippy-requests.jsonl")).unwrap();
+    let requests = requests
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), if serial_failures > 0 { 3 } else { 2 });
+    assert!(requests[0]["environment"]["CARGO_BUILD_JOBS"].is_null());
+    for request in &requests {
+        assert_eq!(request["argv"], requests[0]["argv"]);
+        assert_eq!(request["resources"]["max_processes"], 4096);
+        assert_eq!(request["network"]["mode"], "deny");
+    }
+    for request in &requests[1..] {
+        assert_eq!(request["environment"]["CARGO_BUILD_JOBS"], "1");
+        assert_eq!(request["environment"]["RUST_TEST_THREADS"], "1");
+    }
+    let prompts = prompts.lock().unwrap();
+    assert_eq!(prompts.len(), if serial_failures > 0 { 2 } else { 1 });
+    if serial_failures > 0 {
+        assert!(prompts[1].contains("4096"), "{prompts:?}");
+        assert!(prompts[1].contains("not a compiler"), "{prompts:?}");
+        assert!(prompts[1].contains("Do not skip"), "{prompts:?}");
+    }
+    let records = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist-attempts/one-write-tests.jsonl"),
+    )
+    .unwrap();
+    let records = records
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["phase"] == "verification-resource-recovery")
+            .count(),
+        usize::from(serial_failures > 0)
+    );
+    assert!(
+        !records
+            .iter()
+            .any(|record| record["phase"] == "verification-repair")
+    );
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["process_limit_exceeded"] == true)
+            .count(),
+        1 + usize::from(serial_failures)
+    );
+    let stages = records
+        .iter()
+        .filter(|record| record["phase"] == "verification")
+        .map(|record| {
+            (
+                record["command"].as_str().unwrap(),
+                record["exit_code"].as_i64().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let clippy = "cargo clippy --offline --locked --all-targets -- -D warnings";
+    let mut expected = vec![("cargo fmt --check", 0), (clippy, 3)];
+    if serial_failures > 0 {
+        expected.extend([(clippy, 3), ("cargo fmt --check", 0)]);
+    }
+    if serial_failures < 2 {
+        expected.extend([
+            (clippy, 0),
+            ("cargo build --offline --locked", 0),
+            ("cargo test --offline --locked", 0),
+        ]);
+    } else {
+        expected.push((clippy, 3));
+        let attention = fs::read_to_string(
+            project
+                .path()
+                .join("src/.kvist/attention/one-write-tests.md"),
+        )
+        .unwrap();
+        let summary = attention.split("## ").nth(1).unwrap();
+        assert!(
+            summary.contains(clippy) && summary.contains("4096 process/thread limit"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("focused recovery round did not resolve it"),
+            "{summary}"
+        );
+    }
+    assert_eq!(stages, expected);
 }
 
 #[test]

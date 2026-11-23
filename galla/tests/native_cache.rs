@@ -164,6 +164,38 @@ fn native_metadata_accepts_exact_verification_with_optional_data_roots() {
 }
 
 #[test]
+fn native_cargo_serial_retry_requires_the_exact_pair_in_verification_only() {
+    let mut serial = request(false, false, false);
+    serial["resources"]["max_processes"] = json!(4096);
+    serial["environment"]["CARGO_BUILD_JOBS"] = json!("1");
+    serial["environment"]["RUST_TEST_THREADS"] = json!("1");
+    assert!(validate(&serial).is_ok());
+
+    for (name, value) in [
+        ("CARGO_BUILD_JOBS", Some("2")),
+        ("RUST_TEST_THREADS", Some("128")),
+        ("CARGO_BUILD_JOBS", None),
+        ("RUST_TEST_THREADS", None),
+        ("RUSTFLAGS", Some("-Awarnings")),
+    ] {
+        let mut invalid = serial.clone();
+        if let Some(value) = value {
+            invalid["environment"][name] = json!(value);
+        } else {
+            invalid["environment"].as_object_mut().unwrap().remove(name);
+        }
+        assert!(validate(&invalid).is_err(), "{invalid}");
+    }
+
+    for mut other in [metadata_request(false, false), request(true, true, false)] {
+        assert!(validate(&other).is_ok());
+        other["environment"]["CARGO_BUILD_JOBS"] = json!("1");
+        other["environment"]["RUST_TEST_THREADS"] = json!("1");
+        assert!(validate(&other).is_err());
+    }
+}
+
+#[test]
 fn native_quality_accepts_exact_commands_and_only_projected_read_only_inputs() {
     for argv in [
         vec!["fmt", "--check"],

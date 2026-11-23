@@ -20,8 +20,13 @@ fn native_offline_requests_grant_only_data_and_match_locked_alias_protocol() {
         path: "/usr/bin/bwrap".into(),
         digest: digest_label(b"backend"),
     };
-    for (present, command) in [false, true].into_iter().flat_map(|present| {
-        [OfflineCommand::Test, OfflineCommand::Metadata].map(|command| (present, command))
+    for (present, command, parallelism) in [false, true].into_iter().flat_map(|present| {
+        [
+            (OfflineCommand::Test, CargoParallelism::Normal),
+            (OfflineCommand::Test, CargoParallelism::Serial),
+            (OfflineCommand::Metadata, CargoParallelism::Normal),
+        ]
+        .map(|(command, parallelism)| (present, command, parallelism))
     }) {
         let encoded = Request {
             config: &config,
@@ -40,12 +45,20 @@ fn native_offline_requests_grant_only_data_and_match_locked_alias_protocol() {
                 command,
                 lockfile_identity: &digest_label(b"lock"),
                 projection: None,
+                parallelism,
             },
         }
         .encode()
         .unwrap();
         let request = galla::validation::parse_and_validate(&encoded).unwrap();
         assert_eq!(&request.argv[1..], command.arguments());
+        assert_eq!(request.resources.max_processes, 4096);
+        for (name, value) in galla::protocol::SERIAL_CARGO_ENV {
+            assert_eq!(
+                request.environment.get(name).map(String::as_str),
+                (parallelism == CargoParallelism::Serial).then_some(value)
+            );
+        }
         let cache = request.cache.unwrap();
         assert_eq!(cache.cargo_home, HOME);
         assert!(cache.writable.is_none() && cache.approved.is_none());
@@ -102,6 +115,7 @@ fn native_offline_requests_grant_only_data_and_match_locked_alias_protocol() {
                 command: OfflineCommand::Metadata,
                 lockfile_identity: &digest_label(b"lock"),
                 projection: None,
+                parallelism: CargoParallelism::Normal,
             },
         }
         .encode()

@@ -664,7 +664,7 @@ fn run_with_io(request: SandboxRequest, interactive: bool) -> ExitCode {
         }
 
         if count_processes_in_pgid(child_pid) > limits.max_processes {
-            specific_breach = Some("process count limit exceeded");
+            specific_breach = Some(crate::protocol::PROCESS_LIMIT_DIAGNOSTIC);
             let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
             let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
             break;
@@ -701,8 +701,8 @@ fn run_with_io(request: SandboxRequest, interactive: bool) -> ExitCode {
     }
 
     if let Some(reason) = specific_breach {
-        eprintln!("galla: {reason}");
-        return ExitCode::from(3);
+        eprintln!("\n{reason}");
+        return ExitCode::from(crate::protocol::PROCESS_LIMIT_EXIT);
     }
 
     if timeout_breached {

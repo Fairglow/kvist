@@ -56,6 +56,7 @@ pub(super) enum Phase<'a> {
         command: OfflineCommand,
         lockfile_identity: &'a str,
         projection: Option<&'a super::cargo_context::CargoContext>,
+        parallelism: CargoParallelism,
     },
 }
 
@@ -228,8 +229,18 @@ impl Request<'_> {
                     vec![cargo.clone(), "fetch".into(), "--locked".into()],
                 )
             }
-            Phase::Verification { command, .. } => {
+            Phase::Verification {
+                command,
+                parallelism,
+                ..
+            } => {
                 environment.insert("CARGO_NET_OFFLINE".into(), "true".into());
+                if parallelism == CargoParallelism::Serial {
+                    environment.extend(
+                        galla::protocol::SERIAL_CARGO_ENV
+                            .map(|(name, value)| (name.to_owned(), value.to_owned())),
+                    );
+                }
                 let mut arguments = vec![cargo.clone()];
                 arguments.extend(
                     command

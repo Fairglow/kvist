@@ -1932,3 +1932,74 @@ tasks:
       completed_at: "2026-11-22T21:08:20Z"
     blocked_reason: null
     recovery_state: null
+  - id: "native-cargo-serial-retry-write-tests"
+    title: "write_tests: pin native Cargo serial retry inputs"
+    description: "Cover the exact serial retry environment, the 4096 allowance and the process-limit exit and stderr boundary."
+    context: "SR-REQ-PRODUCTION-RUNNER preserves the closed Cargo verification boundary."
+    purpose: "Allow resource recovery without expanding command authority."
+    expected_outcome: "Native verification admits both serial settings and 4096 tasks; mis-scoped settings are rejected, and a real limit kill has an exact terminal diagnostic."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-23T15:17:11Z"
+      updated_at: "2026-11-23T15:17:11Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cargo-serial-retry-implement-code"
+    title: "implement_code: validate native Cargo serial retries"
+    description: "Validate the fixed serial settings and emit the process-limit diagnostic on its own terminal line."
+    context: "The runner contract keeps argv, network, grants and resource ceilings unchanged."
+    purpose: "Preserve enforcement during a host-requested retry."
+    expected_outcome: "Exactly the bounded optional pair is admitted, without accepting arbitrary environment names or values."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "native-cargo-serial-retry-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-23T15:17:11Z"
+      updated_at: "2026-11-23T15:17:11Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cargo-serial-retry-security-audit"
+    title: "security_audit: inspect native Cargo serial retry admission"
+    description: "Inspect phase selection and rejection of unrecognized environment inputs."
+    context: "Metadata, acquisition and export mode must not gain the override."
+    purpose: "Protect the closed protocol and phase boundaries."
+    expected_outcome: "Record any reachability of new settings outside the exact native verification surface."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "native-cargo-serial-retry-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-23T15:17:11Z"
+      updated_at: "2026-11-23T15:17:11Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "native-cargo-serial-retry-compliance-review"
+    title: "compliance_review: compare native serial retry evidence with runner intent"
+    description: "Compare independent implementation observations and validator evidence with the runner's requirements and contract."
+    context: "The comparison does not read runner source or confer acceptance."
+    purpose: "Surface discrepancies in the permitted request shape."
+    expected_outcome: "Retain the coverage and limitations of contract enforcement for human arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "native-cargo-serial-retry-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+    timestamps:
+      created_at: "2026-11-23T15:17:11Z"
+      updated_at: "2026-11-23T15:17:11Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

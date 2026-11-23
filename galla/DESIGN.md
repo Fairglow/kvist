@@ -357,6 +357,10 @@ network-denied or source-limited namespace, pins trusted addresses and
 reauthorizes redirects, and enforces process and resource limits under
 ADR 0004.
 
+Native Cargo verification validates the optional serial retry environment as
+an exact pair in the existing closed allowlist. It admits no arbitrary Cargo
+arguments or environment and excludes acquisition, metadata and export mode.
+
 ## Verification strategy
 
 `tests/toolchain_e2e.rs` exercises the executable protocol with real

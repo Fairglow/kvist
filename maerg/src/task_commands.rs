@@ -1833,6 +1833,7 @@ fn assess_attempt_journal(
             | "verification-finished"
             | "agent-execution"
             | "verification-repair"
+            | "verification-resource-recovery"
             | "continuation" => {
                 attempt.execution_observed = true;
             }
@@ -5246,6 +5247,8 @@ fn execute_task_under_lock(
                 const MAX_VERIFICATION_REPAIR_ROUNDS: usize = 4;
                 let mut repair_round = 0usize;
                 let mut history = repair::RepairHistory::default();
+                let mut parallelism = crate::sandbox::CargoParallelism::Normal;
+                let mut resource_recovery_started = false;
                 let verify_outcome = loop {
                     if let Err(error) = sequence.check() {
                         let reason = attempt.cause(
@@ -5265,13 +5268,16 @@ fn execute_task_under_lock(
                         "running task verification"
                     );
                     eprintln!("Running {verification_label}...");
-                    let res = verify_task(
+                    let res = verify_task_controlled(
                         component_path,
                         task,
                         project_dir,
                         &config,
                         &sandbox_probe,
                         &policy_identity,
+                        &mut parallelism,
+                        Some(sequence.cancellation()),
+                        || sequence.check(),
                     );
                     let Ok(verify_res) = res else {
                         break res;
@@ -5280,7 +5286,8 @@ fn execute_task_under_lock(
                     if !verify_res.success {
                         history.remember(&verification_cause, &redactions);
                     }
-                    if !agent_outcome::repairable(&verify_res) {
+                    let process_limit = verify_res.process_limit_exceeded;
+                    if !process_limit && !agent_outcome::repairable(&verify_res) {
                         if verify_res.success
                             && let Err(error) = sequence.check()
                         {
@@ -5305,62 +5312,84 @@ fn execute_task_under_lock(
                         return Err(attempt.block(&reason, Some(&run_result.log_path))?);
                     }
                     let pre_digests = attempt.digests(&history.cause(), &run_result.log_path)?;
-                    let recurring = history.recurring(&verify_res, &pre_digests);
-                    if recurring || repair_round >= MAX_VERIFICATION_REPAIR_ROUNDS {
-                        let focused = if recurring {
-                            "identical verification outcome with no source/test progress; reconcile retained failures and choose a genuinely different approved strategy"
+                    let serial = parallelism == crate::sandbox::CargoParallelism::Serial;
+                    let repair_prompt = if process_limit {
+                        let guidance = repair::resource_guidance(serial);
+                        if resource_recovery_started {
+                            let reason = format!(
+                                "{verification_cause}\n{guidance} The focused recovery round did not resolve it. {}\n\
+                                 Review the retained verification records and resolve the remaining concurrency issue before retrying.\n\n\
+                                 {}",
+                                repair::PROCESS_RECOVERY_ACTION,
+                                sequence
+                                    .diagnostics(sav::runtime::StopReason::Failed)
+                                    .message(),
+                            );
+                            return Err(attempt.block(&reason, Some(&run_result.log_path))?);
+                        }
+                        resource_recovery_started = true;
+                        eprintln!(
+                            "{verification_cause} Continuing with targeted resource recovery."
+                        );
+                        format!(
+                            "{prompt}\n\n## Verification resource recovery\n\
+                             {verification_cause} This is not a compiler or test failure.\n\
+                             {guidance}\n{}\n\
+                             After any focused changes, reply with a plain-text summary and no tool calls so Kvist can verify again.",
+                            repair::PROCESS_RECOVERY_ACTION
+                        )
+                    } else {
+                        let recurring = history.recurring(&verify_res, &pre_digests);
+                        if recurring || repair_round >= MAX_VERIFICATION_REPAIR_ROUNDS {
+                            let focused = if recurring {
+                                "identical verification outcome with no source/test progress; reconcile retained failures and choose a genuinely different approved strategy"
+                            } else {
+                                "four repair rounds exhausted; reconcile retained verification and repair evidence before explicitly approving new work"
+                            };
+                            let reason = attempt.cause(
+                                Some(&history.cause()),
+                                &format!(
+                                    "{focused}\n{}",
+                                    sequence
+                                        .diagnostics(sav::runtime::StopReason::Stalled)
+                                        .message()
+                                ),
+                            );
+                            return Err(attempt.block(&reason, Some(&run_result.log_path))?);
+                        }
+                        repair_round += 1;
+                        sequence.repairs_started = repair_round;
+                        eprintln!(
+                            "Verification failed (repair round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS}); feeding failure diagnostics back to the agent to investigate and fix..."
+                        );
+                        let stdout_tail = redact_bounded(
+                            verify_res.stdout.clone(),
+                            &evidence_redactions(&config),
+                            16384,
+                        );
+                        let stderr_tail = redact_bounded(
+                            verify_res.stderr.clone(),
+                            &evidence_redactions(&config),
+                            16384,
+                        );
+                        let runtime_context = if serial {
+                            repair::resource_guidance(true)
                         } else {
-                            "four repair rounds exhausted; reconcile retained verification and repair evidence before explicitly approving new work"
+                            ""
                         };
-                        let reason = attempt.cause(
-                            Some(&history.cause()),
-                            &format!(
-                                "{focused}\n{}",
-                                sequence
-                                    .diagnostics(sav::runtime::StopReason::Stalled)
-                                    .message()
-                            ),
-                        );
-                        return Err(attempt.block(&reason, Some(&run_result.log_path))?);
-                    }
-                    if let Err(error) = sequence.check() {
-                        let reason = attempt.cause(
-                            Some(&history.cause()),
-                            &format!(
-                                "{error}\n{}",
-                                sequence
-                                    .diagnostics(crate::agent::error_stop(&error))
-                                    .message()
-                            ),
-                        );
-                        return Err(attempt.block(&reason, Some(&run_result.log_path))?);
-                    }
-                    repair_round += 1;
-                    sequence.repairs_started = repair_round;
-                    eprintln!(
-                        "Verification failed (repair round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS}); feeding failure diagnostics back to the agent to investigate and fix..."
-                    );
-                    let stdout_tail = redact_bounded(
-                        verify_res.stdout.clone(),
-                        &evidence_redactions(&config),
-                        16384,
-                    );
-                    let stderr_tail = redact_bounded(
-                        verify_res.stderr.clone(),
-                        &evidence_redactions(&config),
-                        16384,
-                    );
-                    let repair_prompt = format!(
-                        "{prompt}\n\n## Verification Failure (Repair Round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS})\n\
+                        format!(
+                            "{prompt}\n\n## Verification Failure (Repair Round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS})\n\
                          `{}` failed with exit code {:?}.\n\
+                         {runtime_context}\n\
                          Inspect the compiler or test failure output below, use `read_file` with `search` (e.g. `{{\"path\": \"src/...\", \"search\": \"fn ...\"}}`) \
                          or `start_line`/`end_line` to jump directly to the relevant code in `src/` or `tests/`, \
                          fix the root cause using `edit_file` or `write_file`, and then reply with a plain-text summary \
                          and NO tool calls so Kvist can re-run verification.\n\n\
                          --- Verification Stdout ---\n{stdout_tail}\n\
                          --- Verification Stderr ---\n{stderr_tail}\n",
-                        verify_res.command, verify_res.exit_code
-                    );
+                            verify_res.command, verify_res.exit_code
+                        )
+                    };
                     let repair_execution = crate::agent::execute_agent_in_sequence(
                         agent_profile,
                         sandbox_config,
@@ -5382,7 +5411,11 @@ fn execute_task_under_lock(
                         sequence,
                     );
                     let repair_run = attempt.record(
-                        "verification-repair",
+                        if process_limit {
+                            "verification-resource-recovery"
+                        } else {
+                            "verification-repair"
+                        },
                         repair_execution,
                         Some(&history.cause()),
                         Some(sequence),
@@ -5403,9 +5436,14 @@ fn execute_task_under_lock(
                         return Err(attempt.block(&reason, Some(&repair_run.log_path))?);
                     }
                     attempt.digests(&history.cause(), &repair_run.log_path)?;
+                    let phase = if process_limit {
+                        "Process-limit recovery".to_owned()
+                    } else {
+                        format!("Repair round {repair_round}")
+                    };
                     history.remember(
                         &format!(
-                            "Repair round {repair_round}: {}; evidence: {}",
+                            "{phase}: {}; evidence: {}",
                             repair_run.stdout,
                             repair_run.log_path.display(),
                         ),
@@ -6204,6 +6242,8 @@ struct ExecutionApprovalMaterial {
     approval_schema_version: u32,
     sandbox_protocol_version: u32,
     sandbox_schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sandbox_process_limit: Option<u64>,
     root_contract_digest: String,
     agent_source: String,
     agent_source_digest: String,
@@ -6317,6 +6357,7 @@ fn build_execution_approval_for_runner(
         approval_schema_version: EXECUTION_APPROVAL_VERSION,
         sandbox_protocol_version: crate::sandbox::PROTOCOL_VERSION,
         sandbox_schema_version: 1,
+        sandbox_process_limit: Some(galla::protocol::MAX_PROCESSES),
         root_contract_digest: approved_root_contract_digest(project_dir)?,
         agent_source: config.agent.source.identity.clone(),
         agent_source_digest: config.agent.source.digest.clone(),
@@ -6796,6 +6837,8 @@ pub struct VerificationResult {
     pub output_limit_exceeded: bool,
     /// True if verification was cancelled; cancellation never authorizes repair.
     pub cancelled: bool,
+    /// True when Galla reported terminating the verifier for its process/thread limit.
+    pub process_limit_exceeded: bool,
     /// Captured stdout bytes up to max_output_bytes converted to string.
     pub stdout: String,
     /// Captured stderr bytes up to max_output_bytes converted to string.
@@ -6813,6 +6856,7 @@ struct VerificationRecord<'a> {
     timed_out: bool,
     output_limit_exceeded: bool,
     cancelled: bool,
+    process_limit_exceeded: bool,
     stdout: &'a str,
     stderr: &'a str,
 }
@@ -6932,6 +6976,8 @@ fn execution_approval_difference(
 ) -> String {
     if approved.task_run != current.task_run {
         "continuous task commit policy has changed".to_owned()
+    } else if approved.sandbox_process_limit != current.sandbox_process_limit {
+        "sandbox process/thread allowance has changed since execution policy approval".to_owned()
     } else if approved.root_contract_digest != current.root_contract_digest {
         "ROOT_CONTRACT.md has changed since execution policy approval".to_owned()
     } else if approved.agent_source != current.agent_source
@@ -7055,6 +7101,31 @@ pub fn verify_task(
     probe: &crate::sandbox::SandboxProbe,
     policy_identity: &str,
 ) -> Result<VerificationResult> {
+    verify_task_controlled(
+        component_path,
+        task,
+        project_dir,
+        config,
+        probe,
+        policy_identity,
+        &mut crate::sandbox::CargoParallelism::Normal,
+        None,
+        || Ok(()),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_task_controlled(
+    component_path: &Path,
+    task: &Task,
+    project_dir: &Path,
+    config: &crate::config::ProjectConfig,
+    probe: &crate::sandbox::SandboxProbe,
+    policy_identity: &str,
+    parallelism: &mut crate::sandbox::CargoParallelism,
+    cancellation: Option<&sav::CancellationToken>,
+    check_retry: impl Fn() -> Result<()>,
+) -> Result<VerificationResult> {
     let approved_runner = check_execution_approved(project_dir, config)?;
     let policy =
         config
@@ -7089,6 +7160,9 @@ pub fn verify_task(
             &context.component_dir,
             std::time::Duration::from_secs(policy.timeout_seconds),
             policy.max_output_bytes,
+            parallelism,
+            cancellation,
+            check_retry,
             |command, output, is_test| {
                 let expected = (is_test && !task.regression_tests.is_empty()).then_some((
                     task.regression_tests.as_slice(),
@@ -7294,7 +7368,8 @@ fn finalize_verification(
         policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES),
     );
     let exit_code = output.status.code();
-    let observed = !*timed_out && !*output_limit_exceeded && !*cancelled;
+    let process_limit_exceeded = result.process_limit_exceeded();
+    let observed = !*timed_out && !*output_limit_exceeded && !*cancelled && !process_limit_exceeded;
     let success = observed
         && expected.map_or_else(
             || output.status.success(),
@@ -7337,6 +7412,7 @@ fn finalize_verification(
             timed_out: *timed_out,
             output_limit_exceeded: *output_limit_exceeded,
             cancelled: *cancelled,
+            process_limit_exceeded,
             stdout: &stdout,
             stderr: &stderr,
         },
@@ -7348,6 +7424,7 @@ fn finalize_verification(
         timed_out: *timed_out,
         output_limit_exceeded: *output_limit_exceeded,
         cancelled: *cancelled,
+        process_limit_exceeded,
         stdout,
         stderr,
     })
