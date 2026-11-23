@@ -19,6 +19,7 @@ impl RepairHistory {
             "exit_code":outcome.exit_code, "timed_out":outcome.timed_out,
             "output_limit_exceeded":outcome.output_limit_exceeded,
             "process_limit_exceeded":outcome.process_limit_exceeded,
+            "nested_sandbox":outcome.nested_sandbox,
             "cancelled":outcome.cancelled, "stdout":outcome.stdout,
             "stderr":outcome.stderr, "revisions":revisions,
         });
@@ -28,9 +29,9 @@ impl RepairHistory {
     }
 
     pub(super) fn remember(&mut self, cause: &str, redactions: &[String]) {
-        // Five ordinary outcomes, four repairs and one resource recovery with
-        // its outcome. The current cause is reported separately on a stop.
-        if self.causes.len() < 11 {
+        // Five ordinary outcomes, four repairs, and two focused recoveries
+        // with their outcomes. The current cause is reported separately on a stop.
+        if self.causes.len() < 13 {
             self.causes.push(super::redact_bounded(
                 cause.to_owned(),
                 redactions,
@@ -54,6 +55,38 @@ pub(super) fn resource_guidance(serial: bool) -> &'static str {
 
 pub(super) const PROCESS_RECOVERY_ACTION: &str = "Use the preserved edits and inspect only task-owned code for excessive worker pools, nested parallel jobs, or children that are not joined/reaped. Bound their concurrency or lifetime where the evidence supports it. Do not skip, ignore, or weaken checks or change sandbox policy. If no task-owned fix is supported, report the concrete prerequisite rather than guessing.";
 
+pub(super) const NESTING_RECOVERY_ACTION: &str = "Run portable assertions directly in the existing sandbox. Preserve assertions that genuinely launch Galla in an established, mandatory outer Linux host lane, if the approved scope permits. Do not skip, ignore, or weaken assertions to hide failures, change named regression expectations, remove the nesting marker, or change sandbox policy. If the required host lane is outside task scope, report that prerequisite.";
+
+pub(super) fn reports_nesting(stdout: &[u8], stderr: &[u8]) -> bool {
+    let diagnostic = galla::context::NESTING_DIAGNOSTIC.as_bytes();
+    [stdout, stderr].into_iter().any(|stream| {
+        stream
+            .windows(diagnostic.len())
+            .any(|window| window == diagnostic)
+    })
+}
+
+pub(super) fn failure_excerpt(value: String, redactions: &[String], limit: usize) -> String {
+    const OMITTED: &str = "\n[... middle omitted ...]\n";
+    let value = super::redact_bounded(value, redactions, usize::MAX);
+    if value.len() <= limit {
+        return value;
+    }
+    if limit <= OMITTED.len() {
+        return value[..value.floor_char_boundary(limit)].to_owned();
+    }
+    let available = limit - OMITTED.len();
+    let head = value.floor_char_boundary(available / 2);
+    let tail = value.ceil_char_boundary(value.len() - (available - available / 2));
+    format!("{}{OMITTED}{}", &value[..head], &value[tail..])
+}
+
+pub(super) fn failure_details(outcome: &VerificationResult, redactions: &[String]) -> String {
+    let stdout = failure_excerpt(outcome.stdout.clone(), redactions, 16384);
+    let stderr = failure_excerpt(outcome.stderr.clone(), redactions, 16384);
+    format!("--- Verification Stdout ---\n{stdout}\n--- Verification Stderr ---\n{stderr}\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,9 +100,24 @@ mod tests {
             output_limit_exceeded: false,
             cancelled: false,
             process_limit_exceeded: false,
+            nested_sandbox: false,
             stdout: "failure".into(),
             stderr: String::new(),
         }
+    }
+
+    #[test]
+    fn failure_excerpt_keeps_final_assertions_and_redacts_across_clip_boundaries() {
+        let input = format!(
+            "cargo test\n{}{}\nassertion failed: final case\n",
+            "secret".repeat(38),
+            "é".repeat(50)
+        );
+        let excerpt = failure_excerpt(input, &["secret".into()], 100);
+        assert!(excerpt.len() <= 100);
+        assert!(!excerpt.contains("secret"));
+        assert!(excerpt.starts_with("cargo test\n"));
+        assert!(excerpt.ends_with("assertion failed: final case\n"));
     }
 
     #[test]

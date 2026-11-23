@@ -273,6 +273,12 @@ pub(super) fn verification_cause(result: &VerificationResult) -> String {
             galla::protocol::PROCESS_LIMIT_EXIT
         );
     }
+    if result.nested_sandbox {
+        return format!(
+            "`{}` reported Galla's no-nesting refusal (exit {:?}). Protected tests already run inside Galla; this is not evidence that the native assertion ran.",
+            result.command, result.exit_code
+        );
+    }
     format!(
         "test-command verification failed. Command: '{}', Exit code: {:?}.\n---\nStdout:\n{}\n---\nStderr:\n{}",
         result.command, result.exit_code, result.stdout, result.stderr,
@@ -303,6 +309,7 @@ mod tests {
             output_limit_exceeded: false,
             cancelled: false,
             process_limit_exceeded: false,
+            nested_sandbox: false,
             stdout: "failure diagnostics".into(),
             stderr: String::new(),
         };

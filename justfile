@@ -49,6 +49,10 @@ test:
     kvist vendor
     cargo nextest run --locked --workspace --all-features --test-threads num-cpus --no-fail-fast
 
+# Run the Galla cases requiring a real outer Linux host, as in CI.
+test-galla-host:
+    bash tools/test-galla-host.sh
+
 test-profile:
     kvist vendor
     NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 python3 tools/profile_tests.py -- cargo nextest run --offline --locked --workspace --all-features --test-threads num-cpus --no-fail-fast --message-format libtest-json-plus --message-format-version 0.1

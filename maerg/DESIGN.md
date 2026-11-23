@@ -230,6 +230,15 @@ start. Keep the successful stages and attempt-local throttling state.
 Persistent resource failures use separate recovery accounting and a focused
 prompt, not the source-repair signature or ordinary repair allowance.
 
+For completed failing Rust test stages, match the runner's exact nesting
+diagnostic within captured output before redaction or clipping. Libtest can
+embed it in a panic on stdout, while a direct probe can report it on stderr.
+Treat it conservatively: only focused repair or a clear blocker is permitted.
+Record the hint with the verification stage and one attempt-local recovery
+phase, independent of source and process-limit repair counters. Preserve
+the beginning and end of bounded failed streams after redaction; this keeps
+Cargo's context and libtest's final assertions without raising capture bounds.
+
 Own one sequence state across authoring and verification-repair calls: original
 start/deadline, cumulative conservative model debit and known/unknown usage,
 shared tool/accepted-generation history and the nonrenewable generation

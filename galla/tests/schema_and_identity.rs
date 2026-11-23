@@ -385,20 +385,12 @@ fn runner_digest() -> String {
     digest_bytes(&bytes)
 }
 
-#[test]
-fn runtime_verifies_runner_identity() {
-    // Skip if inside a sandbox (can't spawn nested runner).
-    if std::path::Path::new("/.galla-sandbox").exists() {
-        return;
-    }
+mod support;
 
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .expect("run probe");
-    assert!(probe_output.status.success());
-    let probe: Value = serde_json::from_slice(&probe_output.stdout).expect("valid probe JSON");
+#[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
+fn runtime_verifies_runner_identity() {
+    let probe = support::probe();
 
     // Real host origins so the runner can authorize the mount sources after
     // the identity checks pass.
@@ -446,19 +438,9 @@ fn runtime_verifies_runner_identity() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn runtime_verifies_policy_identity() {
-    // Skip if inside a sandbox.
-    if std::path::Path::new("/.galla-sandbox").exists() {
-        return;
-    }
-
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .expect("run probe");
-    assert!(probe_output.status.success());
-    let probe: Value = serde_json::from_slice(&probe_output.stdout).expect("valid probe JSON");
+    let probe = support::probe();
 
     // Use the correct runner identity but wrong policy identity.
     let mut request = valid_request();
@@ -481,19 +463,9 @@ fn runtime_verifies_policy_identity() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn runtime_verifies_command_identity() {
-    // Skip if inside a sandbox.
-    if std::path::Path::new("/.galla-sandbox").exists() {
-        return;
-    }
-
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .expect("run probe");
-    assert!(probe_output.status.success());
-    let probe: Value = serde_json::from_slice(&probe_output.stdout).expect("valid probe JSON");
+    let probe = support::probe();
 
     let mut request = valid_request();
     request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
@@ -514,19 +486,9 @@ fn runtime_verifies_command_identity() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn runtime_verifies_mount_plan_identity() {
-    // Skip if inside a sandbox.
-    if std::path::Path::new("/.galla-sandbox").exists() {
-        return;
-    }
-
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .expect("run probe");
-    assert!(probe_output.status.success());
-    let probe: Value = serde_json::from_slice(&probe_output.stdout).expect("valid probe JSON");
+    let probe = support::probe();
 
     let mut request = valid_request();
     request["identities"]["backend"]["path"] = probe["backend"]["path"].clone();

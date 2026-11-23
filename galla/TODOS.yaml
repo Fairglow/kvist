@@ -2003,3 +2003,67 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "verification-lanes-write-tests"
+    title: "write_tests: preserve native coverage without nested execution"
+    description: "Exercise the portable suite under Galla and the outer-host assertions with real enforcement."
+    context: "See SR-REQ-TEST-LANES and the compatibility section of CONTRACT.md."
+    purpose: "Distinguish an unrun native trial from a passing assertion."
+    expected_outcome: "Portable runs report native cases unrun; the host lane exercises them and reports failed probe status and stderr."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#SR-REQ-TEST-LANES"]
+    timestamps:
+      created_at: "2026-11-23T19:15:21Z"
+      updated_at: "2026-11-23T19:15:21Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "verification-lanes-implement-code"
+    title: "implement_code: expose the explicit Galla host test lane"
+    description: "Replace native test self-skips with harness selection shared by local and CI execution."
+    context: "The no-nesting guard and runtime authority are unchanged."
+    purpose: "Make local and CI native evidence comparable."
+    expected_outcome: "The documented host recipe selects native tests and fails if selected inside Galla."
+    kind: implementation
+    status: pending
+    depends_on: ["verification-lanes-write-tests"]
+    requirements: ["REQUIREMENTS.md#SR-REQ-TEST-LANES"]
+    timestamps:
+      created_at: "2026-11-23T19:15:21Z"
+      updated_at: "2026-11-23T19:15:21Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "verification-lanes-security-audit"
+    title: "security_audit: inspect Galla test-lane enforcement"
+    description: "Check that lane selection never disables the runtime nesting guard or allows an assertion to self-skip."
+    context: "The outer-host lane runs in a developer-selected environment or GitHub's Linux VM."
+    purpose: "Keep testing authority separate from protected execution."
+    expected_outcome: "Record any lost native assertion or unexpected runtime permission change."
+    kind: security-audit
+    status: pending
+    depends_on: ["verification-lanes-implement-code"]
+    requirements: ["REQUIREMENTS.md#SR-REQ-TEST-LANES"]
+    timestamps:
+      created_at: "2026-11-23T19:15:21Z"
+      updated_at: "2026-11-23T19:15:21Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "verification-lanes-compliance-review"
+    title: "compliance_review: compare Galla lane results with intent"
+    description: "Compare independent observations and test reports against the lane contract without reading source."
+    context: "Local protected and host-native evidence establish different outcomes."
+    purpose: "Expose coverage gaps for human disposition."
+    expected_outcome: "Report the selected and unrun checks separately, with any discrepancies."
+    kind: compliance-review
+    status: pending
+    depends_on: ["verification-lanes-security-audit"]
+    requirements: ["REQUIREMENTS.md#SR-REQ-TEST-LANES"]
+    timestamps:
+      created_at: "2026-11-23T19:15:21Z"
+      updated_at: "2026-11-23T19:15:21Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

@@ -126,6 +126,7 @@ fn set_size(terminal: &std::fs::File, rows: u16, cols: u16) {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap and a PTY"]
 fn bash_prompt_uses_a_private_controlling_terminal() {
     let workspace = tempfile::tempdir().unwrap();
     let mut terminal = Terminal::spawn(
@@ -163,6 +164,7 @@ fn bash_prompt_uses_a_private_controlling_terminal() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap and a PTY"]
 fn terminal_output_is_bounded() {
     let workspace = tempfile::tempdir().unwrap();
     let mut terminal = Terminal::spawn(workspace.path(), &["exec", "/usr/bin/yes"]);
@@ -174,6 +176,7 @@ fn terminal_output_is_bounded() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap and a PTY"]
 fn host_termination_restores_the_terminal() {
     let workspace = tempfile::tempdir().unwrap();
     let mut terminal = Terminal::spawn(
@@ -187,6 +190,7 @@ fn host_termination_restores_the_terminal() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn redirected_exec_keeps_closed_input_and_separate_output() {
     let workspace = tempfile::tempdir().unwrap();
     let input = workspace.path().join("input");

@@ -329,7 +329,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo 'mocking verify'"
+command = "/usr/bin/bash -c : 'mocking verify'"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -396,7 +396,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo 'mocking verify'"
+command = "/usr/bin/bash -c : 'mocking verify'"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -456,7 +456,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo 'mocking verify'"
+command = "/usr/bin/bash -c : 'mocking verify'"
 "#,
         gateway_command(&gateway.endpoint)
     );

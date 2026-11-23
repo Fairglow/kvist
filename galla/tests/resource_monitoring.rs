@@ -10,6 +10,8 @@ use std::process::{Command, Stdio};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+mod support;
+
 fn digest(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
@@ -21,6 +23,10 @@ fn encode(value: &Value) -> Vec<u8> {
 }
 
 fn run_runner(request: &[u8]) -> std::process::Output {
+    run_runner_with(request, Command::new(env!("CARGO_BIN_EXE_galla")))
+}
+
+fn run_runner_with(request: &[u8], mut runner: Command) -> std::process::Output {
     // The runner verifies its own identity against /proc/self/exe, the
     // backend against the installed bwrap, and recomputes the command and
     // mount-plan identities from argv and grants. The fixture placeholders
@@ -31,12 +37,7 @@ fn run_runner(request: &[u8]) -> std::process::Output {
     value["identities"]["runner"] = json!(digest(
         &std::fs::read(env!("CARGO_BIN_EXE_galla")).expect("read galla binary")
     ));
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .expect("run probe");
-    let probe: Value = serde_json::from_slice(&probe_output.stdout).expect("valid probe JSON");
+    let probe = support::probe();
     value["identities"]["backend"]["path"] = probe["backend"]["path"].clone();
     value["identities"]["backend"]["digest"] = probe["backend"]["digest"].clone();
     let parsed: galla::protocol::SandboxRequest =
@@ -44,7 +45,7 @@ fn run_runner(request: &[u8]) -> std::process::Output {
     value["identities"]["command"] = json!(galla::protocol::command_identity(&parsed.argv));
     value["identities"]["mount_plan"] = json!(galla::protocol::mount_plan_identity(&parsed.grants));
     let request = encode(&value);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_galla"))
+    let mut child = runner
         .arg("--kvist-sandbox-request-v1")
         .env_clear()
         .stdin(Stdio::piped())
@@ -139,34 +140,10 @@ fn valid_request() -> Value {
     })
 }
 
-/// Test that prlimit errors are reported, not silently ignored.
-/// The runner invokes /usr/bin/prlimit to set resource limits before
-/// spawning the sandbox. If prlimit fails, the runner must report
-/// the error and exit with a non-zero code rather than proceeding
-/// without limits.
+/// A runner that cannot apply its requested limits must fail before spawning the payload.
 #[test]
-fn prlimit_failure_is_reported() {
-    // Check if we're already in a sandbox (nested sandbox check)
-    if std::path::Path::new("/.galla-sandbox").exists() {
-        // Inside a sandbox, prlimit is already applied; skip the failure test
-        // but verify the runner detects the nesting
-        let request = valid_request();
-        let bytes = encode(&request);
-        let output = run_runner(&bytes);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            !output.status.success() && stderr.contains("already inside a Galla sandbox"),
-            "runner should detect nested sandbox: {}",
-            stderr
-        );
-        return;
-    }
-
-    // Outside a sandbox, verify prlimit errors are reported. Use real host
-    // origins so the runner authorizes the mount sources and reaches the
-    // limit-setting stage; on a normal host the limits are set successfully
-    // and the command succeeds, so the failure-reporting assertion is only
-    // exercised when a limit genuinely cannot be applied.
+#[ignore = "requires an outer Linux host with Bubblewrap"]
+fn inherited_hard_limit_failure_is_reported() {
     let temp = tempfile::tempdir().unwrap();
     let req_file = temp.path().join("REQUIREMENTS.md");
     std::fs::write(&req_file, "intent").unwrap();
@@ -179,25 +156,21 @@ fn prlimit_failure_is_reported() {
     request["grants"][0]["source"] = json!(req_file.to_string_lossy());
     request["grants"][1]["source"] = json!(tests_dir.to_string_lossy());
     request["grants"][3]["source"] = json!(scratch_dir.to_string_lossy());
-    let bytes = encode(&request);
-    let output = run_runner(&bytes);
+    request["resources"]["max_files"] = json!(256);
+    let mut runner = Command::new("/usr/bin/prlimit");
+    runner.args(["--nofile=128:128", "--", env!("CARGO_BIN_EXE_galla")]);
+    let output = run_runner_with(&encode(&request), runner);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if !output.status.success() {
-        assert!(
-            stderr.contains("prlimit")
-                || stderr.contains("limits")
-                || stderr.contains("fsize")
-                || stderr.contains("nofile"),
-            "prlimit failure not properly reported: {}",
-            stderr
-        );
-    }
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(output.stdout.is_empty());
+    assert!(stderr.contains("failed to set RLIMIT_NOFILE"), "{stderr}");
 }
 
 /// Test that file size limits are enforced via prlimit --fsize.
 /// When max_file_bytes is set, the runner should pass --fsize to prlimit.
 /// A write exceeding the limit should fail with EFBIG (signal 7).
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn file_size_limit_enforced() {
     let mut request = valid_request();
     request["resources"]["max_file_bytes"] = json!(1024);
@@ -228,6 +201,7 @@ fn file_size_limit_enforced() {
 /// When max_processes is set, the runner should monitor the process group
 /// and kill children that exceed the limit.
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn process_count_limit_enforced() {
     let temp = tempfile::tempdir().unwrap();
     let requirements = temp.path().join("REQUIREMENTS.md");
@@ -264,6 +238,7 @@ fn process_count_limit_enforced() {
 /// When max_output_bytes is set, the runner should monitor output size
 /// and kill children that exceed the limit.
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn output_limit_enforced() {
     let mut request = valid_request();
     request["resources"]["max_output_bytes"] = json!(100);
@@ -286,6 +261,7 @@ fn output_limit_enforced() {
 /// When wall_time_ms is set, the runner should monitor elapsed time
 /// and kill children that exceed the limit.
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn wall_time_limit_enforced() {
     let mut request = valid_request();
     request["resources"]["wall_time_ms"] = json!(100);
@@ -306,13 +282,8 @@ fn wall_time_limit_enforced() {
 
 /// Test that successful execution within limits works correctly.
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn successful_execution_within_limits() {
-    // Inside a sandbox, nested execution is not allowed
-    if std::path::Path::new("/.galla-sandbox").exists() {
-        // Skip this test when already inside a sandbox
-        return;
-    }
-
     // Real host origins so the runner authorizes the mount sources.
     let temp = tempfile::tempdir().unwrap();
     let req_file = temp.path().join("REQUIREMENTS.md");

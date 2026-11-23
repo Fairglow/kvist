@@ -208,6 +208,19 @@ Detection MUST survive environment clearing and precede request stdin reads.
 Grants MUST NOT cover the reserved marker. This is a usability guard, not
 proof of confinement or authorization to bypass a consumer's sandbox policy.
 
+### SR-REQ-TEST-LANES
+
+Ordinary component verification MUST run portable tests without starting
+another sandbox to exercise host-native behavior. Tests that require an outer
+Linux host MUST be explicitly unrun in the ordinary suite, not reported as
+passing through early returns. A shared local and CI host lane MUST run those
+assertions with real enforcement and MUST fail if explicitly selected without
+the required environment. Probe-backed fixtures MUST report a failed probe's
+status and stderr before attempting to decode stdout.
+
+This user-requested test-harness change uses a scoped advisory exception while
+review receipts are unavailable. It does not accept component intent.
+
 The following stable requirement identifiers define the mandatory behavior of
 the enforcement component.
 

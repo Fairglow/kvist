@@ -47,7 +47,7 @@ fn fixture(mode: &'static str) -> (TempDir, MockGateway, Arc<AtomicUsize>) {
          command_template = '{}'\n{limits}\
          [test_policy]\nschema_version = 1\nworking_directory = \"component\"\n\
          environment_allowlist = [\"PATH\"]\ntimeout_seconds = 20\nmax_output_bytes = 1000\n\
-         [[test_policy.commands]]\ncomponent = \".\"\ncommand = \"/usr/bin/echo phase4-verification\"\n",
+         [[test_policy.commands]]\ncomponent = \".\"\ncommand = \"/usr/bin/bash -c : phase4-verification\"\n",
         gateway_command(&gateway.endpoint)
     )).expect("config");
     track_project(&project);

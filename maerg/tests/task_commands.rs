@@ -68,6 +68,8 @@ fn configure_fake_sandbox(project: &TempDir) {
     maerg::init_test_logging();
     use std::os::unix::fs::PermissionsExt;
 
+    // Mock verification policies use Bash builtins rather than coreutils paths,
+    // which may be multicall symlinks instead of admissible executables.
     let runner = fake_galla_path(project);
     fs::write(
         &runner,
@@ -94,7 +96,7 @@ case "$request" in
       exit 1
     fi
     ;;
-  *'"argv":["/usr/bin/false"'*) exit 1 ;;
+  *'"argv":["/usr/bin/bash","-c","false"'*) exit 1 ;;
   *'verification-secret'*)
     printf 'agent-redaction-secret'
     printf '%s' "$KVIST_TEST_SECRET" >&2
@@ -980,7 +982,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo 'mocking verify'"
+command = "/usr/bin/bash -c : 'mocking verify'"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -1126,7 +1128,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "ordinary/component"
-command = "/usr/bin/echo 'mocking verify'"
+command = "/usr/bin/bash -c : 'mocking verify'"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -1182,7 +1184,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
     )
     .expect("write config");
@@ -1241,7 +1243,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
     )
     .expect("write config");
@@ -1293,7 +1295,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
     )
     .expect("write project config");
@@ -1384,7 +1386,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
     )
     .expect("write forged config");
@@ -1459,7 +1461,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
             gateway_command(&gateway.endpoint)
         ),
@@ -1562,7 +1564,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
     )
     .expect("write config");
@@ -1772,7 +1774,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo 'mocking verify'"
+command = "/usr/bin/bash -c : 'mocking verify'"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -1815,7 +1817,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -3162,6 +3164,98 @@ fn rust_verification_process_limit_recovers_in_the_same_attempt() {
     check_rust_verification_process_recovery(0);
     check_rust_verification_process_recovery(1);
     check_rust_verification_process_recovery(2);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn rust_verification_nesting_gets_one_focused_recovery() {
+    use std::sync::{Arc, Mutex};
+
+    for persists in [false, true] {
+        let prompts = Arc::new(Mutex::new(Vec::new()));
+        let observed = prompts.clone();
+        let gateway = MockGateway::serve(
+            move |body| {
+                observed
+                    .lock()
+                    .unwrap()
+                    .push(extract_user_content(body).unwrap_or_default());
+                gateway_text_body("Work complete.")
+            },
+            std::time::Duration::ZERO,
+        );
+        let project = rust_quality_project(&gateway.endpoint);
+        if persists {
+            let path = project.path().join("src/TODOS.yaml");
+            let mut queue = maerg::task_queue::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+            queue.tasks[0].regression_tests = vec!["fixture_probe".into()];
+            fs::write(&path, maerg::task_queue::serialize(&queue).unwrap()).unwrap();
+        }
+        let runner = fake_galla_path(&project);
+        let script = fs::read_to_string(&runner).unwrap();
+        let repeat = if persists { "true" } else { "false" };
+        fs::write(
+            &runner,
+            script.replace(
+                r#"  *'"clippy","--offline","--locked"'*)"#,
+                &format!(
+                    r#"  *'"test","--offline","--locked"'*)
+    if {repeat} || [ ! -f nesting-seen ]; then
+      touch nesting-seen
+      printf 'test fixture_probe ... FAILED\n'
+      printf 'fixture probe failed: galla: already inside a Galla sandbox; a nested sandbox is unnecessary; run the intended command directly\n'
+      printf 'test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n'
+      exit 101
+    fi
+    ;;
+  *'"clippy","--offline","--locked"'*)"#
+                ),
+            ),
+        )
+        .unwrap();
+        let approval = run_kvist(&project, &["task", "approve-policy"]);
+        assert!(approval.status.success(), "{approval:?}");
+        let output = run_kvist(&project, &["task", "run", ".", "one-write-tests"]);
+        fs::remove_file(runner).unwrap();
+        assert_eq!(output.status.success(), !persists, "{output:?}");
+        let prompts = prompts.lock().unwrap();
+        assert_eq!(prompts.len(), 2);
+        assert!(prompts[0].contains("Do not launch Galla from protected tests"));
+        assert!(prompts[1].contains("Verification environment recovery"));
+        assert!(prompts[1].contains("Do not skip, ignore, or weaken"));
+
+        let records = fs::read_to_string(
+            project
+                .path()
+                .join("src/.kvist-attempts/one-write-tests.jsonl"),
+        )
+        .unwrap();
+        assert_eq!(
+            records
+                .matches(r#""phase":"verification-environment-recovery""#)
+                .count(),
+            1
+        );
+        assert!(!records.contains(r#""phase":"verification-repair""#));
+        assert_eq!(
+            records.matches(r#""nested_sandbox":true"#).count(),
+            1 + usize::from(persists)
+        );
+        if persists {
+            let attention = fs::read_to_string(
+                project
+                    .path()
+                    .join("src/.kvist/attention/one-write-tests.md"),
+            )
+            .unwrap();
+            let summary = attention.split("## ").nth(1).unwrap();
+            assert!(
+                summary.contains("cargo test --offline --locked"),
+                "{summary}"
+            );
+            assert!(summary.contains("outer Linux host"), "{summary}");
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -4687,7 +4781,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -4755,7 +4849,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -4813,7 +4907,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -4883,7 +4977,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verification-secret"
+command = "/usr/bin/bash -c : verification-secret"
 "#,
             gateway_command(&gateway.endpoint),
             fake_backend().display()
@@ -4962,7 +5056,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -5101,7 +5195,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo 'mocking verify'"
+command = "/usr/bin/bash -c : 'mocking verify'"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -5156,7 +5250,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo 'mocking verify'"
+command = "/usr/bin/bash -c : 'mocking verify'"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -5241,7 +5335,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/false"
+command = "/usr/bin/bash -c false"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -5499,7 +5593,7 @@ timeout_seconds = 1
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/sleep 5"
+command = "/usr/bin/bash -c : sleep"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -5555,7 +5649,7 @@ timeout_seconds = 5
 max_output_bytes = 10
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo emit-and-fail"
+command = "/usr/bin/bash -c : emit-and-fail"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -5620,7 +5714,7 @@ timeout_seconds = 10
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
         gateway_command(&gateway.endpoint)
     );
@@ -5824,7 +5918,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo verify"
+command = "/usr/bin/bash -c : verify"
 "#,
         runner.display(),
         fake_backend().display(),
@@ -6008,7 +6102,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/echo 'mocking verify'"
+command = "/usr/bin/bash -c : 'mocking verify'"
 "#,
         gateway_command(&gateway.endpoint)
     );

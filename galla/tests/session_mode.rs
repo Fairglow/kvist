@@ -532,6 +532,7 @@ fn rejects_the_one_shot_v1_request_as_session_metadata() {
 // -- Executable boundary ------------------------------------------------------
 
 #[test]
+#[ignore = "requires an outer Linux host to exercise session-mode dispatch"]
 fn executable_session_mode_fails_closed_without_session_metadata() {
     // Preserved invariant that holds both against the current one-shot-only
     // runner (which rejects the session-mode argument as unknown) and after the
@@ -560,6 +561,7 @@ fn executable_session_mode_fails_closed_without_session_metadata() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host to exercise request-mode dispatch"]
 fn executable_rejects_session_metadata_passed_on_stdin_in_request_mode() {
     // The session mode reads launch metadata on a dedicated descriptor, not
     // through standard input in request mode. Feeding session metadata to the

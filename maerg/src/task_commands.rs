@@ -1834,6 +1834,7 @@ fn assess_attempt_journal(
             | "agent-execution"
             | "verification-repair"
             | "verification-resource-recovery"
+            | "verification-environment-recovery"
             | "continuation" => {
                 attempt.execution_observed = true;
             }
@@ -4381,7 +4382,8 @@ fn authoring_scope_directive(write_scope: &[AttemptWriteScope]) -> String {
          - Do not write at the component root or anywhere outside those directories; \
          the sandbox rejects any other destination. Use `read_file` to read `Cargo.toml` and `request_dependency` to request dependencies.\n\
          - This task is ALREADY approved by the user: do NOT call `propose_decision` to report task completion, summarize your work, or ask for approval of normal implementation/test details.\n\
-         - There is no shell or `cargo` tool during authoring: Kvist runs the Rust formatter check, Clippy, build, and tests in the verification sandbox after your final text summary with NO tool calls. Tests must pass against the resulting code; if a test-first change intentionally fails, surface it for human review rather than declaring the task complete.\n",
+         - There is no shell or `cargo` tool during authoring: Kvist runs the Rust formatter check, Clippy, build, and tests in a separate Galla verification sandbox after your final text summary with NO tool calls. Tests must pass against the resulting code; if a test-first change intentionally fails, surface it for human review rather than declaring the task complete.\n\
+         - Do not launch Galla from protected tests: the verifier is already inside Galla and nesting is refused. Run portable assertions directly; put assertions that genuinely need a fresh sandbox in the project's explicit outer-host test lane. Do not hide a failed prerequisite behind an early return. No tool runs tests on the host.\n",
         list.join(", ")
     )
 }
@@ -5249,6 +5251,7 @@ fn execute_task_under_lock(
                 let mut history = repair::RepairHistory::default();
                 let mut parallelism = crate::sandbox::CargoParallelism::Normal;
                 let mut resource_recovery_started = false;
+                let mut environment_recovery_started = false;
                 let verify_outcome = loop {
                     if let Err(error) = sequence.check() {
                         let reason = attempt.cause(
@@ -5338,6 +5341,32 @@ fn execute_task_under_lock(
                              After any focused changes, reply with a plain-text summary and no tool calls so Kvist can verify again.",
                             repair::PROCESS_RECOVERY_ACTION
                         )
+                    } else if verify_res.nested_sandbox {
+                        if environment_recovery_started {
+                            let reason = attempt.cause(
+                                None,
+                                &format!(
+                                    "{verification_cause} The focused recovery round did not resolve it. {}\n\nEarlier evidence:\n{}",
+                                    repair::NESTING_RECOVERY_ACTION,
+                                    history.cause(),
+                                ),
+                            );
+                            return Err(attempt.block(&reason, Some(&run_result.log_path))?);
+                        }
+                        environment_recovery_started = true;
+                        eprintln!(
+                            "{verification_cause} Continuing with focused test-environment recovery."
+                        );
+                        format!(
+                            "{prompt}\n\n## Verification environment recovery\n\
+                             {verification_cause}\n\
+                             {}\n\
+                             Inspect the relevant failing tests below and make any focused changes. \
+                             Then reply with a plain-text summary and no tool calls so Kvist can verify again.\n\n\
+                             {}",
+                            repair::NESTING_RECOVERY_ACTION,
+                            repair::failure_details(&verify_res, &redactions),
+                        )
                     } else {
                         let recurring = history.recurring(&verify_res, &pre_digests);
                         if recurring || repair_round >= MAX_VERIFICATION_REPAIR_ROUNDS {
@@ -5362,16 +5391,7 @@ fn execute_task_under_lock(
                         eprintln!(
                             "Verification failed (repair round {repair_round}/{MAX_VERIFICATION_REPAIR_ROUNDS}); feeding failure diagnostics back to the agent to investigate and fix..."
                         );
-                        let stdout_tail = redact_bounded(
-                            verify_res.stdout.clone(),
-                            &evidence_redactions(&config),
-                            16384,
-                        );
-                        let stderr_tail = redact_bounded(
-                            verify_res.stderr.clone(),
-                            &evidence_redactions(&config),
-                            16384,
-                        );
+                        let details = repair::failure_details(&verify_res, &redactions);
                         let runtime_context = if serial {
                             repair::resource_guidance(true)
                         } else {
@@ -5385,8 +5405,7 @@ fn execute_task_under_lock(
                          or `start_line`/`end_line` to jump directly to the relevant code in `src/` or `tests/`, \
                          fix the root cause using `edit_file` or `write_file`, and then reply with a plain-text summary \
                          and NO tool calls so Kvist can re-run verification.\n\n\
-                         --- Verification Stdout ---\n{stdout_tail}\n\
-                         --- Verification Stderr ---\n{stderr_tail}\n",
+                         {details}",
                             verify_res.command, verify_res.exit_code
                         )
                     };
@@ -5413,6 +5432,8 @@ fn execute_task_under_lock(
                     let repair_run = attempt.record(
                         if process_limit {
                             "verification-resource-recovery"
+                        } else if verify_res.nested_sandbox {
+                            "verification-environment-recovery"
                         } else {
                             "verification-repair"
                         },
@@ -5438,6 +5459,8 @@ fn execute_task_under_lock(
                     attempt.digests(&history.cause(), &repair_run.log_path)?;
                     let phase = if process_limit {
                         "Process-limit recovery".to_owned()
+                    } else if verify_res.nested_sandbox {
+                        "Test-environment recovery".to_owned()
                     } else {
                         format!("Repair round {repair_round}")
                     };
@@ -6839,6 +6862,8 @@ pub struct VerificationResult {
     pub cancelled: bool,
     /// True when Galla reported terminating the verifier for its process/thread limit.
     pub process_limit_exceeded: bool,
+    /// A failed Rust test reported Galla's no-nesting diagnostic.
+    pub nested_sandbox: bool,
     /// Captured stdout bytes up to max_output_bytes converted to string.
     pub stdout: String,
     /// Captured stderr bytes up to max_output_bytes converted to string.
@@ -6857,6 +6882,7 @@ struct VerificationRecord<'a> {
     output_limit_exceeded: bool,
     cancelled: bool,
     process_limit_exceeded: bool,
+    nested_sandbox: bool,
     stdout: &'a str,
     stderr: &'a str,
 }
@@ -7164,7 +7190,7 @@ fn verify_task_controlled(
             cancellation,
             check_retry,
             |command, output, is_test| {
-                let expected = (is_test && !task.regression_tests.is_empty()).then_some((
+                let expected = is_test.then_some((
                     task.regression_tests.as_slice(),
                     task.kind == TaskKind::Test,
                 ));
@@ -7348,7 +7374,7 @@ fn finalize_verification(
     result: &crate::sandbox::ExecutionResult,
     policy: &crate::config::TestPolicy,
     config: &crate::config::ProjectConfig,
-    expected: Option<(&[String], bool)>,
+    rust_tests: Option<(&[String], bool)>,
 ) -> Result<VerificationResult> {
     let crate::sandbox::ExecutionResult {
         output,
@@ -7362,15 +7388,16 @@ fn finalize_verification(
         &redactions,
         MAX_VERIFICATION_EVIDENCE_BYTES,
     );
-    let stdout = redact_bounded(
-        String::from_utf8_lossy(&output.stdout).into_owned(),
-        &redactions,
-        policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES),
-    );
     let exit_code = output.status.code();
     let process_limit_exceeded = result.process_limit_exceeded();
     let observed = !*timed_out && !*output_limit_exceeded && !*cancelled && !process_limit_exceeded;
+    let nested_sandbox = observed
+        && rust_tests.is_some()
+        && exit_code.is_some_and(|code| code != 0)
+        && repair::reports_nesting(&output.stdout, &output.stderr);
+    let expected = rust_tests.filter(|(names, _)| !names.is_empty());
     let success = observed
+        && !nested_sandbox
         && expected.map_or_else(
             || output.status.success(),
             |(names, red)| {
@@ -7393,11 +7420,18 @@ fn finalize_verification(
         );
     }
     diagnostics.push_str(&String::from_utf8_lossy(&output.stderr));
-    let stderr = redact_bounded(
-        diagnostics,
+    let limit = policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES);
+    let capture = if success {
+        redact_bounded
+    } else {
+        repair::failure_excerpt
+    };
+    let stdout = capture(
+        String::from_utf8_lossy(&output.stdout).into_owned(),
         &redactions,
-        policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES),
+        limit,
     );
+    let stderr = capture(diagnostics, &redactions, limit);
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let attempt_path = attempt_path(&context.component_dir, task_id)?;
     append_verification(
@@ -7413,6 +7447,7 @@ fn finalize_verification(
             output_limit_exceeded: *output_limit_exceeded,
             cancelled: *cancelled,
             process_limit_exceeded,
+            nested_sandbox,
             stdout: &stdout,
             stderr: &stderr,
         },
@@ -7425,6 +7460,7 @@ fn finalize_verification(
         output_limit_exceeded: *output_limit_exceeded,
         cancelled: *cancelled,
         process_limit_exceeded,
+        nested_sandbox,
         stdout,
         stderr,
     })

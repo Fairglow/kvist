@@ -13,22 +13,7 @@ fn probe_cmd() -> Command {
     cmd
 }
 
-fn inside_sandbox() -> bool {
-    Path::new("/.galla-sandbox").exists()
-}
-
-fn run_probe() -> Result<serde_json::Value, String> {
-    let output = probe_cmd()
-        .output()
-        .map_err(|e| format!("failed to run probe: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "probe failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    serde_json::from_slice(&output.stdout).map_err(|e| format!("failed to parse probe output: {e}"))
-}
+mod support;
 
 /// Verify that the probe actually executes bwrap to test namespace creation.
 ///
@@ -36,12 +21,8 @@ fn run_probe() -> Result<serde_json::Value, String> {
 /// that the probe reports unavailability. If the probe just checked
 /// /proc/self/ns existence without executing bwrap, it would succeed.
 #[test]
+#[ignore = "requires an outer Linux host to exercise probe execution"]
 fn probe_executes_bwrap_to_test_namespaces() {
-    if inside_sandbox() {
-        eprintln!("skipping: already inside a Galla sandbox");
-        return;
-    }
-
     // Create a temp directory with a fake bwrap that fails
     let temp = tempfile::tempdir().expect("create temp dir");
     let fake_bwrap = temp.path().join("bwrap");
@@ -75,13 +56,9 @@ fn probe_executes_bwrap_to_test_namespaces() {
 
 /// Verify that the probe succeeds when bwrap works correctly.
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn probe_succeeds_with_working_bwrap() {
-    if inside_sandbox() {
-        eprintln!("skipping: already inside a Galla sandbox");
-        return;
-    }
-
-    let probe = run_probe().expect("probe should succeed with working bwrap");
+    let probe = support::probe();
 
     // Verify the probe reports the backend
     let backend_path = probe
@@ -124,13 +101,9 @@ fn probe_succeeds_with_working_bwrap() {
 /// Verify that the backend location is secure against symlink substitution.
 /// The probe should report the canonical path of the backend, not a symlink target.
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn probe_backend_path_is_canonical_not_symlink() {
-    if inside_sandbox() {
-        eprintln!("skipping: already inside a Galla sandbox");
-        return;
-    }
-
-    let probe = run_probe().expect("probe should succeed");
+    let probe = support::probe();
 
     let backend_path = probe
         .get("backend")
@@ -161,13 +134,9 @@ fn probe_backend_path_is_canonical_not_symlink() {
 
 /// Verify that the probe validates the backend digest matches the actual binary.
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn probe_backend_digest_matches_binary() {
-    if inside_sandbox() {
-        eprintln!("skipping: already inside a Galla sandbox");
-        return;
-    }
-
-    let probe = run_probe().expect("probe should succeed");
+    let probe = support::probe();
 
     let backend_path = probe
         .get("backend")

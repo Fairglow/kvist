@@ -801,7 +801,7 @@ max_output_bytes = 65536
 
 [[test_policy.commands]]
 component = "."
-command = "/usr/bin/test -f tests/generated.rs"
+command = "/usr/bin/bash -c : verify-generated"
 "##,
             runner.display(),
             backend.display()

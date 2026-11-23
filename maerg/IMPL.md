@@ -3042,3 +3042,22 @@ embedded Skott path in the TUI. The in-crate `view.rs` and `menu_tests.rs`
 suites pin layout, scroll, seek, focus restoration, quit/cancel, paste
 routing, and active-command setting refusal; they are not execution proof of
 the live terminal.
+
+## Protected Rust test-environment recovery
+
+A separate source-only observer identified the Galla instruction in
+`authoring_scope_directive`, observed-result classification in
+`finalize_verification`, and the dedicated
+`verification-environment-recovery` journal phase. For a completed, nonzero
+Rust test stage the classifier inspects the output bytes; the recognized
+diagnostic drives at most one focused model round and a repeat blocks.
+The signal comes from captured output, not privileged runner metadata.
+
+The scripted task-command trial exercises recovery, recurrence and rejection
+of a matching named-red result containing the diagnostic. It does not
+exercise a live model or prove that an outer-host trial ran. The new recovery
+does not provide a host execution path or certify task acceptance.
+
+The separate source-blind comparison found correspondence for the scoped
+recovery cases. It identified the absence of a combined process-limit and
+nesting test in one attempt, and of live-model evidence. Neither is claimed.

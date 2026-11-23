@@ -321,17 +321,8 @@ impl Sandbox {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap and native language tools"]
 fn system_toolchains_are_found_and_execute_real_programs() {
-    // Skip when the verification environment is itself a Galla sandbox: the
-    // runner would detect the existing marker and fail closed before this
-    // trial could establish any enforcement evidence.
-    if std::fs::symlink_metadata(galla::context::SANDBOX_MARKER).is_ok() {
-        eprintln!(
-            "native system trial skipped: already inside a Galla sandbox at {}",
-            galla::context::SANDBOX_MARKER
-        );
-        return;
-    }
     let sandbox = Sandbox::new();
     let directories: Vec<_> =
         std::env::split_paths(sandbox.request["environment"]["PATH"].as_str().unwrap()).collect();
@@ -544,17 +535,8 @@ fn assert_read_only_failure(output: Output, label: &str) {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap and a provisioned Rust inventory"]
 fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
-    // Skip when the verification environment is itself a Galla sandbox: the
-    // runner would detect the existing marker and fail closed before this
-    // trial could establish any enforcement evidence.
-    if std::fs::symlink_metadata(galla::context::SANDBOX_MARKER).is_ok() {
-        eprintln!(
-            "native rustup trial skipped: already inside a Galla sandbox at {}",
-            galla::context::SANDBOX_MARKER
-        );
-        return;
-    }
     let mut sandbox = Sandbox::new();
     let rustup = executable("rustup", &search_directories(), false)
         .canonicalize()

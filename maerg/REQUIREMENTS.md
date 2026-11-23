@@ -518,6 +518,15 @@ and evidence. A persistent interruption MUST give the model a focused
 opportunity to address task-owned concurrency before it can block the task.
 Verification coverage, permissions and existing hard bounds MUST NOT be weakened.
 
+Protected Rust authoring MUST explain that verification already runs inside
+Galla and that a native test requiring a new Galla instance belongs in an
+explicit host lane. A failed Rust test stage reporting Galla's nesting refusal
+MUST get one focused correction opportunity before a repeated refusal can
+block with host-lane guidance. That signal MUST NOT establish a result for
+an intentional-red regression or grant host execution. Bounded failure
+diagnostics MUST retain both the opening context and final assertions when
+available. The same scoped advisory exception applies to this increment.
+
 Ordinary execution and verification failures MUST return failure, persist a
 blocked task with the underlying cause, and identify the attempt and inspection
 and retry commands. Evidence-persistence failures MUST preserve the unresolved

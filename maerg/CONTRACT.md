@@ -719,6 +719,20 @@ rounds, separate from process-limit recovery.
 Only a known completed verification failure is automatically repairable;
 unknown effects, cancellation, timeout and output overflow fence recovery.
 
+If a failed protected Rust test stage reports Galla's no-nesting diagnostic,
+Kvist gives the model one focused environment recovery round, separate from
+ordinary source repair. It re-runs the approved verifier after that round; a
+repeated refusal surfaces the current command, host-lane prerequisite and
+retained evidence before older history. Output is only a diagnostic hint,
+never proof that host-native assertions ran or an acceptable red result.
+Recovery may fix portable assertions or place native assertions in an
+established, mandatory host lane when the approved scope allows it. Dropping
+native coverage, adding an uncontrolled skip, or changing an approved
+named regression's expected result is not a correction. A protected green
+establishes only the result of its approved checks, not host-lane coverage.
+Protected authoring has no host-test or shell tool, and a host-lane result
+does not substitute for protected verification or human disposition.
+
 Neither a repair invocation nor guidance resets sequence stall protection.
 All model attempts share monotonic known usage and conservative unknown
 reservations. Known usage above a

@@ -7205,3 +7205,67 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "verification-nesting-write-tests"
+    title: "write_tests: exercise protected Rust nesting recovery"
+    description: "Script a Rust test-stage nesting diagnostic, including a repeated failure and a repaired outcome."
+    context: "REQ-TASK-LIFECYCLE and the protected verification repair section of CONTRACT.md govern continuation."
+    purpose: "Prevent nested verification failures from consuming ordinary repair rounds."
+    expected_outcome: "One focused recovery re-runs verification; recurrence records an actionable blocker instead of accepting a red result."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
+    timestamps:
+      created_at: "2026-11-23T19:15:21Z"
+      updated_at: "2026-11-23T19:15:21Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "verification-nesting-implement-code"
+    title: "implement_code: steer verification toward the correct test lane"
+    description: "Teach authoring about nesting and keep failed Rust test diagnostics actionable within approved bounds."
+    context: "Protected execution cannot request host commands or add mounts, flags, or environment."
+    purpose: "Continue productively without weakening coverage or authority."
+    expected_outcome: "Record one focused recovery; if it fails again, lead with the host prerequisite and retain evidence."
+    kind: implementation
+    status: pending
+    depends_on: ["verification-nesting-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
+    timestamps:
+      created_at: "2026-11-23T19:15:21Z"
+      updated_at: "2026-11-23T19:15:21Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "verification-nesting-security-audit"
+    title: "security_audit: inspect nesting recovery authority"
+    description: "Check that untrusted diagnostics cannot authorize host work, bypass limits, or attest success."
+    context: "Only the existing approved verifier may run automatically."
+    purpose: "Preserve the protected execution boundary during recovery."
+    expected_outcome: "Record findings for output spoofing, interruptions, and verification acceptance."
+    kind: security-audit
+    status: pending
+    depends_on: ["verification-nesting-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
+    timestamps:
+      created_at: "2026-11-23T19:15:21Z"
+      updated_at: "2026-11-23T19:15:21Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "verification-nesting-compliance-review"
+    title: "compliance_review: compare nesting recovery evidence with intent"
+    description: "Compare independent observations and repair evidence with requirements, contract, and design without reading source."
+    context: "Focused recovery is not approval of a new test lane or acceptance."
+    purpose: "Expose disagreements about continuation and evidence."
+    expected_outcome: "Report whether the first refusal steers and the repeated refusal identifies a prerequisite."
+    kind: compliance-review
+    status: pending
+    depends_on: ["verification-nesting-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-TASK-LIFECYCLE"]
+    timestamps:
+      created_at: "2026-11-23T19:15:21Z"
+      updated_at: "2026-11-23T19:15:21Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

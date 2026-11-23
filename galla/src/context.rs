@@ -3,16 +3,16 @@ use std::path::Path;
 
 pub const SANDBOX_MARKER: &str = "/.galla-sandbox";
 
+/// Diagnostic emitted when a runner invocation is refused inside Galla.
+pub const NESTING_DIAGNOSTIC: &str = "already inside a Galla sandbox; a nested sandbox is unnecessary; run the intended command directly";
+
 pub(crate) fn require_host() -> Result<(), String> {
     check_marker(Path::new(SANDBOX_MARKER))
 }
 
 fn check_marker(path: &Path) -> Result<(), String> {
     match std::fs::symlink_metadata(path) {
-        Ok(_) => Err(
-            "already inside a Galla sandbox; a nested sandbox is unnecessary; run the intended command directly"
-                .to_owned(),
-        ),
+        Ok(_) => Err(NESTING_DIAGNOSTIC.to_owned()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("cannot inspect Galla sandbox marker: {error}")),
     }

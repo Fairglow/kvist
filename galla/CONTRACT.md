@@ -439,6 +439,16 @@ uses the exact approved data-root grants and private Cargo administration.
 
 ## Compatibility and verification
 
+`cargo test --offline --locked -p kvist-galla` runs the portable lane; tests
+that need to start or probe a new sandbox are explicitly ignored unless
+selected. The host conformance trial verifies the nesting guard in a sandbox
+it starts from outer Linux; portable rejection assertions do not require a new
+sandbox. `bash tools/test-galla-host.sh` from the repository
+root runs the mandatory CI host lane on an outer Linux host, including the
+native quality fixture. A missing native prerequisite is a failure of that
+lane, not a test pass. Specialized native-cache trials with additional data
+prerequisites retain their separate selectors.
+
 Native inventory tests may supply multiple explicit read-only toolchain grants
 and a private generated rustup home whose registrations refer to sandbox paths.
 Galla does not discover host toolchains or synthesize that home for consumers.

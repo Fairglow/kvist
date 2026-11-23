@@ -140,19 +140,12 @@ fn file_write_limit_can_be_omitted_or_null() {
     }
 }
 
+mod support;
+
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn native_existing_host_files_are_not_payload_size_violations() {
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .unwrap();
-    assert!(
-        probe_output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&probe_output.stderr)
-    );
-    let probe: Value = serde_json::from_slice(&probe_output.stdout).unwrap();
+    let probe = support::probe();
     let temp = tempfile::tempdir().unwrap();
     let context = temp.path().join("context");
     let work = temp.path().join("work");
@@ -198,14 +191,9 @@ fn native_existing_host_files_are_not_payload_size_violations() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn native_host_updates_are_live_and_do_not_block_unrelated_tools() {
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .unwrap();
-    assert!(probe_output.status.success());
-    let probe: Value = serde_json::from_slice(&probe_output.stdout).unwrap();
+    let probe = support::probe();
     let temp = tempfile::tempdir().unwrap();
     let context = temp.path().join("context");
     let work = temp.path().join("work");
@@ -258,14 +246,9 @@ fn native_host_updates_are_live_and_do_not_block_unrelated_tools() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn native_source_ancestor_links_cannot_expand_host_grants() {
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .unwrap();
-    assert!(probe_output.status.success());
-    let probe: Value = serde_json::from_slice(&probe_output.stdout).unwrap();
+    let probe = support::probe();
     let temp = tempfile::tempdir().unwrap();
     let work = temp.path().join("work");
     let outside = temp.path().join("outside");
@@ -292,14 +275,9 @@ fn native_source_ancestor_links_cannot_expand_host_grants() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn native_enforcers_cannot_be_regranted_through_a_writable_alias() {
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .unwrap();
-    assert!(probe_output.status.success());
-    let probe: Value = serde_json::from_slice(&probe_output.stdout).unwrap();
+    let probe = support::probe();
     let temp = tempfile::tempdir().unwrap();
     let context = temp.path().join("context");
     let scratch = temp.path().join("scratch");
@@ -332,14 +310,9 @@ fn authoring_path_can_select_workspace_scripts_and_system_sbin() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap and a C compiler"]
 fn authoring_loader_environment_does_not_run_in_host_enforcers() {
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .unwrap();
-    assert!(probe_output.status.success());
-    let probe: Value = serde_json::from_slice(&probe_output.stdout).unwrap();
+    let probe = support::probe();
     let temp = tempfile::tempdir().unwrap();
     let work = temp.path().join("work");
     let scratch = temp.path().join("scratch");
@@ -1438,19 +1411,9 @@ fn nested_sandbox_marker_destinations_are_reserved() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn executable_executes_successfully_on_valid_request() {
-    // This test requires spawning an actual sandbox, which cannot run inside
-    // a sandbox. Skip when the marker is present.
-    if std::path::Path::new("/.galla-sandbox").exists() {
-        return;
-    }
-    let probe_output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .expect("run probe");
-    let probe: serde_json::Value =
-        serde_json::from_slice(&probe_output.stdout).expect("valid probe JSON");
+    let probe = support::probe();
 
     let temp = tempfile::tempdir().unwrap();
     let req_file = temp.path().join("REQUIREMENTS.md");
@@ -1546,29 +1509,9 @@ fn executable_executes_successfully_on_valid_request() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn executable_probe_succeeds_with_enforcement() {
-    let output = Command::new(env!("CARGO_BIN_EXE_galla"))
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .expect("run probe");
-    if std::path::Path::new("/.galla-sandbox").exists() {
-        assert_eq!(output.status.code(), Some(3));
-        assert!(output.stdout.is_empty());
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("already inside a Galla sandbox"),
-            "nested probe must reject inside sandbox: {stderr}"
-        );
-        return;
-    }
-    assert!(
-        output.status.success(),
-        "probe must succeed: {:?}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(!output.stdout.is_empty(), "confirmed probe must emit JSON");
-    let probe: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    let probe = support::probe();
     assert_eq!(probe["protocol"], "kvist-sandbox-probe-v1");
     assert_eq!(probe["protocol_version"], 1);
 }

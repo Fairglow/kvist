@@ -549,3 +549,23 @@ Git-index fixture's local bootstrap/protected-request separation and reported no
 additional security finding. Its missing fixture-subprocess deadlines remain
 unqualified; neither that inspection nor the real trial certifies general
 cleanup/deadline behavior.
+
+### Portable and outer-host test evidence
+
+A separate source-only observer located the explicit ignored native cases in
+`tests/`, the shared `tools/test-galla-host.sh` selector, and the `symlink_metadata`
+nesting check in `src/context.rs`. The recipe refuses an existing marker and
+selects the native workspace quality test separately from the other cache
+trials. The observer noted that the old resource fixture did not have to
+exercise a limit-setting failure; the follow-up test now constrains its
+runner child's inherited hard limit and checks the actual limit diagnostic.
+
+The portable suite was exercised on the developer host and via Skott's
+real repository sandbox trial; the explicit native recipe was exercised on
+outer Linux. These runs are distinct. An ignored case supplies no assertion
+outcome in the portable report, and local execution does not attest results
+from a GitHub runner or the additional cache trials.
+
+The separate source-blind comparison found local coverage for the two lanes
+and called out hosted execution as unverified. The inherited-hard-limit
+fixture was also exercised separately after the resource-test correction.

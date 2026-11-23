@@ -363,6 +363,13 @@ arguments or environment and excludes acquisition, metadata and export mode.
 
 ## Verification strategy
 
+Use libtest's explicit `#[ignore = "..."]` for integration tests that need a
+new sandbox; do not return early on probe failure or marker presence. The
+shared host recipe invokes the ignored enforcement suites and the exact
+read-only-workspace quality trial, without selecting cache trials that require
+extra material. Use status-first probe decoding so namespace or installation
+errors cannot be mistaken for malformed JSON.
+
 `tests/toolchain_e2e.rs` exercises the executable protocol with real
 Bubblewrap, system PATH discovery and dependency-free execution. Its opt-in
 Rust trial enumerates the host inventory without installation, creates

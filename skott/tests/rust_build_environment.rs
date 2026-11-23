@@ -655,7 +655,7 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
         &format!(
             "stage metadata {} >/dev/null\nstage repository-tests {}",
             repository_cargo("metadata --format-version=1 --no-deps"),
-            repository_cargo("test -p kvist-galla --lib -- --test-threads=2"),
+            repository_cargo("test --quiet -p kvist-galla -- --test-threads=2"),
         ),
     );
     assert!(result.output_text(16384).contains("test result: ok"));

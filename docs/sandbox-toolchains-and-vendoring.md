@@ -318,8 +318,9 @@ never download."
 
 ## Native Test Scheduling
 
-`native_repository_tests_execute_inside_the_workspace_sandbox` grants the actual
-checkout as its writable scope. Other tests create temporary project fixtures
+`native_repository_tests_execute_inside_the_workspace_sandbox` runs the Galla
+portable suite in a real sandbox with the actual checkout as its writable
+scope. Other tests create temporary project fixtures
 and `.skott-rust-*` resources under that checkout; their rustup registrations
 deliberately target sandbox-only `/rust/toolchains/N` paths. Those links escape
 the repository on the host, so the repository-wide trial correctly rejects
@@ -359,20 +360,54 @@ before rerunning, rather than weakening the scope checks.
 
 Run the full workspace suite on the host (locally or in CI). The suite includes
 trials that start a real Galla sandbox, so those trials must start outside it.
-Inside Galla, run tests that do not need to launch another sandbox directly,
-for example:
+Galla's own tests have two explicit lanes:
+
+```bash
+cargo test --offline --locked -p kvist-galla # portable, including inside Galla
+just test-galla-host                       # outer Linux with Bubblewrap
+```
+
+`just test-galla-host` runs the same [host recipe](../tools/test-galla-host.sh)
+as the stable and MSRV [GitHub jobs](../.github/workflows/rust.yml). It runs
+the real namespace, PTY, resource, identity and toolchain assertions, including
+the native quality trial. Provision working Bubblewrap, the system language
+tools, and the Rust toolchains before invoking it. Missing prerequisites fail
+the host lane. The portable run reports these tests as ignored, which is
+not evidence they passed. The full workspace's other components still include
+host-only trials; do not run their entire suites inside Galla. For example, to
+run only Roetter's cache tests there:
 
 ```bash
 cargo test --offline --locked -p kvist-roetter --test cache_failure --test cache
 ```
 
+Use an outer Linux VM or the hosted job to reproduce kernel, namespace and
+PTY behavior. A Docker image can match userspace packages, not the hosted
+kernel or namespace policy. Compare failing job artifacts and runner image
+versions before changing production policy to make a fixture pass. See
+[GitHub's hosted runner documentation](https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners)
+and [nextest's report formats](https://nexte.st/docs/machine-readable/libtest-json/).
+
+Kvist's protected repair can change approved source and tests, then run the
+same protected verification again. It cannot run host tests. For a nesting
+refusal, Kvist steers once toward the portable/host split; if the refusal
+persists it names the prerequisite in the attention brief. Review the retained
+edits and named regression requirements, run the appropriate lane, and correct
+the prerequisite before transitioning the blocked task to pending. That
+starts a new authoring attempt using the retained files, not a resumed model
+session or verification-only run. Host logs cannot complete a protected
+attempt or replace the named red/green expectation.
+
 The cache tests that exercise initial acquisition use only `file://` sources;
 they override Cargo's offline setting for those fixture subprocesses, not
 Galla's network denial.
-Mock-runner fixtures resolve system executables before using them as backend
-or verification identities; production still rejects symlinks in those
-positions. Roetter recognizes Cargo's colored and uncolored missing-source
-diagnostics, including when CI forces `CARGO_TERM_COLOR=always`.
+Mock-runner fixtures use a regular Bash executable for verification and resolve
+the backend before binding its identity. They do not assume coreutils applet
+paths are regular files. Production still rejects executable symlinks in those
+positions. CI also provisions the `/usr/bin/cargo` Rustup proxy required by
+Roetter's fixed host fallback. Roetter recognizes Cargo's colored and
+uncolored missing-source diagnostics, including when CI forces
+`CARGO_TERM_COLOR=always`.
 
 ## Offline dependencies
 

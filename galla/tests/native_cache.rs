@@ -246,6 +246,7 @@ fn native_quality_accepts_exact_commands_and_only_projected_read_only_inputs() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap, Rustfmt, and Clippy"]
 fn native_quality_runs_rust_tools_on_a_read_only_workspace_member() {
     use std::{fs, os::unix::fs::symlink, path::PathBuf, process::Command};
 

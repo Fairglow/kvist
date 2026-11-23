@@ -50,10 +50,13 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Expose trusted system rustup for sandbox preparation
+      - name: Expose trusted system Rust proxies for sandbox preparation
         run: |
           if [ ! -x /usr/bin/rustup ]; then
             sudo install -m 0755 "$(command -v rustup)" /usr/bin/rustup
+          fi
+          if [ ! -x /usr/bin/cargo ]; then
+            sudo ln -s /usr/bin/rustup /usr/bin/cargo
           fi
 
       - name: Provision native Rust inventory test coverage
@@ -107,6 +110,7 @@ jobs:
         run: cargo vendor --locked .kvist/vendored > /dev/null
 
       - name: Test workspace
+        id: workspace-tests
         env:
           KVIST_GALLA: /home/runner/kvist-target/debug/galla
           NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
@@ -134,12 +138,12 @@ jobs:
             cargo test --locked -p kvist-maerg --test sandbox_toolchain -- \
             --ignored --test-threads=1 --nocapture
 
-      - name: Test native Galla toolchain execution
+      - name: Test the Galla host lane
+        if: ${{ success() || steps.workspace-tests.outcome == 'failure' }}
         shell: bash
         run: |
           KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla" \
-            cargo test --locked -p kvist-galla --test toolchain_e2e -- \
-            --ignored --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/galla-toolchains.log"
+            bash tools/test-galla-host.sh 2>&1 | tee "$RUNNER_TEMP/galla-toolchains.log"
 
       - name: Retain Galla host and sandbox diagnostics
         if: always()
@@ -194,12 +198,15 @@ jobs:
           # The MSRV job's default toolchain is also the sandbox's default
           # toolchain, and the in-sandbox vendor-snapshot trial runs the full
           # native chain, including `cargo clippy --all-targets`, on it.
-          components: clippy
+          components: rustfmt, clippy
 
       - name: Provision native Rust inventory prerequisites on the host
         run: |
           if [ ! -x /usr/bin/rustup ]; then
             sudo install -m 0755 "$(command -v rustup)" /usr/bin/rustup
+          fi
+          if [ ! -x /usr/bin/cargo ]; then
+            sudo ln -s /usr/bin/rustup /usr/bin/cargo
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
           rustup toolchain install 1.94.0 --profile minimal --no-self-update
@@ -235,6 +242,7 @@ jobs:
         run: cargo vendor --locked .kvist/vendored > /dev/null
 
       - name: Test workspace
+        id: workspace-tests
         env:
           KVIST_GALLA: /home/runner/kvist-target/debug/galla
           NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
@@ -256,12 +264,12 @@ jobs:
       - name: Test workspace documentation
         run: cargo test --offline --locked --workspace --all-features --doc
 
-      - name: Test native Galla toolchain execution
+      - name: Test the Galla host lane
+        if: ${{ success() || steps.workspace-tests.outcome == 'failure' }}
         shell: bash
         run: |
           KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla" \
-            cargo test --locked -p kvist-galla --test toolchain_e2e -- \
-            --ignored --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/galla-toolchains.log"
+            bash tools/test-galla-host.sh 2>&1 | tee "$RUNNER_TEMP/galla-toolchains.log"
 
       - name: Retain Galla host and sandbox diagnostics
         if: always()

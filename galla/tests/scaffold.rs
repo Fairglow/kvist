@@ -11,6 +11,7 @@ fn status_is_honest_about_enforcement() {
 }
 
 #[test]
+#[ignore = "requires an outer Linux host with Bubblewrap"]
 fn probe_invocation_succeeds() {
     let output = Command::new(env!("CARGO_BIN_EXE_galla"))
         .arg("--kvist-sandbox-probe-v1")
@@ -18,14 +19,12 @@ fn probe_invocation_succeeds() {
         .output()
         .expect("run scaffold probe");
 
-    if std::path::Path::new("/.galla-sandbox").exists() {
-        assert_eq!(output.status.code(), Some(3));
-        assert!(output.stdout.is_empty());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("already inside a Galla sandbox"));
-        return;
-    }
-
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "Galla probe failed ({}): {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(!output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).trim().is_empty());
 }
