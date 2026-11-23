@@ -73,7 +73,7 @@ fn configure_fake_sandbox(project: &TempDir) {
     let runner = fake_galla_path(project);
     fs::write(
         &runner,
-        r#"#!/bin/sh
+        concat!(r#"#!/bin/sh
 if [ "$1" = "--kvist-sandbox-probe-v1" ]; then
   runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
   backend=$(readlink -f /usr/bin/true) || exit 1
@@ -87,6 +87,16 @@ printf '%s' "${KVIST_UNAPPROVED_ENV-unset}" > runner-ambient-env.txt
 case "$request" in
   *'authoring-apply'*)
     printf '%s' "$request" > agent-sandbox-request.json
+    if [ -f src/tests/atomic-edit-fixture.txt ]; then
+      if ! grep -q '^external$' src/tests/atomic-edit-fixture.txt; then
+        printf 'external\n' >> src/tests/atomic-edit-fixture.txt
+      fi
+      set -- src/.kvist/authoring/*.json
+      [ "$#" -eq 1 ] || exit 1
+      exec '"#, env!("CARGO_BIN_EXE_kvist"), r#"' authoring-apply --component src --intent-file "$1"
+    fi
+    printf '%s\n' '{"result":"applied","call_id":"call_1","tool":"write_file","destination":"tests/generated.rs"}'
+    exit 0
     ;;
 esac
 case "$request" in
@@ -113,7 +123,7 @@ case "$request" in
   *'sleep'*) sleep 2 ;;
 esac
 printf 'fake sandbox runner\n'
-"#,
+"#),
     )
     .expect("write fake sandbox runner");
     fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
@@ -954,6 +964,137 @@ tasks: []
     );
     let updated = fs::read_to_string(child_dir.join("TODOS.yaml")).expect("read child queue");
     assert!(updated.contains("path: \"../../CONTRACT.md\""));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn stale_edit_batch_steers_to_a_corrected_turn_in_the_same_attempt() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    fs::create_dir(project.path().join("src/tests")).expect("test scope");
+    const DESTINATION: &str = "tests/atomic-edit-fixture.txt";
+    let target = project.path().join("src").join(DESTINATION);
+    fs::write(&target, "alpha\nomega\n").expect("starting revision");
+    let counter = AtomicUsize::new(0);
+    let observed = target.clone();
+    let gateway = MockGateway::serve(
+        move |request| {
+            let request: serde_json::Value =
+                serde_json::from_slice(request).expect("model request");
+            let tools = request["messages"]
+                .as_array()
+                .expect("messages")
+                .iter()
+                .filter(|message| message["role"] == "tool")
+                .collect::<Vec<_>>();
+            let turn = counter.fetch_add(1, Ordering::Relaxed);
+            match turn {
+                0 => assert!(tools.is_empty()),
+                1 => {
+                    assert_eq!(
+                        fs::read_to_string(&observed).unwrap(),
+                        "alpha\nomega\nexternal\n"
+                    );
+                    assert_eq!(tools.len(), 2);
+                    for (tool, id) in tools.iter().zip(["edit-0-a", "edit-0-b"]) {
+                        assert_eq!(tool["tool_call_id"], id);
+                        let feedback = tool["content"].as_str().expect("rejection feedback");
+                        assert!(
+                            feedback.contains("None of the edits in this batch were written"),
+                            "{feedback}"
+                        );
+                        assert!(feedback.contains("Reread the file"), "{feedback}");
+                    }
+                }
+                2 => {
+                    assert_eq!(
+                        fs::read_to_string(&observed).unwrap(),
+                        "gamma\nomega\nexternal\n"
+                    );
+                    assert_eq!(tools.len(), 4);
+                    for (tool, id) in tools[2..].iter().zip(["edit-1-a", "edit-1-b"]) {
+                        assert_eq!(tool["tool_call_id"], id);
+                        assert!(tool["content"].as_str().unwrap().contains("applied."));
+                    }
+                    return gateway_text_body("Corrected both edits.");
+                }
+                _ => panic!("unexpected fourth model turn"),
+            }
+            let calls =
+                [("a", "alpha", "beta"), ("b", "beta", "gamma")].map(|(suffix, before, after)| {
+                    serde_json::json!({
+                        "id": format!("edit-{turn}-{suffix}"),
+                        "type": "function",
+                        "function": {
+                            "name": "edit_file",
+                            "arguments": serde_json::json!({
+                                "destination": DESTINATION, "replace": before, "content": after
+                            }).to_string()
+                        }
+                    })
+                });
+            serde_json::json!({
+                "model": "kvist-test-mock",
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "", "tool_calls": calls}
+                }]
+            })
+            .to_string()
+        },
+        std::time::Duration::ZERO,
+    );
+    fs::write(
+        project.path().join("kvist.toml"),
+        format!(
+            r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = '{}'
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "/usr/bin/bash -c :"
+"#,
+            gateway_command(&gateway.endpoint)
+        ),
+    )
+    .expect("write config");
+    track_project(&project);
+
+    let approve = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(
+        approve.status.success(),
+        "{}",
+        String::from_utf8_lossy(&approve.stderr)
+    );
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(target).unwrap(),
+        "gamma\nomega\nexternal\n"
+    );
+    let journal = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl"),
+    )
+    .expect("attempt journal");
+    assert!(journal.contains("\"phase\":\"pending-human-disposition\""));
+    assert!(!journal.contains("attempt-0002"));
 }
 
 #[test]

@@ -7269,3 +7269,55 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "atomic-edit-batches-write-tests"
+    title: "write_tests: exercise same-file batch composition and steering"
+    description: "Exercise ordered and dependent replacements, invalid matches, stale revisions and per-call results."
+    context: "The broker and staged applier share the writing scope in CONTRACT.md. This user-directed change proceeds without an advisory receipt; the exception is only to pre-acceptance advisory review, not to verification or acceptance."
+    purpose: "Catch partial writes and ensure rejection leads to a corrected turn in the same attempt."
+    expected_outcome: "One dispatch commits valid same-file edits; rejection writes nothing and permits a corrected next turn."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-COMPONENT-WRITING-SCOPE"]
+    timestamps: {created_at: "2026-11-23T21:27:13Z", updated_at: "2026-11-23T21:27:13Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "atomic-edit-batches-implement-code"
+    title: "implement_code: commit ordered edits once per file"
+    description: "Bind one starting revision and approved result to a staged file batch; steer on confirmed no-write rejection."
+    context: "The protected authoring loop in DESIGN.md distinguishes pre-write rejection from uncertain dispatch."
+    purpose: "Preserve atomic effects and model context without unsafe retries."
+    expected_outcome: "No intermediate hash or file write; unknown dispatch outcomes remain fenced."
+    kind: implementation
+    status: pending
+    depends_on: ["atomic-edit-batches-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-COMPONENT-WRITING-SCOPE"]
+    timestamps: {created_at: "2026-11-23T21:27:13Z", updated_at: "2026-11-23T21:27:13Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "atomic-edit-batches-security-audit"
+    title: "security_audit: inspect batch authority and failure certainty"
+    description: "Review path and byte bounds, starting and final identity checks, and trusted rejection handling."
+    context: "The sandbox remains the only writer of brokered source and test effects."
+    purpose: "Ensure recovery cannot widen grants or replay a write with unknown outcome."
+    expected_outcome: "Report any scope expansion, integrity bypass, or incorrect retry of uncertain effects."
+    kind: security-audit
+    status: pending
+    depends_on: ["atomic-edit-batches-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-COMPONENT-WRITING-SCOPE"]
+    timestamps: {created_at: "2026-11-23T21:27:13Z", updated_at: "2026-11-23T21:27:13Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "atomic-edit-batches-compliance-review"
+    title: "compliance_review: compare edit batch evidence with intent"
+    description: "Compare independent observations and targeted tests with the per-file atomicity and continuation contract."
+    context: "The source-blind review uses IMPL.md and test evidence, not implementation text."
+    purpose: "Identify any differences between observed behavior and approved intent."
+    expected_outcome: "Report discrepancies and evidence limits without claiming human acceptance."
+    kind: compliance-review
+    status: pending
+    depends_on: ["atomic-edit-batches-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-COMPONENT-WRITING-SCOPE"]
+    timestamps: {created_at: "2026-11-23T21:27:13Z", updated_at: "2026-11-23T21:27:13Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null

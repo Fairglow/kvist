@@ -53,15 +53,21 @@ pub(super) fn effect(
         ToolFailureCategory::Timeout
     } else if record.output_limit_exceeded {
         ToolFailureCategory::OutputLimit
-    } else {
+    } else if record.uncertain {
         ToolFailureCategory::ProcessExit
+    } else {
+        ToolFailureCategory::InvalidRequest
     };
     self::record(
         live,
         &record.tool,
         &record.call_id,
         category,
-        EffectCertainty::MayHaveEffects,
+        if record.uncertain {
+            EffectCertainty::MayHaveEffects
+        } else {
+            EffectCertainty::NotExecuted
+        },
         &record.detail,
         redactions,
     )

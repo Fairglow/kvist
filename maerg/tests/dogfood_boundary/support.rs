@@ -684,6 +684,9 @@ fi
 cat > "{request_log}"
 printf 'started\n' > "{project}/maerg/tests/supervised-run-started"
 printf '#[test]\nfn generated() {{}}\n' > "{project}/maerg/tests/generated.rs"
+if grep -q 'authoring-apply' "{request_log}"; then
+  printf '%s\n' '{{"result":"applied","call_id":"call_1","tool":"write_file","destination":"tests/generated.rs"}}'
+fi
 "#,
         backend = backend.display(),
         request_log = request_log.display(),

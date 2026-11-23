@@ -668,6 +668,15 @@ can be reverted. `edit_file` remains available for targeted, identity-bound
 replacements. The broker's writable scope is the component directory minus the
 exclusions above; everything outside it is refused.
 
+Within a model turn, bounded `edit_file` calls for the same normalized
+destination MUST compose in proposal order against one starting revision and
+commit as one file replacement. Kvist MUST validate the starting revision and
+approved final bytes without hashing or writing intermediate revisions. A
+non-unique replacement, a same-file mix of edits and a full overwrite, or a
+confirmed starting revision rejection MUST produce no write for that file and
+steer the model in the same attempt. An uncertain dispatch MUST NOT be retried
+automatically.
+
 ### REQ-DEPENDENCY-ACQUISITION
 
 Dependency acquisition MUST be a distinct approved phase. Cargo MUST be able to

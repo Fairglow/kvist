@@ -1483,7 +1483,7 @@ runs.
 This section describes the target multi-turn agent tier. The current tier
 performs a single, write-only authoring turn; the target tier runs a multi-turn
 loop that persists the agent's intermediate reasoning in a per-run trajectory
-and persists only the final brokered effect, preserving Kvist's durable,
+and persists confirmed brokered effects, preserving Kvist's durable,
 inspectable state rather than in-chat context. When `task run` executes an
 external agent, the maerg performs each model turn on the host, outside the
 effect sandbox. The selected model command must target a numeric loopback model
@@ -1499,12 +1499,24 @@ and an actionable "ensure the model server is running and listening on
 The loop advertises the closed authoring tool set (`read_file`, `write_file`,
 `edit_file`, `request_dependency`, and `propose_decision`). The broker reduces
 each turn's untrusted tool intents to capability-bound effects under a
-deny-by-default policy; a dropped intent fails that turn without ending the run.
+deny-by-default policy. Rejected file proposals receive tool feedback; other
+denied intents may withhold the turn's effects.
 `read_file` is honored within the read scope and logged to the trajectory but
 produces no persisted effect. `write_file` and `edit_file` are reduced to the
 writable component scope and applied by the maerg itself inside the effect
 sandbox against a read-only staged-intent mount; the host never writes component
-state for an effect, and only the final brokered effect of a run is persisted.
+source or test files for an effect.
+Same-file `edit_file` calls in one turn run in proposal order as one atomic
+file replacement. Each `replace` must match exactly once in the result of
+the preceding edits. Kvist gives every call a result. An invalid batch
+(including more than 32 edits),
+a mixture of `write_file` and `edit_file` for the same destination in one
+turn, or a confirmed stale, missing, or non-text/oversized starting revision
+writes nothing for that file. The model gets steering to inspect and revise
+its request before reporting completion on a later turn. Other files are
+independently eligible for application under the same turn-wide limits and
+decision gates. There is no multi-file transaction or guarantee against
+concurrent independent writers.
 `request_dependency` is evaluated by the broker's dependency-origin policy rather
 than executed inline: a request whose origin is an exact, pinned registry
 revision or a public VCS origin with an exact pinned revision (never a private,
@@ -1518,7 +1530,8 @@ awaiting-decision state; the run harness transitions the task to that state and
 never runs verification or jumps to completed. A decision never writes a protected
 intent document, and it never blocks on a trivial matter. A run succeeds only when
 the agent reports completion, no decision worthy of intervention remains surfaced,
-and every authorized effect applied. Once such a decision is accepted, `TODOS.yaml` MUST gain the tasks needed
+and no dispatched effect has an unconfirmed outcome. Once such a decision is
+accepted, `TODOS.yaml` MUST gain the tasks needed
 to implement it and `IMPL.md` MUST become stale; the component then remains in the
 awaiting-decision state until an updated advisory review is performed and accepted,
 after which `IMPL.md` is rederived from the code.

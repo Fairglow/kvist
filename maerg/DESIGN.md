@@ -776,7 +776,7 @@ the run. The state machine advances turn by turn through a running state and
 terminates in one of complete, awaiting-decision, or fatal. A run reaches
 complete only
 when the agent reports completion, no decision worthy of intervention remains
-surfaced, and every authorized effect applied by the maerg. A decision worthy of
+surfaced, and no dispatched effect is unconfirmed. A decision worthy of
 intervention terminates the run in awaiting-decision rather than continuing, and
 a fatal
 transport or gateway failure terminates it in fatal.
@@ -787,7 +787,7 @@ limits. Reads are logged to the per-run trajectory with the run's redaction
 values applied, so intermediate investigation is inspectable without being
 persisted as an effect. Only brokered write effects are applied by the maerg
 inside the effect sandbox against a read-only staged-intent mount; the host never
-writes component state, and only the final brokered effect of a run is persisted,
+writes component source or test files directly. Confirmed effects are persisted,
 preserving durable, inspectable state over in-chat reasoning.
 
 The write scope is the whole current component directory minus the excluded paths
@@ -880,6 +880,22 @@ reserves estimated input plus bounded output before each attempt, replaces
 reservations with nonzero known provider totals, and retains conservative
 charges for absent or interrupted reports across retries and steering.
 Known usage and completed/uncertain effects survive terminal errors.
+
+The broker groups edits by normalized destination in first-proposal order.
+It reads each starting file once, composes replacements in memory, and stages
+only the final image and the starting and final SHA-256 identities. The trusted
+applier checks both identities before one synchronized atomic replacement.
+The existing plan budget charges each edit for the larger of its input and
+output sizes. Every intermediate image must fit the file bound; a batch
+above 32 edits is refused in full. No intermediate hash or file write is
+needed. A stale, missing, or oversized/non-UTF-8 input yields a closed, call-bound
+pre-write result from the trusted applier. The host continues only on a
+completed, uninterrupted matching result, never on a diagnostic string from a
+failed dispatch. It records a result for each participating model call. Loop
+tracking for a dispatched batch uses its destination, starting revision, and
+approved result so a new revision is not confused with an unchanged replay.
+No-write results are not progress; broker refusals without an authorized
+image continue through existing failed-tool tracking.
 
 The model is advertised exactly these tools, with schemas and the scope and
 protected-document notice, by [`authoring_tool_definitions`](src/authoring/mod.rs)

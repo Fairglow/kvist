@@ -187,7 +187,7 @@ impl TaskAuthorization {
                     op: crate::authoring::EffectOp::Create,
                     destination: path.to_owned(),
                     content_identity: format!("sha256:{}", sha256_hex(content.as_bytes())),
-                    replacement: None,
+                    edit: None,
                     content_bytes: content.len(),
                     purpose: "task-authorized tool call".to_owned(),
                     execution_tier: tier,

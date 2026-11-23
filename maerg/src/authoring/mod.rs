@@ -25,7 +25,7 @@
 //!   existing regular file with the exact supplied bytes. The parent directory must
 //!   already exist.
 //! - `edit_file`: `destination` + `replace` + `content`. The target file must exist
-//!   and `replace` must occur in it exactly once; that one occurrence is replaced
+//!   and `replace` must occur exactly once after preceding same-file edits; it is replaced
 //!   with `content` (empty content deletes it). The identity of the resulting bytes
 //!   is bound into the [`CheckedIntent`] so the applier can prove the result.
 //! - `propose_decision`: `summary` + `why` + optional `patch`. Surfaces an
@@ -127,15 +127,45 @@ pub struct CheckedIntent {
     /// `sha256:hex` identity of the bytes the effect produces: the authored content
     /// for `write_file`, or the resulting file content for `edit_file`.
     pub content_identity: String,
-    /// Exact substring to replace, for `edit_file`; `None` for `write_file`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replacement: Option<String>,
+    /// Host-only data used to stage an edit batch, never emitted as plan evidence.
+    #[serde(skip)]
+    pub(crate) edit: Option<CheckedEdit>,
     /// Bytes of the produced content for this effect, for plan-bound accounting.
     pub content_bytes: usize,
     /// Human-readable purpose bound to the grant.
     pub purpose: String,
     /// Execution tier selected by Kvist task policy, not by the model.
     pub execution_tier: crate::agn::ExecutionTier,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CheckedEdit {
+    starting_revision: String,
+    content: String,
+    sibling_calls: Vec<String>,
+    work_bytes: usize,
+}
+
+impl CheckedIntent {
+    pub(crate) fn calls(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.call_id.as_str()).chain(
+            self.edit
+                .iter()
+                .flat_map(|edit| edit.sibling_calls.iter().map(String::as_str)),
+        )
+    }
+
+    fn work_bytes(&self) -> usize {
+        self.edit
+            .as_ref()
+            .map_or(self.content_bytes, |edit| edit.work_bytes)
+    }
+
+    pub(crate) fn edit_revision(&self) -> Option<&str> {
+        self.edit
+            .as_ref()
+            .map(|edit| edit.starting_revision.as_str())
+    }
 }
 
 /// A model intent the broker refused. Recorded, never executed: it becomes no sandbox
@@ -281,9 +311,12 @@ impl AuthoringPlan {
         self.dependency_requests.len()
     }
 
-    /// Total authored content bytes across all authorized effects.
+    /// Total byte charge across authorized effects and edit work.
     pub fn content_bytes(&self) -> usize {
-        self.effects.iter().map(|effect| effect.content_bytes).sum()
+        self.effects
+            .iter()
+            .map(CheckedIntent::work_bytes)
+            .fold(0, usize::saturating_add)
     }
 
     /// Enforce the plan-wide content bound. Fails closed: when exceeded, every effect
@@ -291,14 +324,16 @@ impl AuthoringPlan {
     pub fn enforce_bound(&mut self, policy: &BrokerPolicy) {
         if self.content_bytes() > policy.max_plan_content_bytes {
             for effect in self.effects.drain(..) {
-                self.dropped.push(DroppedIntent {
-                    call_id: effect.call_id.clone(),
-                    tool: effect.tool.clone(),
-                    reason: format!(
-                        "authorized plan content exceeds the {}-byte plan bound",
-                        policy.max_plan_content_bytes
-                    ),
-                });
+                for id in effect.calls() {
+                    self.dropped.push(DroppedIntent {
+                        call_id: id.to_owned(),
+                        tool: effect.tool.clone(),
+                        reason: format!(
+                            "authorized plan content exceeds the {}-byte plan bound",
+                            policy.max_plan_content_bytes
+                        ),
+                    });
+                }
             }
         }
     }
@@ -337,7 +372,7 @@ impl Default for BrokerPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StagedIntent {
-    /// Staged-intent schema version; only version 1 is recognized.
+    /// Staged-intent schema version.
     pub schema_version: u32,
     /// Turn-local call identity, echoed from the model intent.
     pub call_id: String,
@@ -347,16 +382,15 @@ pub struct StagedIntent {
     pub destination: String,
     /// `sha256:hex` identity the applier must prove before writing.
     pub content_identity: String,
-    /// Authored bytes: the file content for `write_file`, the replacement text
-    /// for `edit_file`.
+    /// Full UTF-8 image authorized by the broker.
     pub content: String,
-    /// Exact substring to replace, for `edit_file`; `None` for `write_file`.
+    /// Required starting revision for an edit; not present for a full write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replacement: Option<String>,
+    pub starting_revision: Option<String>,
 }
 
 /// Schema version of [`StagedIntent`].
-pub const STAGED_INTENT_SCHEMA_VERSION: u32 = 1;
+pub const STAGED_INTENT_SCHEMA_VERSION: u32 = 2;
 
 /// Authorize every untrusted intent returned by one model turn.
 ///
@@ -410,7 +444,7 @@ pub fn authorize_turn(
                 tool: dropped.tool,
                 path: path.to_owned(),
                 content: format!(
-                    "error: {} (not applied). Protected documents (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, `IMPL.md`) are read-only; only files under `src/` and `tests/` may be modified. For `edit_file`, both `replace` and `destination` must be non-empty and `replace` must occur once in the target file. Check the target file with `read_file` or reply with a plain-text summary and NO tool calls if your changes are complete.",
+                    "error: {} (not applied). Protected documents (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, `IMPL.md`) are read-only; only files under `src/` and `tests/` may be modified. For `edit_file`, each non-empty `replace` must occur once after the preceding edits to that file. Reread the file with `read_file` and submit corrected changes if work remains.",
                     dropped.reason
                 ),
             });
@@ -428,8 +462,49 @@ pub fn authorize_intents(
     intents: &[ToolIntent],
     policy: &BrokerPolicy,
 ) -> AuthoringPlan {
+    use std::collections::BTreeMap;
+
+    let destinations = intents
+        .iter()
+        .map(|intent| {
+            if !matches!(intent.name.as_str(), "edit_file" | "write_file") {
+                return None;
+            }
+            let destination = intent.arguments.get("destination")?.as_str()?;
+            normalize_destination(component_root, destination, policy)
+                .ok()
+                .filter(|path| path != &component_root.join("Cargo.toml"))
+        })
+        .collect::<Vec<_>>();
+    let mut groups = BTreeMap::<&Path, Vec<usize>>::new();
+    for (index, destination) in destinations.iter().enumerate() {
+        if let Some(path) = destination {
+            groups.entry(path).or_default().push(index);
+        }
+    }
+    groups.retain(|_, indices| indices.iter().any(|&i| intents[i].name == "edit_file"));
+
     let mut plan = AuthoringPlan::default();
-    for intent in intents {
+    for (index, intent) in intents.iter().enumerate() {
+        if let Some(path) = destinations[index].as_deref()
+            && let Some(indices) = groups.get(path)
+        {
+            if indices.first() == Some(&index) {
+                let calls = indices.iter().map(|&i| &intents[i]).collect::<Vec<_>>();
+                match authorize_edit_batch(component_root, path, &calls, policy) {
+                    Ok(effect) => plan.effects.push(effect),
+                    Err(reason) => {
+                        plan.dropped
+                            .extend(calls.into_iter().map(|call| DroppedIntent {
+                                call_id: call.id.clone(),
+                                tool: call.name.clone(),
+                                reason: reason.clone(),
+                            }))
+                    }
+                }
+            }
+            continue;
+        }
         match classify_intent(component_root, intent, policy) {
             BrokerOutcome::Read(read) => plan.reads.push(read),
             BrokerOutcome::Effect(checked) => plan.effects.push(checked),
@@ -534,13 +609,10 @@ fn classify_intent(
             if let Some(outcome) = check_manifest_decision(component_root, intent, obj) {
                 return outcome;
             }
-            if let Some(brace_err) = check_edit_rust_brace_balance(component_root, intent, obj) {
-                return brace_err;
-            }
-            match authorize_edit(component_root, intent, obj, policy) {
-                Ok(effect) => BrokerOutcome::Effect(effect),
-                Err(reason) => BrokerOutcome::Drop(reason),
-            }
+            let result = string_arg(obj, "destination", false)
+                .and_then(|path| normalize_destination(component_root, &path, policy))
+                .and_then(|path| authorize_edit_batch(component_root, &path, &[intent], policy));
+            result.map_or_else(BrokerOutcome::Drop, BrokerOutcome::Effect)
         }
         "propose_decision" => match classify_propose(intent, obj) {
             Ok(decision) => BrokerOutcome::Decision(decision),
@@ -878,7 +950,7 @@ pub fn authoring_tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "replace": {
                         "type": "string",
-                        "description": "Exact substring; must occur in the file exactly once"
+                        "description": "Exact substring; must occur exactly once after any preceding edits to this file in this turn."
                     },
                     "content": {
                         "type": "string",
@@ -1075,20 +1147,11 @@ fn content_identity_bytes(bytes: &[u8], policy: &BrokerPolicy) -> Result<(String
             policy.max_content_bytes
         ));
     }
-    let digest = Sha256::digest(bytes);
-    Ok((format!("sha256:{}", hex_encode(digest)), bytes.len()))
+    Ok((identity_of(bytes), bytes.len()))
 }
 
-/// Counts non-overlapping occurrences of `needle` in `haystack`. An empty
-/// needle counts as zero occurrences.
-fn count_occurrences(haystack: &[u8], needle: &[u8]) -> usize {
-    if needle.is_empty() {
-        return 0;
-    }
-    haystack
-        .windows(needle.len())
-        .filter(|window| *window == needle)
-        .count()
+fn identity_of(bytes: &[u8]) -> String {
+    format!("sha256:{}", hex_encode(Sha256::digest(bytes)))
 }
 
 /// Replaces the single occurrence of `needle` in `haystack` with `replacement`.
@@ -1164,79 +1227,115 @@ fn authorize_write(
         op,
         destination: normalized_relative(component_root, &resolved),
         content_identity,
-        replacement: None,
+        edit: None,
         content_bytes: byte_len,
         purpose: format!("authoring: {}", intent.id),
         execution_tier: crate::agn::ExecutionTier::Sandboxed,
     })
 }
 
-/// Authorize an `edit_file` intent. The target must exist as a regular non-symlink
-/// file; `replace` must occur in it exactly once; the identity of the resulting
-/// bytes is bound into the effect so the applier can prove it applied exactly the
-/// authorized result.
-fn authorize_edit(
+/// Compose exact replacements before authorizing any write to this destination.
+fn authorize_edit_batch(
     component_root: &Path,
-    intent: &ToolIntent,
-    obj: &serde_json::Map<String, serde_json::Value>,
+    resolved: &Path,
+    calls: &[&ToolIntent],
     policy: &BrokerPolicy,
 ) -> Result<CheckedIntent, String> {
-    let destination = string_arg(obj, "destination", false)?;
-    let replacement = string_arg(obj, "replace", false)?;
-    let content = string_arg(obj, "content", true)?;
-    let resolved = normalize_destination(component_root, &destination, policy)?;
-
-    match fs::symlink_metadata(&resolved) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            return Err(format!(
-                "edit destination `{destination}` is a symbolic link"
-            ));
-        }
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => {
-            return Err(format!(
-                "edit destination `{destination}` is not a regular file"
-            ));
-        }
-        Err(source) => {
-            return Err(format!(
-                "edit destination `{destination}` does not exist or cannot be inspected: {source}"
-            ));
-        }
+    const MAX_EDITS_PER_FILE: usize = 32;
+    let (first, siblings) = calls.split_first().ok_or("empty edit batch")?;
+    let destination = normalized_relative(component_root, resolved);
+    if calls.iter().any(|call| call.name != "edit_file") {
+        return Err(format!(
+            "`{destination}` mixes `write_file` and `edit_file`; choose one or use separate turns"
+        ));
     }
-
-    let existing = fs::read(&resolved)
+    if calls.len() > MAX_EDITS_PER_FILE {
+        return Err(format!(
+            "`{destination}` exceeds the {MAX_EDITS_PER_FILE}-edit batch bound; split across turns"
+        ));
+    }
+    apply::verify_no_follow_ancestors(component_root, resolved.parent().map(Path::to_path_buf))
+        .map_err(|error| error.to_string())?;
+    let limit = policy.max_content_bytes.min(MAX_CONTENT_BYTES);
+    let mut image = crate::file_io::read_text_bounded(resolved, limit)
         .map_err(|source| format!("edit destination `{destination}` cannot be read: {source}"))?;
-    if existing.len() > policy.max_content_bytes {
+    let (starting_revision, _) = content_identity(&image, policy)?;
+    let rust = resolved.extension().is_some_and(|ext| ext == "rs");
+    let was_balanced = rust && rust_brace_balance(&image) == 0;
+    let mut work_bytes = 0usize;
+    for (index, call) in calls.iter().enumerate() {
+        let obj = call
+            .arguments
+            .as_object()
+            .ok_or("edit arguments must be an object")?;
+        if obj
+            .get("_malformed_arguments_error")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+        {
+            return Err(format!(
+                "edit {} on `{destination}` has malformed arguments",
+                index + 1
+            ));
+        }
+        warn_extra_tool_arguments(&call.name, obj);
+        let replacement = string_arg(obj, "replace", false)?;
+        let content = string_arg(obj, "content", true)?;
+        let not_unique = || {
+            format!(
+                "edit {} on `{destination}`: `replace` must occur exactly once after preceding edits",
+                index + 1
+            )
+        };
+        let start = image.find(&replacement).ok_or_else(not_unique)?;
+        // Start the second search one character later to catch overlapping matches.
+        let next = image.ceil_char_boundary(start + 1);
+        if image[next..].contains(&replacement) {
+            return Err(not_unique());
+        }
+        let size = (image.len() - replacement.len()).saturating_add(content.len());
+        if size > limit {
+            return Err(format!(
+                "edit {} on `{destination}` exceeds the {limit}-byte content bound",
+                index + 1
+            ));
+        }
+        work_bytes = work_bytes.saturating_add(image.len().max(size));
+        if work_bytes > policy.max_plan_content_bytes {
+            return Err(format!(
+                "edit batch on `{destination}` exceeds the plan byte bound; split across turns"
+            ));
+        }
+        if rust
+            && let Some((symbol, line)) =
+                find_duplicate_rust_top_level_symbol(&image, &replacement, &content)
+        {
+            return Err(format!(
+                "top-level item `{symbol}` is ALREADY defined in `{destination}` (around line {line}); reread the existing definition instead of adding a duplicate"
+            ));
+        }
+        image.replace_range(start..start + replacement.len(), &content);
+    }
+    if was_balanced && rust_brace_balance(&image) != 0 {
         return Err(format!(
-            "edit destination `{destination}` exceeds the {}-byte per-effect bound",
-            policy.max_content_bytes
+            "edit batch on `{destination}` leaves unbalanced `{{` / `}}` delimiters; preserve enclosing blocks and retry"
         ));
     }
-    let occurrences = count_occurrences(&existing, replacement.as_bytes());
-    if occurrences != 1 {
-        return Err(format!(
-            "`replace` must occur exactly once in `{destination}` (found {occurrences})"
-        ));
-    }
-    let Some(new_content) =
-        replace_single_occurrence(&existing, replacement.as_bytes(), content.as_bytes())
-    else {
-        return Err(format!(
-            "`replace` must occur exactly once in `{destination}` (found {occurrences})"
-        ));
-    };
-    let (content_identity, byte_len) = content_identity_bytes(&new_content, policy)?;
-
+    let (content_identity, byte_len) = content_identity(&image, policy)?;
     Ok(CheckedIntent {
-        call_id: intent.id.clone(),
+        call_id: first.id.clone(),
         tool: "edit_file".to_owned(),
         op: EffectOp::Modify,
-        destination: normalized_relative(component_root, &resolved),
+        destination,
         content_identity,
-        replacement: Some(replacement),
+        edit: Some(CheckedEdit {
+            starting_revision,
+            content: image,
+            sibling_calls: siblings.iter().map(|call| call.id.clone()).collect(),
+            work_bytes,
+        }),
         content_bytes: byte_len,
-        purpose: format!("authoring: {}", intent.id),
+        purpose: format!("authoring: {}", first.id),
         execution_tier: crate::agn::ExecutionTier::Sandboxed,
     })
 }
@@ -1633,58 +1732,6 @@ pub fn is_routine_internal_proposal(decision: &ProposedDecision) -> bool {
                 })
     });
     has_internal_phrase || comment_only_patch
-}
-
-fn check_edit_rust_brace_balance(
-    component_root: &Path,
-    intent: &ToolIntent,
-    obj: &serde_json::Map<String, serde_json::Value>,
-) -> Option<BrokerOutcome> {
-    let destination = obj.get("destination").and_then(serde_json::Value::as_str)?;
-    if !destination.trim().ends_with(".rs") {
-        return None;
-    }
-    let replacement = obj.get("replace").and_then(serde_json::Value::as_str)?;
-    let content = obj.get("content").and_then(serde_json::Value::as_str)?;
-    let (resolved, rel) = resolve_safe_read_path(component_root, destination, false).ok()?;
-    let existing = fs::read_to_string(&resolved).ok()?;
-    if count_occurrences(existing.as_bytes(), replacement.as_bytes()) != 1 {
-        return None;
-    }
-    let new_bytes = replace_single_occurrence(
-        existing.as_bytes(),
-        replacement.as_bytes(),
-        content.as_bytes(),
-    )?;
-    let new_text = std::str::from_utf8(&new_bytes).ok()?;
-    let old_balance = rust_brace_balance(&existing);
-    let new_balance = rust_brace_balance(new_text);
-    if old_balance == 0 && new_balance != 0 {
-        return Some(BrokerOutcome::Read(ReadRecord {
-            outcome: ReadOutcome::Failed,
-            call_id: intent.id.clone(),
-            tool: "edit_file".to_owned(),
-            path: rel.clone(),
-            content: format!(
-                "error: `edit_file` on `{rel}` was not applied because it leaves unbalanced `{{` / `}}` delimiters (net brace balance = {new_balance:+}; did you omit the closing `}}` of `mod tests` or an enclosing block at the end of `content`?). Preserve balanced braces and retry `edit_file`."
-            ),
-        }));
-    }
-    if let Some((symbol, existing_line)) =
-        find_duplicate_rust_top_level_symbol(&existing, replacement, content)
-    {
-        return Some(BrokerOutcome::Read(ReadRecord {
-            outcome: ReadOutcome::Failed,
-            call_id: intent.id.clone(),
-            tool: "edit_file".to_owned(),
-            path: rel.clone(),
-            content: format!(
-                "error: `edit_file` on `{rel}` was not applied because top-level item `{symbol}` is ALREADY defined in `{rel}` (around line {existing_line}). Do not add duplicate definitions; call `read_file` on `{rel}` with `start_line: {}` or `search: \"{symbol}\"` to inspect the existing implementation. If the required functionality is already in place, reply with a plain-text summary and NO tool calls.",
-                existing_line.saturating_sub(10).max(1)
-            ),
-        }));
-    }
-    None
 }
 
 fn warn_extra_tool_arguments(tool: &str, obj: &serde_json::Map<String, serde_json::Value>) {
@@ -2476,7 +2523,7 @@ mod tests {
         assert_eq!(plan.effects.len(), 1);
         let effect = &plan.effects[0];
         assert_eq!(effect.op, EffectOp::Modify);
-        assert_eq!(effect.replacement.as_deref(), Some("original"));
+        assert!(effect.edit.is_some());
         let expected = format!("sha256:{}", hex_encode(Sha256::digest(b"changed")));
         assert_eq!(effect.content_identity, expected);
         assert_eq!(effect.content_bytes, 7);
@@ -2980,8 +3027,12 @@ mod tests {
         );
         let brace_plan = authorize_intents(dir.path(), &[unbalanced_edit], &policy());
         assert!(brace_plan.effects.is_empty());
-        assert_eq!(brace_plan.reads.len(), 1);
-        assert!(brace_plan.reads[0].content.contains("unbalanced `{` / `}`"));
+        assert_eq!(brace_plan.dropped.len(), 1);
+        assert!(
+            brace_plan.dropped[0]
+                .reason
+                .contains("unbalanced `{` / `}`")
+        );
 
         let completion_turn = ModelTurn {
             text: "The tests have been successfully added.".into(),
@@ -3037,8 +3088,8 @@ mod tests {
         );
         let dup_plan = authorize_intents(dir.path(), &[dup_edit], &policy());
         assert!(dup_plan.effects.is_empty());
-        assert_eq!(dup_plan.reads.len(), 1);
-        assert!(dup_plan.reads[0].content.contains("ALREADY defined"));
+        assert_eq!(dup_plan.dropped.len(), 1);
+        assert!(dup_plan.dropped[0].reason.contains("ALREADY defined"));
 
         let search_read = intent(
             "read_file",

@@ -977,10 +977,8 @@ fn dispatch_effect(
 ///
 /// The host stages each effect under the component state directory, dispatches
 /// the in-sandbox `authoring-apply` invocation, and removes the staged file
-/// once it is consumed. A sandbox infrastructure failure is fatal and
-/// propagates after removing the staged file; a dispatch that ran but failed
-/// is recorded as an unapplied effect so the turn fails closed rather than
-/// pretending the model's request was honored.
+/// once it is consumed. A confirmed pre-write rejection is returned to the
+/// model; infrastructure failures and uncertain effects fail closed.
 #[allow(clippy::too_many_arguments)]
 fn apply_authoring_effects(
     profile: &AgentProfile,
@@ -1052,29 +1050,50 @@ fn apply_authoring_effects_with(
                 call_id: effect.call_id.clone(),
                 reason: "the authorized effect lost its originating model intent".to_owned(),
             })?;
+        let starting_revision = effect.edit_revision();
+        // A reauthorized batch against a new revision is not a replay.
+        let edit_action = starting_revision.map(|revision| sav::ToolIntent {
+            id: raw.id.clone(),
+            provider_id: None,
+            name: effect.tool.clone(),
+            arguments: serde_json::json!({
+                "destination":effect.destination,
+                "starting_revision":revision,
+                "content_identity":effect.content_identity,
+            }),
+        });
+        let tracked_action = edit_action.as_ref().unwrap_or(raw);
         if let Some(tracker) = tracker.as_deref_mut()
-            && let Some(report) = tracker.propose(raw, false)
+            && let Some(report) = tracker.propose(tracked_action, false)
         {
             return Ok(Some(report));
         }
-        let before = progress::effect_revision(request.target_dir, effect)?;
+        let edit_changed = starting_revision.map(|revision| revision != effect.content_identity);
+        let before = if edit_changed.is_none() {
+            progress::effect_revision(request.target_dir, effect)?
+        } else {
+            None
+        };
         let staged_path =
             authoring::apply::stage_intent(request.target_dir, session_id, effect, raw)?;
         let _staged = StagedIntentCleanup(staged_path.clone());
-        live.record(
-            &serde_json::json!({"type":"tool_dispatch","data":{
-                "call_id":effect.call_id,"name":effect.tool
-            }}),
-            true,
-        )?;
+        for id in effect.calls() {
+            live.record(
+                &serde_json::json!({"type":"tool_dispatch","data":{
+                    "call_id":id,"name":effect.tool
+                }}),
+                true,
+            )?;
+        }
         if steering.cancellation.is_cancelled() {
             return Err(KvistError::Sav(ModelError::Cancelled));
         }
         if !steering.mailbox.dispatch_ready()? {
             break;
         }
-        records.push(EffectRecord {
-            call_id: effect.call_id.clone(),
+        let from = records.len();
+        records.extend(effect.calls().map(|id| EffectRecord {
+            call_id: id.to_owned(),
             tool: effect.tool.clone(),
             destination: effect.destination.clone(),
             applied: false,
@@ -1084,41 +1103,49 @@ fn apply_authoring_effects_with(
             timed_out: false,
             output_limit_exceeded: false,
             cancelled: false,
-        });
+        }));
         let result = dispatch(&staged_path)?;
         let cancelled = result.cancelled;
         let record = summarize_effect(effect, result);
-        if let Some(retained) = records.last_mut() {
-            *retained = record.clone();
+        for retained in &mut records[from..] {
+            *retained = EffectRecord {
+                call_id: retained.call_id.clone(),
+                ..record.clone()
+            };
         }
-        live.record(
-            &serde_json::json!({"type":"tool_result","data":{
-                "call_id":record.call_id,"name":record.tool,"applied":record.applied,
-                "uncertain":record.uncertain,
-                "timed_out":record.timed_out,"output_limit_exceeded":record.output_limit_exceeded
-            }}),
-            true,
-        )?;
-        if !record.applied {
-            failure::effect(live, &record, cancelled, steering.redactions)?;
+        for retained in &records[from..] {
+            live.record(
+                &serde_json::json!({"type":"tool_result","data":{
+                    "call_id":retained.call_id,"name":retained.tool,"applied":retained.applied,
+                    "uncertain":retained.uncertain,
+                    "timed_out":retained.timed_out,"output_limit_exceeded":retained.output_limit_exceeded
+                }}),
+                true,
+            )?;
+            if !retained.applied {
+                failure::effect(live, retained, cancelled, steering.redactions)?;
+            }
         }
         if cancelled {
             return Err(KvistError::Sav(sav::Error::Cancelled));
         }
-        if !record.applied {
+        if record.uncertain {
             return Ok(None);
         }
-        let after = progress::effect_revision(request.target_dir, effect)?;
-        let changed = record.applied && before != after;
-        if let Some(retained) = records.last_mut() {
-            retained.changed = changed;
-        }
+        let changed = if !record.applied {
+            false
+        } else if let Some(changed) = edit_changed {
+            changed
+        } else {
+            before != progress::effect_revision(request.target_dir, effect)?
+        };
+        records[from].changed = changed;
         if changed && let Some(detector) = accepted_generation.as_deref_mut() {
             *detector = sav::loop_detection::StreamLoopDetector::default();
         }
         if let Some(tracker) = tracker.as_deref_mut()
             && let Some(report) = tracker.observe(
-                raw,
+                tracked_action,
                 &sav::runtime::ToolOutcome {
                     exited: true,
                     status: Some(if record.applied { 0 } else { 1 }),
@@ -1159,12 +1186,28 @@ fn summarize_effect(
     result: crate::sandbox::ExecutionResult,
 ) -> EffectRecord {
     let output = &result.output;
-    let applied = !result.timed_out
+    let completed = !result.timed_out
         && !result.output_limit_exceeded
         && !result.cancelled
         && output.status.success();
+    use authoring::apply::ApplyOutcome;
+    let outcome = completed
+        .then(|| authoring::apply::acknowledged_outcome(effect, &output.stdout))
+        .flatten();
+    let applied = outcome == Some(ApplyOutcome::Applied);
+    let rejection = match outcome {
+        Some(ApplyOutcome::StaleRevision) => Some("changed after authorization"),
+        Some(ApplyOutcome::MissingDestination) => Some("is no longer present"),
+        Some(ApplyOutcome::UnreadableRevision) => Some("is no longer bounded UTF-8 text"),
+        Some(ApplyOutcome::Applied) | None => None,
+    };
     let detail = if applied {
         String::new()
+    } else if let Some(reason) = rejection {
+        format!(
+            "The edit target `{}` {reason}. None of the edits in this batch were written. Reread the file with `read_file` and submit corrected edits against the current content, or choose a different authorized approach if the target cannot be edited.",
+            effect.destination
+        )
     } else {
         let mut text = format!(
             "effect for `{}` -> {} exited with {:?}",
@@ -1176,6 +1219,8 @@ fn summarize_effect(
             text.push_str(" after its wall-clock limit");
         } else if result.output_limit_exceeded {
             text.push_str(" after exceeding its output bound");
+        } else if completed {
+            text.push_str(" without a valid matching acknowledgment");
         }
         text.push_str("\nstate may have mutated; completion unconfirmed; do not replay");
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1197,7 +1242,7 @@ fn summarize_effect(
         destination: effect.destination.clone(),
         applied,
         changed: false,
-        uncertain: !applied,
+        uncertain: outcome.is_none(),
         detail,
         timed_out: result.timed_out,
         output_limit_exceeded: result.output_limit_exceeded,
@@ -1282,7 +1327,7 @@ fn drop_reason(dropped: &[DroppedIntent]) -> String {
 /// apply; partial application would misrepresent what the model requested.
 fn apply_reason(effects: &[EffectRecord]) -> String {
     let mut reason = String::new();
-    for record in effects.iter().filter(|record| !record.applied) {
+    for record in effects.iter().filter(|record| record.uncertain) {
         reason.push_str(&format!(
             "- effect call {} (tool `{}` -> {}): {}\n",
             record.call_id, record.tool, record.destination, record.detail
@@ -2201,21 +2246,20 @@ fn execute_agent_inner(
                     },
                 );
             }
-            if effect_report.is_none() && effects.len() < plan.effects.len() {
+            if effect_report.is_none() {
                 steering.skip_calls(
                     turn.tool_intents.iter().filter(|intent| {
                         plan.effects
                             .iter()
-                            .any(|effect| effect.call_id == intent.id)
+                            .any(|effect| effect.calls().any(|id| id == intent.id))
                     }),
                     effects,
                     &mut conversation,
                 )?;
             }
 
-            // An unapplied effect fails the turn: partial application would
-            // misrepresent what the model requested.
-            if effects.iter().any(|record| !record.applied) {
+            // Confirmed pre-write rejections are feedback, not a stop condition.
+            if effects.iter().any(|record| record.uncertain) {
                 let reason = apply_reason(effects);
                 tracing::warn!(task_id = %request.task_id, %reason);
                 return Ok(Some(TurnFailure {
@@ -3365,7 +3409,7 @@ mod tests {
             destination: "tests/generated.rs".to_owned(),
             content_identity:
                 "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
-            replacement: None,
+            edit: None,
             content_bytes: 3,
             purpose: "test".to_owned(),
             execution_tier: crate::agn::ExecutionTier::Sandboxed,
@@ -3391,11 +3435,35 @@ mod tests {
 
     #[test]
     fn summarize_effect_records_success_without_detail() {
-        let record = summarize_effect(&effect("call-1"), execution_result(0, "", ""));
+        let record = summarize_effect(
+            &effect("call-1"),
+            execution_result(
+                0,
+                r#"{"result":"applied","call_id":"call-1","tool":"write_file","destination":"tests/generated.rs"}"#,
+                "",
+            ),
+        );
         assert!(record.applied);
         assert!(record.detail.is_empty());
         assert_eq!(record.call_id, "call-1");
         assert_eq!(record.destination, "tests/generated.rs");
+    }
+
+    #[test]
+    fn summarize_effect_treats_missing_or_mismatched_acknowledgment_as_uncertain() {
+        let effect = effect("call-1");
+        for stdout in [
+            "",
+            r#"{"result":"applied","call_id":"other","tool":"write_file","destination":"tests/generated.rs"}"#,
+        ] {
+            let record = summarize_effect(&effect, execution_result(0, stdout, ""));
+            assert!(record.uncertain);
+            assert!(
+                record
+                    .detail
+                    .contains("without a valid matching acknowledgment")
+            );
+        }
     }
 
     #[test]

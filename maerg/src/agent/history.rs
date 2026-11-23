@@ -134,7 +134,7 @@ impl<'a> RunHistory<'a> {
         }
         for effect in &current.effects {
             self.edits += usize::from(effect.applied);
-            self.unapplied |= !effect.applied;
+            self.unapplied |= effect.uncertain;
             self.timed_out |= effect.timed_out;
             self.output_limit_exceeded |= effect.output_limit_exceeded;
             self.cancelled |= effect.cancelled;
@@ -143,7 +143,13 @@ impl<'a> RunHistory<'a> {
                 self.max_bytes,
                 &format!(
                     "{} {} -> {}\n{}\n",
-                    if effect.applied { "applied" } else { "FAILED" },
+                    if effect.applied {
+                        "applied"
+                    } else if effect.uncertain {
+                        "FAILED"
+                    } else {
+                        "rejected before writing"
+                    },
                     effect.tool,
                     effect.destination,
                     effect.detail

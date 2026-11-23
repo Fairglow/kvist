@@ -251,7 +251,7 @@ mod tests {
             op: EffectOp::Create,
             destination: "src/file.rs".into(),
             content_identity: String::new(),
-            replacement: None,
+            edit: None,
             content_bytes: 0,
             purpose: "fixture".into(),
             execution_tier: crate::agn::ExecutionTier::Sandboxed,

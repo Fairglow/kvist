@@ -2029,7 +2029,8 @@ normative requirements.
   `propose_decision`, and `request_dependency`. Default file authority is
   `src/` and `tests/`, with protected document names and absolute/traversal
   destinations rejected. Default depth/content bounds are 12 levels, 1 MiB
-  per effect, and 8 MiB per plan. Edits require a single matching substring.
+  per effect, and 8 MiB per plan. Edits require a single matching substring
+  in the image left by preceding edits to the same file.
   These tools do not grant arbitrary shell execution or general file reading.
 
 Evidence: `src/agent.rs`, `src/agent/context.rs`,
@@ -2055,26 +2056,37 @@ report.
 
 The broker reduces untrusted proposals to file effects, decisions, accepted
 dependency requests, or dropped intents. A decision records bounded proposal
-evidence and pauses before that turn's effects. Dropped intents prevent file
-effect application. Accepted dependency requests are recorded, but protected
+evidence and pauses before that turn's effects. The authoring loop converts
+rejected file proposals to failed tool results without necessarily withholding
+effects for other files. Remaining denied intents prevent effect application.
+Accepted dependency requests are recorded, but protected
 fulfillment is explicitly unsupported as described below.
 
 File effects are staged under component state with content identity and then
 applied by the current Kvist executable inside the effect sandbox. Requests
 carry the task's pinned runner/probe/policy, read-only context and staged input,
 network-denied authoring phase, remaining timeout, output bound, and owner
-cancellation token. The applier revalidates destination/content and edit
-preconditions before replacement. Effects are sequential, not transactional:
-earlier writes are not rolled back when later work fails.
+cancellation token. The applier revalidates destination scope before applying
+the staged image. Within one turn, a destination with edits
+is ordered by its first proposal and gets one batch, with at most 32 edits.
+Mixed edits and full writes to that destination are refused. The broker
+composes replacements in memory subject to file and cumulative byte bounds,
+then stages the starting revision and final image with its content identity.
+The applier checks both identities before one atomic replacement. There is no
+transaction across files.
 
 ### Steering, cancellation, and retained outcomes
 
 Dispatch readiness is checked before staging and before launching another
 effect. A conservative uncertain-effect record is inserted into the
 owner-retained turn before dispatch. Confirmed results replace it; dispatch
-errors leave it explicitly uncertain. Cancelled, timed-out, output-limited, or
-otherwise unsuccessful dispatched effects are treated as potentially mutating,
-not as proof that nothing changed. Staged-file cleanup is scope-owned.
+errors leave it explicitly uncertain. A successful dispatch must return a
+matching structured acknowledgment. Matching pre-write acknowledgments for
+stale, missing, or oversized/non-UTF-8 revisions report no write and tell each
+participating call to inspect the target and revise the edits. Loop detection keys edit batches by destination, starting
+revision, and final identity, and records rejection as no progress. Cancelled,
+timed-out, output-limited, or otherwise unconfirmed dispatches remain
+potentially mutating. Staged-file cleanup is scope-owned.
 
 The turn/effect collection lives outside the execution closure. The finalizer
 attempts one aggregate log/trajectory record after ordinary success, early
@@ -2098,6 +2110,12 @@ complete evidence. A bounded text log can also truncate later detail.
 Evidence: `src/agent.rs::{execute_agent_inner,apply_authoring_effects_with,
 summarize_effect,record_turn_outcome,evidence_filename,write_atomic}`,
 `src/agent/controls.rs`, and `src/agent/regression_tests.rs`.
+The batch evidence in [`src/authoring/mod.rs`](src/authoring/mod.rs) and
+[`src/authoring/apply.rs`](src/authoring/apply.rs) covers ordered composition,
+atomic refusal and stale revisions. The
+[`stale_edit_batch_steers_to_a_corrected_turn_in_the_same_attempt`](tests/task_commands.rs)
+regression checks both calls' rejection feedback, the next turn's corrected
+results and final bytes, and the original attempt's pending human disposition.
 
 ### Redaction and live records
 

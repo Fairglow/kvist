@@ -14,25 +14,56 @@ use std::{
 
 use hex::encode as hex_encode;
 use sav::ToolIntent;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{KvistError, Result, file_io};
 
 use super::{
     ALLOWED_TOOLS, BrokerPolicy, CheckedIntent, MAX_CONTENT_BYTES, STAGED_INTENT_SCHEMA_VERSION,
-    StagedIntent, count_occurrences, normalize_destination, replace_single_occurrence,
+    StagedIntent, identity_of, normalize_destination,
 };
 
-/// Maximum bytes of a staged intent file. The per-effect content bound plus JSON
-/// overhead leaves ample headroom; anything larger is a malformed stage.
-const MAX_STAGED_INTENT_BYTES: u64 = 2 << 20;
+// JSON can represent one content byte as a six-byte escape.
+const MAX_STAGED_INTENT_BYTES: usize = 6 * MAX_CONTENT_BYTES + 64 * 1024;
+const MAX_ACK_BYTES: usize = 16 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ApplyOutcome {
+    Applied,
+    StaleRevision,
+    MissingDestination,
+    UnreadableRevision,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ApplyAcknowledgment {
+    result: ApplyOutcome,
+    call_id: String,
+    tool: String,
+    destination: String,
+}
+
+pub(crate) fn acknowledged_outcome(effect: &CheckedIntent, stdout: &[u8]) -> Option<ApplyOutcome> {
+    if stdout.len() > MAX_ACK_BYTES {
+        return None;
+    }
+    let ack: ApplyAcknowledgment = serde_json::from_slice(stdout).ok()?;
+    (ack.call_id == effect.call_id
+        && ack.tool == effect.tool
+        && ack.destination == effect.destination
+        && (ack.result == ApplyOutcome::Applied || effect.edit.is_some()))
+    .then_some(ack.result)
+}
 
 /// Stages one authorized effect for in-sandbox application.
 ///
 /// The staged file lands at `<component>/.kvist/authoring/<session>_<hash>.json`,
 /// where the hash derives from the model call identity so untrusted call ids can
-/// never influence the path. The raw intent payload must hash to the authorized
-/// identity or staging fails closed.
+/// never influence the path. The applier verifies the staged image's identity
+/// before writing it.
 pub fn stage_intent(
     component_root: &Path,
     session_id: &str,
@@ -50,15 +81,15 @@ pub fn stage_intent(
                 reason: "raw intent carries no writable content".to_owned(),
             })?
             .to_owned(),
-        "edit_file" => raw
-            .arguments
-            .get("content")
-            .and_then(serde_json::Value::as_str)
+        "edit_file" => effect
+            .edit
+            .as_ref()
             .ok_or_else(|| KvistError::AuthoringEffectFailed {
                 call_id: effect.call_id.clone(),
-                reason: "raw intent carries no replacement content".to_owned(),
+                reason: "authorized edit carries no final image".to_owned(),
             })?
-            .to_owned(),
+            .content
+            .clone(),
         _ => {
             return Err(KvistError::AuthoringEffectFailed {
                 call_id: effect.call_id.clone(),
@@ -74,19 +105,28 @@ pub fn stage_intent(
         destination: effect.destination.clone(),
         content_identity: effect.content_identity.clone(),
         content,
-        replacement: effect.replacement.clone(),
+        starting_revision: effect
+            .edit
+            .as_ref()
+            .map(|edit| edit.starting_revision.clone()),
     };
 
+    let payload =
+        serde_json::to_string(&staged).map_err(|source| KvistError::AuthoringEffectFailed {
+            call_id: effect.call_id.clone(),
+            reason: format!("staged intent cannot be serialized: {source}"),
+        })?;
+    if payload.len() > MAX_STAGED_INTENT_BYTES {
+        return Err(KvistError::AuthoringEffectFailed {
+            call_id: effect.call_id.clone(),
+            reason: "serialized intent exceeds the staging bound".to_owned(),
+        });
+    }
     let directory = component_root.join(".kvist").join("authoring");
     ensure_real_directory(&directory, "create authoring staging directory")?;
     let identity = &hex_encode(Sha256::digest(effect.call_id.as_bytes()))[..16];
     let path = directory.join(format!("{session_id}_{identity}.json"));
-    let bytes =
-        serde_json::to_vec(&staged).map_err(|source| KvistError::AuthoringEffectFailed {
-            call_id: effect.call_id.clone(),
-            reason: format!("staged intent cannot be serialized: {source}"),
-        })?;
-    file_io::write_new_file_atomically(&path, &String::from_utf8_lossy(&bytes))?;
+    file_io::write_new_file_atomically(&path, &payload)?;
     Ok(path)
 }
 
@@ -127,27 +167,42 @@ pub fn apply_intent(component_root: &Path, intent_file: &Path) -> Result<String>
     // symlink, so the effect cannot be redirected outside the writable root.
     verify_no_follow_ancestors(component_root, resolved.parent().map(Path::to_path_buf))?;
 
-    match staged.tool.as_str() {
-        "write_file" => apply_write(&staged, &resolved)?,
-        "edit_file" => apply_edit(&staged, &resolved)?,
+    if staged.content.len() > MAX_CONTENT_BYTES {
+        return Err(KvistError::AuthoringEffectFailed {
+            call_id: staged.call_id,
+            reason: "result exceeds the per-effect content bound".to_owned(),
+        });
+    }
+    prove_identity(
+        &staged.call_id,
+        staged.content.as_bytes(),
+        &staged.content_identity,
+    )?;
+    let result = match (staged.tool.as_str(), staged.starting_revision.as_deref()) {
+        ("write_file", None) => {
+            apply_write(&staged, &resolved)?;
+            ApplyOutcome::Applied
+        }
+        ("edit_file", Some(revision)) if valid_revision(revision) => {
+            apply_edit(&staged, &resolved, revision)?
+        }
         _ => {
             return Err(KvistError::AuthoringEffectFailed {
                 call_id: staged.call_id.clone(),
-                reason: format!(
-                    "tool `{}` is not in the authorized authoring set",
-                    staged.tool
-                ),
+                reason: "invalid starting revision for staged authoring tool".to_owned(),
             });
         }
-    }
-
-    Ok(serde_json::json!({
-        "result": "applied",
-        "call_id": staged.call_id,
-        "tool": staged.tool,
-        "destination": staged.destination,
+    };
+    serde_json::to_string(&ApplyAcknowledgment {
+        result,
+        call_id: staged.call_id,
+        tool: staged.tool,
+        destination: staged.destination,
     })
-    .to_string())
+    .map_err(|source| KvistError::AuthoringEffectFailed {
+        call_id: String::new(),
+        reason: format!("cannot serialize authoring acknowledgment: {source}"),
+    })
 }
 
 fn read_staged_intent(intent_file: &Path) -> Result<StagedIntent> {
@@ -162,25 +217,28 @@ fn read_staged_intent(intent_file: &Path) -> Result<StagedIntent> {
             reason: "staged intent file is a symbolic link".to_owned(),
         });
     }
-    if !metadata.is_file() || metadata.len() > MAX_STAGED_INTENT_BYTES {
+    if !metadata.is_file() || metadata.len() > MAX_STAGED_INTENT_BYTES as u64 {
         return Err(KvistError::AuthoringEffectFailed {
             call_id: String::new(),
             reason: "staged intent file is missing or exceeds the size bound".to_owned(),
         });
     }
-    let bytes = fs::read(intent_file).map_err(|source| KvistError::Io {
-        operation: "read staged authoring intent",
-        path: intent_file.to_path_buf(),
-        source,
-    })?;
-    serde_json::from_slice(&bytes).map_err(|source| KvistError::AuthoringEffectFailed {
+    let text =
+        file_io::read_text_bounded(intent_file, MAX_STAGED_INTENT_BYTES).map_err(|source| {
+            KvistError::Io {
+                operation: "read staged authoring intent",
+                path: intent_file.to_path_buf(),
+                source,
+            }
+        })?;
+    serde_json::from_str(&text).map_err(|source| KvistError::AuthoringEffectFailed {
         call_id: String::new(),
-        reason: format!("staged intent is not valid version-1 JSON: {source}"),
+        reason: format!("staged intent is not valid JSON: {source}"),
     })
 }
 
 fn prove_identity(call_id: &str, bytes: &[u8], expected: &str) -> Result<()> {
-    let actual = format!("sha256:{}", hex_encode(Sha256::digest(bytes)));
+    let actual = identity_of(bytes);
     if actual != expected {
         return Err(KvistError::AuthoringEffectFailed {
             call_id: call_id.to_owned(),
@@ -188,6 +246,15 @@ fn prove_identity(call_id: &str, bytes: &[u8], expected: &str) -> Result<()> {
         });
     }
     Ok(())
+}
+
+fn valid_revision(revision: &str) -> bool {
+    revision.strip_prefix("sha256:").is_some_and(|digest| {
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
 }
 
 /// Verifies every directory component between the component root and the given
@@ -234,11 +301,6 @@ pub(crate) fn verify_no_follow_ancestors(
 }
 
 fn apply_write(staged: &StagedIntent, resolved: &Path) -> Result<()> {
-    prove_identity(
-        &staged.call_id,
-        staged.content.as_bytes(),
-        &staged.content_identity,
-    )?;
     match fs::symlink_metadata(resolved) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             Err(KvistError::AuthoringEffectFailed {
@@ -264,75 +326,33 @@ fn apply_write(staged: &StagedIntent, resolved: &Path) -> Result<()> {
     }
 }
 
-fn apply_edit(staged: &StagedIntent, resolved: &Path) -> Result<()> {
-    let replacement =
-        staged
-            .replacement
-            .as_deref()
-            .ok_or_else(|| KvistError::AuthoringEffectFailed {
-                call_id: staged.call_id.clone(),
-                reason: "edit effect carries no replacement substring".to_owned(),
-            })?;
-    let metadata = fs::symlink_metadata(resolved).map_err(|source| KvistError::Io {
-        operation: "inspect edit destination",
-        path: resolved.to_path_buf(),
-        source,
-    })?;
-    if metadata.file_type().is_symlink() {
-        return Err(KvistError::AuthoringEffectFailed {
-            call_id: staged.call_id.clone(),
-            reason: format!("destination `{}` is a symbolic link", resolved.display()),
-        });
-    }
-    if !metadata.is_file() {
-        return Err(KvistError::AuthoringEffectFailed {
-            call_id: staged.call_id.clone(),
-            reason: format!(
-                "destination `{}` does not exist or is not a file",
-                resolved.display()
-            ),
-        });
-    }
-    let current = fs::read(resolved).map_err(|source| KvistError::Io {
-        operation: "read edit destination",
-        path: resolved.to_path_buf(),
-        source,
-    })?;
-    if current.len() > MAX_CONTENT_BYTES {
-        return Err(KvistError::AuthoringEffectFailed {
-            call_id: staged.call_id.clone(),
-            reason: "destination exceeds the per-effect content bound".to_owned(),
-        });
-    }
-    let occurrences = count_occurrences(&current, replacement.as_bytes());
-    if occurrences != 1 {
-        return Err(KvistError::AuthoringEffectFailed {
-            call_id: staged.call_id.clone(),
-            reason: format!(
-                "`replace` must occur exactly once in `{}` (found {occurrences}; the file changed since authorization)",
-                resolved.display()
-            ),
-        });
-    }
-    let Some(new_content) =
-        replace_single_occurrence(&current, replacement.as_bytes(), staged.content.as_bytes())
-    else {
-        return Err(KvistError::AuthoringEffectFailed {
-            call_id: staged.call_id.clone(),
-            reason: format!(
-                "`replace` must occur exactly once in `{}` (found {occurrences}; the file changed since authorization)",
-                resolved.display()
-            ),
-        });
+fn apply_edit(staged: &StagedIntent, resolved: &Path, revision: &str) -> Result<ApplyOutcome> {
+    let current = match file_io::read_text_bounded(resolved, MAX_CONTENT_BYTES) {
+        Ok(current) => current,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            return Ok(ApplyOutcome::MissingDestination);
+        }
+        Err(source)
+            if matches!(
+                source.kind(),
+                io::ErrorKind::InvalidData | io::ErrorKind::FileTooLarge
+            ) =>
+        {
+            return Ok(ApplyOutcome::UnreadableRevision);
+        }
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "read edit destination",
+                path: resolved.to_path_buf(),
+                source,
+            });
+        }
     };
-    prove_identity(&staged.call_id, &new_content, &staged.content_identity)?;
-    if new_content.len() > MAX_CONTENT_BYTES {
-        return Err(KvistError::AuthoringEffectFailed {
-            call_id: staged.call_id.clone(),
-            reason: "result exceeds the per-effect content bound".to_owned(),
-        });
+    if identity_of(current.as_bytes()) != revision {
+        return Ok(ApplyOutcome::StaleRevision);
     }
-    file_io::replace_file_atomically(resolved, &String::from_utf8_lossy(&new_content))
+    file_io::replace_file_atomically(resolved, &staged.content)?;
+    Ok(ApplyOutcome::Applied)
 }
 
 fn ensure_real_directory(path: &Path, operation: &'static str) -> Result<()> {
@@ -367,10 +387,6 @@ mod tests {
     use std::os::unix::fs::symlink;
     use tempfile::TempDir;
 
-    fn identity_of(bytes: &[u8]) -> String {
-        format!("sha256:{}", hex_encode(Sha256::digest(bytes)))
-    }
-
     /// A component fixture with the writable roots and one protected document.
     fn component() -> TempDir {
         let dir = TempDir::new().expect("component fixture");
@@ -388,21 +404,26 @@ mod tests {
             op: super::super::EffectOp::Create,
             destination: destination.to_owned(),
             content_identity: identity_of(content.as_bytes()),
-            replacement: None,
+            edit: None,
             content_bytes: content.len(),
             purpose: "test".to_owned(),
             execution_tier: crate::agn::ExecutionTier::Sandboxed,
         }
     }
 
-    fn edit_effect(destination: &str, replacement: &str, result: &str) -> CheckedIntent {
+    fn edit_effect(destination: &str, before: &str, result: &str) -> CheckedIntent {
         CheckedIntent {
             call_id: "call-1".to_owned(),
             tool: "edit_file".to_owned(),
             op: super::super::EffectOp::Modify,
             destination: destination.to_owned(),
             content_identity: identity_of(result.as_bytes()),
-            replacement: Some(replacement.to_owned()),
+            edit: Some(super::super::CheckedEdit {
+                starting_revision: identity_of(before.as_bytes()),
+                content: result.to_owned(),
+                sibling_calls: vec![],
+                work_bytes: result.len(),
+            }),
             content_bytes: result.len(),
             purpose: "test".to_owned(),
             execution_tier: crate::agn::ExecutionTier::Sandboxed,
@@ -456,13 +477,13 @@ mod tests {
         assert_eq!(parsed.call_id, "call-1");
         assert_eq!(parsed.destination, "tests/generated.rs");
         assert_eq!(parsed.content, "fn main() {}\n");
-        assert!(parsed.replacement.is_none());
+        assert!(parsed.starting_revision.is_none());
     }
 
     #[test]
-    fn stages_an_edit_intent_with_its_replacement() {
+    fn stages_an_edit_intent_with_the_starting_revision_and_final_image() {
         let root = component();
-        let effect = edit_effect("tests/a.rs", "alpha", "line\nbeta\n");
+        let effect = edit_effect("tests/a.rs", "line\nalpha\n", "line\nbeta\n");
         let staged = stage_intent(
             root.path(),
             "session-1",
@@ -472,8 +493,11 @@ mod tests {
         .expect("stage edit");
         let parsed: StagedIntent =
             serde_json::from_slice(&fs::read(staged).expect("read staged")).expect("parse");
-        assert_eq!(parsed.replacement.as_deref(), Some("alpha"));
-        assert_eq!(parsed.content, "beta");
+        assert_eq!(
+            parsed.starting_revision,
+            Some(identity_of(b"line\nalpha\n"))
+        );
+        assert_eq!(parsed.content, "line\nbeta\n");
     }
 
     #[test]
@@ -613,6 +637,68 @@ mod tests {
     }
 
     #[test]
+    fn same_file_batch_composes_dependent_and_independent_edits() {
+        let root = component();
+        let path = root.path().join("tests/a.txt");
+        fs::write(&path, "alpha\nuntouched\nomega\n").unwrap();
+        let calls = [
+            raw_edit("first", "tests/a.txt", "alpha", "beta"),
+            raw_edit("second", "tests//a.txt", "omega", "end"),
+            raw_edit("third", "tests/a.txt", "beta", "gamma"),
+        ];
+        let plan = super::super::authorize_intents(root.path(), &calls, &BrokerPolicy::default());
+        assert!(plan.dropped.is_empty(), "{:?}", plan.dropped);
+        assert_eq!(plan.effects.len(), 1);
+        let staged = stage_intent(root.path(), "session", &plan.effects[0], &calls[0]).unwrap();
+        apply_intent(root.path(), &staged).unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "gamma\nuntouched\nend\n");
+    }
+
+    #[test]
+    fn invalid_same_file_batch_authorizes_no_partial_effect() {
+        let root = component();
+        let path = root.path().join("tests/a.txt");
+        fs::write(&path, "alpha\nomega\n").unwrap();
+        for invalid in [
+            raw_edit("second", "tests/a.txt", "alpha", "end"),
+            raw_edit("second", "tests/a.txt", "omega", "alpha"),
+            raw_edit("second", "tests/a.txt", "", "alpha"),
+            raw_write("second", "tests/a.txt", "overwritten"),
+        ] {
+            let first = raw_edit("first", "tests/a.txt", "alpha", "omega");
+            let plan = super::super::authorize_intents(
+                root.path(),
+                &[first, invalid],
+                &BrokerPolicy::default(),
+            );
+            assert!(plan.effects.is_empty());
+            assert_eq!(plan.dropped.len(), 2);
+            assert_eq!(fs::read_to_string(&path).unwrap(), "alpha\nomega\n");
+        }
+    }
+
+    #[test]
+    fn oversized_batch_leaves_other_destinations_authorized() {
+        let root = component();
+        let path = root.path().join("tests/a.txt");
+        fs::write(&path, "alpha\n").unwrap();
+        let mut calls = (0..33)
+            .map(|index| raw_edit(&format!("edit-{index}"), "tests/a.txt", "alpha", "alpha"))
+            .collect::<Vec<_>>();
+        calls.insert(1, raw_write("independent", "tests/b.txt", "independent\n"));
+        let plan = super::super::authorize_intents(root.path(), &calls, &BrokerPolicy::default());
+        assert_eq!(plan.effects.len(), 1);
+        assert_eq!(plan.effects[0].call_id, "independent");
+        assert_eq!(plan.dropped.len(), 33);
+        assert!(
+            plan.dropped
+                .iter()
+                .all(|drop| drop.reason.contains("32-edit batch bound"))
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), "alpha\n");
+    }
+
+    #[test]
     fn applies_an_edit_when_the_replacement_still_occurs_exactly_once() {
         let root = component();
         let path = root.path().join("tests").join("a.rs");
@@ -620,7 +706,7 @@ mod tests {
         fs::write(&path, current).expect("write fixture");
         let result = "line one\nbeta\nline three\n";
 
-        let effect = edit_effect("tests/a.rs", "alpha", result);
+        let effect = edit_effect("tests/a.rs", current, result);
         let staged = stage_intent(
             root.path(),
             "s",
@@ -637,9 +723,7 @@ mod tests {
         let root = component();
         let path = root.path().join("tests").join("a.rs");
 
-        // Zero occurrences: the file changed since authorization.
-        fs::write(&path, "nothing here\n").expect("write fixture");
-        let effect = edit_effect("tests/a.rs", "alpha", "whatever\n");
+        let effect = edit_effect("tests/a.rs", "alpha\n", "beta\n");
         let staged = stage_intent(
             root.path(),
             "s",
@@ -647,27 +731,33 @@ mod tests {
             &raw_edit("call-1", "tests/a.rs", "alpha", "beta"),
         )
         .expect("stage");
-        let error = apply_intent(root.path(), &staged).expect_err("drift must be refused");
-        assert!(
-            error.to_string().contains("exactly once"),
-            "diagnostic: {error}"
-        );
+        for drift in [
+            "nothing here\n",
+            "alpha\nalpha\n",
+            "alpha\nunrelated change\n",
+        ] {
+            fs::write(&path, drift).expect("write fixture");
+            let ack = apply_intent(root.path(), &staged).expect("report rejection");
+            assert_eq!(
+                acknowledged_outcome(&effect, ack.as_bytes()),
+                Some(ApplyOutcome::StaleRevision)
+            );
+            assert_eq!(fs::read_to_string(&path).expect("unchanged"), drift);
+        }
+        fs::write(&path, [0xff]).expect("replace with a non-UTF-8 revision");
+        let ack = apply_intent(root.path(), &staged).expect("report invalid text revision");
         assert_eq!(
-            fs::read_to_string(&path).expect("unchanged"),
-            "nothing here\n"
+            acknowledged_outcome(&effect, ack.as_bytes()),
+            Some(ApplyOutcome::UnreadableRevision)
         );
-
-        // Two occurrences: ambiguous, refused.
-        fs::write(&path, "alpha\nalpha\n").expect("write fixture");
-        let error = apply_intent(root.path(), &staged).expect_err("ambiguity must be refused");
-        assert!(
-            error.to_string().contains("exactly once"),
-            "diagnostic: {error}"
-        );
+        assert_eq!(fs::read(&path).unwrap(), [0xff]);
+        fs::remove_file(&path).expect("remove destination");
+        let ack = apply_intent(root.path(), &staged).expect("report missing destination");
         assert_eq!(
-            fs::read_to_string(&path).expect("unchanged"),
-            "alpha\nalpha\n"
+            acknowledged_outcome(&effect, ack.as_bytes()),
+            Some(ApplyOutcome::MissingDestination)
         );
+        assert!(!path.exists());
     }
 
     #[test]
@@ -676,7 +766,8 @@ mod tests {
         let path = root.path().join("tests").join("a.rs");
         fs::write(&path, "alpha\n").expect("write fixture");
         // The authorized identity was computed for a different result.
-        let effect = edit_effect("tests/a.rs", "alpha", "different result\n");
+        let mut effect = edit_effect("tests/a.rs", "alpha\n", "beta\n");
+        effect.content_identity = identity_of(b"different result\n");
         let staged = stage_intent(
             root.path(),
             "s",
@@ -694,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    fn edit_refuses_symlink_destinations_and_missing_files() {
+    fn edit_refuses_symlink_destinations() {
         let root = component();
         let outside = TempDir::new().expect("outside");
         let target = outside.path().join("target.txt");
@@ -712,23 +803,13 @@ mod tests {
         let error =
             apply_intent(root.path(), &staged).expect_err("symlink destination must be refused");
         assert!(
-            error.to_string().contains("symbolic link"),
+            error.to_string().contains("read edit destination"),
             "diagnostic: {error}"
         );
         assert_eq!(
             fs::read_to_string(&target).expect("outside read"),
             "outside\n"
         );
-
-        let effect = edit_effect("tests/missing.rs", "x", "y");
-        let staged = stage_intent(
-            root.path(),
-            "s2",
-            &effect,
-            &raw_edit("call-1", "tests/missing.rs", "x", "y"),
-        )
-        .expect("stage");
-        assert!(apply_intent(root.path(), &staged).is_err());
     }
 
     #[test]
@@ -790,8 +871,7 @@ mod tests {
             "tool": "write_file",
             "destination": "tests/a.rs",
             "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-            "content": "x",
-            "replacement": null
+            "content": "x"
         }))
         .expect("build bad version");
         bad_version.schema_version = 99;
@@ -804,8 +884,7 @@ mod tests {
         assert!(apply_intent(root.path(), &bad_version).is_err());
 
         let oversized = dir.join("oversized.json");
-        fs::write(&oversized, vec![b'x'; MAX_STAGED_INTENT_BYTES as usize + 1])
-            .expect("write oversized");
+        fs::write(&oversized, vec![b'x'; MAX_STAGED_INTENT_BYTES + 1]).expect("write oversized");
         assert!(apply_intent(root.path(), &oversized).is_err());
     }
 }

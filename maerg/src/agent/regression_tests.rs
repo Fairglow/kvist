@@ -742,7 +742,7 @@ fn partial_effects_and_usage_survive_cancellation_and_later_dispatch_failure() {
             &mut retained.effects,
             None,
             None,
-            |_| {
+            |staged| {
                 calls += 1;
                 if interruption == "between-effects" {
                     token.cancel();
@@ -753,9 +753,12 @@ fn partial_effects_and_usage_survive_cancellation_and_later_dispatch_failure() {
                         reason: "injected dispatch failure".into(),
                     });
                 }
-                Ok(effect_result(
-                    interruption == "cancelled-dispatch" && calls == 2,
-                ))
+                let mut result = effect_result(interruption == "cancelled-dispatch" && calls == 2);
+                if !result.cancelled {
+                    result.output.stdout =
+                        authoring::apply::apply_intent(&root, staged)?.into_bytes();
+                }
+                Ok(result)
             },
         )
         .expect_err("must preserve explicit interruption");
