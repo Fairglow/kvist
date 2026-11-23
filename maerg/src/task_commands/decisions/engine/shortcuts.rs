@@ -26,6 +26,10 @@ pub(in crate::task_commands::decisions) enum Command {
         approval: String,
         continue_run: bool,
     },
+    Schedule {
+        plan_id: String,
+        approval: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -73,8 +77,8 @@ fn read(context: &TaskContext) -> Result<Option<(Registry, String)>> {
     Ok(Some((registry, text)))
 }
 
-fn expansion(component: &Path, command: &Command) -> String {
-    let component = component_argument(component);
+fn expansion(component_path: &Path, command: &Command) -> String {
+    let component = component_argument(component_path);
     match command {
         Command::OptionPlan {
             task,
@@ -98,6 +102,12 @@ fn expansion(component: &Path, command: &Command) -> String {
             quote(approval),
             if *continue_run { " --continue" } else { "" },
         ),
+        Command::Schedule { plan_id, approval } => format!(
+            "kvist task apply {} {} --approve {}",
+            shell_token(&component_path.to_string_lossy()),
+            quote(plan_id),
+            quote(approval),
+        ),
     }
 }
 
@@ -116,6 +126,7 @@ fn response(context: &TaskContext, number: u32, command: &Command) -> ResponseAc
                 "; stop after application"
             },
         ),
+        Command::Schedule { .. } => "Approve exact schedule; do not run tasks".into(),
     };
     ResponseAction {
         number,
@@ -154,6 +165,7 @@ pub(in crate::task_commands::decisions) fn list_for_task(
                         task == task_id
                             && !directory.join(format!("{plan_id}.applied.json")).exists()
                     }
+                    Command::Schedule { .. } => false,
                 })
                 .map(|(number, command)| response(context, *number, command))
                 .collect()
@@ -254,18 +266,26 @@ pub(in crate::task_commands::decisions) fn plan(
     context: &TaskContext,
     plan: &Plan,
 ) -> Result<Vec<ResponseAction>> {
-    register(
-        context,
+    register(context, plan_commands(plan))
+}
+
+fn plan_commands(plan: &Plan) -> Vec<Command> {
+    if let Some(task) = &plan.input.task {
         [false, true]
             .into_iter()
             .map(|continue_run| Command::ApplyPlan {
-                task: plan.input.task.id.clone(),
+                task: task.id.clone(),
                 plan_id: plan.id.clone(),
                 approval: plan.approval.clone(),
                 continue_run,
             })
-            .collect(),
-    )
+            .collect()
+    } else {
+        vec![Command::Schedule {
+            plan_id: plan.id.clone(),
+            approval: plan.approval.clone(),
+        }]
+    }
 }
 
 pub(in crate::task_commands::decisions) fn discover(
@@ -313,14 +333,7 @@ pub(in crate::task_commands::decisions) fn discover(
         if bytes > MAX_TOTAL {
             return Err(fail(&directory, "shortcut plan discovery exceeds 8 MiB"));
         }
-        for continue_run in [false, true] {
-            commands.push(Command::ApplyPlan {
-                task: plan.input.task.id.clone(),
-                plan_id: plan.id.clone(),
-                approval: plan.approval.clone(),
-                continue_run,
-            });
-        }
+        commands.extend(plan_commands(&plan));
     }
     if !commands.is_empty() {
         register(context, commands)?;

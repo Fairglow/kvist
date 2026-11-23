@@ -1,6 +1,9 @@
 use super::*;
 use std::fs::{File, Metadata};
 
+pub(super) const MAX_TRANSACTION_BYTES: u64 = 4 * 1024 * 1024;
+pub(super) const MAX_PLAN_BYTES: usize = MAX_TRANSACTION_BYTES as usize - 16 * 1024;
+
 struct Parent {
     file: File,
     original: PathBuf,
@@ -153,12 +156,16 @@ fn identical(a: &Metadata, b: &Metadata) -> bool {
 }
 
 pub(super) fn read_bytes(path: &Path) -> Result<Vec<u8>> {
+    read_with_limit(path, MAX_FILE)
+}
+
+fn read_with_limit(path: &Path, limit: u64) -> Result<Vec<u8>> {
     safe_path(path, false)?;
     let before = fs::symlink_metadata(path).map_err(|error| fail(path, error.to_string()))?;
-    if !before.is_file() || before.len() > MAX_FILE {
+    if !before.is_file() || before.len() > limit {
         return Err(fail(
             path,
-            "input must be a regular file no larger than 1 MiB",
+            format!("input must be a regular file no larger than {limit} bytes"),
         ));
     }
     let parent = Parent::open(path)?;
@@ -179,7 +186,7 @@ pub(super) fn read_bytes(path: &Path) -> Result<Vec<u8>> {
     }
     let mut bytes = Vec::new();
     (&file)
-        .take(MAX_FILE + 1)
+        .take(limit + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| fail(path, error.to_string()))?;
     safe_path(path, false)?;
@@ -188,17 +195,20 @@ pub(super) fn read_bytes(path: &Path) -> Result<Vec<u8>> {
     let finished = file
         .metadata()
         .map_err(|error| fail(path, error.to_string()))?;
-    if bytes.len() as u64 > MAX_FILE
+    if bytes.len() as u64 > limit
         || !identical(&before, &after)
         || !identical(&opened, &finished)
         || hardlinked(&after)
     {
-        return Err(fail(path, "input changed while reading or exceeds 1 MiB"));
+        return Err(fail(
+            path,
+            "input changed while reading or exceeds its size bound",
+        ));
     }
     Ok(bytes)
 }
 
-pub(super) fn read_text(path: &Path) -> Result<String> {
+pub(in crate::task_commands) fn read_text(path: &Path) -> Result<String> {
     String::from_utf8(read_bytes(path)?)
         .map_err(|error| fail(path, format!("input is not UTF-8: {error}")))
 }
@@ -208,8 +218,13 @@ pub(super) fn encode<T: Serialize>(value: &T) -> Result<String> {
 }
 
 pub(super) fn decode<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
-    serde_json::from_slice(&read_bytes(path)?)
+    serde_json::from_slice(&read_with_limit(path, MAX_TRANSACTION_BYTES)?)
         .map_err(|error| fail(path, format!("invalid JSON: {error}")))
+}
+
+pub(super) fn read_transaction(path: &Path) -> Result<String> {
+    String::from_utf8(read_with_limit(path, MAX_TRANSACTION_BYTES)?)
+        .map_err(|error| fail(path, format!("transaction is not UTF-8: {error}")))
 }
 
 pub(super) fn bounded(text: &str, path: &Path) -> Result<()> {
@@ -227,7 +242,7 @@ pub(super) fn equal(a: &str, b: &str) -> bool {
             == 0
 }
 
-pub(super) fn directory(path: &Path) -> Result<()> {
+pub(in crate::task_commands) fn directory(path: &Path) -> Result<()> {
     safe_path(path, true)?;
     if !path.exists() {
         let parent = path
@@ -255,7 +270,7 @@ pub(super) fn directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn write_new(path: &Path, text: &str) -> Result<()> {
+pub(in crate::task_commands) fn write_new(path: &Path, text: &str) -> Result<()> {
     bounded(text, path)?;
     safe_path(path, true)?;
     let parent = Parent::open(path)?;
@@ -267,11 +282,17 @@ pub(super) fn write_new(path: &Path, text: &str) -> Result<()> {
         .map_err(|error| fail(path, error.to_string()))
 }
 
-pub(super) fn replace(path: &Path, text: &str) -> Result<()> {
-    bounded(text, path)?;
+pub(super) fn write_transaction(path: &Path, text: &str, create: bool) -> Result<()> {
+    if text.len() as u64 > MAX_TRANSACTION_BYTES {
+        return Err(fail(path, "retained transaction exceeds 4 MiB"));
+    }
     safe_path(path, true)?;
     let parent = Parent::open(path)?;
-    replace_file_atomically(&parent.destination, text)?;
+    if create {
+        write_new_file_atomically(&parent.destination, text)?;
+    } else {
+        replace_file_atomically(&parent.destination, text)?;
+    }
     parent.verify()?;
     safe_path(path, false)?;
     parent
@@ -280,7 +301,7 @@ pub(super) fn replace(path: &Path, text: &str) -> Result<()> {
         .map_err(|error| fail(path, error.to_string()))
 }
 
-pub(super) fn secret(context: &TaskContext) -> Result<Vec<u8>> {
+pub(in crate::task_commands) fn secret(context: &TaskContext) -> Result<Vec<u8>> {
     let base = user_state_base()
         .filter(|path| path.is_absolute())
         .ok_or_else(|| {

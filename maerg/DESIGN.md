@@ -1690,6 +1690,29 @@ Reject/new direction changes planning guidance; it does not dispose task history
 Optional continuation happens only after successful apply and lock release, by
 the existing continuous scheduler under its existing execution policy.
 
+### Standalone task planning
+
+New-work planning is a separate typed entry point into the decision transaction
+engine, with no synthetic paused task or altered execution state. An append-only
+materializer shares document edits, task construction and guarded publication
+with decision plans. It indexes allowed Markdown headings and stable clause
+labels once per candidate, before invoking advisory review. The planner and
+reviewer see only allowed intent and bounded task projections; validation and
+receipt inputs are host-derived. The plan binds queue bytes, local and allowed
+intent, component identity, configuration, and the absence of unresolved
+execution/checkpoint work. Publication uses the existing lock, recovery journal,
+exact approval, and numbered response registry. The preview emphasizes added
+work rather than replaying unrelated historical task text.
+
+An optional Rust work-item regression list is carried by both authoring phases.
+The host runs the unchanged approved Cargo quality pipeline. Only its final
+test stage can satisfy a red expectation: the command must run to an ordinary
+test failure, the exact approved libtest case names must fail once, unrelated
+cases must not fail, and test summaries must agree. Implementation must observe
+the same names passing. Output truncation, cancellation and infrastructure
+errors are never red evidence. Historical tasks without named cases retain
+their existing verification behavior.
+
 ### Guided help and actionable status guidance
 
 `help.rs` is a pure, I/O-free module: `HelpTopic` is a closed

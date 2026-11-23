@@ -2158,6 +2158,7 @@ mod tests {
                 component_dir: None,
                 commit: false,
                 message: None,
+                review_ack: None,
                 review_exception: None,
             },
         };
@@ -2408,6 +2409,7 @@ mod tests {
             context: String::new(),
             purpose: String::new(),
             expected_outcome: String::new(),
+            regression_tests: Vec::new(),
             kind: TaskKind::Test,
             status,
             depends_on: deps.iter().map(|dep| (*dep).to_owned()).collect(),
@@ -2765,6 +2767,7 @@ mod tests {
                 component_dir: Some(".".into()),
                 commit: true,
                 message: None,
+                review_ack: None,
                 review_exception: None,
             },
         };

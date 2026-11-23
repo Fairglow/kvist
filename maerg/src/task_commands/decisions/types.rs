@@ -65,6 +65,8 @@ pub struct TaskDefinition {
     pub context: String,
     pub purpose: String,
     pub expected_outcome: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regression_tests: Option<Vec<String>>,
     pub kind: TaskKind,
     pub depends_on: Vec<String>,
     pub requirements: Vec<String>,
@@ -130,10 +132,18 @@ pub(super) struct IntentReview {
 pub(super) struct Capture {
     pub(super) schema_version: u32,
     pub(super) component: PathBuf,
-    pub(super) task: Task,
+    pub(super) task: Option<Task>,
     pub(super) queue: TaskQueue,
     pub(super) files: BTreeMap<String, String>,
     pub(super) bindings: BTreeMap<String, String>,
+}
+
+impl Capture {
+    pub(super) fn paused(&self) -> Result<&Task> {
+        self.task
+            .as_ref()
+            .ok_or_else(|| decision_error("plan does not resolve a paused task"))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -102,6 +102,9 @@ Kvist core concepts
                security-audit, compliance-review), status, depends_on, and
                requirement references. A task is ready when pending with every
                (transitive) dependency completed: `kvist task next [DIR]`.
+  planning     `kvist task plan DIR --idea 'desired outcome'` drafts new work.
+               Review the preview and select its numbered approval to schedule;
+               planning and approval do not run tasks.
   supervision  `kvist task run [DIR]` executes ready work continuously under
                approved sandbox/test policy, checkpointing complete items.
                Execution and checkpoint commits are not human acceptance.
@@ -119,7 +122,9 @@ Kvist component lifecycle
 
   1. kvist component new [DIR]    scaffold REQUIREMENTS/CONTRACT/DESIGN
   2. kvist component validate     structural check of the three intent docs
-  3. kvist component accept [DIR] record accepted revisions (the baseline)
+  3. kvist task plan DIR --idea TEXT  draft work; use the displayed approval
+     to schedule it and record intent. For separately edited intent:
+     `kvist component review [DIR]`, then the displayed acceptance command.
   4. kvist task run DIR           execute ready work with complete-item checkpoints
   5. Review the component's .kvist/continuous-reviews/component.json and findings.
 

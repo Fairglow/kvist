@@ -2377,7 +2377,7 @@ pub(crate) fn run_offline_cargo_quality_checks<T>(
     component_dir: &Path,
     timeout: Duration,
     output_limit: usize,
-    mut record: impl FnMut(&str, &ExecutionResult) -> Result<T>,
+    mut record: impl FnMut(&str, &ExecutionResult, bool) -> Result<T>,
 ) -> Result<T> {
     with_offline_cargo_workspace(
         config,
@@ -2413,7 +2413,11 @@ pub(crate) fn run_offline_cargo_quality_checks<T>(
                     projection,
                     None,
                 )?;
-                let evidence = record(&command, &result)?;
+                let evidence = record(
+                    &command,
+                    &result,
+                    matches!(stage, native_cargo::OfflineCommand::Test),
+                )?;
                 let passed = !result.cancelled
                     && !result.timed_out
                     && !result.output_limit_exceeded

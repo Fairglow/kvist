@@ -401,8 +401,10 @@ pub enum ComponentCommand {
         /// Explicit commit message when --commit is used.
         #[arg(long)]
         message: Option<String>,
-        /// Explicit exception when project review is required but no current
-        /// review receipt exists. Records the reason with the acceptance.
+        /// Acknowledge the exact receipt ID printed by component review.
+        #[arg(long, value_name = "RECEIPT_ID", conflicts_with = "review_exception")]
+        review_ack: Option<String>,
+        /// Record an explicit exception for this bundle instead of a review.
         #[arg(long, value_name = "REASON")]
         review_exception: Option<String>,
     },
@@ -597,6 +599,28 @@ impl From<ReasoningEffortArgument> for sav::ReasoningEffort {
 /// Task selection and state-transition operations.
 #[derive(Debug, Subcommand)]
 pub enum TaskCommand {
+    /// Draft and review new component work; scheduling requires separate approval.
+    Plan {
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+        /// Describe the desired result for the architect model.
+        #[arg(long, required_unless_present = "import", conflicts_with = "import")]
+        idea: Option<String>,
+        /// Read a manually prepared v1 JSON work-item draft.
+        #[arg(long, value_name = "FILE")]
+        import: Option<PathBuf>,
+        /// Deliberately skip advisory review for this exact plan.
+        #[arg(long, value_name = "REASON")]
+        review_exception: Option<String>,
+    },
+    /// Schedule one reviewed plan using its exact approval; do not run it.
+    Apply {
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+        plan_id: String,
+        #[arg(long, value_name = "SHA256")]
+        approve: String,
+    },
     /// Print the first ready task without changing durable state.
     Next {
         /// Component directory; defaults to the component containing the
@@ -1271,6 +1295,14 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     component.to_string_lossy().replace('\\', "\\\\"),
                 )))
             }
+            Command::Task { command: TaskCommand::Plan { component_dir, idea, import, review_exception } } => {
+                task_planning_output(&component_dir, |project, component| task_commands::decisions::planning::stage(
+                    project, component, idea.as_deref(), import.as_deref(), review_exception.as_deref()), true)
+            }
+            Command::Task { command: TaskCommand::Apply { component_dir, plan_id, approve } } => {
+                task_planning_output(&component_dir, |project, component| task_commands::decisions::planning::apply(
+                    project, component, &plan_id, &approve), true)
+            }
             Command::Task {
                 command: TaskCommand::Transition {
                     component_dir,
@@ -1503,13 +1535,14 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                         component_dir,
                         commit,
                         message,
+                        review_ack,
                         review_exception,
                     },
             } => {
                 let project = context::ProjectContext::resolve(None)?;
                 let component = project.resolve_component(component_dir.as_deref())?;
                 let response =
-                    task_commands::accept(&project.project_dir, &component, commit, message.as_deref(), review_exception.as_deref(), true)?;
+                    task_commands::accept(&project.project_dir, &component, commit, message.as_deref(), review_ack.as_deref(), review_exception.as_deref(), true)?;
                 Ok(CommandOutput::message(response))
             }
             Command::Component {
@@ -1522,19 +1555,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             Command::Component {
                 command: ComponentCommand::Review { component_dir },
             } => {
-                let project = context::ProjectContext::resolve(None)?;
-                let component = project.resolve_component(component_dir.as_deref())?;
-                let config = config::load(&project.project_dir)?;
-                let context = task_commands::validate_accept_context(&project.project_dir, &component)?;
-                let (receipt_path, report) = task_commands::review::review_intent(&context, &config)?;
-                let response = serde_json::json!({
-                    "status": "success",
-                    "command": "component-review",
-                    "component_dir": context.component_dir.to_string_lossy(),
-                    "receipt_path": receipt_path.to_string_lossy(),
-                    "report": report,
-                }).to_string();
-                Ok(CommandOutput::message(response))
+                component_review_output(component_dir.as_deref(), true)
             }
             Command::Completions { shell } => {
                 use clap::CommandFactory;
@@ -1911,6 +1932,43 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             }
             Command::Task {
                 command:
+                    TaskCommand::Plan {
+                        component_dir,
+                        idea,
+                        import,
+                        review_exception,
+                    },
+            } => task_planning_output(
+                &component_dir,
+                |project, component| {
+                    task_commands::decisions::planning::stage(
+                        project,
+                        component,
+                        idea.as_deref(),
+                        import.as_deref(),
+                        review_exception.as_deref(),
+                    )
+                },
+                false,
+            ),
+            Command::Task {
+                command:
+                    TaskCommand::Apply {
+                        component_dir,
+                        plan_id,
+                        approve,
+                    },
+            } => task_planning_output(
+                &component_dir,
+                |project, component| {
+                    task_commands::decisions::planning::apply(
+                        project, component, &plan_id, &approve,
+                    )
+                },
+                false,
+            ),
+            Command::Task {
+                command:
                     TaskCommand::Transition {
                         component_dir,
                         task_id,
@@ -2096,6 +2154,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                         component_dir,
                         commit,
                         message,
+                        review_ack,
                         review_exception,
                     },
             } => {
@@ -2106,6 +2165,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     &component,
                     commit,
                     message.as_deref(),
+                    review_ack.as_deref(),
                     review_exception.as_deref(),
                     false,
                 )?;
@@ -2120,24 +2180,7 @@ fn execute_raw(command: Option<Command>, json: bool) -> Result<CommandOutput> {
             }
             Command::Component {
                 command: ComponentCommand::Review { component_dir },
-            } => {
-                let project = context::ProjectContext::resolve(None)?;
-                let component = project.resolve_component(component_dir.as_deref())?;
-                let config = config::load(&project.project_dir)?;
-                let context =
-                    task_commands::validate_accept_context(&project.project_dir, &component)?;
-                let (receipt_path, report) =
-                    task_commands::review::review_intent(&context, &config)?;
-                let receipt_rel = receipt_path
-                    .strip_prefix(&project.project_dir)
-                    .unwrap_or(&receipt_path);
-                Ok(CommandOutput::message(format!(
-                    "completed component intent review for {}\nreceipt: {}\n\n{}",
-                    component.display(),
-                    receipt_rel.display(),
-                    report
-                )))
-            }
+            } => component_review_output(component_dir.as_deref(), false),
             Command::Completions { shell } => {
                 use clap::CommandFactory;
                 let mut cmd = Cli::command();
@@ -2337,6 +2380,52 @@ fn task_status_name(status: crate::task_queue::TaskStatus) -> &'static str {
         crate::task_queue::TaskStatus::AwaitingDecision => "awaiting-decision",
         crate::task_queue::TaskStatus::Completed => "completed",
     }
+}
+
+fn component_review_output(component: Option<&Path>, json: bool) -> Result<CommandOutput> {
+    let project = context::ProjectContext::resolve(None)?;
+    let component = project.resolve_component(component)?;
+    let config = config::load(&project.project_dir)?;
+    let context = task_commands::validate_accept_context(&project.project_dir, &component)?;
+    let (path, report) = task_commands::review::review_intent(&context, &config)?;
+    let id = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".receipt.json"))
+        .ok_or_else(|| KvistError::AgentEvidenceFailed {
+            reason: "invalid written review receipt identity".into(),
+        })?;
+    let next = format!(
+        "kvist component accept {} --review-ack {id}",
+        task_commands::decisions::shell_token(&component.to_string_lossy())
+    );
+    Ok(CommandOutput::message(if json {
+        serde_json::json!({
+            "status":"success","command":"component-review","component_dir":context.component_dir,
+            "receipt_id":id,"receipt_path":path,"report":report,"next_command":next
+        })
+        .to_string()
+    } else {
+        format!(
+            "## Advisory component intent review\n\n{report}\n\nReceipt: `{}`\n\nTo acknowledge this receipt and accept this intent, run `{next}`. This does not certify implementation.",
+            path.display()
+        )
+    }))
+}
+
+fn task_planning_output(
+    component: &Path,
+    operation: impl FnOnce(&Path, &Path) -> Result<task_commands::decisions::Output>,
+    json: bool,
+) -> Result<CommandOutput> {
+    let project = context::ProjectContext::resolve(None)?;
+    let component = project.resolve_component(Some(component))?;
+    let output = operation(&project.project_dir, &component)?;
+    Ok(CommandOutput::message(if json {
+        serde_json::json!({"status":"success","component_dir":component,"plan":output}).to_string()
+    } else {
+        output.message
+    }))
 }
 
 fn json_string_escape(output: &mut String, value: &str) {

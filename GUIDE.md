@@ -249,13 +249,23 @@ kvist component validate src/storage
 
 Edit the generated `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` in `src/storage/` to define the component's boundaries.
 
-#### Step 5: Accept Intent
+#### Step 5: Plan and Accept Intent
 
-Once intent documents are authored and reviewed, record their cryptographic revisions into `TODOS.yaml`:
+New components have an empty queue. Describe a desired result to the planner
+or [import a typed draft](docs/task-authoring.md#local-manual-draft):
 
 ```bash
-kvist component accept src/storage
+kvist task plan src/storage --idea 'Distinguish empty and blocked work queues.'
 ```
+
+Read the preview and invoke its numbered approval command. This schedules the
+work and records its intent baseline without running it. See
+[Writing and scheduling tasks](docs/task-authoring.md).
+
+For independently edited intent with `[review] required = true`, run
+`kvist component review src/storage` and use the exact `component accept
+--review-ack` command it prints. An explicit `--review-exception REASON`
+records a deliberate exception for the current bundle.
 
 #### Step 6: Execute and Advance Tasks
 
@@ -269,7 +279,7 @@ kvist task next src/storage
 kvist task approve-policy
 
 # Run the task via the sandboxed agent
-kvist task run src/storage implement-code --stream
+kvist task run src/storage --stream
 ```
 
 ---

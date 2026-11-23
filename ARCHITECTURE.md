@@ -106,10 +106,11 @@ not inferred from this architectural decision.
 2. `kvist component new` creates adjacent requirements, contract, and design
    templates for an approved component boundary.
 3. The architect approves those documents; a designer derives a traceable
-   `TODOS.yaml`. In the target workflow, one bounded advisory review covers the
+   task plan. A bounded advisory review covers the
    exact digests of the three documents and the canonical task-definition
    projection. The human acknowledges the feedback or records an exact-digest
-   exception before acceptance.
+   exception before acceptance when required. An explicit [new-work plan](docs/task-authoring.md)
+   can combine local intent changes and queue additions in one exact approval.
 4. Task authoring receives local component artifacts plus read-only sandbox
    mounts for `ROOT_CONTRACT.md` and the immediate parent `CONTRACT.md`.
    Explicit provider contracts are the only additional cross-component
@@ -135,10 +136,9 @@ not inferred from this architectural decision.
    implementation record, and test evidence.
 9. Human arbitration resolves every discrepancy and preserves rationale.
 
-Current `component accept` behavior remains narrower: it structurally validates
-the component intent and records revisions. It does not enforce AI review.
-The planned review operation is separate because `component accept` must remain
-deterministic, local, and free of agent or network invocation.
+`component review` is a separate model-assisted operation. `component accept`
+checks the exact acknowledged receipt or deliberate exception when review
+is required and records revisions without invoking a model or network.
 
 Local requirements or design changes stale only the local task plan. A local
 contract change also matters to declared consumers. The currently implemented

@@ -98,7 +98,7 @@ fn pending_task_run_preserves_attention(exact: bool) {
         run_task_or_item(
             fixture.project.path(),
             Path::new("."),
-            exact.then_some(plan.input.task.id.as_str()),
+            exact.then_some(plan.input.paused().unwrap().id.as_str()),
             false,
         )
         .is_err()

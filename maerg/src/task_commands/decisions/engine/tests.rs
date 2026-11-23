@@ -6,6 +6,8 @@ use tempfile::TempDir;
 mod context;
 #[path = "document_tests.rs"]
 mod documents;
+#[path = "planning_tests.rs"]
+mod planning;
 
 struct Fixture {
     project: TempDir,
@@ -44,6 +46,7 @@ impl Fixture {
                 context: "An isolated tracked test component".to_owned(),
                 purpose: "Preserve human-directed scope".to_owned(),
                 expected_outcome: "The planned local behavior is verified".to_owned(),
+                regression_tests: Vec::new(),
                 kind,
                 status: TaskStatus::Pending,
                 depends_on: if index == 0 {
@@ -192,7 +195,10 @@ fn source_and_intent_drift_and_tampered_plans_refuse_without_writes() {
     tampered.rationale = "Edited after approval".to_owned();
     fs::write(path, serde_json::to_string(&tampered).unwrap()).unwrap();
     assert!(load_plan(fixture.project.path(), Path::new("."), &plan.id).is_err());
-    assert_eq!(fixture.input().task.status, TaskStatus::AwaitingDecision);
+    assert_eq!(
+        fixture.input().paused().unwrap().status,
+        TaskStatus::AwaitingDecision
+    );
 }
 
 #[test]
@@ -202,7 +208,7 @@ fn retirement_requires_full_closure_and_retains_full_records_and_reasons() {
     let mut draft = fixture.draft();
     draft.disposition = Disposition::Withdraw;
     draft.tasks = vec![TaskEdit::Retire {
-        id: input.task.id.clone(),
+        id: input.paused().unwrap().id.clone(),
         reason: "Retire original scope".to_owned(),
     }];
     assert!(fixture.prepare(draft.clone()).is_err());
@@ -270,7 +276,7 @@ fn draft_fields_paths_and_invalid_graphs_are_rejected() {
         .insert("../CONTRACT.md".to_owned(), "x".to_owned());
     assert!(fixture.prepare(draft).is_err());
     let mut draft = fixture.draft();
-    let task = fixture.input().task;
+    let task = fixture.input().task.unwrap();
     let definition = TaskDefinition {
         id: "new-test".to_owned(),
         title: "Test a prerequisite".to_owned(),
@@ -278,6 +284,7 @@ fn draft_fields_paths_and_invalid_graphs_are_rejected() {
         context: task.context.clone(),
         purpose: task.purpose.clone(),
         expected_outcome: task.expected_outcome.clone(),
+        regression_tests: Some(task.regression_tests.clone()),
         kind: TaskKind::Test,
         depends_on: vec![task.id],
         requirements: task.requirements,
@@ -308,6 +315,7 @@ fn definition(task: &Task, id: &str, kind: TaskKind, depends_on: Vec<String>) ->
         context: task.context.clone(),
         purpose: task.purpose.clone(),
         expected_outcome: task.expected_outcome.clone(),
+        regression_tests: Some(task.regression_tests.clone()),
         kind,
         depends_on,
         requirements: task.requirements.clone(),
@@ -342,7 +350,7 @@ fn additions_form_a_full_lifecycle_before_the_resumed_task() {
     for (index, kind) in kinds.into_iter().enumerate() {
         draft.tasks.push(TaskEdit::Add {
             task: definition(
-                &input.task,
+                input.paused().unwrap(),
                 ids[index],
                 kind,
                 if index == 0 {
@@ -391,7 +399,12 @@ fn lifecycle_and_unknown_dependency_edits_fail_native_validation() {
     ] {
         let mut draft = fixture.draft();
         draft.tasks.push(TaskEdit::Add {
-            task: definition(&fixture.input().task, "invalid-task", kind, dependencies),
+            task: definition(
+                fixture.input().paused().unwrap(),
+                "invalid-task",
+                kind,
+                dependencies,
+            ),
         });
         assert!(fixture.prepare(draft).is_err());
     }
@@ -544,7 +557,7 @@ fn retired_journal_recognition_requires_an_authenticated_exact_receipt() {
     let input = fixture.input();
     let directory = fixture.component().join(".kvist-attempts");
     fs::create_dir(&directory).unwrap();
-    let journal = directory.join(format!("{}.jsonl", input.task.id));
+    let journal = directory.join(format!("{}.jsonl", input.paused().unwrap().id));
     fs::write(&journal, "{\"phase\":\"committed\"}\n").unwrap();
     let input = fixture.input();
     let mut draft = fixture.draft();
@@ -579,7 +592,7 @@ fn retired_journal_recognition_requires_an_authenticated_exact_receipt() {
     let copied = other
         .component()
         .join(".kvist-attempts")
-        .join(format!("{}.jsonl", input.task.id));
+        .join(format!("{}.jsonl", input.paused().unwrap().id));
     fs::copy(&journal, &copied).unwrap();
     assert!(recognizes_retired_journal(&other.component(), &copied).is_err());
     fs::write(&journal, "{\"phase\":\"externally-edited\"}\n").unwrap();
@@ -848,7 +861,7 @@ fn preview_and_task_metadata_tampering_are_never_authority() {
     assert!(fixture.apply(&plan).is_err());
     let input = fixture.input();
     let mut definition = serde_json::to_value(definition(
-        &input.task,
+        input.paused().unwrap(),
         "authored-task",
         TaskKind::Test,
         Vec::new(),

@@ -556,14 +556,14 @@ pub struct TaskRunConfig {
 
 /// Component advisory review policy.
 ///
-/// When `required` is `true` (the default), target acceptance requires a
+/// When `required` is `true`, component acceptance requires a
 /// current review receipt plus explicit human acknowledgement, or a
 /// deliberate exception bound to the exact bundle digests.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReviewConfig {
     /// Whether component acceptance requires an acknowledged review receipt.
-    /// Defaults to `true` when the section or field is absent.
+    /// Omit the entire section for optional review; a present section defaults to required.
     #[serde(default = "review_required_default")]
     pub required: bool,
 }

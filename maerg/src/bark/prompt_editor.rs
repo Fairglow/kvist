@@ -266,6 +266,7 @@ mod tests {
             context: "Context info".to_owned(),
             purpose: "Purpose info".to_owned(),
             expected_outcome: "Outcome info".to_owned(),
+            regression_tests: Vec::new(),
             kind: TaskKind::Test,
             status: TaskStatus::Pending,
             depends_on: Vec::new(),

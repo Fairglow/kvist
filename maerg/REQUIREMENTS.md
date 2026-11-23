@@ -1406,6 +1406,28 @@ The human-requested change has an explicit advisory exception while general
 intent-review receipts are unavailable. Per-plan review feedback or a deliberate
 exception is required; independent observation/comparison remains separate.
 
+### REQ-TASK-PLANNING
+
+Operators MUST be able to turn an idea for one explicitly selected component
+into bounded, reviewable work without a paused task, or import an equivalent
+manual draft. A draft MUST establish covered clauses, bounded work and
+observable, phase-specific evidence. New references MUST resolve within
+allowed intent; historical entries MUST NOT require wholesale migration.
+The host MUST construct ordered test, implementation, audit and compliance
+tasks, retain the exact proposed changes and advisory review or deliberate
+exception, and require explicit, exact approval before scheduling. Applying
+MUST preserve existing task state and use the ordinary durable mutation and
+recovery boundary. Planning and application MUST NOT execute tasks or accept
+implementation. The preview MUST make the next operator action apparent.
+
+Verification evidence and human acceptance MUST remain distinct from model
+claims and queue status. Protected authoring SHOULD receive a focused task
+brief without exposing peer or independent-review internals.
+
+This development bundle does not claim a Kvist review receipt or component
+acceptance. Runtime plans require their own advisory review or exception;
+independent observation and compliance remain separate.
+
 ### REQ-HELP-GUIDANCE
 
 Kvist MUST answer "what is this state, and what do I do next?" from the

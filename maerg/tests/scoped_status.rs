@@ -194,6 +194,7 @@ fn compact_task_progress_counts_states_and_only_suggests_ready_current_work() {
         purpose: "Verify all workflow state counts.".into(),
         expected_outcome: "Counts are explicit; blocked components do not suggest execution."
             .into(),
+        regression_tests: Vec::new(),
         kind: TaskKind::Test,
         status: TaskStatus::Pending,
         depends_on: vec![],

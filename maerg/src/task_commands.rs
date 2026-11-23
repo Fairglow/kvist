@@ -34,8 +34,10 @@ mod checkpoint;
 mod completion;
 mod continuous;
 pub mod decisions;
+mod regression;
 mod repair;
 pub mod review;
+pub(crate) mod task_brief;
 
 /// Selects the first ready task in declared queue order, using the same
 /// definition as the overview, the shell, and the blank-task `task run`
@@ -2116,6 +2118,7 @@ pub fn accept(
     component_path: &Path,
     commit: bool,
     message: Option<&str>,
+    review_ack: Option<&str>,
     review_exception: Option<&str>,
     is_json: bool,
 ) -> Result<String> {
@@ -2150,122 +2153,15 @@ pub fn accept(
                 .join(ComponentArtifact::Design.filename()),
         )?;
 
-        // Check for a valid review receipt when project review is required
         let config = crate::config::load(project_dir)?;
-        if config.review.required {
-            let requirements_digest = digest(requirements.as_bytes());
-            let contract_digest = digest(contract.as_bytes());
-            let design_digest = digest(design.as_bytes());
-
-            let queue_path = context
-                .component_dir
-                .join(ComponentArtifact::TaskQueue.filename());
-            let queue_content =
-                fs::read_to_string(&queue_path).map_err(|source| KvistError::Io {
-                    operation: "read TODOS.yaml for review digest",
-                    path: queue_path.clone(),
-                    source,
-                })?;
-            let current_queue: crate::task_queue::TaskQueue =
-                crate::task_queue::parse(&queue_content).map_err(|source| {
-                    KvistError::TaskQueueUnavailable {
-                        path: queue_path,
-                        reason: source.to_string(),
-                    }
-                })?;
-
-            // Build canonical task projection
-            let task_projections: Vec<crate::task_commands::review::TaskProjection> = current_queue
-                .tasks
-                .iter()
-                .map(|task| crate::task_commands::review::TaskProjection {
-                    id: task.id.clone(),
-                    title: task.title.clone(),
-                    description: task.description.clone(),
-                    context: task.context.clone(),
-                    purpose: task.purpose.clone(),
-                    expected_outcome: task.expected_outcome.clone(),
-                    kind: format!("{:?}", task.kind),
-                    depends_on: task.depends_on.clone(),
-                    requirements: task.requirements.clone(),
-                })
-                .collect();
-            let projection_json =
-                serde_json::to_string_pretty(&task_projections).map_err(|source| {
-                    KvistError::AgentEvidenceFailed {
-                        reason: format!(
-                            "cannot serialize task projection for review check: {source}"
-                        ),
-                    }
-                })?;
-            let todos_projection_digest = digest(projection_json.as_bytes());
-
-            // Check for current review receipt
-            let reviews_dir = context.component_dir.join(".kvist").join("reviews");
-            let mut has_current_receipt = false;
-            if reviews_dir.exists() {
-                for entry in fs::read_dir(&reviews_dir).map_err(|source| KvistError::Io {
-                    operation: "read reviews directory",
-                    path: reviews_dir.clone(),
-                    source,
-                })? {
-                    let entry = entry.map_err(|source| KvistError::Io {
-                        operation: "read reviews entry",
-                        path: reviews_dir.clone(),
-                        source,
-                    })?;
-                    let path = entry.path();
-                    if path.extension().and_then(|ext| ext.to_str()) == Some("json")
-                        && let Ok(receipt_bytes) = fs::read(path)
-                    {
-                        match serde_json::from_slice::<crate::task_commands::review::ReviewReceipt>(
-                            &receipt_bytes,
-                        ) {
-                            Ok(receipt)
-                                if receipt.requirements_digest == requirements_digest
-                                    && receipt.contract_digest == contract_digest
-                                    && receipt.design_digest == design_digest
-                                    && receipt.todos_projection_digest
-                                        == todos_projection_digest =>
-                            {
-                                // Verify HMAC authentication to prevent receipt forgery
-                                let receipt_json = serde_json::to_string(&receipt).map_err(|source| {
-                                    KvistError::AgentEvidenceFailed {
-                                        reason: format!("cannot serialize receipt for HMAC verification: {source}"),
-                                    }
-                                })?;
-                                if crate::task_commands::review::verify_receipt_hmac(
-                                    &receipt_json,
-                                    &receipt.authentication,
-                                    project_dir,
-                                ) {
-                                    has_current_receipt = true;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            if !has_current_receipt {
-                if let Some(exception_reason) = review_exception {
-                    // Record the exception with the acceptance
-                    eprintln!("review exception recorded: {}", exception_reason);
-                } else {
-                    return Err(KvistError::ComponentDocumentValidationFailed {
-                        path: context
-                            .component_dir
-                            .join(ComponentArtifact::TaskQueue.filename()),
-                        diagnostics: format!(
-                            "project review is required but no current review receipt exists for this intent bundle. Run `kvist component review {}` first, or use `kvist component accept {} --review-exception 'reason'`",
-                            context.component_path.display(),
-                            context.component_path.display()
-                        ),
-                    });
-                }
-            }
-        }
+        review::check_acceptance(
+            &context,
+            &config,
+            &queue,
+            [&requirements, &contract, &design],
+            review_ack,
+            review_exception,
+        )?;
 
         let inspection = project_state::inspect(project_dir)?;
         let component_root = project_dir.join(
@@ -3410,6 +3306,7 @@ pub fn finalize(
         let journal_path = existing_attempt_path(&context.component_dir, task_id);
         let journal = read_attempt_journal(&journal_path)?;
         validate_finalization_identity(&journal_path, &journal, task_id, attempt_id)?;
+        require_successful_finalization_evidence(&journal_path, &journal, attempt_id)?;
         let (mut queue, queue_digest) = read_queue_snapshot(&context.component_dir)?;
         let task_index = queue
             .tasks
@@ -3844,6 +3741,39 @@ fn validate_finalization_identity(
         return Err(journal_error(
             path,
             "finalization requires an existing prepared task attempt",
+        ));
+    }
+    Ok(())
+}
+
+fn require_successful_finalization_evidence(
+    path: &Path,
+    journal: &AttemptJournal,
+    attempt_id: &str,
+) -> Result<()> {
+    let mut stage = 0;
+    for event in journal
+        .events
+        .iter()
+        .filter(|event| event["attempt_id"] == attempt_id)
+    {
+        let success = event["result"] == "success";
+        stage = match (stage, event["phase"].as_str(), success) {
+            (0, Some("execution-finished"), true) => 1,
+            (1, Some("verification-finished"), true) => 2,
+            (2, Some("pending-human-disposition"), _) => 3,
+            (
+                _,
+                Some("execution-finished" | "verification-finished" | "pending-human-disposition"),
+                _,
+            ) => 0,
+            _ => stage,
+        };
+    }
+    if stage != 3 {
+        return Err(journal_error(
+            path,
+            "accept requires successful execution and verification evidence pending human disposition for this exact attempt",
         ));
     }
     Ok(())
@@ -5298,7 +5228,8 @@ fn execute_task_under_lock(
         } else if run_result.success {
             let rust_verification = is_rust_verification(project_dir);
             if task.kind == TaskKind::Implementation
-                || task.kind == TaskKind::Test && rust_verification
+                || task.kind == TaskKind::Test
+                    && (rust_verification || !task.regression_tests.is_empty())
             {
                 let needs_finalization = !continuous && task.kind == TaskKind::Implementation;
                 let verification_label = if rust_verification {
@@ -5336,7 +5267,7 @@ fn execute_task_under_lock(
                     eprintln!("Running {verification_label}...");
                     let res = verify_task(
                         component_path,
-                        task_id,
+                        task,
                         project_dir,
                         &config,
                         &sandbox_probe,
@@ -5532,6 +5463,9 @@ fn execute_task_under_lock(
                                 "phase": "verification-finished",
                                 "result": "success",
                                 "command": verify_res.command,
+                                "exit_code": verify_res.exit_code,
+                                "regression_tests": task.regression_tests,
+                                "expected_test_result": if task.regression_tests.is_empty() { None } else if task.kind == TaskKind::Test { Some("red") } else { Some("green") },
                                 "source_scopes": {
                                     "src": verified_digests.0,
                                     "tests": verified_digests.1,
@@ -6850,7 +6784,7 @@ fn recovered_attempt_tag(secret: &[u8], evidence: &RecoveredAttempt) -> Result<S
 /// Verification run result
 #[derive(Debug, Clone)]
 pub struct VerificationResult {
-    /// True if the test command finished within the timeout and exited with code 0.
+    /// True if the command satisfied its host-defined verification expectation.
     pub success: bool,
     /// The template/command string that was executed.
     pub command: String,
@@ -7115,7 +7049,7 @@ pub fn find_test_command(
 /// Runs verification through the same required sandbox protocol as agents.
 pub fn verify_task(
     component_path: &Path,
-    task_id: &str,
+    task: &Task,
     project_dir: &Path,
     config: &crate::config::ProjectConfig,
     probe: &crate::sandbox::SandboxProbe,
@@ -7155,14 +7089,26 @@ pub fn verify_task(
             &context.component_dir,
             std::time::Duration::from_secs(policy.timeout_seconds),
             policy.max_output_bytes,
-            |command, output| {
-                finalize_verification(&context, task_id, command, output, policy, config)
+            |command, output, is_test| {
+                let expected = (is_test && !task.regression_tests.is_empty()).then_some((
+                    task.regression_tests.as_slice(),
+                    task.kind == TaskKind::Test,
+                ));
+                finalize_verification(
+                    &context, &task.id, command, output, policy, config, expected,
+                )
             },
         );
     }
+    if !task.regression_tests.is_empty() {
+        return Err(KvistError::AgentEvidenceFailed {
+            reason: "named regression verification requires the approved Rust quality pipeline"
+                .into(),
+        });
+    }
     if let Some(result) = vendored_language_verification(
         &context,
-        task_id,
+        &task.id,
         project_dir,
         sandbox_config,
         config,
@@ -7215,7 +7161,15 @@ pub fn verify_task(
         },
         &approved_runner,
     )?;
-    finalize_verification(&context, task_id, &command_str, &result, policy, config)
+    finalize_verification(
+        &context,
+        &task.id,
+        &command_str,
+        &result,
+        policy,
+        config,
+        None,
+    )
 }
 
 /// Run offline verification for a vendored non-Rust project, returning the
@@ -7295,6 +7249,7 @@ fn vendored_language_verification(
         &result,
         policy,
         config,
+        None,
     )?))
 }
 
@@ -7319,6 +7274,7 @@ fn finalize_verification(
     result: &crate::sandbox::ExecutionResult,
     policy: &crate::config::TestPolicy,
     config: &crate::config::ProjectConfig,
+    expected: Option<(&[String], bool)>,
 ) -> Result<VerificationResult> {
     let crate::sandbox::ExecutionResult {
         output,
@@ -7337,13 +7293,36 @@ fn finalize_verification(
         &redactions,
         policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES),
     );
+    let exit_code = output.status.code();
+    let observed = !*timed_out && !*output_limit_exceeded && !*cancelled;
+    let success = observed
+        && expected.map_or_else(
+            || output.status.success(),
+            |(names, red)| {
+                exit_code == Some(if red { 101 } else { 0 })
+                    && std::str::from_utf8(&output.stdout)
+                        .is_ok_and(|stdout| regression::matches_result(stdout, names, red))
+            },
+        );
+    let mut diagnostics = String::new();
+    if let Some((names, red)) = expected {
+        diagnostics = format!(
+            "Kvist expected {} for [{}]; expectation {}.\n",
+            if red {
+                "failed tests and no other failures"
+            } else {
+                "passing tests"
+            },
+            names.join(", "),
+            if success { "met" } else { "not met" },
+        );
+    }
+    diagnostics.push_str(&String::from_utf8_lossy(&output.stderr));
     let stderr = redact_bounded(
-        String::from_utf8_lossy(&output.stderr).into_owned(),
+        diagnostics,
         &redactions,
         policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES),
     );
-    let success = !*timed_out && !*output_limit_exceeded && !*cancelled && output.status.success();
-    let exit_code = output.status.code();
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let attempt_path = attempt_path(&context.component_dir, task_id)?;
     append_verification(
@@ -7395,6 +7374,7 @@ mod tests {
             context: String::new(),
             purpose: String::new(),
             expected_outcome: String::new(),
+            regression_tests: Vec::new(),
             kind: TaskKind::Implementation,
             status,
             depends_on: deps.iter().map(|dep| (*dep).to_owned()).collect(),

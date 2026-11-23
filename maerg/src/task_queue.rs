@@ -122,6 +122,9 @@ pub struct Task {
     pub purpose: String,
     /// Observable completion condition.
     pub expected_outcome: String,
+    /// Exact Rust libtest cases expected red in test tasks and green in implementation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regression_tests: Vec<String>,
     /// Lifecycle role controlling execution and review ordering.
     pub kind: TaskKind,
     /// Durable workflow state.
@@ -655,6 +658,9 @@ fn append_task(output: &mut String, task: &Task) {
     );
     append_string_list(output, 4, "depends_on", &task.depends_on);
     append_string_list(output, 4, "requirements", &task.requirements);
+    if !task.regression_tests.is_empty() {
+        append_string_list(output, 4, "regression_tests", &task.regression_tests);
+    }
     line(output, 4, "timestamps:");
     line(
         output,
@@ -932,6 +938,20 @@ pub(crate) fn validate_task(
     if validate_set_order {
         validate_sorted_unique(&task.depends_on, "depends_on")?;
         validate_sorted_unique(&task.requirements, "requirements")?;
+        validate_sorted_unique(&task.regression_tests, "regression_tests")?;
+    }
+    if task.regression_tests.len() > 16
+        || !task.regression_tests.is_empty()
+            && !matches!(task.kind, TaskKind::Test | TaskKind::Implementation)
+        || task
+            .regression_tests
+            .iter()
+            .any(|name| !valid_regression_name(name))
+    {
+        return Err(TaskQueueError::invalid(format!(
+            "task `{}` may name at most 16 exact Rust regression test cases on authoring phases only",
+            task.id
+        )));
     }
     for requirement in &task.requirements {
         let Some((source, locator)) = requirement.split_once('#') else {
@@ -1151,6 +1171,17 @@ fn validate_revision(value: &str, field: &str) -> std::result::Result<(), TaskQu
     Ok(())
 }
 
+fn valid_regression_name(name: &str) -> bool {
+    name.len() <= 256
+        && name.split("::").all(|part| {
+            let mut bytes = part.bytes();
+            bytes
+                .next()
+                .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        })
+}
+
 pub(crate) fn valid_task_id(value: &str) -> bool {
     !value.is_empty()
         && value.chars().count() <= MAX_TASK_ID_CHARS
@@ -1279,6 +1310,7 @@ mod tests {
             context: String::new(),
             purpose: String::new(),
             expected_outcome: String::new(),
+            regression_tests: Vec::new(),
             kind: TaskKind::Implementation,
             status,
             depends_on: deps.iter().map(|dep| (*dep).to_owned()).collect(),

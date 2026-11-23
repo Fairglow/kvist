@@ -79,10 +79,10 @@ constraint set injected into component work.
   acceptance requires review plus explicit human acknowledgement, or a
   deliberate exception bound to the exact bundle digests. A persistent project
   opt-out may disable the per-bundle gate but must be visible and explicit.
-- Keep `component accept` deterministic and local. Current behavior only
-  validates structure and records revisions; advisory-review enforcement and
-  project-level acceptance are planned and must not be represented as already
-  implemented.
+- Keep `component accept` deterministic and local. When component intent
+  review is required, validate the acknowledgement of a current `component
+  review` receipt or record a deliberate exception before recording revisions.
+  Project-level acceptance remains separate and planned.
 - `TODOS.yaml` orders work as tests, implementation, security audit, then
   compliance review.
 - Requirements state what must be achieved, contracts state what consumers may

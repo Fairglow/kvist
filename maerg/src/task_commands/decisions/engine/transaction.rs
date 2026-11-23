@@ -33,13 +33,37 @@ pub(super) fn prepare(
     review: IntentReview,
 ) -> Result<Plan> {
     let context = context_for(project_dir, &input.component)?;
-    let fresh = capture(project_dir, &input.component, Some(&input.task.id))?;
+    let fresh = capture(project_dir, &input.component, Some(&input.paused()?.id))?;
     if encode(&fresh)? != encode(&input)? {
         return Err(fail(
             &context.component_dir,
             "captured inputs are stale or inconsistent; capture again",
         ));
     }
+    let at = now()?;
+    let disposition = draft.disposition;
+    let changes = tasks::outputs(&context, &input, draft, &at)?;
+    prepare_changes(
+        project_dir,
+        input,
+        changes,
+        selection,
+        review,
+        disposition,
+        at,
+    )
+}
+
+pub(in crate::task_commands::decisions) fn prepare_changes(
+    project_dir: &Path,
+    input: Capture,
+    changes: tasks::Changes,
+    selection: Selection,
+    review: IntentReview,
+    disposition: Disposition,
+    at: Timestamp,
+) -> Result<Plan> {
+    let context = context_for(project_dir, &input.component)?;
     if review.report.trim().is_empty() {
         return Err(fail(
             &context.component_dir,
@@ -57,9 +81,6 @@ pub(super) fn prepare(
             "selected option ID must be nonblank, bounded and free of control characters",
         ));
     }
-    let at = now()?;
-    let disposition = draft.disposition;
-    let changes = tasks::outputs(&context, &input, draft, &at)?;
     let mut plan = Plan {
         schema_version: 1,
         id: String::new(),
@@ -81,7 +102,12 @@ pub(super) fn prepare(
     let secret = secret(&context)?;
     plan.authentication_tag = authenticated(&plan, &secret)?;
     let json = encode(&plan)?;
-    bounded(&json, Path::new("plan.json"))?;
+    if json.len() > storage::MAX_PLAN_BYTES {
+        return Err(fail(
+            &context.component_dir,
+            "frozen plan exceeds the retained transaction bound",
+        ));
+    }
     let markdown = preview(&plan)?;
     bounded(&markdown, Path::new("plan.md"))?;
     let total = json
@@ -95,11 +121,10 @@ pub(super) fn prepare(
             "plan and preview exceed the 8 MiB aggregate limit",
         ));
     }
-    let fresh = capture(
-        project_dir,
-        &plan.input.component,
-        Some(&plan.input.task.id),
-    )?;
+    let fresh = match &plan.input.task {
+        Some(task) => capture(project_dir, &plan.input.component, Some(&task.id))?,
+        None => capture_queue(project_dir, &plan.input.component)?,
+    };
     if encode(&fresh)? != encode(&plan.input)? {
         return Err(fail(
             &context.component_dir,
@@ -108,14 +133,19 @@ pub(super) fn prepare(
     }
     let directory = context.component_dir.join(DIRECTORY);
     storage::directory(&directory)?;
-    retain(&directory.join(format!("{}.md", plan.id)), &markdown)?;
-    retain(&directory.join(format!("{}.json", plan.id)), &json)?;
+    retain(&directory.join(format!("{}.md", plan.id)), &markdown, false)?;
+    retain(&directory.join(format!("{}.json", plan.id)), &json, true)?;
     Ok(plan)
 }
 
-fn retain(path: &Path, text: &str) -> Result<()> {
+fn retain(path: &Path, text: &str, transaction: bool) -> Result<()> {
     if exists(path)? {
-        if read_text(path)? != text {
+        let current = if transaction {
+            storage::read_transaction(path)?
+        } else {
+            read_text(path)?
+        };
+        if current != text {
             return Err(fail(
                 path,
                 "content-addressed decision history already exists with different bytes; never clobber it",
@@ -123,7 +153,11 @@ fn retain(path: &Path, text: &str) -> Result<()> {
         }
         return Ok(());
     }
-    write_new(path, text)
+    if transaction {
+        storage::write_transaction(path, text, true)
+    } else {
+        write_new(path, text)
+    }
 }
 
 fn identity(plan: &Plan) -> Result<(String, String)> {
@@ -269,11 +303,7 @@ fn save_journal(
     }
     journal.authentication_tag = authenticated(journal, secret)?;
     let text = encode(journal)?;
-    if new {
-        write_new(&path, &text)
-    } else {
-        replace(&path, &text)
-    }
+    storage::write_transaction(&path, &text, new)
 }
 
 pub(super) fn apply(
@@ -420,7 +450,7 @@ fn apply_locked(
         authentication_tag: String::new(),
     };
     receipt.authentication_tag = authenticated(&receipt, secret)?;
-    write_new(&receipt_path, &encode(&receipt)?)?;
+    storage::write_transaction(&receipt_path, &encode(&receipt)?, true)?;
     if fail_after == Some(plan.outputs.len() + 1) {
         return Err(fail(
             &receipt_path,
@@ -505,7 +535,7 @@ pub(super) fn recognizes_retired_journal(component: &Path, journal: &Path) -> Re
     let key = format!("local/.kvist-attempts/{id}.jsonl");
     let mut total = 0_usize;
     for path in receipts {
-        let text = read_text(&path)?;
+        let text = storage::read_transaction(&path)?;
         total = total.saturating_add(text.len());
         if total > MAX_TOTAL {
             return Err(fail(&directory, "retired receipt inventory exceeds 8 MiB"));
@@ -575,11 +605,14 @@ fn code_block(text: &str) -> String {
 }
 
 fn preview(plan: &Plan) -> Result<String> {
+    let Some(task) = &plan.input.task else {
+        return queue_preview(plan);
+    };
     let mut text = format!(
         "# Deterministic decision plan\n\nPlan: `{}`\n\nComponent: `{}`\n\nPaused task: `{}`\n\nDisposition: `{:?}`\n\nExact approval: `{}`\n\nThis approves only these local intent and scheduling changes, not execution, compliance, model findings or Git publication. Application is a durable, recoverable multi-file transaction, not one atomic filesystem operation.\n\n## Selected option and human guidance\n\n{}\n## Rationale\n\n{}\n## Advisory review or explicit exception\n\nException: `{}`\n\n{}\n",
         plan.id,
         plan.input.component.display(),
-        plan.input.task.id,
+        task.id,
         plan.disposition,
         plan.approval,
         code_block(&encode(&plan.selection)?),
@@ -610,5 +643,52 @@ fn preview(plan: &Plan) -> Result<String> {
     ));
     text.push_str("\n## Evidence and follow-up\n\nRetained IMPL.md and source-derived reports remain historical observations; new intent needs fresh tests, implementation, independent audit, clean-slate observation and source-blind comparison. No source was removed and no task was marked completed by this decision.\n\n### Frozen input bindings\n\n");
     text.push_str(&code_block(&encode(&plan.input.bindings)?));
+    Ok(text)
+}
+
+fn queue_preview(plan: &Plan) -> Result<String> {
+    let queue = parse(&plan.outputs["TODOS.yaml"])
+        .map_err(|error| fail(Path::new("TODOS.yaml"), error.to_string()))?;
+    let additions = queue
+        .tasks
+        .get(plan.input.queue.tasks.len()..)
+        .ok_or_else(|| {
+            fail(
+                Path::new("TODOS.yaml"),
+                "scheduling output does not preserve the original queue",
+            )
+        })?;
+    let mut text = format!(
+        "# Schedule new work\n\nComponent: `{}`\n\nPlan: `{}`\n\nApproval schedules {} new tasks. It does not execute, accept or commit them.\n\n## Idea and rationale\n\n{}{}\n## Advisory review or exception\n\n{}",
+        plan.input.component.display(),
+        plan.id,
+        additions.len(),
+        code_block(&plan.selection.guidance),
+        code_block(&plan.rationale),
+        code_block(&plan.review.report),
+    );
+    for task in additions {
+        text.push_str(&format!("\n### `{}`\n\n{}", task.id, code_block(&format!(
+            "{}\n\nWork: {}\nContext: {}\nPurpose: {}\nExpected evidence: {}\nReferences: {}\nAfter: {}",
+            task.title, task.description, task.context, task.purpose, task.expected_outcome,
+            task.requirements.join(", "), if task.depends_on.is_empty() { "none".into() } else { task.depends_on.join(", ") },
+        ))));
+    }
+    for name in ["REQUIREMENTS.md", "CONTRACT.md", "DESIGN.md"] {
+        if let Some(after) = plan.outputs.get(name) {
+            text.push_str(&format!(
+                "\n## {name}\n\n### Before\n\n{}\n### After\n\n{}",
+                code_block(&plan.input.files[name]),
+                code_block(after)
+            ));
+        }
+    }
+    text.push_str("\n## Apply exactly this plan\n\n");
+    text.push_str(&code_block(&format!(
+        "kvist task apply {} {} --approve {}",
+        shell_token(&plan.input.component.to_string_lossy()),
+        plan.id,
+        plan.approval
+    )));
     Ok(text)
 }

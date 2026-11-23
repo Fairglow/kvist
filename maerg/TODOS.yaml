@@ -10,6 +10,58 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "task-planning-write-tests"
+    title: "Test standalone task planning"
+    description: "Exercise a manual idea draft, exact approval, reference validation, stale inputs, and preserved prior state using a temporary component."
+    context: "The decision planner requires paused work; normal scaffolds have an empty queue."
+    purpose: "Specify a local, inspectable way to add work without granting models queue authority."
+    expected_outcome: "Fixtures reject invalid input without scheduling, and accept one exact plan with ordered lifecycle tasks."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-TASK-PLANNING"]
+    timestamps: {created_at: "2026-11-23T13:03:00Z", updated_at: "2026-11-23T13:03:00Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-planning-implement-code"
+    title: "Stage and schedule new component work"
+    description: "Connect typed work-item planning to existing transaction and numbered approval facilities."
+    context: "Reuse native literal document edits, attempt fences and the exact approval boundary."
+    purpose: "Let operators move from an idea to bounded and traceable pending tasks."
+    expected_outcome: "CLI previews the exact work and approval, preserves existing state on apply, and guides the operator to task next."
+    kind: implementation
+    status: pending
+    depends_on: ["task-planning-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-TASK-PLANNING"]
+    timestamps: {created_at: "2026-11-23T13:03:00Z", updated_at: "2026-11-23T13:03:00Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-planning-security-audit"
+    title: "Audit new-work scheduling boundaries"
+    description: "Review the local plan, reference scope, approval, concurrent drift and interrupted application boundaries independently."
+    context: "Planning output and imported drafts are untrusted; only the host owns durable scheduling."
+    purpose: "Find authority or evidence gaps without certifying the implementation."
+    expected_outcome: "Retain scoped findings and evidence gaps for human arbitration."
+    kind: security-audit
+    status: pending
+    depends_on: ["task-planning-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-TASK-PLANNING"]
+    timestamps: {created_at: "2026-11-23T13:03:00Z", updated_at: "2026-11-23T13:03:00Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
+  - id: "task-planning-compliance-review"
+    title: "Compare standalone planning with approved intent"
+    description: "Compare independently observed scheduling behavior and tests with the approved planning clauses."
+    context: "The implementer does not derive the record or certify the new workflow."
+    purpose: "Separate task execution evidence from independent review and human acceptance."
+    expected_outcome: "Record clause-level matches, discrepancies and limitations using source-blind comparison."
+    kind: compliance-review
+    status: pending
+    depends_on: ["task-planning-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-TASK-PLANNING"]
+    timestamps: {created_at: "2026-11-23T13:03:00Z", updated_at: "2026-11-23T13:03:00Z", completed_at: null}
+    blocked_reason: null
+    recovery_state: null
   - id: "task-stall-watchdog-write-tests"
     title: "write_tests: distinguish stagnation from execution limits"
     description: "Exercise the progress clock, recurrence handoff, bounded directory traversal and default versus explicitly approved task time."

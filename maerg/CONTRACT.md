@@ -578,7 +578,9 @@ task additions/updates/retirements, never queue lifecycle/acceptance metadata.
 Manual input uses the same schema and validator, not a whole replacement queue.
 No source or arbitrary filesystem writes are allowed by decision application.
 
-Plans have per-file 1 MiB and aggregate 8 MiB bounds. Discussion and model frames
+Plans have per-input-file 1 MiB and aggregate 8 MiB bounds, with up to 4 MiB
+for retained transaction JSON containing both before and after snapshots.
+Discussion and model frames
 are additionally bounded by configured context/output budgets, with no silent
 history truncation. A discussion has at most 32 exchanges and 256 KiB; a model
 support report has at most 65,536 bytes, including after redaction. Input, source, approval or evidence drift refuses application.
@@ -629,14 +631,42 @@ of model output; the host materializes, validates and previews complete files.
 `add`/`update` have a complete `task` object with `id`, `title`, `description`,
 `context`, `purpose`, `expected_outcome`, native `kind`, `depends_on`, and
 `requirements`; `retire` has `id` and `reason`. Unknown fields, whole queues,
-timestamps, statuses and acceptance IDs are rejected. `disposition` is
-`resolve` or `withdraw`. Host-authored lifecycle/revision metadata and retained
+timestamps, statuses and acceptance IDs are rejected.
+`regression_tests` is optional on authoring definitions; omission preserves
+prior selectors on update. An explicit empty list removes them.
+The disposition is `resolve` or `withdraw`. Host-authored lifecycle/revision metadata and retained
 retirement records are visible in the frozen plan preview before approval.
 `--continue` is a separate opt-in to ordinary execution after application,
 requiring its independent existing execution approval; it never broadens the
 intent plan's filesystem authority.
 Nonstreamed execution progress is diagnostic stderr; final results remain stdout,
 so `--json decision ... apply ... --continue` retains one valid JSON result.
+
+## Planning new work
+
+`kvist task plan COMPONENT --idea TEXT` drafts work with the architect model.
+`kvist task plan COMPONENT --import FILE [--review-exception REASON]` takes
+the same strict native version-1 JSON without a drafting model. An advisory
+model reviews the materialized candidate unless an explicit reason is supplied.
+The plan is provisional until the operator uses the displayed numbered
+response (`kvist decision COMPONENT do NUMBER`) or
+`kvist task apply COMPONENT PLAN_ID --approve SHA256`. Approval schedules work
+but does not run it, change existing task dispositions, certify it, or commit it.
+
+`QueueDraft` and `WorkItem` in `src/task_commands/decisions/planning.rs` define
+the native Rust/Serde JSON format. A work item supplies a unique kebab-case
+stem, title, context, purpose, requirement references, optional prerequisite
+task IDs, and a description and expected evidence for each lifecycle phase.
+Rust work items MAY supply `regression_tests`, up to 16 exact, unique libtest
+case names. The approved Cargo pipeline must observe those and only those
+failures in the test phase, and the same cases passing in implementation.
+Without that field, existing execution semantics are unchanged.
+The host adds the four standard ID suffixes, ties each phase to its predecessor,
+and owns all lifecycle metadata. Optional `document_edits` use the existing
+exact excerpt format for local intent. New locators resolve only in local
+requirements/contract/design, the root contract, or the immediate parent
+contract; at least one local requirement reference is required. Planning is
+for additions; changes to paused work continue through `decision plan`.
 
 ## Protected resilience
 

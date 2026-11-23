@@ -602,6 +602,8 @@ mod tests {
         let root = root();
         let task = node(&root, "task");
         for name in [
+            "plan",
+            "apply",
             "next",
             "transition",
             "run",
@@ -614,7 +616,7 @@ mod tests {
         ] {
             assert!(task.find_subcommand(name).is_some(), "missing task {name}");
         }
-        assert_eq!(task.subcommands.len(), 9);
+        assert_eq!(task.subcommands.len(), 11);
     }
 
     #[test]

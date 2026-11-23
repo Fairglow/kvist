@@ -37,6 +37,12 @@ network = "deny"
 mount = "component"
 environment_allowlist = ["PATH", "RUST_BACKTRACE", "CARGO_HOME", "RUSTC", "TERM"]
 
+# Optional component-intent review policy. Standalone task plans always retain
+# an advisory review or an explicit plan exception.
+# To require a receipt acknowledgement on `component accept`, add:
+# [review]
+# required = true
+
 [task_run]
 # Local unaccepted checkpoints: task, item (default), component, or manual.
 # Changes require `kvist task approve-policy`.

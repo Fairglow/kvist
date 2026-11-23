@@ -637,7 +637,7 @@ fn recover_orphaned_checkpoint(
     Ok(())
 }
 
-fn item_groups(tasks: &[Task]) -> Result<BTreeMap<String, Vec<String>>> {
+pub(super) fn item_groups(tasks: &[Task]) -> Result<BTreeMap<String, Vec<String>>> {
     let stems = tasks
         .iter()
         .filter_map(|task| item_stem(&task.id))
@@ -741,13 +741,24 @@ fn definition_digest(queue: &TaskQueue) -> Result<String> {
             )
         })
         .collect::<Vec<_>>();
-    serde_json::to_vec(&(
+    let binding = (
         &queue.component.requirements_revision,
         &queue.component.contract_revision,
         &queue.component.design_revision,
         &queue.component.parent_contract,
         definitions,
-    ))
+    );
+    let regressions = queue
+        .tasks
+        .iter()
+        .filter(|task| !task.regression_tests.is_empty())
+        .map(|task| (&task.id, &task.regression_tests))
+        .collect::<Vec<_>>();
+    if regressions.is_empty() {
+        serde_json::to_vec(&binding)
+    } else {
+        serde_json::to_vec(&(binding, regressions))
+    }
     .map(|bytes| digest(&bytes))
     .map_err(|error| KvistError::AgentEvidenceFailed {
         reason: format!("cannot record task definitions: {error}"),
@@ -1227,13 +1238,15 @@ fn source_evidence(context: &TaskContext) -> Result<String> {
 
 fn verification_evidence(context: &TaskContext) -> Result<Vec<Value>> {
     let queue = read_queue(&context.component_dir)?;
-    let mut evidence = BTreeMap::<String, (usize, Value)>::new();
+    let mut evidence = BTreeMap::<(String, bool), (usize, Value)>::new();
     let current_scopes = serde_json::json!({
         "src":digest_path_tree(&context.component_dir.join("src"))?,
         "tests":digest_path_tree(&context.component_dir.join("tests"))?,
     });
     for task in queue.tasks.iter().filter(|task| {
-        task.kind == TaskKind::Implementation && task.status == TaskStatus::Completed
+        task.status == TaskStatus::Completed
+            && (task.kind == TaskKind::Implementation
+                || task.kind == TaskKind::Test && !task.regression_tests.is_empty())
     }) {
         let path = existing_attempt_path(&context.component_dir, &task.id);
         let metadata = match fs::symlink_metadata(&path) {
@@ -1257,10 +1270,14 @@ fn verification_evidence(context: &TaskContext) -> Result<Vec<Value>> {
             if event["phase"] == "verification-finished" {
                 let key = serde_json::to_string(&event["command"])
                     .map_err(|err| error(context, &err.to_string()))?;
-                let record = evidence.entry(key).or_insert((0, Value::Null));
+                let record = evidence
+                    .entry((key, task.kind == TaskKind::Test))
+                    .or_insert((0, Value::Null));
                 record.0 += 1;
                 record.1 = serde_json::json!({
                     "result":event["result"], "command":event["command"],
+                    "task_id":task.id, "attempt_id":event["attempt_id"],
+                    "regression_tests":event["regression_tests"], "expected_test_result":event["expected_test_result"],
                     "stdout":event["stdout"], "stderr":event["stderr"],
                     "source_scopes":event["source_scopes"],
                     "matches_current_source_scopes": event.get("source_scopes").map(|scopes| scopes == &current_scopes),

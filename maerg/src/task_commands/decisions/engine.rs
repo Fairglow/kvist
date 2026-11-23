@@ -9,9 +9,13 @@ mod storage;
 mod tasks;
 mod transaction;
 
+pub(in crate::task_commands) mod review_storage {
+    pub(in crate::task_commands) use super::storage::{directory, read_text, secret, write_new};
+}
+
 use storage::{
     absolute, authenticated, bounded, decode, encode, equal, existing_secret, exists, fail, now,
-    read_bytes, read_text, remove, replace, replace_controlled, safe_path, secret, write_new,
+    read_bytes, read_text, remove, replace_controlled, safe_path, secret, write_new,
 };
 
 pub(super) fn context_for(project_dir: &Path, component: &Path) -> Result<TaskContext> {
@@ -21,6 +25,13 @@ pub(super) fn context_for(project_dir: &Path, component: &Path) -> Result<TaskCo
 pub(super) fn capture(project_dir: &Path, component: &Path, task: Option<&str>) -> Result<Capture> {
     capture::capture(project_dir, component, task)
 }
+
+pub(super) fn capture_queue(project_dir: &Path, component: &Path) -> Result<Capture> {
+    capture::capture_queue(project_dir, component)
+}
+
+pub(super) use tasks::queue_changes;
+pub(super) use transaction::prepare_changes;
 
 pub(super) fn prepare(
     project_dir: &Path,
@@ -54,7 +65,7 @@ pub(super) fn ensure_no_pending(component_dir: &Path) -> Result<()> {
     {
         return Err(fail(
             &path,
-            "pending decision transaction fences ordinary writers; repeat the identical approved decision apply",
+            "pending plan transaction fences ordinary writers; repeat the identical approved apply",
         ));
     }
     Ok(())

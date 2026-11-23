@@ -216,10 +216,13 @@ A configured acquisition failure never falls back to host acquisition.
 
 ### 4.2 `kvist task`
 
-All component-scoped forms take an optional `COMPONENT_DIR` (P2):
+Most component-scoped forms take an optional `COMPONENT_DIR` (P2).
+Planning and applying new work require a deliberate component selection.
 
 | Command               | Form                                                                                           | Purpose                                                                                                                                                                                                                                                                                                               |
 | --------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task plan`           | `kvist task plan COMPONENT_DIR (--idea TEXT \| --import FILE) [--review-exception REASON]`       | draft, validate and preview new work; see [task authoring](task-authoring.md) |
+| `task apply`          | `kvist task apply COMPONENT_DIR PLAN_ID --approve SHA256`                                      | schedule the exact approved work without running it; the preview also prints a numbered approval |
 | `task next`           | `kvist task next [COMPONENT_DIR]`                                                              | print the first ready task (no state change)                                                                                                                                                                                                                                                                          |
 | `task run`            | `kvist task run [COMPONENT_DIR [TASK_ID\|N]] [--stream]`                                       | omit the component for project-wide work, or omit just the task for a single continuous component run. An exact TASK_ID runs only that task; N runs the Nth ready task (1-based, matching `tasks`). |
 | `task log`            | `kvist task log [COMPONENT_DIR] TASK_ID`                                                       | print the most recent bounded, redacted execution log                                                                                                                                                                                                                                                                 |
@@ -236,7 +239,8 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
 | -------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `component new`      | `kvist component new COMPONENT_DIR`                               | scaffold `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`            |
 | `component validate` | `kvist component validate [COMPONENT_DIR]`                        | validate the three intent documents                               |
-| `component accept`   | `kvist component accept [COMPONENT_DIR] [--commit] [--message M]` | record accepted revisions; `--commit` also creates the Git commit |
+| `component review`   | `kvist component review [COMPONENT_DIR]` | show advisory findings and the exact receipt acknowledgement action |
+| `component accept`   | `kvist component accept [COMPONENT_DIR] [--review-ack RECEIPT_ID \| --review-exception REASON] [--commit] [--message M]` | record accepted revisions; when `[review] required = true`, acknowledge the exact current receipt or record a deliberate exception |
 | `component commit`   | `kvist component commit ACCEPTANCE_ID`                            | (re)perform the isolated index commit for a pending acceptance    |
 
 ### 4.4 `kvist agent`

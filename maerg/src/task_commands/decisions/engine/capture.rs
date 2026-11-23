@@ -40,6 +40,18 @@ pub(super) fn context_for(project_dir: &Path, component: &Path) -> Result<TaskCo
 }
 
 pub(super) fn capture(project_dir: &Path, component: &Path, task: Option<&str>) -> Result<Capture> {
+    capture_scope(project_dir, component, Some(task))
+}
+
+pub(super) fn capture_queue(project_dir: &Path, component: &Path) -> Result<Capture> {
+    capture_scope(project_dir, component, None)
+}
+
+fn capture_scope(
+    project_dir: &Path,
+    component: &Path,
+    paused_task: Option<Option<&str>>,
+) -> Result<Capture> {
     let context = context_for(project_dir, component)?;
     ensure_no_pending(&context.component_dir)?;
     let lock = TaskLock::task_lock_path(&context)?;
@@ -49,9 +61,34 @@ pub(super) fn capture(project_dir: &Path, component: &Path, task: Option<&str>) 
             "component has an operation lock; inspect/unlock its owner before planning",
         ));
     }
-    let (queue, files, bindings, mut budget) = snapshot(&context)?;
+    let (queue, files, bindings, mut budget) = snapshot(&context, paused_task.is_some())?;
     guards(&context, &queue)?;
     unknown_journals(&context, &queue, None)?;
+    let task = if let Some(task) = paused_task {
+        Some(select_paused(&context, &queue, task)?.clone())
+    } else {
+        None
+    };
+    let mut input = Capture {
+        schema_version: 1,
+        component: context.component_path.clone(),
+        task,
+        queue,
+        files,
+        bindings,
+    };
+    if input.task.is_some() {
+        let id = capture_id(&input)?;
+        decision_context(&context, &id, &mut budget, &mut input.bindings)?;
+    }
+    Ok(input)
+}
+
+fn select_paused<'a>(
+    context: &TaskContext,
+    queue: &'a TaskQueue,
+    task: Option<&str>,
+) -> Result<&'a Task> {
     let paused = queue
         .tasks
         .iter()
@@ -62,7 +99,7 @@ pub(super) fn capture(project_dir: &Path, component: &Path, task: Option<&str>) 
             )
         })
         .collect::<Vec<_>>();
-    let task = match task {
+    match task {
         Some(id) => paused
             .iter()
             .find(|task| task.id == id)
@@ -72,27 +109,13 @@ pub(super) fn capture(project_dir: &Path, component: &Path, task: Option<&str>) 
                     &context.component_dir,
                     "selected task is not a known paused task",
                 )
-            })?,
-        None if paused.len() == 1 => paused[0],
-        None => {
-            return Err(fail(
-                &context.component_dir,
-                "expected exactly one paused task; specify --task to resolve ambiguity",
-            ));
-        }
+            }),
+        None if paused.len() == 1 => Ok(paused[0]),
+        None => Err(fail(
+            &context.component_dir,
+            "expected exactly one paused task; specify --task to resolve ambiguity",
+        )),
     }
-    .clone();
-    let mut input = Capture {
-        schema_version: 1,
-        component: context.component_path.clone(),
-        task,
-        queue,
-        files,
-        bindings,
-    };
-    let id = capture_id(&input)?;
-    decision_context(&context, &id, &mut budget, &mut input.bindings)?;
-    Ok(input)
 }
 
 fn decision_context(
@@ -261,7 +284,7 @@ fn check_ledger(context: &TaskContext) -> Result<()> {
     continuous::decision_preflight(context, &secret)
 }
 
-fn snapshot(context: &TaskContext) -> Result<Snapshot> {
+fn snapshot(context: &TaskContext, decision: bool) -> Result<Snapshot> {
     let mut budget = Budget::default();
     let mut files = BTreeMap::new();
     let mut bindings = BTreeMap::new();
@@ -337,25 +360,29 @@ fn snapshot(context: &TaskContext) -> Result<Snapshot> {
         "parent/contract".to_owned(),
         digest(encode(&parent)?.as_bytes()),
     );
-    for name in [
-        "src",
-        "tests",
-        "IMPL.md",
-        ".kvist-attempts",
-        ".kvist/continuous.json",
-        ".kvist/continuous-reviews",
-        ".kvist/authoring/proposals",
-        ".kvist/attention",
-        ".kvist/reviews",
-        ".kvist/evidence",
-        "reports",
-        "COMPLIANCE.md",
-        "SECURITY.md",
-        "Cargo.toml",
-        "Cargo.lock",
-        "build.rs",
-        ".gitignore",
-    ] {
+    for name in if decision {
+        &[
+            "src",
+            "tests",
+            "IMPL.md",
+            ".kvist-attempts",
+            ".kvist/continuous.json",
+            ".kvist/continuous-reviews",
+            ".kvist/authoring/proposals",
+            ".kvist/attention",
+            ".kvist/reviews",
+            ".kvist/evidence",
+            "reports",
+            "COMPLIANCE.md",
+            "SECURITY.md",
+            "Cargo.toml",
+            "Cargo.lock",
+            "build.rs",
+            ".gitignore",
+        ][..]
+    } else {
+        &[][..]
+    } {
         tree(
             &context.component_dir,
             Path::new(name),
@@ -445,10 +472,12 @@ pub(super) fn verify(
     outputs: &BTreeMap<String, String>,
     recovery: bool,
 ) -> Result<()> {
-    let (queue, files, mut bindings, mut budget) = snapshot(context)?;
+    let (queue, files, mut bindings, mut budget) = snapshot(context, input.task.is_some())?;
     // Recovery keeps the original decision workspace even after its own queue
     // and documents have reached known post-state bytes.
-    decision_context(context, &capture_id(input)?, &mut budget, &mut bindings)?;
+    if input.task.is_some() {
+        decision_context(context, &capture_id(input)?, &mut budget, &mut bindings)?;
+    }
     if bindings != input.bindings {
         return Err(fail(
             &context.component_dir,

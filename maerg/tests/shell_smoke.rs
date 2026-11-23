@@ -44,6 +44,7 @@ fn add_editor_task(dir: &tempfile::TempDir) -> EditorQueues {
         context: "The terminal fixture has no execution policy.".into(),
         purpose: "Keep terminal input visible.".into(),
         expected_outcome: "Policy refusal has no durable effects.".into(),
+        regression_tests: Vec::new(),
         kind: maerg::task_queue::TaskKind::Test,
         status: maerg::task_queue::TaskStatus::Pending,
         depends_on: vec![],

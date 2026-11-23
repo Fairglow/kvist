@@ -1,6 +1,37 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped task planning observation - 2026-11-23
+
+An independent source-only observer read planning, transaction, review,
+verification and CLI code and related fixture assertions, without reading
+intent, the queue, prior records or history. It did not execute the fixtures.
+
+`task plan` accepts one idea or a manual import and prepares a local plan
+without changing the queue. A version-one work item becomes linked test,
+implementation, audit and comparison tasks. The host resolves task references
+and binds the materialized candidate and advisory review or exception to the
+plan identity. `task apply` requires exact approval and does not execute the
+new tasks. The observed fixtures cover exact approval, invalid references and
+fields, drift, existing-state preservation, large queues, and review of
+materialized intent. The model path is exercised with a scripted response,
+not evidence of a particular live model's planning quality.
+
+The verifier can distinguish host-approved Rust red and green expectations
+from ordinary process success. Its matcher fixtures cover exact named cases,
+unrelated failures, ignored or missing tests, and ambiguous case names.
+Acceptance of a supervised attempt requires the exact attempt and successful
+execution and verification evidence pending human disposition. An intent
+review receipt is bounded to the exact component bundle and report; it does
+not certify implementation. These observations are not formal audit,
+compliance or human acceptance.
+
+A separate source-blind comparison noted that the observation alone does not
+establish every retention, preview, or task-brief requirement; it also flagged
+the traceability of Rust red/green conditions to requirement wording. This
+record does not claim that those evidence gaps are formal findings or that
+the active development bundle has a review receipt.
+
 ## Scoped protected continuation observation - 2026-11-23
 
 An independent source-only observer read the budget, agent loop, broker,

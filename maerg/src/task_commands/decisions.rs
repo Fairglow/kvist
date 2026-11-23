@@ -3,7 +3,9 @@
 use super::*;
 
 mod engine;
+pub(crate) mod planning;
 mod types;
+pub(super) use engine::review_storage;
 pub use engine::shortcuts::ResponseAction;
 pub use types::{Action, Disposition, DocumentEdit, Draft, TaskDefinition, TaskEdit};
 use types::{Capture, IntentReview, Plan, Selection};
@@ -126,6 +128,9 @@ pub fn execute(project_dir: &Path, component: &Path, action: Option<Action>) -> 
                     approve: approval,
                     continue_run,
                 },
+                engine::shortcuts::Command::Schedule { plan_id, approval } => {
+                    return planning::apply(project_dir, component, &plan_id, &approval);
+                }
             }
         }
         action => action,
@@ -166,6 +171,18 @@ pub fn execute(project_dir: &Path, component: &Path, action: Option<Action>) -> 
             approve,
             continue_run,
         } => {
+            if engine::load_plan(project_dir, component, &plan_id)?
+                .input
+                .task
+                .is_none()
+            {
+                if continue_run {
+                    return Err(decision_error(
+                        "a new-work plan only schedules work; apply it first, then run ready tasks separately",
+                    ));
+                }
+                return planning::apply(project_dir, component, &plan_id, &approve);
+            }
             let plan = engine::apply(project_dir, component, &plan_id, &approve)?;
             let mut message = format!(
                 "Applied exact decision plan `{}`. Intent/scheduling accepted; implementation and findings are not approved. No Git commit was created.",
@@ -411,13 +428,14 @@ fn options(project: &Path, component: &Path, task: Option<&str>) -> Result<Outpu
     let mut evidence = intent_evidence(&context, &input)?;
     evidence["human_request"] =
         serde_json::json!("Prepare substantive options for this decision; do not apply them.");
-    let report = ask(&context, &input.task, "decision-options", &evidence)?;
+    let task = input.paused()?;
+    let report = ask(&context, &task.id, "decision-options", &evidence)?;
     let alternatives: Alternatives = strict_parse(&report)?;
     validate_alternatives(&alternatives)?;
     let catalog = Catalog {
         schema_version: 1,
         capture: identity.clone(),
-        task_id: input.task.id.clone(),
+        task_id: task.id.clone(),
         alternatives,
     };
     let mut markdown = format!(
@@ -430,7 +448,7 @@ fn options(project: &Path, component: &Path, task: Option<&str>) -> Result<Outpu
             option.id, option.title, option.consequences, option.recommendation,
         ));
     }
-    markdown.push_str(&instructions(component, &input.task.id));
+    markdown.push_str(&instructions(component, &task.id));
     let path = save_support(&context, &name, &catalog, &markdown, previous.as_deref())?;
     let actions = engine::shortcuts::options(&context, &catalog, &encode(&catalog)?)?;
     let mut output = response(
@@ -449,6 +467,7 @@ fn discuss(project: &Path, component: &Path, task: Option<&str>, message: &str) 
     let input = engine::capture(project, component, task)?;
     let context = engine::context_for(project, component)?;
     let identity = capture_id(&input)?;
+    let task = input.paused()?;
     let name = format!("{identity}.discussion");
     let path = context
         .component_dir
@@ -462,13 +481,13 @@ fn discuss(project: &Path, component: &Path, task: Option<&str>, message: &str) 
         .unwrap_or(Conversation {
             schema_version: 1,
             capture: identity.clone(),
-            task_id: input.task.id.clone(),
+            task_id: task.id.clone(),
             exchanges: Vec::new(),
         });
     validate_conversation(&conversation)?;
     if conversation.schema_version != 1
         || conversation.capture != identity
-        || conversation.task_id != input.task.id
+        || conversation.task_id != task.id
     {
         return Err(decision_error(
             "conversation does not match the frozen decision revision",
@@ -482,7 +501,7 @@ fn discuss(project: &Path, component: &Path, task: Option<&str>, message: &str) 
     let mut evidence = intent_evidence(&context, &input)?;
     evidence["conversation"] = serde_json::to_value(&conversation.exchanges).map_err(json_error)?;
     evidence["human_request"] = serde_json::json!(message);
-    let answer = ask(&context, &input.task, "decision-discussion", &evidence)?;
+    let answer = ask(&context, &task.id, "decision-discussion", &evidence)?;
     conversation.exchanges.push(Exchange {
         question: message.to_owned(),
         answer,
@@ -503,7 +522,7 @@ fn discuss(project: &Path, component: &Path, task: Option<&str>, message: &str) 
             exchange.answer,
         ));
     }
-    markdown.push_str(&instructions(component, &input.task.id));
+    markdown.push_str(&instructions(component, &task.id));
     let path = save_support(
         &context,
         &name,
@@ -536,6 +555,7 @@ fn prepare(
         return Err(decision_error("a catalog pin requires an explicit option"));
     }
     let input = engine::capture(project, component, task)?;
+    let task = input.paused()?;
     let context = engine::context_for(project, component)?;
     meaningful(&selection.guidance, "guidance", 16 * 1024).or_else(|error| {
         if selection.guidance.is_empty() {
@@ -561,7 +581,7 @@ fn prepare(
         let catalog: Catalog = strict_parse(&text)?;
         if catalog.schema_version != 1
             || catalog.capture != capture_id(&input)?
-            || catalog.task_id != input.task.id
+            || catalog.task_id != task.id
         {
             return Err(decision_error(
                 "option catalog is stale or has an unsupported version",
@@ -606,7 +626,7 @@ fn prepare(
                 "planning requires --option, --guidance, or --import; no choice was inferred",
             ));
         }
-        strict_parse(&ask(&context, &input.task, "decision-plan", &evidence)?)?
+        strict_parse(&ask(&context, &task.id, "decision-plan", &evidence)?)?
     };
     let review = match review_exception {
         Some(reason) => {
@@ -623,7 +643,7 @@ fn prepare(
                 .remove("draft_schema");
             evidence["proposed_draft"] = serde_json::to_value(&draft).map_err(json_error)?;
             IntentReview {
-                report: ask(&context, &input.task, "decision-intent-review", &evidence)?,
+                report: ask(&context, &task.id, "decision-intent-review", &evidence)?,
                 exception: false,
             }
         }
@@ -648,6 +668,7 @@ fn prepare(
 }
 
 fn intent_evidence(context: &TaskContext, input: &Capture) -> Result<serde_json::Value> {
+    let task = input.paused()?;
     let mut documents = input.files.clone();
     documents.remove("TODOS.yaml");
     documents.insert(
@@ -706,7 +727,7 @@ fn intent_evidence(context: &TaskContext, input: &Capture) -> Result<serde_json:
                 ));
             }
             let name = entry.file_name().to_string_lossy().into_owned();
-            if (name.starts_with(&input.task.id) || directory == ".kvist/authoring/proposals")
+            if (name.starts_with(&task.id) || directory == ".kvist/authoring/proposals")
                 && name.ends_with(".md")
             {
                 let text = bounded_read(&entry.path())?;
@@ -742,14 +763,14 @@ fn intent_evidence(context: &TaskContext, input: &Capture) -> Result<serde_json:
     if let Some(conversation) = &conversation
         && (conversation.schema_version != 1
             || conversation.capture != capture_id(input)?
-            || conversation.task_id != input.task.id)
+            || conversation.task_id != task.id)
     {
         return Err(decision_error(
             "discussion input has a mismatched decision identity",
         ));
     }
     let evidence = serde_json::json!({
-        "schema_version":1,"decision":input.task,"local_and_allowed_context":documents,
+        "schema_version":1,"decision":task,"local_and_allowed_context":documents,
         "queue_graph":tasks,"retained_advisory_evidence":retained,
         "conversation":conversation.map(|conversation| conversation.exchanges),
         "boundary":"Proposal/discussion only; never read peer implementations or claim source/compliance approval.",
@@ -764,7 +785,7 @@ fn intent_evidence(context: &TaskContext, input: &Capture) -> Result<serde_json:
 
 fn ask(
     context: &TaskContext,
-    task: &Task,
+    task_id: &str,
     phase: &'static str,
     evidence: &serde_json::Value,
 ) -> Result<String> {
@@ -774,7 +795,7 @@ fn ask(
     let mut session = crate::agent::review::ReviewSession::decision(
         profile,
         &context.component_dir,
-        &task.id,
+        task_id,
         redactions,
     )?;
     let outcome = encode(evidence).and_then(|evidence| session.request(phase, evidence));

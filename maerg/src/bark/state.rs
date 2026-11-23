@@ -501,6 +501,7 @@ tasks:
             context: String::new(),
             purpose: String::new(),
             expected_outcome: String::new(),
+            regression_tests: Vec::new(),
             kind: task_queue::TaskKind::Test,
             status,
             depends_on: deps.iter().map(|dep| (*dep).to_owned()).collect(),

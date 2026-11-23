@@ -155,19 +155,60 @@ pub(super) fn system_context(request: &AgentExecutionRequest<'_>, system: &str) 
         ));
     }
     let mut bytes = 0_usize;
-    let mut files = Vec::new();
+    let mut selected_files = Vec::new();
     for selected in request.context_paths {
         if selected.as_os_str().len() > 4096 {
             return Err(invalid("selected context path exceeds 4096 bytes"));
         }
         let host_path = source(request, selected)?;
-        let mut contents = read_file(&host_path, MAX_CONTEXT_BYTES - bytes)?;
+        let contents = read_file(&host_path, MAX_CONTEXT_BYTES - bytes)?;
         bytes += contents.len();
-        if host_path == request.target_dir.join("TODOS.yaml") {
-            contents = selected_task(&contents, request.task_id)?;
-        }
-        files.push(serde_json::json!({"path":selected,"contents":contents}));
+        let canonical_name = host_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| {
+                host_path.parent() == Some(request.target_dir) && LOCAL_ARTIFACTS.contains(name)
+            })
+            .or_else(|| {
+                request
+                    .read_only_mounts
+                    .iter()
+                    .find(|mount| mount.source == host_path && mount.identity.is_none())
+                    .and_then(|mount| match mount.destination.as_str() {
+                        "/workspace/context/ROOT_CONTRACT.md" => Some("ROOT_CONTRACT.md"),
+                        "/workspace/context/PARENT_CONTRACT.md" => Some("PARENT_CONTRACT.md"),
+                        _ => None,
+                    })
+            });
+        selected_files.push((selected, canonical_name.map(str::to_owned), contents));
     }
+    let files = selected_files
+        .iter()
+        .map(|(selected, name, contents)| {
+            if name.as_deref() == Some("TODOS.yaml") {
+                let locators = crate::task_commands::task_brief::LocatorIndex::new(
+                    selected_files.iter().filter_map(|(_, name, contents)| {
+                        name.as_deref()
+                            .filter(|name| {
+                                matches!(
+                                    *name,
+                                    "REQUIREMENTS.md"
+                                        | "CONTRACT.md"
+                                        | "DESIGN.md"
+                                        | "ROOT_CONTRACT.md"
+                                        | "PARENT_CONTRACT.md"
+                                )
+                            })
+                            .map(|name| (name, contents.as_str()))
+                    }),
+                );
+                let task = selected_task(contents, request.task_id, request.target_dir, &locators)?;
+                Ok(serde_json::json!({"path":selected,"contents":task}))
+            } else {
+                Ok(serde_json::json!({"path":selected,"contents":contents}))
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
     let mut prompt = system.to_owned();
     prompt.push_str("\n\nOriginal approved task (unchanged by supplemental guidance):\n");
     prompt.push_str(&serde_json::Value::String(request.prompt.to_owned()).to_string());
@@ -180,7 +221,12 @@ pub(super) fn system_context(request: &AgentExecutionRequest<'_>, system: &str) 
     Ok(prompt)
 }
 
-fn selected_task(contents: &str, task_id: &str) -> Result<String> {
+fn selected_task(
+    contents: &str,
+    task_id: &str,
+    component_dir: &Path,
+    locators: &crate::task_commands::task_brief::LocatorIndex<'_>,
+) -> Result<String> {
     let queue = crate::task_queue::parse(contents)
         .map_err(|error| invalid(format!("selected TODOS.yaml is invalid: {error}")))?;
     let task = queue
@@ -192,6 +238,52 @@ fn selected_task(contents: &str, task_id: &str) -> Result<String> {
                 "selected task `{task_id}` is absent from TODOS.yaml"
             ))
         })?;
+    let prerequisites = task
+        .depends_on
+        .iter()
+        .take(8)
+        .enumerate()
+        .filter_map(|(index, id)| {
+            queue
+                .tasks
+                .iter()
+                .find(|earlier| earlier.id == *id)
+                .map(|task| (index, task))
+        })
+        .map(|(index, earlier)| {
+            let observation = if index < 2
+                && earlier.status == crate::task_queue::TaskStatus::Completed
+            {
+                let journal = component_dir
+                    .join(".kvist-attempts")
+                    .join(format!("{}.jsonl", earlier.id));
+                match read_file(&journal, MAX_COMPONENT_DOCUMENT_BYTES as usize) {
+                    Ok(text) => {
+                        crate::task_commands::task_brief::retained_verification(&text, &earlier.id)
+                            .map_err(|error| {
+                                invalid(format!(
+                                    "malformed prerequisite evidence for `{}`: {error}",
+                                    earlier.id
+                                ))
+                            })?
+                    }
+                    Err(KvistError::Io { source, .. })
+                        if source.kind() == io::ErrorKind::NotFound =>
+                    {
+                        None
+                    }
+                    Err(error) => return Err(error),
+                }
+            } else {
+                None
+            };
+            Ok(serde_json::json!({
+                "id":earlier.id,"title":earlier.title,"expected_outcome":earlier.expected_outcome,
+                "regression_tests":earlier.regression_tests,
+                "retained_verification":observation,
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(serde_json::json!({
         "schema_version":queue.schema_version,
         "projection":"selected_task_definition",
@@ -199,8 +291,15 @@ fn selected_task(contents: &str, task_id: &str) -> Result<String> {
             "id":task.id,"title":task.title,"description":task.description,
             "context":task.context,"purpose":task.purpose,
             "expected_outcome":task.expected_outcome,"kind":task.kind,
-            "depends_on":task.depends_on,"requirements":task.requirements
-        }
+            "depends_on":task.depends_on,"requirements":task.requirements,
+            "regression_tests":task.regression_tests,
+            "expected_test_result":if task.regression_tests.is_empty() { None } else if task.kind == crate::task_queue::TaskKind::Test { Some("red") } else { Some("green") },
+        },
+        "reference_lines":task.requirements.iter().filter_map(|reference|
+            locators.resolve(reference).map(|line| serde_json::json!({"reference":reference,"line":line}))
+        ).collect::<Vec<_>>(),
+        "prerequisites":prerequisites,
+        "additional_prerequisites":task.depends_on.len().saturating_sub(8),
     })
     .to_string())
 }

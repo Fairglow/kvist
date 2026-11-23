@@ -1095,6 +1095,8 @@ mod tests {
         let res = complete(&c, "task ");
         let got = positional_values(&res);
         for name in [
+            "plan",
+            "apply",
             "next",
             "transition",
             "run",
@@ -1107,7 +1109,7 @@ mod tests {
         ] {
             assert!(got.contains(&name), "missing task {name} in {got:?}");
         }
-        assert_eq!(got.len(), 9);
+        assert_eq!(got.len(), 11);
     }
 
     #[test]
@@ -1200,6 +1202,7 @@ mod tests {
             context: String::new(),
             purpose: String::new(),
             expected_outcome: String::new(),
+            regression_tests: Vec::new(),
             kind: TaskKind::Test,
             status: TaskStatus::Pending,
             depends_on: Vec::new(),

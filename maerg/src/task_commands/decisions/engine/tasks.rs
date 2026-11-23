@@ -1,7 +1,7 @@
 use super::*;
 use crate::task_queue::{RevalidationState, TaskTimestamps};
 
-pub(super) struct Changes {
+pub(in crate::task_commands::decisions) struct Changes {
     pub outputs: BTreeMap<String, String>,
     pub retired: Vec<Task>,
     pub retirement_reasons: BTreeMap<String, String>,
@@ -21,13 +21,13 @@ pub(super) fn outputs(
         ));
     }
     bounded(&encode(&draft)?, Path::new("draft"))?;
-    let mut documents =
-        documents::materialize(&input.files, draft.documents, draft.document_edits)?;
+    let documents = documents::materialize(&input.files, draft.documents, draft.document_edits)?;
     let mut queue = input.queue.clone();
+    let paused = input.paused()?;
     let selected = queue
         .tasks
         .iter()
-        .position(|task| task.id == input.task.id)
+        .position(|task| task.id == paused.id)
         .ok_or_else(|| fail(&context.component_dir, "selected task disappeared"))?;
     let mut seen = BTreeSet::new();
     let mut additions = Vec::new();
@@ -64,7 +64,7 @@ pub(super) fn outputs(
                             format!("unknown updated task `{}`", task.id),
                         )
                     })?;
-                editable(existing, &input.task.id, &context.component_dir)?;
+                editable(existing, &paused.id, &context.component_dir)?;
                 authored(existing, task);
                 existing.timestamps.updated_at = at.clone();
             }
@@ -114,7 +114,7 @@ pub(super) fn outputs(
             task.depends_on.dedup();
         }
         Disposition::Withdraw => {
-            let mut closure = BTreeSet::from([input.task.id.clone()]);
+            let mut closure = BTreeSet::from([paused.id.clone()]);
             loop {
                 let previous = closure.len();
                 for task in &input.queue.tasks {
@@ -143,6 +143,49 @@ pub(super) fn outputs(
     queue
         .tasks
         .retain(|task| !retirements.contains_key(&task.id));
+    let outputs = controlled_outputs(context, input, queue, documents, at)?;
+    Ok(Changes {
+        outputs,
+        retired,
+        retirement_reasons: retirements,
+        rationale: draft.rationale,
+    })
+}
+
+pub(in crate::task_commands::decisions) fn queue_changes(
+    context: &TaskContext,
+    input: &Capture,
+    draft: super::super::planning::QueueDraft,
+    at: &Timestamp,
+) -> Result<Changes> {
+    let documents = documents::materialize(&input.files, BTreeMap::new(), draft.document_edits)?;
+    let mut queue = input.queue.clone();
+    let definitions = super::super::planning::definitions(context, input, &documents, draft.items)?;
+    queue
+        .tasks
+        .extend(definitions.into_iter().map(|task| new_task(task, at)));
+    if crate::config::CommitFrequency::Item
+        == crate::config::load(&context.project_dir)?.task_run.commit
+        && continuous::item_groups(&input.queue.tasks).is_ok()
+    {
+        continuous::item_groups(&queue.tasks)?;
+    }
+    let outputs = controlled_outputs(context, input, queue, documents, at)?;
+    Ok(Changes {
+        outputs,
+        retired: Vec::new(),
+        retirement_reasons: BTreeMap::new(),
+        rationale: draft.rationale,
+    })
+}
+
+fn controlled_outputs(
+    context: &TaskContext,
+    input: &Capture,
+    mut queue: TaskQueue,
+    mut documents: BTreeMap<String, String>,
+    at: &Timestamp,
+) -> Result<BTreeMap<String, String>> {
     queue.component.requirements_revision = digest(documents["REQUIREMENTS.md"].as_bytes());
     queue.component.contract_revision = digest(documents["CONTRACT.md"].as_bytes());
     queue.component.design_revision = digest(documents["DESIGN.md"].as_bytes());
@@ -156,12 +199,7 @@ pub(super) fn outputs(
     bounded(&text, Path::new("TODOS.yaml"))?;
     documents.insert("TODOS.yaml".to_owned(), text);
     documents.retain(|name, text| input.files.get(name) != Some(text));
-    Ok(Changes {
-        outputs: documents,
-        retired,
-        retirement_reasons: retirements,
-        rationale: draft.rationale,
-    })
+    Ok(documents)
 }
 
 fn editable(task: &Task, selected: &str, path: &Path) -> Result<()> {
@@ -190,6 +228,10 @@ fn authored(existing: &mut Task, definition: TaskDefinition) {
     existing.context = definition.context;
     existing.purpose = definition.purpose;
     existing.expected_outcome = definition.expected_outcome;
+    if let Some(mut tests) = definition.regression_tests {
+        tests.sort();
+        existing.regression_tests = tests;
+    }
     existing.kind = definition.kind;
     existing.depends_on = definition.depends_on;
     existing.depends_on.sort();
@@ -207,6 +249,7 @@ fn new_task(definition: TaskDefinition, at: &Timestamp) -> Task {
         context: String::new(),
         purpose: String::new(),
         expected_outcome: String::new(),
+        regression_tests: Vec::new(),
         kind: definition.kind,
         status: TaskStatus::Pending,
         depends_on: Vec::new(),
