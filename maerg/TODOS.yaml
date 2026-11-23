@@ -6843,3 +6843,47 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
     timestamps: { created_at: "2026-11-22T23:47:00Z", updated_at: "2026-11-22T23:47:00Z", completed_at: null }
+  - id: "workspace-skott-write-tests"
+    title: "write_tests: cover idle and active Skott views"
+    description: "Exercise the view menu and live and final supervised task statistics."
+    context: "The supervised subprocess no longer fed the embedded pane."
+    purpose: "Pin the independent and supervised presentation paths."
+    expected_outcome: "All views remain available without widening task authority."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-SETTINGS-MENU"]
+    timestamps: { created_at: "2026-11-23T06:38:00Z", updated_at: "2026-11-23T06:54:35Z", completed_at: "2026-11-23T06:54:35Z" }
+  - id: "workspace-skott-implement-code"
+    title: "implement_code: restore the embedded Skott workspace"
+    description: "Separate view focus, share the Skott UI, and project private supervised telemetry."
+    context: "Human-requested restoration; no advisory receipt is available."
+    purpose: "Use both tools inside one workspace without concurrent task and free-form effects."
+    expected_outcome: "Free-form interaction and supervised steering share Skott's renderer."
+    kind: implementation
+    status: completed
+    depends_on: ["workspace-skott-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-SETTINGS-MENU"]
+    timestamps: { created_at: "2026-11-23T06:38:00Z", updated_at: "2026-11-23T06:54:35Z", completed_at: "2026-11-23T06:54:35Z" }
+  - id: "workspace-skott-security-audit"
+    title: "security_audit: inspect embedded presentation boundaries"
+    description: "Check redaction, telemetry transport and isolation of free-form prompts from task execution."
+    context: "Independent review, not implementer certification."
+    purpose: "Keep telemetry and prompt input outside the protected task authority."
+    expected_outcome: "Retain concrete findings and limitations."
+    kind: security-audit
+    status: pending
+    depends_on: ["workspace-skott-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-SETTINGS-MENU"]
+    timestamps: { created_at: "2026-11-23T06:38:00Z", updated_at: "2026-11-23T06:38:00Z", completed_at: null }
+  - id: "workspace-skott-compliance-review"
+    title: "compliance_review: compare Skott views and task metrics with intent"
+    description: "Compare independent source observations and executable evidence with the workspace contract."
+    context: "Source observation and comparison use separate contexts."
+    purpose: "Retain discrepancies for human arbitration."
+    expected_outcome: "Document verified behavior and limits without accepting work."
+    kind: compliance-review
+    status: pending
+    depends_on: ["workspace-skott-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-SETTINGS-MENU"]
+    timestamps: { created_at: "2026-11-23T06:38:00Z", updated_at: "2026-11-23T06:38:00Z", completed_at: null }

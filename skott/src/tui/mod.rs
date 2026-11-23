@@ -5,6 +5,7 @@ mod render;
 mod startup;
 pub mod theme;
 
+pub use render::render_in;
 pub use theme::file as theme_files;
 pub use theme::{THEME_NAMES, Theme};
 

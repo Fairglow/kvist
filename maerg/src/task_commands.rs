@@ -4969,8 +4969,12 @@ fn run_task_under_lock(
     continuous: bool,
     inherited_lock: Option<&TaskLock>,
 ) -> Result<String> {
+    let started = std::time::Instant::now();
+    crate::workspace_feed::boundary(serde_json::json!({
+        "type":"workspace_task_start","data":task_id,
+    }));
     let mut explanation = None;
-    execute_task_under_lock(
+    let result = execute_task_under_lock(
         project_dir,
         component_path,
         task_id,
@@ -4991,7 +4995,11 @@ fn run_task_under_lock(
             explanation.as_deref(),
             inherited_lock,
         )
-    })
+    });
+    crate::workspace_feed::boundary(serde_json::json!({
+        "type":"workspace_task_end","data":{"elapsed":started.elapsed().as_secs_f64()},
+    }));
+    result
 }
 
 struct RunControls {

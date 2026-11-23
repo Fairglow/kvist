@@ -506,6 +506,7 @@ fn run_stream_attempt<T: ModelTransport>(
     request: &ModelRequest,
     cancellation: &CancellationToken,
     redactions: &[String],
+    display_text: bool,
 ) -> (sav::Result<ModelTurn>, bool) {
     let mut emitted = false;
     let mut printed_text_newline = false;
@@ -513,7 +514,7 @@ fn run_stream_attempt<T: ModelTransport>(
     let mut redactor = StreamRedactor::new(redactions);
     let mut relay = |event: ModelStreamEvent| -> sav::Result<()> {
         emitted = true;
-        if let ModelStreamEvent::TextDelta(delta) = event {
+        if display_text && let ModelStreamEvent::TextDelta(delta) = event {
             let chunk = redactor.absorb(&delta);
             if !chunk.is_empty() {
                 if is_tty && !printed_text_newline {
@@ -627,6 +628,7 @@ fn complete_turn_counted<T: ModelTransport>(
                 &request,
                 retry.cancellation,
                 redactions,
+                !retry.live.is_some_and(LiveRun::presenting),
             )
         } else {
             (transport.complete(&request, retry.cancellation), false)
@@ -1431,10 +1433,7 @@ fn execute_agent_inner(
     let outcome: Result<Option<TurnFailure>> = (|| {
         let _server = if allow_control {
             let server = sav::observation::bind_runtime_controls(controls, cancellation)?;
-            eprintln!(
-                "private run control: {}",
-                server.path().display().to_string().escape_debug()
-            );
+            live.control_path(server.path());
             Some(server)
         } else {
             None
@@ -1476,6 +1475,9 @@ fn execute_agent_inner(
         let request_deadline = choice.native.as_ref().map_or(remaining, |native| {
             remaining.min(Duration::from_secs(native.deadline_secs))
         });
+        live.present(&serde_json::json!({"type":"workspace_context","data":{
+            "limit":context.limit_tokens(),"source":context.capacity_source()
+        }}));
         live.record(
             &serde_json::json!({"type":"execution_limits","data":{
                 "task_timeout_seconds":profile.timeout_seconds,
@@ -1557,7 +1559,9 @@ fn execute_agent_inner(
                     elapsed,
                     rem,
                 );
-                if is_tty {
+                if live.presenting() {
+                    live.present(&serde_json::json!({"type":"workspace_turn","data":generations}));
+                } else if is_tty {
                     eprint!("\r\x1b[2K  {line}");
                 } else {
                     eprint!("\r{line}");
@@ -2239,7 +2243,9 @@ fn execute_agent_inner(
             })
     };
     let diagnostics = sequence.diagnostics(sequence.last_stop);
-    eprintln!("{}", diagnostics.message());
+    if !live.presenting() {
+        eprintln!("{}", diagnostics.message());
+    }
     let sequence_recorded = live.record(
         &serde_json::json!({"type":"sequence_accounting","data":diagnostics}),
         true,

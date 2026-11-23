@@ -1,6 +1,46 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped Skott workspace observation - 2026-11-23
+
+An independent source-only observer read the workspace and Skott
+implementation and test assertions, excluding intent, queues, prior
+records, and history. It did not execute tests.
+
+The workspace draws Kvist, Skott, or both, side by side from 83 columns
+and vertically stacked below that. The Skott renderer reserves four rows
+for its editor. F6 changes input focus in split; F3–F5 change layout and F7
+toggles the last supervised session only while no command runs. Keys and
+paste go to the focused pane's own editor.
+
+The supervised pane sends submitted guidance through the private control
+capability; acknowledgement means queued, and subsequent control events
+indicate delivery. Free-form prompts use a separate embedded session. A
+busy free-form turn blocks a new Kvist command, and selecting a different
+model or effort while busy blocks prompt submission until the turn ends.
+
+The presentation feed is separate from the protected journal. The task
+runner emits start/end boundaries; the feed conveys model, tool, control,
+and text events. The workspace accumulates turn, attempt, tool, token,
+context, compaction, and rollover metrics and appends final task statistics.
+Live output-token figures are estimates; provider usage updates totals
+when available. Missing usage for any attempt makes the final token total
+unavailable.
+
+Sources: `src/bark/tui/workspace.rs`, `src/bark/tui/workspace/`,
+`src/workspace_feed.rs`, `src/task_commands.rs`, `src/agent/live.rs`, and
+the Skott viewport renderer. Observed assertions: split rendering and
+resize/scroll, transient turn-row replacement, confinement of model output
+to Skott, independent prompt history across view changes, queued guidance
+reaching a replacement model request, and one terminal task event.
+
+The separate source-blind comparison was supported by a PTY switch during
+a waiting command and by tests that sent multiline supervised guidance to
+the private control and steered an active free-form turn after switching
+layouts. It did not establish every execution-authority invariant across
+view switches; the independent review guidance rejection remains in
+force. This is scoped evidence, not compliance certification.
+
 ## Scoped automatic task selection observation - 2026-11-23
 
 An independent source-only observer inspected implementation and test

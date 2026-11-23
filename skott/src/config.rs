@@ -514,6 +514,22 @@ impl Config {
 
     /// Loads config with a CLI-level explicit registry override.
     pub fn load_with_registry(path: &Path, registry_path: Option<&Path>) -> Result<Config> {
+        Self::load_with_defaults(path, registry_path, None)
+    }
+
+    /// Loads a workspace configuration using `workspace` as the default project
+    /// and working directory instead of the host process's current directory.
+    pub fn load_for_workspace(path: &Path, workspace: &Path) -> Result<Config> {
+        Self::load_with_defaults(path, None, Some(workspace))
+    }
+
+    fn load_with_defaults(
+        path: &Path,
+        registry_path: Option<&Path>,
+        workspace: Option<&Path>,
+    ) -> Result<Config> {
+        let project_directory =
+            || workspace.map_or_else(std::env::current_dir, |path| Ok(path.to_path_buf()));
         let contents = read_configuration(path)?;
         let mut raw: RawConfig = toml::from_str(&contents).map_err(|error: toml::de::Error| {
             configuration_parse_error(path, &contents, error.span())
@@ -521,7 +537,7 @@ impl Config {
         if raw.registry.is_some() || registry_path.is_some() || raw.models.is_empty() {
             let registry = raw.registry.take().unwrap_or_default();
             let base = path.parent().unwrap_or(Path::new("."));
-            let cwd = std::env::current_dir()
+            let cwd = project_directory()
                 .map_err(|source| io_error("resolve registry project directory", None, source))?;
             let mut paths = sav::registry::RegistryPaths::for_project(&cwd);
             paths.explicit = registry_path.map(Path::to_path_buf).or_else(|| {
@@ -584,12 +600,12 @@ impl Config {
                 reason: error.to_string(),
             })?;
         }
-        Config::validate(raw, path)
+        Config::validate(raw, path, workspace)
     }
 
     /// Validates the parsed configuration against the working directory and the
     /// model/effort/tool-policy invariants.
-    fn validate(raw: RawConfig, path: &Path) -> Result<Config> {
+    fn validate(raw: RawConfig, path: &Path, workspace: Option<&Path>) -> Result<Config> {
         if raw.schema_version != SCHEMA_VERSION {
             return Err(Error::Config {
                 path: Some(path.to_string_lossy().into_owned()),
@@ -602,7 +618,8 @@ impl Config {
 
         let working_directory = match &raw.working_directory {
             Some(value) => PathBuf::from(value),
-            None => std::env::current_dir()
+            None => workspace
+                .map_or_else(std::env::current_dir, |path| Ok(path.to_path_buf()))
                 .map_err(|source| io_error("resolve current working directory", None, source))?,
         };
         if !working_directory.is_absolute() {

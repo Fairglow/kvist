@@ -32,32 +32,49 @@ fn centered(area: Rect) -> Rect {
 impl Workspace {
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) -> io::Result<()> {
         let area = frame.area();
+        let (kvist, skott) = match self.pane {
+            ActivePane::Kvist => (area, Rect::ZERO),
+            ActivePane::Skott => (Rect::ZERO, area),
+            ActivePane::Both => {
+                let columns = [Constraint::Percentage(50), Constraint::Percentage(50)];
+                let panes = if area.width >= 83 {
+                    Layout::horizontal(columns).split(area)
+                } else {
+                    Layout::vertical(columns).split(area)
+                };
+                (panes[0], panes[1])
+            }
+        };
+        self.skott_area = skott;
+        if !kvist.is_empty() {
+            self.draw_kvist(frame, kvist)?;
+        }
+        if !skott.is_empty() {
+            let cursor = self.overlay.is_none() && self.skott_focused();
+            let app = self.skott_app();
+            if app.width != skott.width || app.height != skott.height {
+                app.resize(skott.width, skott.height);
+            }
+            skott::tui::render_in(frame, app, skott, cursor);
+        }
+        self.draw_overlay(frame, area)
+    }
+
+    fn draw_kvist(&mut self, frame: &mut Frame<'_>, area: Rect) -> io::Result<()> {
         let (base, accent) = super::super::render::chrome(self.theme);
         let raised = render::panel(self.theme);
         let selected = render::selection(self.theme);
         let border = render::border(self.theme);
         frame.render_widget(Block::default().style(base), area);
-        // When a Skott session is active, reserve a dedicated row for the
-        // in-place metrics line so it never overlaps the transcript.
-        let skott_active = self.skott.as_ref().is_some_and(|skott| skott.is_active());
-        let parts = if skott_active {
-            Layout::vertical([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Min(1),
-                Constraint::Length(3),
-            ])
-            .split(area)
-        } else {
-            Layout::vertical([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Min(1),
-                Constraint::Length(3),
-            ])
-            .split(area)
-        };
+        let turn = self.task_skott.turn_line();
+        let parts = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(u16::from(turn.is_some())),
+            Constraint::Min(1),
+            Constraint::Length(3),
+        ])
+        .split(area);
         let commit = self
             .commit_frequency
             .map_or("unavailable", |mode| mode.as_str());
@@ -120,82 +137,28 @@ impl Workspace {
             Paragraph::new(sanitize(&stats)).style(raised.patch(render::secondary(self.theme))),
             parts[1],
         );
-        let body = if skott_active { parts[3] } else { parts[2] };
-        if skott_active {
-            self.render_skott_metrics_line(frame, parts[2], base, accent);
+        if let Some(turn) = turn {
+            frame.render_widget(
+                Paragraph::new(sanitize(&turn)).style(raised.fg(accent)),
+                parts[2],
+            );
         }
-        let skott = self.skott.as_ref().filter(|skott| skott.is_active());
-        let pane = skott
-            .map(|skott| skott.active_pane())
-            .unwrap_or(ActivePane::Kvist);
-        // Wide enough for two side-by-side panes? Each pane needs at least 40
-        // columns plus the separator.
-        let side_by_side = pane == ActivePane::Both && body.width >= 83;
-        // The embedded Skott app pre-wraps its transcript rows at the pane's
-        // width, so feed it the pane it is about to render into. Without this
-        // the rows keep their launch-time 79-column wrapping no matter how the
-        // terminal or the split view changes.
-        let (skott_pane, kvist_pane) = match (skott_active, pane, side_by_side) {
-            (true, ActivePane::Both, true) => {
-                let split =
-                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                        .split(body);
-                (split[1], split[0])
-            }
-            (true, ActivePane::Skott, _) => (body, body),
-            _ => (Rect::ZERO, body),
-        };
-        if skott_pane != Rect::ZERO
-            && let Some(skott) = self.skott.as_mut().filter(|skott| skott.is_active())
-        {
-            let width = skott_pane.width.saturating_sub(1).max(1);
-            if width != skott.app.width {
-                skott.app.resize(width, skott.app.height);
-                self.dirty = true;
-            }
-        }
-        // The Kvist transcript is pre-wrapped at `self.width`; keep that width
-        // below the area it renders into (full body on its own, left half in
-        // the split view, minus the right scrollbar column) so a terminal
-        // resize or a split-view pane change re-wraps it at the next render.
-        let width = kvist_pane.width.saturating_sub(2).max(1);
+        let body = parts[3];
+        let width = body.width.saturating_sub(2).max(1);
         if width != self.width {
             self.width = width;
             self.dirty = true;
         }
-        match (skott_active, pane, side_by_side) {
-            (true, ActivePane::Skott, _) => {
-                self.render_skott_body(frame, body, base, border, accent)?;
-            }
-            (true, ActivePane::Both, true) => {
-                let inner =
-                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                        .split(body);
-                self.render_kvist_body(frame, inner[0], base, border, accent)?;
-                self.render_skott_body(frame, inner[1], base, border, accent)?;
-            }
-            _ => self.render_kvist_body(frame, body, base, border, accent)?,
-        }
-        let footer = if skott_active { parts[4] } else { parts[3] };
-        // When the Skott view is active, the bottom row is a guidance area for
-        // steering the agent, not the Kvist command area. The user can submit
-        // their own steering input to an active Skott session.
-        let in_skott_steering = skott_active && pane == ActivePane::Skott && self.overlay.is_none();
-        let label = if self.running.is_some() && !in_skott_steering {
+        self.render_kvist_body(frame, body, base, border, accent)?;
+        let footer = parts[4];
+        let label = if self.running.is_some() {
             "answer> "
-        } else if in_skott_steering {
-            "guide> "
         } else {
             "> "
         };
-        let input_title = if in_skott_steering {
-            " Agent guidance "
-        } else {
-            " Command "
-        };
         let input = Block::default()
             .borders(Borders::TOP)
-            .title(input_title)
+            .title(" Command ")
             .style(raised)
             .border_style(border);
         let input_area = input.inner(footer);
@@ -231,7 +194,7 @@ impl Workspace {
                 ..input_area
             },
         );
-        if self.overlay.is_none() {
+        if self.overlay.is_none() && !self.skott_focused() && !input_area.is_empty() {
             frame.set_cursor_position((
                 input_area
                     .x
@@ -279,6 +242,13 @@ impl Workspace {
             let mut state = ListState::default().with_selected(Some(self.candidate));
             frame.render_stateful_widget(list, popup, &mut state);
         }
+        Ok(())
+    }
+
+    fn draw_overlay(&mut self, frame: &mut Frame<'_>, area: Rect) -> io::Result<()> {
+        let raised = render::panel(self.theme);
+        let selected = render::selection(self.theme);
+        let border = render::border(self.theme);
         if let Some(overlay) = &mut self.overlay {
             let popup = centered(area);
             frame.render_widget(Clear, popup);
@@ -437,141 +407,6 @@ impl Workspace {
         );
         Ok(())
     }
-
-    /// Renders the dedicated, in-place Skott metrics line. It replaces any
-    /// previous such line each frame and is the only agent progress shown in
-    /// the Kvist shell. When the session ends it becomes the final stats and
-    /// result.
-    fn render_skott_metrics_line(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        base: Style,
-        accent: Color,
-    ) {
-        let skott = match &self.skott {
-            Some(skott) if skott.is_active() => skott,
-            _ => return,
-        };
-        let status = if skott.result().finished {
-            "final"
-        } else {
-            "live"
-        };
-        let prefix = format!(
-            " Skott {} | {} | ",
-            skott.model_id().unwrap_or("unknown"),
-            status
-        );
-        let stats = skott
-            .app
-            .stats_line_for_width(usize::from(area.width).saturating_sub(prefix.len()));
-        let line = if stats.is_empty() {
-            format!("{prefix}{}", skott.app.status)
-        } else if stats.chars().count() > usize::from(area.width).saturating_sub(prefix.len()) {
-            format!(" {stats}")
-        } else {
-            format!("{prefix}{stats}")
-        };
-        frame.render_widget(
-            Paragraph::new(sanitize(&line))
-                .style(base.patch(render::secondary(self.theme)).fg(accent)),
-            area,
-        );
-    }
-
-    /// Renders the detailed Skott agent view using Skott's own App state and
-    /// rendering, so the Kvist view matches the standalone Skott TUI exactly.
-    fn render_skott_body(
-        &mut self,
-        frame: &mut Frame<'_>,
-        body: Rect,
-        base: Style,
-        border: Style,
-        accent: Color,
-    ) -> io::Result<()> {
-        let skott = self
-            .skott
-            .as_ref()
-            .ok_or_else(|| io::Error::other("Skott view requested with no session"))?;
-        let app = &skott.app;
-        // The dedicated Skott metrics line (rendered above the body) already
-        // shows the model and the full turn/token/context/elapsed summary; the
-        // panel title must not repeat it, so it names the view only.
-        let title = " Skott agent ".to_owned();
-        let panel = Block::default()
-            .borders(Borders::TOP)
-            .title(title)
-            .border_style(border)
-            .style(base);
-        let inner = panel.inner(body);
-        frame.render_widget(panel, body);
-
-        // Use Skott's own rendering: extend each line to full width with its
-        // background, then render with auto-follow scroll.
-        let inner_width = usize::from(inner.width.max(1));
-        let lines: Vec<Line> = app
-            .lines
-            .iter()
-            .map(|screen_line| {
-                let mut line = screen_line.line.clone();
-                line.style = line.style.patch(Style::default().bg(screen_line.bg));
-                let current = line.width();
-                if current < inner_width {
-                    line.spans.push(Span::styled(
-                        " ".repeat(inner_width - current),
-                        Style::default().bg(screen_line.bg),
-                    ));
-                }
-                line
-            })
-            .collect();
-
-        let height = usize::from(inner.height).max(1);
-        // Record the viewport so the input path can clamp and step the scroll.
-        self.skott_viewport = height;
-        let total_lines = lines.len().max(height);
-        let max_scroll = lines.len().saturating_sub(height);
-        // Auto-follow pins the view to the newest line; scrolling back unpins
-        // it so a long run's agent work stays reviewable. Clamp the stored
-        // offset and re-pin when it is at the bottom.
-        self.skott_scroll = self.skott_scroll.min(max_scroll);
-        self.skott_follow = self.skott_follow || self.skott_scroll == max_scroll;
-        let scroll = if self.skott_follow {
-            max_scroll
-        } else {
-            self.skott_scroll
-        };
-        let scroll = u16::try_from(scroll).unwrap_or(u16::MAX);
-        frame.render_widget(
-            Paragraph::new(Text::from(lines))
-                .style(base)
-                .scroll((scroll, 0)),
-            inner,
-        );
-
-        // Add scrollbar, matching the Kvist view.
-        let position = if max_scroll > 0 {
-            scroll as f64 / max_scroll as f64
-        } else {
-            0.0
-        };
-        let visible = height as f64 / total_lines as f64;
-        let mut scrollbar = ScrollbarState::new(65_536)
-            .position((position * 65_536.0) as usize)
-            .viewport_content_length((visible * 65_536.0).max(1.0) as usize);
-        frame.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(None)
-                .end_symbol(None)
-                .thumb_style(Style::default().fg(accent))
-                .track_style(border),
-            body,
-            &mut scrollbar,
-        );
-
-        Ok(())
-    }
 }
 
 fn document(
@@ -606,6 +441,87 @@ fn document(
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn split_replaces_the_turn_row_and_keeps_model_detail_out_of_kvist_history() {
+        use serde_json::json;
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut workspace = Workspace::new(dir.path()).unwrap();
+        let feed = crate::workspace_feed::Reader::new().unwrap();
+        let mut writer = std::fs::File::options()
+            .append(true)
+            .open(feed.path())
+            .unwrap();
+        workspace.task_skott.shown = true;
+        workspace.task_skott.feed = Some(feed);
+        workspace.select_pane(ActivePane::Both);
+        let mut send = |events: &[serde_json::Value]| {
+            for event in events {
+                writeln!(writer, "{event}").unwrap();
+            }
+        };
+        send(&[
+            json!({"type":"workspace_task_start","data":"test-task"}),
+            json!({"type":"workspace_turn","data":1}),
+            json!({"type":"model_request","data":{"model":"fixture","estimated_input_tokens":9}}),
+            json!({"type":"reasoning","data":"Only in Skott.\n\n"}),
+            json!({"type":"text","data":"Visible model answer.\n\n"}),
+            json!({"type":"model_result","data":{
+                "usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},
+                "timings":{"generation_seconds":0.5}
+            }}),
+        ]);
+        let mut terminal = Terminal::new(TestBackend::new(200, 30)).unwrap();
+        let mut capture = |workspace: &mut Workspace| {
+            workspace.pump_task_view().unwrap();
+            workspace.rendered = workspace.render_transcript().unwrap();
+            terminal
+                .draw(|frame| workspace.draw(frame).unwrap())
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+        };
+        let first = capture(&mut workspace);
+        assert!(first.contains("Turn 1 | 1 attempts"));
+        assert!(first.contains("Visible model answer."));
+        assert!(first.contains("prompt · Enter send"));
+        assert_eq!(
+            workspace
+                .task_skott
+                .app
+                .stats
+                .unwrap()
+                .generation_tokens_per_sec,
+            Some(10.0)
+        );
+        send(&[
+            json!({"type":"workspace_turn","data":2}),
+            json!({"type":"model_request","data":{"model":"fixture","estimated_input_tokens":18}}),
+        ]);
+        let second = capture(&mut workspace);
+        assert!(second.contains("Turn 2 | 2 attempts"));
+        assert!(!second.contains("Turn 1"));
+        send(&[
+            json!({"type":"model_result","data":{"usage":{"input_tokens":18,"output_tokens":2,"total_tokens":20}}}),
+            json!({"type":"workspace_task_end","data":{"elapsed":2.5}}),
+        ]);
+        let done = capture(&mut workspace);
+        assert!(!done.contains("Turn 2"));
+        assert_eq!(workspace.source.matches("Task statistics").count(), 1);
+        assert!(
+            workspace
+                .source
+                .contains("2 turns | 2 attempts | 0 tools | 28 in / 7 out | 2.5s")
+        );
+        assert!(!workspace.source.contains("Visible model answer."));
+    }
 
     #[test]
     fn long_confirmations_can_scroll_to_all_source_and_consumer_warnings() {
@@ -779,42 +695,29 @@ mod tests {
                 )));
         }
         workspace.skott = Some(embedded);
+        workspace.select_pane(ActivePane::Skott);
 
-        // Wide terminal: the Skott pane must adopt the pane's inner width and
-        // the Kvist transcript must adopt its full-body inner width.
         let mut terminal = Terminal::new(TestBackend::new(200, 30)).unwrap();
         terminal
             .draw(|frame| workspace.draw(frame).unwrap())
             .unwrap();
-        assert_eq!(workspace.width, 198, "Kvist transcript must track the pane");
-        assert_eq!(workspace.skott.as_ref().unwrap().app.width, 199);
-        assert_eq!(workspace.skott_viewport, 23);
+        assert_eq!(workspace.skott_app().width, 200);
+        assert_eq!(workspace.skott_app().height, 30);
 
         // Mouse wheel on the Skott view scrolls the Skott transcript, not the
         // Kvist transcript: scrolling back unpins auto-follow, and the Kvist
         // scroll offset is left untouched.
         let kvist_scroll = workspace.scroll;
         let lines = workspace.skott.as_ref().unwrap().app.lines.len();
-        workspace.mouse_scroll(true).unwrap();
+        let skott_bottom = workspace.skott_app().scroll;
+        workspace.mouse_scroll(true, true).unwrap();
         assert_eq!(
             workspace.scroll, kvist_scroll,
             "Kvist transcript must not move"
         );
-        assert!(
-            !workspace.skott_follow,
-            "scrolling back must unpin auto-follow"
-        );
-        assert_eq!(
-            workspace.skott_scroll,
-            (lines - workspace.skott_viewport) - 3,
-            "the wheel must scroll the Skott view by its step"
-        );
-        // Scrolling down again reaches the bottom and re-pins auto-follow.
-        workspace.mouse_scroll(false).unwrap();
-        assert!(
-            workspace.skott_follow,
-            "reaching the bottom must re-pin follow"
-        );
+        assert_eq!(workspace.skott_app().scroll, skott_bottom - 3);
+        workspace.mouse_scroll(false, true).unwrap();
+        assert_eq!(workspace.skott_app().scroll, skott_bottom);
 
         // A narrower terminal re-wraps both transcripts: the Skott app reflows
         // its rows at the new pane width, and the Kvist width tracks the pane.
@@ -823,25 +726,27 @@ mod tests {
         terminal
             .draw(|frame| workspace.draw(frame).unwrap())
             .unwrap();
-        assert_eq!(workspace.skott.as_ref().unwrap().app.width, 99);
+        assert_eq!(workspace.skott_app().width, 100);
         assert!(
             workspace.skott.as_ref().unwrap().app.lines.len() > lines,
             "the Skott transcript must re-wrap at the narrower pane"
         );
-        assert_eq!(workspace.width, 98);
 
         // The side-by-side split shrinks both panes again: the Skott app
         // re-wraps at the half-width pane, and the Kvist transcript follows.
-        workspace
-            .skott
-            .as_mut()
-            .unwrap()
-            .set_active_pane(ActivePane::Both);
+        workspace.select_pane(ActivePane::Both);
         terminal
             .draw(|frame| workspace.draw(frame).unwrap())
             .unwrap();
-        assert_eq!(workspace.skott.as_ref().unwrap().app.width, 49);
+        assert_eq!(workspace.skott_app().width, 50);
         assert_eq!(workspace.width, 48);
+
+        let mut terminal = Terminal::new(TestBackend::new(72, 32)).unwrap();
+        terminal
+            .draw(|frame| workspace.draw(frame).unwrap())
+            .unwrap();
+        assert_eq!(workspace.skott_area, Rect::new(0, 16, 72, 16));
+        assert_eq!(workspace.width, 70);
     }
 
     #[test]

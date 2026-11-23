@@ -3725,6 +3725,107 @@ fn independent_review_redacts_escaped_secrets_from_stream_logs_and_reports() {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn workspace_feed_tracks_a_steered_task_without_printing_the_capability() {
+    use sav::observation::{ControlRequest, send_control};
+    use std::time::{Duration, Instant};
+
+    let (observed, requests) = std::sync::mpsc::channel();
+    let gateway = MockGateway::serve(
+        move |body| {
+            if !body.is_empty() {
+                let body = String::from_utf8_lossy(body);
+                observed.send(body.to_string()).unwrap();
+                if !body.contains("Use the revised wording") {
+                    std::thread::sleep(Duration::from_millis(650));
+                }
+            }
+            gateway_stream_body(&[r#"{"report":"Workspace fixture.","decision_required":false}"#])
+        },
+        Duration::ZERO,
+    );
+    let project = continuous_project(&gateway.endpoint, "manual");
+    let feed = tempfile::NamedTempFile::new().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args([
+            "task",
+            "run",
+            ".",
+            "one-write-tests",
+            "--stream",
+            "--allow-control",
+        ])
+        .env("KVIST_WORKSPACE_FEED", feed.path())
+        .current_dir(project.path())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let events = || {
+        fs::read_to_string(feed.path())
+            .unwrap()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .collect::<Vec<_>>()
+    };
+    let first = requests.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(!first.contains("Use the revised wording"));
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let socket = loop {
+        let current = events();
+        if current.iter().any(|event| event["type"] == "model_request")
+            && let Some(path) = current.iter().find_map(|event| {
+                (event["type"] == "workspace_control")
+                    .then(|| event["data"].as_str())
+                    .flatten()
+            })
+        {
+            assert!(
+                !current
+                    .iter()
+                    .any(|event| event["type"] == "workspace_task_end")
+            );
+            break std::path::PathBuf::from(path);
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let reply = send_control(
+        &socket,
+        &ControlRequest::guide(1, "Use the revised wording"),
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    assert_eq!(reply.status, "queued");
+    let second = requests.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(second.contains("Use the revised wording"), "{second}");
+    assert!(wait_cancelled_task(&mut child).success());
+    let output = child.wait_with_output().unwrap();
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("private run control"));
+    let events = events();
+    assert!(events.iter().any(|event| event["type"] == "workspace_turn"));
+    assert!(events.iter().any(|event| {
+        event["type"] == "text"
+            && event["data"]
+                .as_str()
+                .is_some_and(|text| text.contains("Workspace fixture"))
+    }));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "control" && event["data"]["state"] == "delivered")
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "workspace_task_end")
+            .count(),
+        1
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn independent_review_controls_reject_guidance_and_cancel_quiet_inference() {
     use sav::observation::{ControlRequest, send_control};
     use std::io::{BufRead, BufReader, Read};

@@ -33,13 +33,15 @@ const BINDINGS: &[(&str, &str, Option<&str>)] = &[
         None,
     ),
     ("Alt+Left / Right", "Horizontal transcript scroll", None),
+    ("F3", "Cycle view: Kvist / Skott / split", Some("view")),
+    ("F4", "Kvist only", None),
+    ("F5", "Skott only", None),
+    ("F6", "Switch input focus in split view", Some("focus")),
     (
-        "F3",
-        "Cycle agent view: Kvist / Skott / side by side",
-        Some("view"),
+        "F7",
+        "Switch between the last task and free-form Skott when idle",
+        None,
     ),
-    ("F4", "Kvist metrics view", None),
-    ("F5", "Skott detail view", None),
     (
         "Ctrl+C",
         "Cancel owned command or clear idle input; never quit",
@@ -60,11 +62,6 @@ const BINDINGS: &[(&str, &str, Option<&str>)] = &[
         "Pin/unpin the highlighted component",
         None,
     ),
-    (
-        "Ctrl+A (idle)",
-        "Start interactive Skott agent session",
-        Some("agent"),
-    ),
 ];
 
 pub(super) fn footer() -> String {
@@ -81,5 +78,6 @@ pub(super) fn help() -> String {
         text.push_str(&format!("| {key} | {action} |\n"));
     }
     text.push_str("\nMenus preserve the command draft. Type to filter component/model lists; Esc returns one level without applying a choice. F2 opens the root menu, cancelling any pending confirmation without approving it. Current values are marked independently of the cursor.\n\nWhile a command runs, input answers its prompts. Answers are shown as typed and not retained in the transcript; enable \"Mask command answers\" in Appearance to hide them when a prompt asks for a secret. For `prompt --file -`, enter the prompt then Ctrl+D on empty input. Persisted settings, including appearance and pins, require an idle command; inspection and transcript navigation remain available. Settings do not approve policy. Transcript history is local diagnostic state, not canonical evidence.\n");
+    text.push_str("\nSkott has its own multiline prompt (Ctrl+Enter or Enter twice to send). During supervised native work it sends guidance, not command answers; independent reviews reject guidance. F2 opens the workspace menu from either pane. F7 returns to the independent Skott conversation after a task.\n");
     text
 }

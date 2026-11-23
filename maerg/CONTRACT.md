@@ -1091,6 +1091,21 @@ The workspace captures child stdout/stderr without a shell. Its command
 footer stays available during execution for interactive answers; Ctrl+C
 requests cancellation, not rollback or replay. PageUp/PageDown and mouse wheel
 browse output without editing input; Ctrl+Home/End reach history ends.
+
+The Workspace **View** menu selects **Kvist only**, **Skott only**, or
+**Split: Kvist + Skott**, including while work runs. F3 cycles views;
+F4/F5 select Kvist/Skott and F6 switches input focus in split view. A narrow
+terminal stacks the panes. The Skott pane uses its standalone multiline
+prompt and statistics; prompts use the project’s Skott configuration and
+sandbox. Free-form sessions retain their conversation between prompts and
+view changes. During a protected native task the Skott pane shows live
+model and tool events. Its prompt sends supplemental guidance through the
+private supervised control, which the workspace enables on its owned task
+subprocess; the independent-review boundary still rejects
+guidance. Free-form prompts cannot run concurrently with a protected task.
+After the run, F7 switches between the last task and the free-form session.
+Kvist shows the current turn on one replaceable line and writes final task
+statistics to its own transcript.
 Tab/Shift+Tab navigate completion, Enter accepts a visible candidate before
 submission, Up/Down recall command history, F1 opens help and F2 settings.
 Escape dismisses completion first, otherwise returns one menu level, and opens

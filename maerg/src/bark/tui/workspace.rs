@@ -9,6 +9,7 @@ mod menus;
 mod model_menu_tests;
 mod model_menus;
 mod preferences;
+mod skott_view;
 mod task_progress;
 mod view;
 
@@ -40,13 +41,10 @@ use crate::bark::{
     tree::{CommandNode, build_root},
 };
 use crate::config::CommitFrequency;
-use crate::skott_embedded::{ActivePane, ContinuationDecision, EmbeddedSkott, SkottResult};
-use task_progress::RunProgress;
-
-/// The maximum automatic continuations Kvist submits for one agent session
-/// before it stops forcing progress and surfaces the result for a decision.
-const MAX_SKOTT_CONTINUATIONS: u32 = 5;
+use crate::skott_embedded::{ActivePane, EmbeddedSkott};
 use crate::{KvistError, Result};
+use skott_view::{TaskView, idle_app};
+use task_progress::RunProgress;
 
 enum Overlay {
     Help {
@@ -109,16 +107,11 @@ pub(super) struct Workspace {
     quit: bool,
     prompt_file: Option<tempfile::NamedTempFile>,
     skott: Option<EmbeddedSkott>,
-    skott_continuations: u32,
-    skott_result_reported: bool,
-    /// Scroll offset (in lines) into the embedded Skott transcript. While
-    /// `skott_follow` is set the view is pinned to the newest line; scrolling
-    /// back clears the pin so a long run's agent work stays reviewable.
-    skott_scroll: usize,
-    skott_follow: bool,
-    /// Last known inner height (rows) of the Skott body, used to clamp the
-    /// scroll offset without re-deriving the layout in the input path.
-    skott_viewport: usize,
+    free_skott: skott::tui::app::App,
+    task_skott: TaskView,
+    pane: ActivePane,
+    split_skott_focus: bool,
+    skott_area: ratatui::layout::Rect,
 }
 
 pub(crate) fn available() -> bool {
@@ -227,11 +220,29 @@ pub(crate) fn run(project: &Path) -> Result<()> {
                         Event::Paste(text) => workspace.paste(&text),
                         Event::Mouse(mouse) => match mouse.kind {
                             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                                workspace.mouse_scroll(mouse.kind == MouseEventKind::ScrollUp)?;
+                                let in_skott = workspace
+                                    .skott_area
+                                    .contains((mouse.column, mouse.row).into());
+                                workspace.mouse_scroll(
+                                    mouse.kind == MouseEventKind::ScrollUp,
+                                    in_skott,
+                                )?;
+                            }
+                            MouseEventKind::Down(event::MouseButton::Left)
+                                if workspace.overlay.is_none()
+                                    && workspace.pane == ActivePane::Both =>
+                            {
+                                workspace.split_skott_focus = workspace
+                                    .skott_area
+                                    .contains((mouse.column, mouse.row).into());
                             }
                             MouseEventKind::Down(event::MouseButton::Left)
                             | MouseEventKind::Drag(event::MouseButton::Left)
                                 if workspace.overlay.is_none()
+                                    && workspace.pane != ActivePane::Skott
+                                    && !workspace
+                                        .skott_area
+                                        .contains((mouse.column, mouse.row).into())
                                     && mouse.column == size.width.saturating_sub(1) =>
                             {
                                 let height = size.height.saturating_sub(7).max(1);
@@ -369,11 +380,11 @@ impl Workspace {
             quit: false,
             prompt_file: None,
             skott: None,
-            skott_continuations: 0,
-            skott_result_reported: false,
-            skott_scroll: 0,
-            skott_follow: true,
-            skott_viewport: 1,
+            free_skott: idle_app(),
+            task_skott: TaskView::default(),
+            pane: ActivePane::Kvist,
+            split_skott_focus: false,
+            skott_area: ratatui::layout::Rect::ZERO,
         };
         workspace.refresh();
         workspace.append(&format!(
@@ -506,45 +517,21 @@ impl Workspace {
         render::markdown(&self.source, self.width, self.theme)
     }
 
-    /// True when a plain PageUp/PageDown should scroll the embedded Skott
-    /// transcript rather than the Kvist transcript: the session is active and
-    /// the Skott view (alone or side-by-side) is the active pane.
-    fn skott_viewport_scroll_active(&self) -> bool {
-        self.skott.as_ref().is_some_and(|skott| {
-            skott.is_active() && matches!(skott.active_pane(), ActivePane::Skott | ActivePane::Both)
-        })
+    fn skott_focused(&self) -> bool {
+        self.pane == ActivePane::Skott || self.pane == ActivePane::Both && self.split_skott_focus
     }
 
-    /// Scrolls the embedded Skott transcript by `delta` lines, clamped to the
-    /// transcript's bounds. While auto-follow is on the effective position is
-    /// the bottom, so a PageUp scrolls back one page from the newest line and
-    /// unpins follow; PageDown to the bottom re-pins it, so the view tracks
-    /// new output again. This keeps a long run's agent work reviewable.
-    fn skott_scroll_page(&mut self, delta: isize) {
-        let Some(skott) = self.skott.as_ref().filter(|skott| skott.is_active()) else {
-            return;
-        };
-        let lines = skott.app.lines.len();
-        let max_scroll = lines.saturating_sub(self.skott_viewport);
-        let current = if self.skott_follow {
-            max_scroll
-        } else {
-            self.skott_scroll
-        };
-        let next = if delta < 0 {
-            current.saturating_sub(delta.unsigned_abs())
-        } else {
-            current.saturating_add(delta as usize)
-        };
-        self.skott_scroll = next.min(max_scroll);
-        self.skott_follow = self.skott_scroll == max_scroll;
+    fn select_pane(&mut self, pane: ActivePane) {
+        self.pane = pane;
+        self.candidates.clear();
+        self.dirty = true;
+        if pane != ActivePane::Kvist {
+            self.prepare_skott_view();
+        }
     }
 
-    /// Applies one mouse-wheel tick. Overlays scroll themselves; while the
-    /// Skott view (alone or side-by-side) is showing the embedded Skott
-    /// transcript, the wheel scrolls that transcript — matching what plain
-    /// PageUp/PageDown do there; otherwise the Kvist transcript scrolls.
-    pub(super) fn mouse_scroll(&mut self, up: bool) -> io::Result<()> {
+    /// Applies one mouse-wheel tick to the overlay or the pane under the pointer.
+    fn mouse_scroll(&mut self, up: bool, skott: bool) -> io::Result<()> {
         if self.overlay.is_some() {
             let key = if up { KeyCode::Up } else { KeyCode::Down };
             for _ in 0..3 {
@@ -552,8 +539,13 @@ impl Workspace {
             }
             return Ok(());
         }
-        if self.skott_viewport_scroll_active() {
-            self.skott_scroll_page(if up { -3 } else { 3 });
+        if skott {
+            let app = self.skott_app();
+            if up {
+                app.scroll_up(3);
+            } else {
+                app.scroll_down(3);
+            }
             return Ok(());
         }
         self.navigate(if up { -3 } else { 3 })?;
@@ -608,61 +600,10 @@ impl Workspace {
     }
 
     fn pump(&mut self) -> io::Result<()> {
-        // Process embedded Skott events; a new event marks the view dirty.
         if let Some(skott) = &mut self.skott {
-            if skott.pump() {
-                self.dirty = true;
-            }
-            // Kvist owns the completion policy. When the agent returns control
-            // without finishing and without a legitimate block, resubmit a
-            // focused continuation prompt (bounded, so a stuck agent surfaces
-            // for a human decision instead of looping forever). A terminal
-            // result is reported to the Kvist view exactly once.
-            if skott.result().finished && !self.skott_result_reported {
-                match skott.result().decision() {
-                    Some(ContinuationDecision::Continue)
-                        if self.skott_continuations < MAX_SKOTT_CONTINUATIONS =>
-                    {
-                        self.skott_continuations = self.skott_continuations.saturating_add(1);
-                        let attempt = self.skott_continuations;
-                        let turns = skott.metrics().turns;
-                        let prompt = format!(
-                            "Continue the task. You returned control after {turns} turn(s) \
-                             without finishing and without a blocking reason. Review what \
-                             remains and keep working until the task is complete, you are \
-                             blocked for a concrete reason, or a human decision is required. \
-                             (automatic continuation {attempt}/{MAX_SKOTT_CONTINUATIONS})"
-                        );
-                        match skott.submit(prompt) {
-                            Ok(()) => {
-                                self.dirty = true;
-                                self.notice = format!(
-                                    "Agent stopped without finishing; Kvist continued the task (attempt {attempt})."
-                                );
-                            }
-                            Err(error) => {
-                                self.skott_result_reported = true;
-                                self.record_error(&format!("Skott continuation failed: {error}"))?;
-                            }
-                        }
-                    }
-                    _ => {
-                        // Finished, blocked, or out of continuations: surface it.
-                        self.skott_result_reported = true;
-                        let result = skott.result().clone();
-                        let model_stats = skott.app.stats_line();
-                        self.report_skott_result(&result, &model_stats)?;
-                    }
-                }
-            }
+            skott.pump();
         }
-        // The final stats and result are now in the Kvist transcript;
-        // drop the session so the metrics line clears and a new agent
-        // session can start.
-        if self.skott_result_reported {
-            self.skott = None;
-            self.dirty = true;
-        }
+        let more_feed = self.pump_task_view()?;
 
         let Some(run) = &mut self.running else {
             return Ok(());
@@ -712,6 +653,13 @@ impl Workspace {
             self.capture_error(&error)?;
         }
         if let Some(status) = status {
+            if more_feed || self.pump_task_view()? {
+                return Ok(());
+            }
+            if let Some(stats) = self.task_skott.finish(None) {
+                self.append(&stats)?;
+            }
+            self.task_skott.feed.take();
             self.last_failed = self.capture_failed || !status.success();
             self.append(&format!(
                 "\n\n**Command {}** ({status}).\n\n",
@@ -741,42 +689,29 @@ impl Workspace {
         Ok(())
     }
 
-    /// Appends a terminal Skott result to the Kvist transcript so the Kvist
-    /// view shows the answer (or failure) and the session metrics.
-    fn report_skott_result(&mut self, result: &SkottResult, metrics: &str) -> io::Result<()> {
-        let heading = match result.decision() {
-            Some(ContinuationDecision::Finished) => "Agent result",
-            Some(ContinuationDecision::Blocked) => "Agent blocked",
-            Some(ContinuationDecision::Continue) => "Agent paused",
-            None => "Agent",
-        };
-        let mut markdown = format!("\n\n## {heading}\n\n");
-        if let Some(answer) = &result.answer {
-            markdown.push_str(answer);
-            markdown.push_str("\n\n");
-        }
-        if let Some(failure) = &result.failure {
-            markdown.push_str(&format!("**Failure:** {failure}\n\n"));
-        }
-        if !metrics.is_empty() {
-            markdown.push_str(&format!("**Metrics:** {metrics}\n\n"));
-        }
-        self.append(&markdown)
-    }
-
     fn key(&mut self, key: KeyEvent, terminal: &mut Screen) -> io::Result<()> {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
-        if control && key.code == KeyCode::Char('a') {
-            // Ctrl+A: start an interactive agent session when idle.
-            if self.running.is_none() && !self.skott.as_ref().is_some_and(|skott| skott.is_active())
-            {
-                self.start_agent_session("")?;
-            }
-            return Ok(());
-        }
         if control && key.code == KeyCode::Char('q') {
             self.request_quit();
             return Ok(());
+        }
+        if matches!(key.code, KeyCode::F(3..=5))
+            && let Some(pane) = self.pane.for_key(key)
+        {
+            self.select_pane(pane);
+            return Ok(());
+        }
+        if key.code == KeyCode::F(6) && self.pane == ActivePane::Both {
+            self.split_skott_focus = !self.split_skott_focus;
+            return Ok(());
+        }
+        if key.code == KeyCode::F(7) && self.running.is_none() {
+            self.task_skott.shown = !self.task_skott.shown;
+            self.prepare_skott_view();
+            return Ok(());
+        }
+        if self.overlay.is_none() && self.skott_focused() && key.code != KeyCode::F(2) {
+            return self.skott_key(key);
         }
         if control && key.code == KeyCode::Char('c') {
             if let Some(run) = &mut self.running {
@@ -808,13 +743,6 @@ impl Workspace {
             return self.overlay_key(key);
         }
 
-        // Skott pane switching: Ctrl+PageUp/PageDown or Alt+Left/Right
-        if let Some(skott) = &mut self.skott
-            && skott.handle_key(key)
-        {
-            self.dirty = true;
-            return Ok(());
-        }
         if self.running.is_some()
             && matches!(
                 key.code,
@@ -829,17 +757,6 @@ impl Workspace {
                 self.overlay = Some(Overlay::Help { scroll: 0 });
             }
             KeyCode::F(2) => self.open_menu(menus::Page::Root)?,
-            // While the embedded Skott session is active and the Skott view is
-            // showing, plain PageUp/PageDown scroll the *Skott* transcript
-            // (not the Kvist transcript). Scrolling back unpins auto-follow so
-            // a long run's agent work stays reviewable; reaching the bottom
-            // re-pins it. (Ctrl+PageUp / Ctrl+PageDown still switch views.)
-            KeyCode::PageUp if self.skott_viewport_scroll_active() => {
-                self.skott_scroll_page(-(self.skott_viewport.max(1) as isize));
-            }
-            KeyCode::PageDown if self.skott_viewport_scroll_active() => {
-                self.skott_scroll_page(self.skott_viewport.max(1) as isize);
-            }
             KeyCode::PageUp => self.navigate(-(self.viewport.max(1) as isize))?,
             KeyCode::PageDown => self.navigate(self.viewport.max(1) as isize)?,
             KeyCode::Home if control => {
@@ -917,6 +834,13 @@ impl Workspace {
             return;
         }
         if self.overlay.is_some() {
+            return;
+        }
+        if self.skott_focused() {
+            let app = self.skott_app();
+            if app.overlay == skott::tui::app::Overlay::None && !app.show_help {
+                app.editor.insert_str(text);
+            }
             return;
         }
         if !self.input.insert(text) {

@@ -1125,6 +1125,17 @@ state and MUST NOT be treated as compliance evidence.
 
 ### REQ-SETTINGS-MENU
 
+The workspace MUST offer Kvist-only, Skott-only, and split views in its
+menu at all times. Switching MUST NOT cancel work, discard either input
+draft, or change execution authority. The independent Skott pane MUST use
+the standalone prompt editor, transcript rendering and model statistics,
+and MUST accept sandboxed work when Kvist is not running a task, including
+steering an active free-form turn. A supervised native task MUST display
+live model/tool output and model metrics in Skott. Steering MUST go through
+the supervised guidance control, never command stdin or a parallel agent.
+Independent reviews MUST continue to reject guidance. Kvist MUST show an
+in-place turn status and append one final statistics line per native task.
+
 The interactive shell MUST provide a settings menu (the `skott` overlay
 pattern) that exposes the major choices: model, reasoning effort, session
 history, component selection, theme, and other settings. Selecting a component
@@ -1132,10 +1143,11 @@ from the menu MUST be the same focus change as the `cd` builtin and MUST
 pre-fill the component for subsequent commands. Theme, model, and effort
 selections MUST persist the preference and apply immediately to the session.
 
-The workspace MUST use one hierarchical Esc/F2 menu with Components, Role
-assignments, Models, Appearance, History, Help and Quit, and Cancel command
-while work is active. Esc MUST first dismiss completion, otherwise return one
-menu level, and open the menu from the unobstructed workspace. Back-navigation
+The workspace MUST use one hierarchical menu, available with F2 in either
+pane, with Components, Role assignments, Models, Appearance, View, History,
+Help and Quit, and Cancel command while work is active. In Kvist, Esc MUST
+first dismiss completion, otherwise return one menu level, and open the menu
+from the unobstructed workspace. Back-navigation
 MUST restore the parent's cursor/filter without changing settings or the command
 draft. Quit and Ctrl+Q MUST share cancellation/reaping and warn before terminating
 active work. Ctrl+C remains cancel/clear, not quit; CLI editing/completion,

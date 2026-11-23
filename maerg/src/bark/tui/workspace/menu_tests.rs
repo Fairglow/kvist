@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::{
-    Overlay, Workspace,
+    ActivePane, Overlay, Workspace,
     menus::{Action, Entry, Menu, Page},
 };
 
@@ -10,6 +10,59 @@ fn menu(workspace: &Workspace) -> &Menu {
         panic!("expected menu");
     };
     menu
+}
+
+#[test]
+fn idle_workspace_view_picker_exposes_all_layouts_without_starting_skott() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::new(dir.path()).unwrap();
+    workspace.open_menu(Page::Root).unwrap();
+    let views = menu(&workspace)
+        .choices
+        .iter()
+        .position(|choice| choice.label.starts_with("View"))
+        .unwrap();
+    if let Some(Overlay::Menu(menu)) = &mut workspace.overlay {
+        menu.selected = views;
+    }
+    workspace.overlay_key(KeyCode::Enter.into()).unwrap();
+    let labels: Vec<_> = menu(&workspace)
+        .choices
+        .iter()
+        .map(|choice| choice.label.as_str())
+        .collect();
+    assert_eq!(labels, ["Kvist only", "Skott only", "Split: Kvist + Skott"]);
+    workspace.overlay_key(KeyCode::Down.into()).unwrap();
+    workspace.overlay_key(KeyCode::Enter.into()).unwrap();
+    assert!(workspace.overlay.is_none());
+    assert_eq!(workspace.pane, ActivePane::Skott);
+    assert!(
+        !workspace
+            .skott
+            .as_ref()
+            .is_some_and(|skott| skott.is_active())
+    );
+}
+
+#[test]
+fn active_workspace_view_selection_preserves_both_drafts_and_the_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::new(dir.path()).unwrap();
+    workspace.input.set("kvist draft");
+    workspace.start(vec!["--help".into()]).unwrap();
+    workspace.task_skott.shown = true;
+    workspace.select_pane(ActivePane::Skott);
+    workspace.paste("line one\nline two");
+    workspace.open_menu(Page::View).unwrap();
+    workspace.overlay_key(KeyCode::Down.into()).unwrap();
+    workspace.overlay_key(KeyCode::Enter.into()).unwrap();
+    assert_eq!(workspace.pane, ActivePane::Both);
+    assert!(workspace.running.is_some());
+    assert_eq!(workspace.input.text, "kvist draft");
+    assert_eq!(
+        workspace.skott_app().editor.lines(),
+        ["line one", "line two"]
+    );
 }
 
 #[test]

@@ -204,6 +204,27 @@ fn bare_kvist_hosts_completion_reports_and_restorable_component_history() {
     wait_for(&pty.master, &mut output, || {
         transcript(&component).contains("# Agent report")
     });
+    // The prompt child is waiting on Kvist stdin. Switch views through the
+    // live menu without answering it, then use F4 to return to the command.
+    let before_skott = output.len();
+    write(&pty.master, b"\x1bOQ\x1b[B\x1b[B\x1b[B\x1b[B\r\x1b[B\r").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        pump(&pty.master, &mut output);
+        if String::from_utf8_lossy(&output[before_skott..]).contains("Skott setup required") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Skott view did not open during the command"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        transcript(&component).matches("Command finished").count(),
+        1
+    );
+    write(&pty.master, b"\x1bOS").unwrap();
     write(&pty.master, b"\r").unwrap();
     wait_for(&pty.master, &mut output, || {
         transcript(&component).matches("Command finished").count() >= 2

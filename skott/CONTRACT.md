@@ -2,6 +2,11 @@
 
 # Skott — Contract
 
+The interactive renderer also accepts a caller-provided viewport and cursor
+ownership flag. Embedders can reuse the standalone transcript, status, menus
+and multiline prompt without taking over the terminal or running a second
+event loop.
+
 ## Native Cargo cache resources
 
 Under ADR 0020, Rust resources use `dependencies::rust::cache`: `home` selects

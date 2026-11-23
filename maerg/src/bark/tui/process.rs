@@ -85,12 +85,31 @@ fn reader(
 }
 
 impl Running {
-    pub(super) fn spawn(directory: &Path, arguments: &[String]) -> io::Result<Self> {
-        Self::spawn_program(&std::env::current_exe()?, directory, arguments)
+    pub(super) fn spawn_with_feed(
+        directory: &Path,
+        arguments: &[String],
+        feed: Option<&Path>,
+    ) -> io::Result<Self> {
+        Self::spawn_inner(&std::env::current_exe()?, directory, arguments, feed)
     }
 
+    #[cfg(test)]
     fn spawn_program(program: &Path, directory: &Path, arguments: &[String]) -> io::Result<Self> {
-        let mut child = Command::new(program)
+        Self::spawn_inner(program, directory, arguments, None)
+    }
+
+    fn spawn_inner(
+        program: &Path,
+        directory: &Path,
+        arguments: &[String],
+        feed: Option<&Path>,
+    ) -> io::Result<Self> {
+        let mut command = Command::new(program);
+        command.env_remove(crate::workspace_feed::ENV);
+        if let Some(path) = feed {
+            command.env(crate::workspace_feed::ENV, path);
+        }
+        let mut child = command
             .args(arguments)
             .current_dir(directory)
             .env("NO_COLOR", "1")

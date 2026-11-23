@@ -68,7 +68,15 @@ fn panel_top_edge(
 
 /// Renders one frame of the application.
 pub fn render(f: &mut ratatui::Frame, app: &App) {
-    let area = f.area();
+    render_in(f, app, f.area(), true);
+}
+
+/// Draws the standalone Skott interface in a viewport of a host frame.
+/// Only a focused, editable pane should own the terminal cursor.
+pub fn render_in(f: &mut ratatui::Frame, app: &App, area: Rect, cursor: bool) {
+    if area.is_empty() {
+        return;
+    }
     // Paint the whole frame with the theme's panel background and plain-text
     // foreground before anything else draws. Without this, any cell no later
     // widget happens to style (a short menu row, the gap below the last
@@ -129,7 +137,7 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
         }
         (false, Overlay::None) => render_transcript(f, app, transcript_area),
     }
-    render_input(f, app, input_area);
+    render_input(f, app, input_area, cursor);
 }
 
 /// The live stats bar: working speed, average throughput, and context
@@ -254,7 +262,7 @@ fn render_transcript_scrollbar(
     );
 }
 
-fn render_input(f: &mut ratatui::Frame, app: &App, area: Rect) {
+fn render_input(f: &mut ratatui::Frame, app: &App, area: Rect, cursor: bool) {
     f.render_widget(&app.editor, area);
     // The prompt box draws its title through ratatui's block title, which
     // erases the border's opening cells — so, like the transcript, overlay the
@@ -273,7 +281,7 @@ fn render_input(f: &mut ratatui::Frame, app: &App, area: Rect) {
     );
     // The editor reports the terminal-relative cursor position from the most
     // recent render; park the real terminal cursor there so typing is visible.
-    if let Some(position) = app.editor.rendered_cursor_position() {
+    if cursor && let Some(position) = app.editor.rendered_cursor_position() {
         f.set_cursor_position(position);
     }
 }

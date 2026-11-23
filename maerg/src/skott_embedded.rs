@@ -53,6 +53,31 @@ pub enum ActivePane {
     Both,
 }
 
+impl ActivePane {
+    pub(crate) fn for_key(self, key: KeyEvent) -> Option<Self> {
+        let control = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        match key.code {
+            KeyCode::F(3) => Some(self.next()),
+            KeyCode::Tab if control => Some(self.next()),
+            KeyCode::F(4) => Some(Self::Kvist),
+            KeyCode::PageUp if control => Some(Self::Kvist),
+            KeyCode::Left if alt => Some(Self::Kvist),
+            KeyCode::F(5) => Some(Self::Skott),
+            KeyCode::PageDown if control => Some(Self::Skott),
+            KeyCode::Right if alt => Some(Self::Skott),
+            _ => None,
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Kvist => Self::Skott,
+            Self::Skott => Self::Both,
+            Self::Both => Self::Kvist,
+        }
+    }
+}
 /// Kvist's completion policy for one agent run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContinuationDecision {
@@ -341,6 +366,8 @@ pub struct EmbeddedSkott {
     active_pane: ActivePane,
     model_id: Option<String>,
     started: Option<Instant>,
+    pending_tasks: usize,
+    effort: ReasoningEffort,
 }
 
 impl Default for EmbeddedSkott {
@@ -374,6 +401,8 @@ impl EmbeddedSkott {
             active_pane: ActivePane::Kvist,
             model_id: None,
             started: None,
+            pending_tasks: 0,
+            effort: ReasoningEffort::Medium,
         }
     }
 
@@ -434,9 +463,7 @@ impl EmbeddedSkott {
             retry,
             max_turns,
             budgets.limits,
-            // Kvist applies its own task-aware continuation policy on top of
-            // the shared one, so the worker must not also auto-continue.
-            false,
+            true,
         )
         .map_err(skott_error)?;
         let app = SkottApp::new(
@@ -461,6 +488,8 @@ impl EmbeddedSkott {
             active_pane: ActivePane::Skott,
             model_id: Some(model.id.clone()),
             started: Some(Instant::now()),
+            pending_tasks: 0,
+            effort,
         })
     }
 
@@ -479,7 +508,8 @@ impl EmbeddedSkott {
         };
         // Collect before observing: `observe` mutably borrows `self`, so the
         // immutable borrow of `self.receiver` must end first.
-        let events: Vec<Event> = receiver.try_iter().collect();
+        let events: Vec<Event> = receiver.try_iter().take(256).collect();
+        let drained = events.len() < 256;
         let mut changed = false;
         for event in events {
             self.observe(event);
@@ -493,7 +523,7 @@ impl EmbeddedSkott {
         // agent loop is the known cause). Surface it once so Kvist reports the
         // failure and tears the task down instead of hanging with the task
         // stuck in-progress and no explanation.
-        if !self.is_running() && !self.result.finished {
+        if drained && !self.is_running() && !self.result.finished {
             self.log.flush_pending();
             self.observe(Event::Failed(
                 "Kvist's agent session died unexpectedly while running the model (the \
@@ -607,6 +637,7 @@ impl EmbeddedSkott {
             // on every other loop exit. Both are terminal, so each sets the
             // stop reason; `Finished` is an unambiguous completion.
             Event::Finished { message } => {
+                self.pending_tasks = self.pending_tasks.saturating_sub(1);
                 self.result.answer = Some(message.clone());
                 self.result.stop_reason = Some(StopReason::Completed);
                 self.result.finished = true;
@@ -615,10 +646,12 @@ impl EmbeddedSkott {
                 return;
             }
             Event::PromptEnd { reason, .. } => {
+                self.pending_tasks = self.pending_tasks.saturating_sub(1);
                 self.result.stop_reason = Some(*reason);
                 self.result.finished = true;
             }
             Event::Failed(message) => {
+                self.pending_tasks = self.pending_tasks.saturating_sub(1);
                 self.result.failure = Some(message.clone());
                 self.result.stop_reason = Some(StopReason::Failed);
                 self.result.finished = true;
@@ -637,6 +670,10 @@ impl EmbeddedSkott {
     /// stop reason, failure) no longer applies, so the continuation policy must
     /// not re-fire on it. Session metrics accumulate across prompts.
     pub fn submit(&mut self, prompt: String) -> Result<()> {
+        self.send_prompt(prompt, true)
+    }
+
+    pub(crate) fn send_prompt(&mut self, prompt: String, echo: bool) -> Result<()> {
         let prompts =
             self.prompts
                 .as_ref()
@@ -654,10 +691,23 @@ impl EmbeddedSkott {
         {
             self.prior_prompts = std::mem::take(&mut self.current_totals);
         }
-        self.app.push_event(Event::Note("You:".to_string()));
-        self.app.push_event(Event::Text(prompt));
+        if submission.kind == skott::SubmissionKind::Task {
+            self.pending_tasks = self.pending_tasks.saturating_add(1);
+        }
+        if echo {
+            self.app.push_event(Event::Note("You:".to_string()));
+            self.app.push_event(Event::Text(prompt));
+        }
         self.result = SkottResult::default();
         Ok(())
+    }
+
+    pub(crate) fn is_busy(&self) -> bool {
+        self.is_running() && self.pending_tasks != 0
+    }
+
+    pub(crate) fn effort(&self) -> ReasoningEffort {
+        self.effort
     }
 
     /// Requests cancellation of the active turn; observed effects are retained.
@@ -684,53 +734,8 @@ impl EmbeddedSkott {
     /// Left/Right and Home/End are never consumed here, so the Kvist
     /// transcript keeps its normal scrolling.
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
-        // F-key shortcuts: unambiguous and reliable across all terminals.
-        match key.code {
-            KeyCode::F(3) => {
-                self.active_pane = match self.active_pane {
-                    ActivePane::Kvist => ActivePane::Skott,
-                    ActivePane::Skott => ActivePane::Both,
-                    ActivePane::Both => ActivePane::Kvist,
-                };
-                return true;
-            }
-            KeyCode::F(4) => {
-                self.active_pane = ActivePane::Kvist;
-                return true;
-            }
-            KeyCode::F(5) => {
-                self.active_pane = ActivePane::Skott;
-                return true;
-            }
-            _ => {}
-        }
-        // Modifier-based shortcuts: kept for backward compatibility, but
-        // unreliable on terminals that send the same sequence for Tab and
-        // Ctrl+Tab. Prefer the F-key shortcuts above.
-        let control = key.modifiers.contains(KeyModifiers::CONTROL);
-        if control && key.code == KeyCode::Tab {
-            self.active_pane = match self.active_pane {
-                ActivePane::Kvist => ActivePane::Skott,
-                ActivePane::Skott => ActivePane::Both,
-                ActivePane::Both => ActivePane::Kvist,
-            };
-            return true;
-        }
-        if control && key.code == KeyCode::PageUp {
-            self.active_pane = ActivePane::Kvist;
-            return true;
-        }
-        if control && key.code == KeyCode::PageDown {
-            self.active_pane = ActivePane::Skott;
-            return true;
-        }
-        let alt = key.modifiers.contains(KeyModifiers::ALT);
-        if alt && key.code == KeyCode::Left {
-            self.active_pane = ActivePane::Kvist;
-            return true;
-        }
-        if alt && key.code == KeyCode::Right {
-            self.active_pane = ActivePane::Skott;
+        if let Some(pane) = self.active_pane.for_key(key) {
+            self.active_pane = pane;
             return true;
         }
         false
@@ -823,6 +828,7 @@ pub(crate) mod tests {
     #[derive(Default)]
     struct StubTransport {
         calls: Mutex<u32>,
+        guidance_fixture: Option<mpsc::Sender<ModelRequest>>,
     }
 
     impl ModelTransport for StubTransport {
@@ -836,11 +842,24 @@ pub(crate) mod tests {
         }
         fn stream(
             &self,
-            _request: &ModelRequest,
-            _cancellation: &CancellationToken,
+            request: &ModelRequest,
+            cancellation: &CancellationToken,
             on_event: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
         ) -> sav::Result<ModelTurn> {
-            *self.calls.lock().unwrap() += 1;
+            let call = {
+                let mut calls = self.calls.lock().unwrap();
+                *calls += 1;
+                *calls
+            };
+            if let Some(requests) = &self.guidance_fixture {
+                requests.send(request.clone()).unwrap();
+                if call == 1 {
+                    while !cancellation.is_cancelled() {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    return Err(sav::Error::ModelTransportCancelled);
+                }
+            }
             on_event(ModelStreamEvent::TextDelta("done".into()))?;
             Ok(turn())
         }
@@ -918,6 +937,19 @@ pub(crate) mod tests {
     /// Shared with the workspace view tests so they can drive a live embedded
     /// session without a model.
     pub(crate) fn start_stubbed() -> (EmbeddedSkott, PromptSender) {
+        start_with_stub(StubTransport::default())
+    }
+
+    pub(crate) fn start_steerable_stub() -> (EmbeddedSkott, mpsc::Receiver<ModelRequest>) {
+        let (sender, receiver) = mpsc::channel();
+        let (skott, _) = start_with_stub(StubTransport {
+            guidance_fixture: Some(sender),
+            ..StubTransport::default()
+        });
+        (skott, receiver)
+    }
+
+    fn start_with_stub(transport: StubTransport) -> (EmbeddedSkott, PromptSender) {
         let config = test_config();
         let model = test_model(&config).clone();
         let budgets = model
@@ -932,7 +964,7 @@ pub(crate) mod tests {
         let context = budgets.context();
         let (handle, receiver, prompts) = start_session(
             session,
-            StubTransport::default(),
+            transport,
             StubExecutor,
             context,
             None,
@@ -946,6 +978,7 @@ pub(crate) mod tests {
         embedded.handle = Some(handle);
         embedded.receiver = Some(receiver);
         embedded.prompts = Some(prompts.clone());
+        embedded.app.model = Some(model.id.clone());
         embedded.model_id = Some(model.id);
         embedded.started = Some(Instant::now());
         embedded.active_pane = ActivePane::Skott;

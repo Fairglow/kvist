@@ -309,6 +309,8 @@ standalone interactive command, not the embedded workspace.
 | Tab / Shift+Tab                | Open/cycle completions; Enter accepts a selection                   |
 | Up / Down                      | Command recall (or completion/menu selection)                       |
 | F1 / F2                        | Scrollable Markdown shortcut help / unified workspace menu          |
+| F3 / F4 / F5                  | Cycle views / Kvist only / Skott only                                |
+| F6 / F7                        | Change split input focus / switch last task and free-form Skott      |
 | PageUp / PageDown; mouse wheel | Browse transcript, including older segments                         |
 | Ctrl+Home / Ctrl+End           | Oldest history / resume following latest output                     |
 | Alt+Left / Alt+Right           | Horizontal transcript scrolling                                     |
@@ -328,8 +330,13 @@ explicitly. Do not treat transcript text as execution or compliance evidence.
 Unsupported/small terminals, `NO_COLOR`, `CLICOLOR=0` or `TERM=dumb` retain the
 line-oriented fallback.
 
-**Workspace menu.** Esc and F2 open Components, Role assignments, Models,
-Appearance, History, Help and Quit; Cancel command is available during work.
+**Workspace menu.** Esc in Kvist or F2 in either pane opens Components, Role
+assignments, Models, Appearance, View, History, Help and Quit; Cancel command is
+available during work. **View** offers Kvist only, Skott only and split during
+idle and active work. Split views stack on narrow terminals. The Skott prompt
+uses Ctrl+Enter or Enter twice to send. During a supervised native task this
+submits guidance, not stdin or a new task; independent review rejects it. F7
+returns to the free-form Skott conversation when the command ends.
 Esc returns one level and preserves parent cursor/filter and command draft.
 Current choices are preselected and independently marked. Type to filter
 component/model lists. Components has bounded recent/pinned shortcuts instead

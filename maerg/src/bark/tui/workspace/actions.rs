@@ -8,30 +8,6 @@ use clap::Parser;
 
 impl Workspace {
     pub(super) fn submit(&mut self, terminal: &mut Screen) -> io::Result<()> {
-        // When the Skott view is active, the bottom row is the agent guidance
-        // area. Submitting here sends steering input to the running Skott
-        // session rather than answering a running command.
-        let skott_active = self.skott.as_ref().is_some_and(|skott| skott.is_active());
-        let skott_pane = self
-            .skott
-            .as_ref()
-            .map(|skott| skott.active_pane())
-            .unwrap_or(crate::skott_embedded::ActivePane::Kvist);
-        let in_skott_steering = skott_active
-            && skott_pane == crate::skott_embedded::ActivePane::Skott
-            && self.overlay.is_none();
-        if in_skott_steering {
-            let guidance = self.input.text.trim().to_owned();
-            if !guidance.is_empty()
-                && let Some(skott) = &mut self.skott
-            {
-                skott.submit(guidance.clone()).map_err(|error| {
-                    io::Error::other(format!("failed to send guidance to Skott: {error}"))
-                })?;
-            }
-            self.input.set("");
-            return Ok(());
-        }
         if let Some(run) = &mut self.running {
             run.answer(&self.input.text)?;
             self.input.set("");
@@ -291,7 +267,8 @@ impl Workspace {
                     args.extend(arguments);
                     self.dispatch(args, terminal)?;
                 } else if arguments.is_empty() {
-                    self.append("usage: agent <PROMPT…> — runs the prompt through the embedded Skott agent; Ctrl+Tab switches between the Kvist metrics, the Skott detail, and a side-by-side view.\n")?;
+                    self.task_skott.shown = false;
+                    self.select_pane(super::ActivePane::Skott);
                 } else {
                     self.start_agent_session(&arguments.join(" "))?;
                 }
@@ -365,13 +342,16 @@ impl Workspace {
             cli::Command::Task {
                 command: cli::TaskCommand::Run { .. }
             }
-        ) && !arguments.iter().any(|arg| arg == "--stream")
-        {
-            let insert_at = arguments
-                .iter()
-                .position(|arg| arg == "--")
-                .unwrap_or(arguments.len());
-            arguments.insert(insert_at, "--stream".into());
+        ) {
+            for flag in ["--stream", "--allow-control"] {
+                let insert_at = arguments
+                    .iter()
+                    .position(|arg| arg == "--")
+                    .unwrap_or(arguments.len());
+                if !arguments[..insert_at].iter().any(|arg| arg == flag) {
+                    arguments.insert(insert_at, flag.into());
+                }
+            }
         }
         if let cli::Command::Prompt { editor: true, .. } = command {
             arguments.retain(|arg| arg != "--editor");
@@ -405,11 +385,6 @@ impl Workspace {
                 },
         } = &command
         {
-            if self.skott.as_ref().is_some_and(|skott| skott.is_active()) {
-                return Err(io::Error::other(
-                    "end the interactive agent session before starting a task run",
-                ));
-            }
             let progress = super::RunProgress::new(
                 &self.project,
                 component_dir.as_deref(),
@@ -422,7 +397,11 @@ impl Workspace {
                     .task_run
                     .commit,
             );
-            self.start(arguments)?;
+            let feed = crate::workspace_feed::Reader::new()?;
+            self.start_command(arguments, Some(feed.path()))?;
+            self.task_skott = super::TaskView::default();
+            self.task_skott.feed = Some(feed);
+            self.task_skott.shown = true;
             self.task_progress = Some(progress);
             return Ok(());
         }
@@ -460,9 +439,18 @@ impl Workspace {
     }
 
     pub(super) fn start(&mut self, arguments: Vec<String>) -> io::Result<()> {
+        self.start_command(arguments, None)
+    }
+
+    fn start_command(&mut self, arguments: Vec<String>, feed: Option<&Path>) -> io::Result<()> {
         if self.running.is_some() {
             return Err(io::Error::other(
                 "wait for the running command before starting another command",
+            ));
+        }
+        if self.skott.as_ref().is_some_and(|skott| skott.is_busy()) {
+            return Err(io::Error::other(
+                "wait for the active free-form Skott turn or cancel it before starting a Kvist command",
             ));
         }
         self.capture_failed = false;
@@ -470,67 +458,9 @@ impl Workspace {
         self.streams = std::array::from_fn(|_| {
             super::super::process::Stream::with_redactions(self.redactions.clone())
         });
-        self.running = Some(Running::spawn(&self.project, &arguments)?);
+        self.running = Some(Running::spawn_with_feed(&self.project, &arguments, feed)?);
         self.notice =
             "Running; Ctrl+C cancels. Input answers the command (answers are not retained).".into();
-        Ok(())
-    }
-
-    /// Starts an embedded Skott agent session for `prompt`.
-    ///
-    /// Loads the project's `skott.toml`, selects its default model, and drives
-    /// the Skott agent loop in-process. The session streams progress to the
-    /// Skott view and metrics to the Kvist view. It does not control the task queue.
-    pub(super) fn start_agent_session(&mut self, prompt: &str) -> io::Result<()> {
-        if self.skott.as_ref().is_some_and(|skott| skott.is_active()) {
-            return Err(io::Error::other(
-                "an agent session is already active; it ends when the task finishes or is cancelled",
-            ));
-        }
-        let config_path = self.project.join("skott.toml");
-        let config = skott::Config::load(&config_path).map_err(|error| {
-            io::Error::other(format!(
-                "no usable Skott configuration at {}: {}; create one with `skott init-config` or `skott setup`",
-                config_path.display(),
-                error.describe()
-            ))
-        })?;
-        let model = config
-            .models
-            .iter()
-            .find(|model| model.is_default)
-            .or_else(|| config.models.first())
-            .ok_or_else(|| {
-                io::Error::other(
-                    "the Skott configuration has no selectable model; add a [[models]] entry",
-                )
-            })?
-            .clone();
-        let effort = config.default_thinking_effort;
-        let mut session = crate::skott_embedded::EmbeddedSkott::start(
-            config,
-            &model,
-            effort,
-            None,
-            skott::RunLimits::default(),
-            None,
-        )
-        .map_err(|error| io::Error::other(error.to_string()))?;
-        if !prompt.is_empty() {
-            session
-                .submit(prompt.to_owned())
-                .map_err(|error| io::Error::other(error.to_string()))?;
-        }
-        self.skott_continuations = 0;
-        self.skott_result_reported = false;
-        self.skott_scroll = 0;
-        self.skott_follow = true;
-        self.skott = Some(session);
-        self.append(&format!(
-            "\n\n## Agent session\n\nStarted Skott agent `{model}`. The Skott metrics appear on their own line above the transcript; Ctrl+Tab switches between the Kvist metrics, the Skott detail, and a side-by-side view.\n\n",
-            model = model.id
-        ))?;
-        self.dirty = true;
         Ok(())
     }
 

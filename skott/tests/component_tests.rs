@@ -75,6 +75,21 @@ fn loads_a_valid_configuration() {
 }
 
 #[test]
+fn embedded_configuration_defaults_to_the_workspace_without_overriding_explicit_directory() {
+    let workspace = tempdir().unwrap();
+    let (config_dir, _) = valid_dir(None);
+    let default = VALID_CONFIG.replace("working_directory = \"%WD%\"\n", "");
+    let path = write_config(&config_dir, &default);
+    let config = Config::load_for_workspace(&path, workspace.path()).unwrap();
+    assert_eq!(config.working_directory, workspace.path());
+
+    let explicit = VALID_CONFIG.replace("%WD%", config_dir.path().to_str().unwrap());
+    write_config(&config_dir, &explicit);
+    let config = Config::load_for_workspace(&path, workspace.path()).unwrap();
+    assert_eq!(config.working_directory, config_dir.path());
+}
+
+#[test]
 fn rejects_wrong_schema_version() {
     let (dir, path) = valid_dir(None);
     let contents = std::fs::read_to_string(&path).unwrap();

@@ -53,6 +53,7 @@ pub mod vcs_commit;
 pub mod vendor_command;
 pub mod vendoring;
 pub mod wizard;
+mod workspace_feed;
 
 use clap::Parser;
 

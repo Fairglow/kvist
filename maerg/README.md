@@ -87,6 +87,15 @@ Ctrl+Q and the Quit menu item share idle exit and active-work cancellation
 confirmation/reaping. During commands, input answers
 stdin and is masked, never retained.
 
+Use **F2 → View** to select **Kvist only**, **Skott only**, or **Split: Kvist +
+Skott**, even while work runs. F3 cycles views; F4/F5 select either pane and F6
+switches input focus in split view. Skott uses its standalone multiline prompt
+(Ctrl+Enter or Enter twice to send). In a native `task run`, it shows live model
+output and accepts steering through the supervised runner; independent reviews
+reject guidance. Kvist shows the current turn on one line and saves the task
+totals. After the run, F7 switches between the last task and your independent
+Skott conversation, which uses the project's `skott.toml`.
+
 Canonical Markdown history is private local diagnostic state under each scope's
 `.kvist/transcript/`, with numbered block-aligned pages (1 MiB target, 16 MiB
 maximum individual block) and bounded command recall. Older pages are not

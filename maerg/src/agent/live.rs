@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sav::observation::RunJournal;
 use sav::{CancellationToken, ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn};
@@ -16,6 +16,7 @@ use super::{StreamRedactor, redact, redact_bounded};
 pub(super) struct LiveRun {
     journal: Mutex<RunJournal>,
     redactions: Vec<String>,
+    feed: Mutex<Option<crate::workspace_feed::Writer>>,
 }
 
 impl LiveRun {
@@ -35,10 +36,32 @@ impl LiveRun {
             "live run journal: {}",
             path.display().to_string().escape_debug()
         );
+        let feed = match crate::workspace_feed::Writer::open() {
+            Ok(feed) => feed,
+            Err(error) => {
+                eprintln!("Skott presentation feed unavailable: {error}");
+                None
+            }
+        };
         Ok(Self {
             journal: Mutex::new(journal),
             redactions: redactions.to_owned(),
+            feed: Mutex::new(feed),
         })
+    }
+
+    pub(super) fn presenting(&self) -> bool {
+        self.feed.lock().is_ok_and(|feed| feed.is_some())
+    }
+
+    pub(super) fn present(&self, value: &serde_json::Value) {
+        if let Ok(mut feed) = self.feed.lock()
+            && let Some(writer) = feed.as_mut()
+            && let Err(error) = writer.send(value)
+        {
+            *feed = None;
+            eprintln!("Skott presentation feed stopped: {error}");
+        }
     }
 
     pub(super) fn record(&self, event: &serde_json::Value, checkpoint: bool) -> sav::Result<()> {
@@ -51,15 +74,34 @@ impl LiveRun {
         if checkpoint {
             journal.checkpoint()?;
         }
+        if matches!(
+            event["type"].as_str(),
+            Some(
+                "model_request"
+                    | "model_result"
+                    | "model_failure"
+                    | "tool_dispatch"
+                    | "tool_result"
+                    | "context_compaction"
+                    | "context_rollover"
+                    | "control"
+            )
+        ) {
+            self.present(&event);
+        }
         Ok(())
     }
 
-    fn record_text(&self, text: &str) -> sav::Result<()> {
+    fn record_text(&self, text: &str, kind: &str) -> sav::Result<()> {
         let text = redact(text, &self.redactions);
         let mut remaining = text.as_str();
-        let mut journal = self.journal.lock().map_err(|_| sav::Error::Observation {
-            reason: "required live journal lock is poisoned".into(),
-        })?;
+        let mut journal = if kind == "text" {
+            Some(self.journal.lock().map_err(|_| sav::Error::Observation {
+                reason: "required live journal lock is poisoned".into(),
+            })?)
+        } else {
+            None
+        };
         while !remaining.is_empty() {
             // JSON can expand each byte to six bytes; keep envelope headroom.
             let mut end = remaining.len().min(8192);
@@ -67,7 +109,11 @@ impl LiveRun {
                 end -= 1;
             }
             let (chunk, rest) = remaining.split_at(end);
-            journal.record(&json!({"type":"text","data":chunk}))?;
+            let event = json!({"type":kind,"data":chunk});
+            if let Some(journal) = &mut journal {
+                journal.record(&event)?;
+            }
+            self.present(&event);
             remaining = rest;
         }
         Ok(())
@@ -82,7 +128,19 @@ impl LiveRun {
                 })
             })?
             .finish(disposition)?;
+        self.present(&json!({"type":"workspace_end","data":disposition}));
         Ok(())
+    }
+
+    pub(super) fn control_path(&self, path: &Path) {
+        if std::env::var_os(crate::workspace_feed::ENV).is_some() {
+            self.present(&json!({"type":"workspace_control","data":path}));
+        } else {
+            eprintln!(
+                "private run control: {}",
+                path.display().to_string().escape_debug()
+            );
+        }
     }
 }
 
@@ -138,7 +196,7 @@ impl<T: ModelTransport> ObservedTransport<'_, T> {
                 "text_truncated":turn.text.len()>8192,
                 "reasoning_bytes":turn.reasoning.as_ref().map_or(0, String::len),
                 "finish_reason":turn.finish_reason,
-                "tool_count":turn.tool_intents.len(),"usage":turn.usage
+                "tool_count":turn.tool_intents.len(),"usage":turn.usage,"timings":turn.timings
             }})),
             Err(error) => self.record(&json!({"type":"model_failure","data":{
                 "message":redact_bounded(&error.to_string(),self.redactions,1024)
@@ -190,22 +248,50 @@ impl<T: ModelTransport> ModelTransport for ObservedTransport<'_, T> {
     ) -> sav::Result<ModelTurn> {
         self.request(request)?;
         let mut redactor = StreamRedactor::new(self.redactions);
+        let mut reasoning = StreamRedactor::new(self.redactions);
+        let presentation = self.live.filter(|live| live.presenting());
+        let mut decode_started = None;
+        let mut decode_seconds = 0.0;
+        let mut output_chars = 0usize;
+        let mut last_sample = 0.0;
         let mut record_error = None;
         let mut callback_stopped = false;
         let mut relay = |event: ModelStreamEvent| {
             if callback_stopped {
                 return Err(sav::Error::ModelTransportCancelled);
             }
+            if let Some(live) = presentation
+                && let ModelStreamEvent::TextDelta(text) | ModelStreamEvent::ReasoningDelta(text) =
+                    &event
+                && !text.is_empty()
+            {
+                let now = Instant::now();
+                decode_seconds = now
+                    .saturating_duration_since(*decode_started.get_or_insert(now))
+                    .as_secs_f64();
+                output_chars = output_chars.saturating_add(text.chars().count());
+                if last_sample == 0.0 || decode_seconds - last_sample >= 0.2 {
+                    live.present(&json!({"type":"workspace_decode","data":{
+                        "output":output_chars.div_ceil(4),"seconds":decode_seconds
+                    }}));
+                    last_sample = decode_seconds.max(f64::EPSILON);
+                }
+            }
             if let ModelStreamEvent::TextDelta(text) = &event {
                 let text = redactor.absorb(text);
                 if !text.is_empty()
                     && let Some(live) = self.live
-                    && let Err(error) = live.record_text(&text)
+                    && let Err(error) = live.record_text(&text, "text")
                 {
                     callback_stopped = true;
                     record_error = Some(error);
                     return Err(sav::Error::ModelTransportCancelled);
                 }
+            }
+            if let ModelStreamEvent::ReasoningDelta(text) = &event
+                && let Some(live) = self.live.filter(|live| live.presenting())
+            {
+                live.record_text(&reasoning.absorb(text), "reasoning")?;
             }
             match on_event(event) {
                 Ok(()) => Ok(()),
@@ -230,9 +316,21 @@ impl<T: ModelTransport> ModelTransport for ObservedTransport<'_, T> {
         let tail = redactor.finish();
         if !tail.is_empty()
             && let Some(live) = self.live
-            && let Err(error) = live.record_text(&tail)
+            && let Err(error) = live.record_text(&tail, "text")
         {
             return self.reject(result, error, true);
+        }
+        if let Some(live) = self.live.filter(|live| live.presenting())
+            && let Err(error) = live.record_text(&reasoning.finish(), "reasoning")
+        {
+            return self.reject(result, error, true);
+        }
+        if let Some(live) = presentation
+            && decode_seconds > last_sample
+        {
+            live.present(&json!({"type":"workspace_decode","data":{
+                "output":output_chars.div_ceil(4),"seconds":decode_seconds
+            }}));
         }
         if let Err(error) = self.result(&result) {
             return self.reject(result, error, true);
@@ -462,7 +560,7 @@ mod tests {
         let path = fixture.path().join("run.events.jsonl");
         let live = LiveRun::create(&path, "chunks", "task", "model", &["secret".into()]).unwrap();
         let text = format!("{}secret{}", "a".repeat(8190), "\0\u{03bb}".repeat(40_000));
-        live.record_text(&text).unwrap();
+        live.record_text(&text, "text").unwrap();
         live.finish("success").unwrap();
         let serialized = std::fs::read_to_string(&path).unwrap();
         assert!(serialized.lines().all(|line| line.len() < 65_536));

@@ -1498,7 +1498,14 @@ pipes, and retains exact prepared/ref/index recovery state. Each Git/signing
 command has a five-minute deadline; test hooks may shorten that deadline.
 
 The workspace drives `task run` through its existing supervised command
-subprocess instead of finalizing embedded agent answers. The task header
+subprocess instead of finalizing embedded agent answers. An optional private
+local telemetry channel projects redacted host-side events into a separate
+Skott app. Telemetry cannot change task state or signal completion. The
+workspace supplies steering exclusively through the existing private runtime
+control, with the same model-generation boundaries and independent review
+rejection. View and input focus are workspace state, independent of workers.
+Both apps share the standalone viewport renderer and editor.
+The task header
 observes the host-owned queue for the command's resolved component, throttled
 and outside the transcript renderer. With project-wide selection it follows
 new in-progress tasks across candidate queues, independently of transcript

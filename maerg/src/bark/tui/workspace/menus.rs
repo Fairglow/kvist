@@ -10,7 +10,7 @@ use crate::{
     presentation,
 };
 
-use super::{Overlay, Workspace};
+use super::{ActivePane, Overlay, Workspace};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ModelKey {
@@ -22,6 +22,7 @@ pub(super) struct ModelKey {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Page {
     Root,
+    View,
     Components,
     Roles,
     Role { role: Role, global: bool },
@@ -177,6 +178,7 @@ impl Workspace {
                     Entry::new("Role assignments", Action::Open(Page::Roles)),
                     Entry::new("Models", Action::Open(Page::Models)),
                     Entry::new("Appearance", Action::Open(Page::Appearance)),
+                    Entry::new("View (F3 cycle)", Action::Open(Page::View)),
                     Entry::new("History", Action::Open(Page::History)),
                     Entry::new("Help", Action::Help),
                 ];
@@ -186,47 +188,21 @@ impl Workspace {
                 if self.running.is_some() {
                     entries.push(Entry::new("Cancel command", Action::Cancel));
                 }
-                // Always offer to start an agent session when idle (no running
-                // command and no active Skott session).
-                if self.running.is_none()
-                    && !self.skott.as_ref().is_some_and(|skott| skott.is_active())
-                {
-                    entries.push(Entry::new(
-                        "Start agent session (Ctrl+A)",
-                        Action::Command {
-                            arguments: vec!["agent".into()],
-                            confirm: Some(
-                                "Start an interactive Skott agent session?\n\nThis opens the Skott view with a live agent. Use Ctrl+A to start, Ctrl+C to cancel the current turn, and Ctrl+Q to quit."
-                            .to_owned()),
-                            return_to: Page::Root,
-                        },
-                    ));
-                }
-                if let Some(skott) = self.skott.as_ref().filter(|skott| skott.is_active()) {
-                    let pane = skott.active_pane();
-                    let next = match pane {
-                        crate::skott_embedded::ActivePane::Kvist => {
-                            crate::skott_embedded::ActivePane::Skott
-                        }
-                        crate::skott_embedded::ActivePane::Skott => {
-                            crate::skott_embedded::ActivePane::Both
-                        }
-                        crate::skott_embedded::ActivePane::Both => {
-                            crate::skott_embedded::ActivePane::Kvist
-                        }
-                    };
-                    let label = format!(
-                        "Switch view (F3): {}",
-                        match next {
-                            crate::skott_embedded::ActivePane::Kvist => "Kvist metrics",
-                            crate::skott_embedded::ActivePane::Skott => "Skott detail",
-                            crate::skott_embedded::ActivePane::Both => "side by side",
-                        }
-                    );
-                    entries.push(Entry::new(label, Action::SwitchView(next)));
-                }
                 entries.push(Entry::new("Quit", Action::Quit));
                 return Ok(Menu::new(page, "Workspace", entries));
+            }
+            Page::View => {
+                let choices = [
+                    ("Kvist only", ActivePane::Kvist),
+                    ("Skott only", ActivePane::Skott),
+                    ("Split: Kvist + Skott", ActivePane::Both),
+                ]
+                .into_iter()
+                .map(|(label, pane)| {
+                    Entry::new(label, Action::SwitchView(pane)).current(self.pane == pane)
+                })
+                .collect();
+                return Ok(Menu::new(page, "View", choices));
             }
             Page::Components => {
                 let known = self.state.components();
@@ -374,7 +350,7 @@ impl Workspace {
     }
 
     pub(super) fn request_quit(&mut self) {
-        if self.running.is_some() {
+        if self.running.is_some() || self.skott.as_ref().is_some_and(|skott| skott.is_busy()) {
             if !matches!(self.overlay, Some(Overlay::Quit)) {
                 self.quit_return = self.overlay.take();
             }
@@ -434,6 +410,9 @@ impl Workspace {
                 KeyCode::Char('y' | 'Y') => {
                     if let Some(run) = &mut self.running {
                         run.cancel()?;
+                    }
+                    if let Some(skott) = &mut self.skott {
+                        skott.shutdown();
                     }
                     self.quit = true;
                     self.menu_stack.clear();
@@ -628,11 +607,9 @@ impl Workspace {
             },
             Action::Back => self.back(),
             Action::SwitchView(pane) => {
-                if let Some(skott) = &mut self.skott {
-                    skott.set_active_pane(pane);
-                    self.dirty = true;
-                }
-                self.back();
+                self.select_pane(pane);
+                self.menu_stack.clear();
+                self.overlay = None;
             }
             Action::Focus(focus) => {
                 if let Err(error) = self.change_focus(focus) {
@@ -667,7 +644,7 @@ impl Workspace {
             Action::SetCommitFrequency { expected, mode } => {
                 self.overlay = Some(Overlay::Menu(menu));
                 if self.running.is_some()
-                    || self.skott.as_ref().is_some_and(|skott| skott.is_active())
+                    || self.skott.as_ref().is_some_and(|skott| skott.is_busy())
                 {
                     return Err(io::Error::other(
                         "wait for the current run before changing Auto-commit",

@@ -144,10 +144,7 @@ impl<'a> ReviewSession<'a> {
                 }
                 reply
             })?;
-            eprintln!(
-                "private run control: {}",
-                server.path().display().to_string().escape_debug()
-            );
+            live.control_path(server.path());
             Some(server)
         } else {
             None
