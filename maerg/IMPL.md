@@ -1,6 +1,30 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped protected tool recovery observation - 2026-11-23
+
+An independent source-only observer read the agent loop, progress and sequence
+state, presentation code, and fixture assertions. It excluded intent, queues,
+prior records, and history, and did not execute tests.
+
+A tool recurrence report interrupts the remainder of the batch and pairs
+withheld calls without replacing retained reads, effects or accepted requests.
+The host appends feedback matched to the recurrence kind and returns to the
+same conversation loop. This does not consume a generation correction. The
+sequence retains wall and token accounting and separately counts interventions.
+Notices are spaced by intervention count and appear on stderr or in the task
+view; the view renders the short notice rather than the recovery prompt.
+
+The scripted assertions cover steering to a final response, a decision, and
+token-limit failure, plus unchanged observations, failed reads, action cycles,
+call/result pairing, suppressed repeat effects, and task-view notice rendering.
+They do not establish that an arbitrary live model will follow the guidance.
+A separate source-blind comparison found no discrepancy in the scoped
+continuation and diagnostic evidence. The final protected-runtime and
+shared-budget run passed 56 selected tests; the task-view and tightened
+model-feedback assertions passed separately. The formal audit and compliance
+gates remain pending; this observation is not acceptance.
+
 ## Scoped Skott workspace observation - 2026-11-23
 
 An independent source-only observer read the workspace and Skott

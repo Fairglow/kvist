@@ -1,15 +1,59 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:c786ec71ab7aa367e6305ae1a715adb6a16c7126410fe72dd760c83d9f3e712e"
-  contract_revision: "sha256:957ce69d562103d49f26cac15691f96f1fe3ab9ab0e43962af6cb89776d9d53a"
-  design_revision: "sha256:bc195225b837d3416c7d9fe9bb154759606bdbd4246dc768687e0349f0acef3f"
+  requirements_revision: "sha256:43ce2591aa13c63e1e96ef53a6bb026f484f521b3a034f34820b8585f3970dd4"
+  contract_revision: "sha256:8948a80a3fd13882bc2596b66926ba99f8b9ae1d873e82e4e49187ce1be7cc2e"
+  design_revision: "sha256:6d626bab4bcb4bb20ef1a2147475c3fef37258a9a0fb8b8eca134419ed851f91"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-11-19T16:35:47Z"
+    checked_at: "2026-11-23T08:03:20Z"
     stale_since: null
     causes: []
 tasks:
+  - id: "tool-loop-steering-write-tests"
+    title: "write_tests: protect task continuation after repeated tools"
+    description: "Script repeated reads, failures and effect proposals past the former cutoff."
+    context: "The cargo-quality write-tests attempt stopped at a tool recurrence with no decision for the operator."
+    purpose: "Pin continued work without replay, fake success or an invented user blocker."
+    expected_outcome: "Fixtures reach a final result, a retained decision or the approved token limit in the original attempt."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: { created_at: "2026-11-23T08:20:57Z", updated_at: "2026-11-23T08:30:25Z", completed_at: "2026-11-23T08:30:25Z" }
+  - id: "tool-loop-steering-implement-code"
+    title: "implement_code: steer past repeated tool activity"
+    description: "Recover in the same protected attempt with actionable guidance and periodic operator notices."
+    context: "Approved resource limits, effect authority and the decision protocol are unchanged."
+    purpose: "Remove the tool-correction cutoff without weakening duplicate-effect protection."
+    expected_outcome: "The next request receives task-specific recovery guidance and all withheld proposals remain paired."
+    kind: implementation
+    status: completed
+    depends_on: ["tool-loop-steering-write-tests"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: { created_at: "2026-11-23T08:20:57Z", updated_at: "2026-11-23T08:30:25Z", completed_at: "2026-11-23T08:30:25Z" }
+  - id: "tool-loop-steering-security-audit"
+    title: "security_audit: preserve protected tool and decision boundaries"
+    description: "Independently assess effect suppression, authority and operator diagnostics."
+    context: "Automatic continuation must not replay effects or expand the approved grant."
+    purpose: "Retain independent assessment of the protected recovery path."
+    expected_outcome: "Scoped findings or an explicit evidence gap."
+    kind: security-audit
+    status: pending
+    depends_on: ["tool-loop-steering-implement-code"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: { created_at: "2026-11-23T08:20:57Z", updated_at: "2026-11-23T08:20:57Z", completed_at: null }
+  - id: "tool-loop-steering-compliance-review"
+    title: "compliance_review: compare protected tool continuation with intent"
+    description: "Compare source-derived observations and test evidence with the controlled recovery intent."
+    context: "Continuation is not proof of task completion or acceptance."
+    purpose: "Preserve discrepancies for human arbitration."
+    expected_outcome: "A separate source-blind comparison."
+    kind: compliance-review
+    status: pending
+    depends_on: ["tool-loop-steering-security-audit"]
+    requirements: ["REQUIREMENTS.md#REQ-AGENT-RESILIENCE"]
+    timestamps: { created_at: "2026-11-23T08:20:57Z", updated_at: "2026-11-23T08:20:57Z", completed_at: null }
   - id: "provider-runtime-progress-write-tests"
     title: "write_tests: provider capacity and protected rollover"
     description: "Exercise mismatched capacity hints and a protected attempt that continues after provider context rejection."
@@ -19,8 +63,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
-    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:24:12Z", completed_at: "2026-11-22T18:24:12Z" }
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-11-22T18:06:39Z"
+      updated_at: "2026-11-22T18:24:12Z"
+      completed_at: "2026-11-22T18:24:12Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "provider-runtime-progress-implement-code"
     title: "implement_code: provider recovery and harness progress"
     description: "Refresh protected context when needed and present task identity, phase and elapsed time beside shared Skott metrics."
@@ -29,9 +79,16 @@ tasks:
     expected_outcome: "Both views expose useful progress without treating a rollover as a task result."
     kind: implementation
     status: completed
-    depends_on: ["provider-runtime-progress-write-tests"]
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
-    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:24:12Z", completed_at: "2026-11-22T18:24:12Z" }
+    depends_on:
+      - "provider-runtime-progress-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-11-22T18:06:39Z"
+      updated_at: "2026-11-22T18:24:12Z"
+      completed_at: "2026-11-22T18:24:12Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "provider-runtime-progress-security-audit"
     title: "security_audit: protected attempt continuity"
     description: "Independently inspect preserved controls, effect authority, and isolated diagnostics across rollover."
@@ -40,9 +97,16 @@ tasks:
     expected_outcome: "Independent findings with explicit scope."
     kind: security-audit
     status: pending
-    depends_on: ["provider-runtime-progress-implement-code"]
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
-    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:06:39Z", completed_at: null }
+    depends_on:
+      - "provider-runtime-progress-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-11-22T18:06:39Z"
+      updated_at: "2026-11-22T18:06:39Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "provider-runtime-progress-compliance-review"
     title: "compliance_review: protected continuation and harness metrics"
     description: "Compare independent observations and fixture evidence with the controlled intent."
@@ -51,9 +115,16 @@ tasks:
     expected_outcome: "A separate source-blind comparison; no automatic acceptance."
     kind: compliance-review
     status: pending
-    depends_on: ["provider-runtime-progress-security-audit"]
-    requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
-    timestamps: { created_at: "2026-11-22T18:06:39Z", updated_at: "2026-11-22T18:06:39Z", completed_at: null }
+    depends_on:
+      - "provider-runtime-progress-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SHARED-RUNTIME"
+    timestamps:
+      created_at: "2026-11-22T18:06:39Z"
+      updated_at: "2026-11-22T18:06:39Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "task-run-reliability-write-tests"
     title: "write_tests: pin task-run lock release, transcript completion, and crash recovery"
     description: "Reproduce (a) a second `task run` of the same component in one TUI session failing with `component is locked`; (b) the transcript completion message ending mid-sentence at 500 characters with no completion footer; and (c) an embedded run interrupted mid-generation leaving the session non-terminal and the component lock stale with no durable diagnostic."
@@ -6750,7 +6821,8 @@ tasks:
     expected_outcome: "Only verified task work completes; operators can see progress and choose checkpoints."
     kind: implementation
     status: pending
-    depends_on: ["task-run-quality-write-tests"]
+    depends_on:
+      - "task-run-quality-write-tests"
     requirements:
       - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
       - "REQUIREMENTS.md#REQ-TASK-RUN-FEEDBACK-AND-QUALITY"
@@ -6768,7 +6840,8 @@ tasks:
     expected_outcome: "Audit findings and limits are retained."
     kind: security-audit
     status: pending
-    depends_on: ["task-run-quality-implement-code"]
+    depends_on:
+      - "task-run-quality-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-TASK-RUN-FEEDBACK-AND-QUALITY"
     timestamps:
@@ -6785,7 +6858,8 @@ tasks:
     expected_outcome: "Discrepancies are retained for human arbitration."
     kind: compliance-review
     status: pending
-    depends_on: ["task-run-quality-security-audit"]
+    depends_on:
+      - "task-run-quality-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-TASK-RUN-FEEDBACK-AND-QUALITY"
     timestamps:
@@ -6805,7 +6879,12 @@ tasks:
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
-    timestamps: { created_at: "2026-11-22T23:47:00Z", updated_at: "2026-11-22T23:53:40Z", completed_at: "2026-11-22T23:53:40Z" }
+    timestamps:
+      created_at: "2026-11-22T23:47:00Z"
+      updated_at: "2026-11-22T23:53:40Z"
+      completed_at: "2026-11-22T23:53:40Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "workspace-task-run-implement-code"
     title: "implement_code: restore project-wide task scheduling"
     description: "Use the protected component executor from CLI and workspace, and retain live progress without changing focus."
@@ -6814,11 +6893,17 @@ tasks:
     expected_outcome: "Each runnable component retains its own locks, evidence, and checkpoint boundaries."
     kind: implementation
     status: completed
-    depends_on: ["workspace-task-run-write-tests"]
+    depends_on:
+      - "workspace-task-run-write-tests"
     requirements:
       - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
       - "REQUIREMENTS.md#REQ-TASK-RUN-FEEDBACK-AND-QUALITY"
-    timestamps: { created_at: "2026-11-22T23:47:00Z", updated_at: "2026-11-22T23:53:40Z", completed_at: "2026-11-22T23:53:40Z" }
+    timestamps:
+      created_at: "2026-11-22T23:47:00Z"
+      updated_at: "2026-11-22T23:53:40Z"
+      completed_at: "2026-11-22T23:53:40Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "workspace-task-run-security-audit"
     title: "security_audit: inspect project-wide task authority"
     description: "Independently check component isolation, policy approval, cancellation, and checkpoint boundaries."
@@ -6827,10 +6912,16 @@ tasks:
     expected_outcome: "Independent findings identify any broken authority boundaries."
     kind: security-audit
     status: pending
-    depends_on: ["workspace-task-run-implement-code"]
+    depends_on:
+      - "workspace-task-run-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
-    timestamps: { created_at: "2026-11-22T23:47:00Z", updated_at: "2026-11-22T23:47:00Z", completed_at: null }
+    timestamps:
+      created_at: "2026-11-22T23:47:00Z"
+      updated_at: "2026-11-22T23:47:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "workspace-task-run-compliance-review"
     title: "compliance_review: compare automatic scheduling against intent"
     description: "Compare independent observations and regression test evidence against the controlled intent."
@@ -6839,10 +6930,16 @@ tasks:
     expected_outcome: "The comparison records verified behavior and its limits without accepting work."
     kind: compliance-review
     status: pending
-    depends_on: ["workspace-task-run-security-audit"]
+    depends_on:
+      - "workspace-task-run-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-CONTINUOUS-EXECUTION"
-    timestamps: { created_at: "2026-11-22T23:47:00Z", updated_at: "2026-11-22T23:47:00Z", completed_at: null }
+    timestamps:
+      created_at: "2026-11-22T23:47:00Z"
+      updated_at: "2026-11-22T23:47:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "workspace-skott-write-tests"
     title: "write_tests: cover idle and active Skott views"
     description: "Exercise the view menu and live and final supervised task statistics."
@@ -6852,8 +6949,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#REQ-SETTINGS-MENU"]
-    timestamps: { created_at: "2026-11-23T06:38:00Z", updated_at: "2026-11-23T06:54:35Z", completed_at: "2026-11-23T06:54:35Z" }
+    requirements:
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+    timestamps:
+      created_at: "2026-11-23T06:38:00Z"
+      updated_at: "2026-11-23T06:54:35Z"
+      completed_at: "2026-11-23T06:54:35Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "workspace-skott-implement-code"
     title: "implement_code: restore the embedded Skott workspace"
     description: "Separate view focus, share the Skott UI, and project private supervised telemetry."
@@ -6862,9 +6965,16 @@ tasks:
     expected_outcome: "Free-form interaction and supervised steering share Skott's renderer."
     kind: implementation
     status: completed
-    depends_on: ["workspace-skott-write-tests"]
-    requirements: ["REQUIREMENTS.md#REQ-SETTINGS-MENU"]
-    timestamps: { created_at: "2026-11-23T06:38:00Z", updated_at: "2026-11-23T06:54:35Z", completed_at: "2026-11-23T06:54:35Z" }
+    depends_on:
+      - "workspace-skott-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+    timestamps:
+      created_at: "2026-11-23T06:38:00Z"
+      updated_at: "2026-11-23T06:54:35Z"
+      completed_at: "2026-11-23T06:54:35Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "workspace-skott-security-audit"
     title: "security_audit: inspect embedded presentation boundaries"
     description: "Check redaction, telemetry transport and isolation of free-form prompts from task execution."
@@ -6873,9 +6983,16 @@ tasks:
     expected_outcome: "Retain concrete findings and limitations."
     kind: security-audit
     status: pending
-    depends_on: ["workspace-skott-implement-code"]
-    requirements: ["REQUIREMENTS.md#REQ-SETTINGS-MENU"]
-    timestamps: { created_at: "2026-11-23T06:38:00Z", updated_at: "2026-11-23T06:38:00Z", completed_at: null }
+    depends_on:
+      - "workspace-skott-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+    timestamps:
+      created_at: "2026-11-23T06:38:00Z"
+      updated_at: "2026-11-23T06:38:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "workspace-skott-compliance-review"
     title: "compliance_review: compare Skott views and task metrics with intent"
     description: "Compare independent source observations and executable evidence with the workspace contract."
@@ -6884,6 +7001,13 @@ tasks:
     expected_outcome: "Document verified behavior and limits without accepting work."
     kind: compliance-review
     status: pending
-    depends_on: ["workspace-skott-security-audit"]
-    requirements: ["REQUIREMENTS.md#REQ-SETTINGS-MENU"]
-    timestamps: { created_at: "2026-11-23T06:38:00Z", updated_at: "2026-11-23T06:38:00Z", completed_at: null }
+    depends_on:
+      - "workspace-skott-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SETTINGS-MENU"
+    timestamps:
+      created_at: "2026-11-23T06:38:00Z"
+      updated_at: "2026-11-23T06:38:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

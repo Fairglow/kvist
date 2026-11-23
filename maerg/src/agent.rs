@@ -1428,6 +1428,7 @@ fn execute_agent_inner(
         tools: tool_tracker,
         generation: accepted_generation,
         corrections_used,
+        tool_interventions,
         ..
     } = sequence;
     let outcome: Result<Option<TurnFailure>> = (|| {
@@ -2006,17 +2007,14 @@ fn execute_agent_inner(
                 if controls.has_pending() {
                     continue;
                 }
-                if let Some(failure) = progress::correct(
+                progress::steer(
                     &report,
-                    recovery,
-                    corrections_used,
+                    tool_interventions,
                     &live,
                     &mut conversation,
                     &redactions,
-                )? {
-                    return Ok(Some(failure));
-                }
-                last_action_label = "tool correction".into();
+                )?;
+                last_action_label = "tool steering".into();
                 continue;
             }
 
@@ -2166,17 +2164,14 @@ fn execute_agent_inner(
                 if controls.has_pending() {
                     continue;
                 }
-                if let Some(failure) = progress::correct(
+                progress::steer(
                     &report,
-                    recovery,
-                    corrections_used,
+                    tool_interventions,
                     &live,
                     &mut conversation,
                     &redactions,
-                )? {
-                    return Ok(Some(failure));
-                }
-                last_action_label = "tool correction".into();
+                )?;
+                last_action_label = "tool steering".into();
                 continue;
             }
         }

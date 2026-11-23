@@ -619,17 +619,19 @@ so `--json decision ... apply ... --continue` retains one valid JSON result.
 ## Protected resilience
 
 Protected resilience retains the selected model, approved grant and original
-task throughout at most two autonomous corrections for the entire authoring
-and repair sequence. Progress clears streaks but cannot replenish corrections;
-guidance and compaction retain spent allowance. Detection uses bounded
-deterministic heuristics, not semantic certification.
+task. Detection uses bounded deterministic heuristics, not semantic
+certification.
 Protected streaming uses Sav's `StreamLoopDetector` and transport
-`RepetitiveGeneration` report. A `RecoveryBudget` belongs to the authoring
-sequence, outside compactable messages; recovery discards incomplete proposals
-and cancels only the model operation. Reports contain bounded metadata, not
-copied untrusted model text.
-Repeated generation/proposals/observations may terminate authoring as stalled,
-never as synthesized completion. Novel read-only inspection has no turn cap.
+`RepetitiveGeneration` report. Repetitive generation has two autonomous
+corrections across authoring and repair, with no reset on guidance, progress or
+compaction. Generation recovery discards incomplete proposals and cancels only
+the model operation; exhaustion may terminate as stalled, never as completion.
+Repeated tool proposals, observations, failures and cycles instead receive
+in-run steering without a correction-count cutoff. The host records why it
+intervened and what the model should do next, shows periodic progress notices,
+and uses the existing approved bounds. It preserves completed effects and
+pairs any withheld calls with not-executed results. Recurrence alone does not
+become a request for human input. Novel read-only inspection has no turn cap.
 Read suppression requires the same observed content revision; a covered range
 alone cannot hide changed bytes. Failed inspections/edits are failed results,
 not successful process observations.
@@ -649,16 +651,16 @@ consumes the aggregate deadline. There are at most four repair rounds.
 Only a known completed verification failure is automatically repairable;
 unknown effects, cancellation, timeout and output overflow fence recovery.
 
-The two corrections are stall-correction opportunities; verification repair
-has its separately bounded four outer rounds. Neither a repair invocation nor
-guidance resets sequence stall protection. All model attempts share monotonic
-known usage and conservative unknown reservations. Known usage above a
+Neither a repair invocation nor guidance resets sequence stall protection.
+All model attempts share monotonic known usage and conservative unknown
+reservations. Known usage above a
 reservation increases debit; unknown attempts never refund or restore
 availability. Sequence diagnostics identify elapsed time, model charges and
 remaining approved allowance without treating verification as model tokens.
 Repeated identical verification diagnostics without a changed source/test
 revision stop repair with a focused blocker and reconciliation guidance.
-Changed revisions permit useful reverification but do not replenish corrections.
+Changed revisions permit useful reverification but do not replenish generation
+corrections.
 Required final change-detail collection preserves its existing local inventory
 scope, applies bounded deterministic inspection, and fails explicitly on
 observation errors rather than silently recording partial successful evidence.

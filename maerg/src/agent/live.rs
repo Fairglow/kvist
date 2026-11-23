@@ -86,7 +86,8 @@ impl LiveRun {
                     | "context_rollover"
                     | "control"
             )
-        ) {
+        ) || (event["type"] == "tool_recovery" && event["data"]["notice"].is_string())
+        {
             self.present(&event);
         }
         Ok(())

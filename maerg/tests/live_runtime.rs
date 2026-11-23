@@ -551,8 +551,17 @@ fn resilience_run_with_authority(
 
 fn resilience_run_scripted(
     workdir: &Path,
+    answer: impl FnMut(usize, &serde_json::Value) -> (serde_json::Value, String) + Send,
+    gate: Option<&EffectGate>,
+) -> (maerg::agent::AgentRunResult, usize) {
+    resilience_run_with_limit(workdir, answer, gate, None)
+}
+
+fn resilience_run_with_limit(
+    workdir: &Path,
     mut answer: impl FnMut(usize, &serde_json::Value) -> (serde_json::Value, String) + Send,
     gate: Option<&EffectGate>,
+    token_limit: Option<usize>,
 ) -> (maerg::agent::AgentRunResult, usize) {
     use std::sync::atomic::{AtomicBool, Ordering};
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -585,6 +594,7 @@ fn resilience_run_scripted(
         });
         let mut selected = shared_profile(&endpoint, 32768);
         selected.timeout_seconds = SCRIPTED_TIMEOUT_SECONDS;
+        selected.token_limit = token_limit;
         let no_effect_config = SandboxConfig {
             runner: "/usr/bin/true".into(),
             backend: "/usr/bin/true".into(),
@@ -608,10 +618,12 @@ fn resilience_run_scripted(
                 role: Role::Developer,
                 policy_identity: "fixture",
             },
-        )
-        .expect("recorded outcome");
+        );
         stopped.store(true, Ordering::SeqCst);
-        (result, provider.join().expect("provider"))
+        (
+            result.expect("recorded outcome"),
+            provider.join().expect("provider"),
+        )
     })
 }
 
@@ -620,26 +632,78 @@ fn read_call(path: &str) -> serde_json::Value {
 }
 
 #[test]
-fn resilience_repeated_reads_are_stalled_not_completed() {
+fn resilience_repeated_reads_receive_steering_until_the_model_returns_a_result() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
     fs::create_dir(dir.path().join("src")).expect("src");
     fs::write(dir.path().join("src/file.rs"), "pub fn incomplete() {}\n").expect("file");
-    let (result, calls) = resilience_run(dir.path(), |_, _| read_call("src/file.rs"));
-    assert!(!result.success, "a read loop is not completion");
-    assert!(result.stderr.contains("stalled"), "{}", result.stderr);
-    assert!(calls <= 6, "duplicate reads must terminate promptly");
+    let (result, calls) = resilience_run_scripted(
+        dir.path(),
+        |index, request| {
+            if index == 11 {
+                let context = request.to_string();
+                assert!(context.contains("finish the required implementation"));
+                let steering = request["messages"]
+                    .as_array()
+                    .expect("messages")
+                    .iter()
+                    .rev()
+                    .find(|message| message["role"] == "user")
+                    .and_then(|message| message["content"].as_str())
+                    .expect("steering");
+                assert!(steering.contains("next unmet requirement"), "{steering}");
+                assert!(steering.contains("start_line") && steering.contains("search"));
+                assert!(steering.contains("propose_decision"));
+                return (serde_json::json!([]), "Verified final result".into());
+            }
+            (read_call("src/file.rs"), String::new())
+        },
+        None,
+    );
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 11);
+    assert_eq!(result.stdout, "Verified final result");
 }
 
 #[test]
-fn resilience_tool_only_repeated_reads_never_synthesize_an_answer() {
+fn resilience_tool_only_repeated_reads_stop_at_the_approved_limit_not_as_completion() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
     fs::create_dir(dir.path().join("src")).expect("src");
     fs::write(dir.path().join("src/file.rs"), "// inspect only\n").expect("file");
-    let (result, calls) = resilience_run_with_text(dir.path(), "", |_, _| read_call("src/file.rs"));
+    let (result, calls) = resilience_run_with_limit(
+        dir.path(),
+        |_, _| (read_call("src/file.rs"), String::new()),
+        None,
+        Some(20_000),
+    );
     assert!(!result.success);
-    assert!(result.stderr.contains("stalled"), "{}", result.stderr);
-    assert!(!result.stdout.contains("Completed"), "{}", result.stdout);
-    assert!(calls <= 6);
+    assert!(!result.surfaced_decision);
+    assert!(
+        result.stderr.contains("cumulative token limit"),
+        "{}",
+        result.stderr
+    );
+    assert!(result.stdout.is_empty(), "{}", result.stdout);
+    assert!(calls > 5, "old cutoff still active: {calls}");
+}
+
+#[test]
+fn resilience_repeated_reads_can_still_surface_a_genuine_decision() {
+    let dir = tempfile::tempdir_in(".").expect("workspace");
+    fs::create_dir(dir.path().join("src")).expect("src");
+    fs::write(dir.path().join("src/file.rs"), "// inspect only\n").expect("file");
+    let (result, calls) = resilience_run_with_text(dir.path(), "", |index, _| {
+        if index <= 8 {
+            return read_call("src/file.rs");
+        }
+        serde_json::json!([{"function":{"name":"propose_decision","arguments":{
+            "summary":"Choose whether to change the public API or revise the requirement.",
+            "why":"The two approved constraints conflict. Option A changes the public API; Option B revises the requirement. Neither change is authorized."
+        }}}])
+    });
+    assert!(result.surfaced_decision, "{}", result.stderr);
+    assert!(!result.success);
+    assert_eq!(calls, 9);
+    assert!(result.stdout.contains("Neither change is authorized"));
 }
 
 #[test]
@@ -761,16 +825,28 @@ fn resilience_pseudo_read_errors_have_failed_outcomes_and_no_progress() {
 #[test]
 fn resilience_malformed_decision_is_not_an_explicit_completion_note() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
-    let (result, _) = resilience_run(dir.path(), |_, _| {
-        serde_json::json!([{
-            "function":{"name":"propose_decision","arguments":{
-                "_malformed_arguments_error":"truncated",
-                "_malformed_arguments_preview":"unfinished"
-            }}
-        }])
-    });
+    let (result, calls) = resilience_run_scripted(
+        dir.path(),
+        |index, _| {
+            if index <= 8 {
+                return (
+                    serde_json::json!([{
+                        "function":{"name":"propose_decision","arguments":{
+                            "_malformed_arguments_error":"truncated",
+                            "_malformed_arguments_preview":"unfinished"
+                        }}
+                    }]),
+                    String::new(),
+                );
+            }
+            (serde_json::json!([]), "Work remains unfinished.".into())
+        },
+        None,
+    );
+    assert_eq!(calls, 9);
     assert!(!result.success, "malformed calls cannot certify completion");
-    assert!(result.stderr.contains("stalled"), "{}", result.stderr);
+    assert!(!result.surfaced_decision);
+    assert!(result.stderr.contains("reported incomplete"));
 }
 
 #[test]

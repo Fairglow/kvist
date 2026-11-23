@@ -1,7 +1,7 @@
-use sav::loop_detection::{RecoveryBudget, ToolLoopReport};
+use sav::loop_detection::{ToolLoopKind, ToolLoopReport};
 use sav::runtime::AgentSession;
 
-use super::{LiveRun, RunControls, RunTurn, TurnFailure, redact_bounded};
+use super::{LiveRun, RunControls, RunTurn, redact_bounded};
 use crate::Result;
 
 pub(super) fn effect_revision(
@@ -50,50 +50,64 @@ pub(super) fn interrupt_batch(
     )
 }
 
-pub(super) fn correct(
+pub(super) fn steer(
     report: &ToolLoopReport,
-    recovery: &mut RecoveryBudget,
-    corrections_used: &mut u8,
+    interventions: &mut u64,
     live: &LiveRun,
     session: &mut AgentSession,
     redactions: &[String],
-) -> Result<Option<TurnFailure>> {
-    let Some(step) = recovery.take() else {
-        // Budget exhausted: provide guidance but DON'T stop the agent
-        // This allows the agent to continue with human guidance
-        live.record(
-            &serde_json::json!({"type":"tool_stalled","data":{
-                "kind":report.kind,"period":report.period,"copies":report.copies
-            }}),
-            true,
-        )?;
-
-        // Return a TurnFailure that indicates guidance is needed but work remains
-        return Ok(Some(TurnFailure {
-            stop_reason: sav::runtime::StopReason::GuidanceRequired,
-            reason: format!(
-                "{}. Recovery budget exhausted after {} correction attempts. {}",
-                report.exhausted_message(),
-                corrections_used,
-                "Remaining work must be completed - provide focused guidance or change approach."
-            ),
-            timed_out: false,
-            output_limit_exceeded: false,
-            cancelled: false,
-        }));
+) -> Result<()> {
+    let attempt = interventions.saturating_add(1);
+    let (cause, next_step) = match report.kind {
+        ToolLoopKind::RepeatedObservation => (
+            "The same tool call returned unchanged information",
+            "Use the result already in context. If a specific fact is still missing, use `read_file` with a focused `search` or a new `start_line`/`end_line` range, or inspect a different relevant path.",
+        ),
+        ToolLoopKind::RepeatedFailure => (
+            "Tool calls returned the same error",
+            "Read the error in the tool result and correct its cause before trying again, or choose another supported tool or path.",
+        ),
+        ToolLoopKind::RepeatedAction => (
+            "An effect was proposed again without an observed change",
+            "Check the prior result and current state. If a change is still needed, propose a small targeted edit based on what is actually present.",
+        ),
+        ToolLoopKind::ActionCycle => (
+            "A sequence of tool calls and results repeated",
+            "Stop repeating that sequence. Use the results already obtained to make the next targeted change or check one specific missing fact with a different call.",
+        ),
     };
-    let feedback = report.feedback(step);
-    *corrections_used = corrections_used.saturating_add(1);
+    let refocus = if attempt > 2 {
+        " Revisit the next unmet requirement and prefer a concrete step over more exploration."
+    } else {
+        ""
+    };
+    let feedback = format!(
+        "Kvist recovery: {cause}. {next_step}{refocus} \
+         Continue the original task. Keep completed changes; no effects ran for calls marked not executed. \
+         Do not replay completed or uncertain effects. \
+         If the work is complete, report the actual result in plain text without tool calls. \
+         Use `propose_decision` only for a specific choice requiring human authority; explain why and give concrete alternatives."
+    );
+    let notice = attempt.is_power_of_two().then(|| {
+        format!(
+            "{cause} (tool steering #{attempt}). Kvist is guiding the model to a different step and continuing the task."
+        )
+    });
     live.record(
         &serde_json::json!({"type":"tool_recovery","data":{
             "kind":report.kind,"period":report.period,"copies":report.copies,
-            "attempt":step.attempt,"limit":step.limit,"feedback":feedback
+            "attempt":attempt,"feedback":feedback,"notice":notice
         }}),
         true,
     )?;
-    eprintln!("{}", redact_bounded(&feedback, redactions, 4096));
+    if let Some(notice) = notice
+        && !live.presenting()
+    {
+        eprintln!("\n{}", redact_bounded(&notice, redactions, 4096));
+    }
     session.push_user(feedback);
-    Ok(None)
+    *interventions = attempt;
+    Ok(())
 }
 
 #[cfg(test)]

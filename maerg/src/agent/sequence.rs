@@ -18,6 +18,7 @@ pub(crate) struct AuthoringSequence {
     pub(crate) last_stop: StopReason,
     pub(crate) current_log_path: Option<std::path::PathBuf>,
     pub(super) corrections_used: u8,
+    pub(super) tool_interventions: u64,
     pub(crate) repairs_started: usize,
     pub(super) awaiting_decision: bool,
     _signals: SignalCancellation,
@@ -34,6 +35,7 @@ pub(crate) struct SequenceDiagnostics {
     pub disposition: &'static str,
     pub stall_corrections_used: u8,
     pub remaining_stall_corrections: u8,
+    pub tool_interventions: u64,
     pub remaining_repair_rounds: usize,
     pub next_step: &'static str,
 }
@@ -59,6 +61,7 @@ impl AuthoringSequence {
             last_stop: StopReason::NoWork,
             current_log_path: None,
             corrections_used: 0,
+            tool_interventions: 0,
             repairs_started: 0,
             awaiting_decision: false,
             _signals: signals,
@@ -100,6 +103,7 @@ impl AuthoringSequence {
             },
             stall_corrections_used: self.corrections_used,
             remaining_stall_corrections: 2u8.saturating_sub(self.corrections_used),
+            tool_interventions: self.tool_interventions,
             remaining_repair_rounds: 4usize.saturating_sub(self.repairs_started),
             next_step: if self.awaiting_decision {
                 "Resolve the retained decision through the human decision workflow; do not continue authoring or verification automatically."
@@ -115,13 +119,14 @@ impl AuthoringSequence {
 impl SequenceDiagnostics {
     pub(crate) fn message(&self) -> String {
         format!(
-            "Authoring sequence: elapsed {:.2}s; remaining {:.2}s; model charge {} tokens; remaining model allowance {:?}; stall corrections {}/2 used ({} remaining); repair rounds {} remaining; stop {:?}. Next step: {}",
+            "Authoring sequence: elapsed {:.2}s; remaining {:.2}s; model charge {} tokens; remaining model allowance {:?}; generation corrections {}/2 used ({} remaining); tool steering {} interventions; repair rounds {} remaining; stop {:?}. Next step: {}",
             self.elapsed_seconds,
             self.remaining_seconds,
             self.model_charge,
             self.remaining_model_tokens,
             self.stall_corrections_used,
             self.remaining_stall_corrections,
+            self.tool_interventions,
             self.remaining_repair_rounds,
             self.stop_reason,
             self.next_step,

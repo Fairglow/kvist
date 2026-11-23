@@ -502,11 +502,18 @@ mod tests {
             Some(10.0)
         );
         send(&[
+            json!({"type":"tool_recovery","data":{
+                "notice":"Repeated read; Kvist is continuing the task.",
+                "feedback":"Private recovery prompt."
+            }}),
+            json!({"type":"tool_recovery","data":{"notice":null,"feedback":"Another private prompt."}}),
             json!({"type":"workspace_turn","data":2}),
             json!({"type":"model_request","data":{"model":"fixture","estimated_input_tokens":18}}),
         ]);
         let second = capture(&mut workspace);
         assert!(second.contains("Turn 2 | 2 attempts"));
+        assert!(second.contains("Repeated read; Kvist is continuing the task."));
+        assert!(!second.contains("private prompt") && !second.contains("Private recovery prompt"));
         assert!(!second.contains("Turn 1"));
         send(&[
             json!({"type":"model_result","data":{"usage":{"input_tokens":18,"output_tokens":2,"total_tokens":20}}}),
@@ -521,6 +528,7 @@ mod tests {
                 .contains("2 turns | 2 attempts | 0 tools | 28 in / 7 out | 2.5s")
         );
         assert!(!workspace.source.contains("Visible model answer."));
+        assert!(!workspace.source.contains("Repeated read;"));
     }
 
     #[test]

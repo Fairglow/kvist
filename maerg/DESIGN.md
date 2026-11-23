@@ -196,8 +196,15 @@ This user-requested repair uses the scoped advisory exception, not acceptance.
 Use the shared 128-entry, 32-action-cycle tracker with actual broker outcomes
 and validated component revision changes. Record refused proposals as failures,
 inspect unchanged observations after reads, and stop the remaining batch with
-paired not-executed results when a report occurs. Append one recorded correction
-from the authoring recovery allowance, not one charge per duplicate call.
+paired not-executed results when a report occurs. Append one concise host
+message per reported batch: identify the kind of recurrence, point to existing
+tool results, and suggest a different safe next action. For persistent
+recurrence, ask the model to return to the next unmet requirement rather than
+read more by default. Give distinct paths for a real result or a concrete
+decision without treating stalled activity as either. Count steering across
+the sequence and present the first and successive power-of-two notices on
+stderr or the live workspace feed; record every intervention in the journal.
+This counting is diagnostic only and never spends the generation allowance.
 
 Bind suppressed read coverage to the observed revision; retain actual failed
 read/edit semantics. The model must receive changed bytes, not an assertion that
@@ -213,7 +220,8 @@ remain separate.
 
 Own one sequence state across authoring and verification-repair calls: original
 start/deadline, cumulative conservative model debit and known/unknown usage,
-shared tool/accepted-generation history and the nonrenewable stall budget.
+shared tool/accepted-generation history and the nonrenewable generation
+correction budget.
 Clip each model invocation to remaining role resources, including elapsed
 verification time, without changing verification's independent approved ceiling.
 Hash complete verification outcome/status and source/test revisions for

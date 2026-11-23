@@ -287,6 +287,10 @@ impl TaskView {
             }
             "context_compaction" => s.compactions = s.compactions.saturating_add(1),
             "context_rollover" => s.rollovers = s.rollovers.saturating_add(1),
+            "tool_recovery" => {
+                let notice = data["notice"].as_str()?;
+                self.app.push_event(Event::Note(notice.to_owned()));
+            }
             "control" => {
                 let id = GuidanceId(data["id"].as_u64()?);
                 let state = match data["state"].as_str()? {

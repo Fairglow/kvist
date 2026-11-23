@@ -911,8 +911,12 @@ implementation until resolved, as defined by `REQ-DECISION-SURFACING`.
 #### REQ-AGENT-RESILIENCE
 
 Protected authoring MUST use Sav's bounded shared streamed-repetition and
-progress mechanisms without importing workspace tool authority. Loop
-termination MUST NOT synthesize completion or report authoring success.
+progress mechanisms without importing workspace tool authority. Repeated tool
+activity alone MUST NOT end or pause an attempt. The host MUST steer the model
+toward a concrete alternative in the same attempt, preserve completed results,
+and keep suppressing duplicate effects without renewing approved limits. A
+genuine human decision MUST explain what choice is needed and why. Loop
+handling MUST NOT synthesize completion or report authoring success.
 Legitimate novel read-only investigation MUST NOT have a fixed turn ceiling.
 Read coverage MUST bind the observed content revision; changed content must
 reach the model rather than be suppressed as unchanged. Error observations
@@ -929,7 +933,10 @@ recurring-failure/progress history. Digest/evidence failures MUST be explicit.
 Repair rounds remain finite and cannot advance work without observed progress
 or an explicit complete response and clean verification.
 Tests MUST exercise false completion, changed reads, novel investigations,
-streamed loops, repair failures/decisions, finite recovery and aggregate bounds.
+steering past repeated tool batches to a result, a genuine decision or an
+approved resource limit, streamed loops, repair failures/decisions, and aggregate
+bounds. This user-directed tool recovery repair uses the scoped advisory
+exception while review receipts remain unavailable.
 Advisory intent review and scoped independent evidence do not mint receipts
 or record human implementation acceptance.
 

@@ -82,7 +82,7 @@ fn phase3_fresh_observations_clear_cross_turn_passage_history() {
 }
 
 #[test]
-fn phase3_generation_and_tool_stalls_share_one_correction_allowance() {
+fn phase3_tool_steering_does_not_spend_the_generation_correction_allowance() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
     fs::create_dir(dir.path().join("src")).expect("src");
     for index in 1..=3 {
@@ -90,7 +90,7 @@ fn phase3_generation_and_tool_stalls_share_one_correction_allowance() {
     }
     fs::write(dir.path().join("src/page.rs"), "// observation\n").expect("page");
     let passage = repeated_passage();
-    let (result, _) = resilience_run_scripted(
+    let (result, calls) = resilience_run_scripted(
         dir.path(),
         |index, _| {
             (
@@ -105,6 +105,8 @@ fn phase3_generation_and_tool_stalls_share_one_correction_allowance() {
                 },
                 if index <= 3 {
                     passage.clone()
+                } else if index == 13 {
+                    [passage.as_str(); 6].join(" ")
                 } else {
                     format!("inspect step {index}")
                 },
@@ -112,21 +114,18 @@ fn phase3_generation_and_tool_stalls_share_one_correction_allowance() {
         },
         None,
     );
-    assert!(!result.success);
-    let corrections = events(dir.path())
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 14);
+    let generation_corrections = events(dir.path())
         .into_iter()
-        .filter(|event| {
-            matches!(
-                event["type"].as_str(),
-                Some("generation_recovery" | "tool_recovery")
-            )
-        })
+        .filter(|event| event["type"] == "generation_recovery")
         .collect::<Vec<_>>();
-    assert_eq!(corrections.len(), 2);
-    assert_eq!(corrections[0]["type"], "generation_recovery");
-    assert_eq!(corrections[0]["data"]["attempt"], 1);
-    assert_eq!(corrections[1]["type"], "tool_recovery");
-    assert_eq!(corrections[1]["data"]["attempt"], 2);
+    assert_eq!(generation_corrections.len(), 2);
+    assert_eq!(generation_corrections[0]["data"]["attempt"], 1);
+    assert_eq!(generation_corrections[1]["data"]["attempt"], 2);
+    let tool_steering = recoveries(dir.path());
+    assert!(tool_steering.len() > 2);
+    assert_eq!(tool_steering[0]["data"]["attempt"], 1);
 }
 
 fn events(workdir: &Path) -> Vec<serde_json::Value> {
@@ -154,13 +153,14 @@ fn recoveries(workdir: &Path) -> Vec<serde_json::Value> {
 
 fn scripted_loop(
     workdir: &Path,
+    turns: usize,
     mut tools: impl FnMut(usize) -> serde_json::Value + Send,
 ) -> (maerg::agent::AgentRunResult, usize) {
     resilience_run_scripted(
         workdir,
         |index, _| {
             (
-                if index <= 80 {
+                if index <= turns {
                     tools(index)
                 } else {
                     serde_json::json!([])
@@ -173,16 +173,19 @@ fn scripted_loop(
 }
 
 #[test]
-fn phase3_repeatable_failed_reads_get_two_corrections_then_stall() {
+fn phase3_repeatable_failed_reads_get_steering_and_remain_failed_results() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
-    let (result, calls) = scripted_loop(dir.path(), |_| read_call("src/missing.rs"));
+    let (result, calls) = scripted_loop(dir.path(), 8, |_| read_call("src/missing.rs"));
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 9);
+    let corrections = recoveries(dir.path());
+    assert!(corrections.len() > 2);
+    assert_eq!(corrections[0]["data"]["kind"], "repeated_failure");
     assert!(
-        !result.success,
-        "failed observations must not loop to completion"
+        corrections[0]["data"]["feedback"]
+            .as_str()
+            .is_some_and(|text| text.contains("error in the tool result"))
     );
-    assert!(calls < 80, "repeated failures were unbounded: {calls}");
-    assert!(result.stderr.contains("stalled"), "{}", result.stderr);
-    assert_eq!(recoveries(dir.path()).len(), 2);
     assert!(
         events(dir.path())
             .iter()
@@ -192,19 +195,20 @@ fn phase3_repeatable_failed_reads_get_two_corrections_then_stall() {
 }
 
 #[test]
-fn phase3_repeatable_failed_discovery_gets_two_corrections_then_stalls() {
+fn phase3_repeatable_failed_discovery_gets_steering_until_a_result() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
     let (result, calls) = scripted_loop(
         dir.path(),
+        8,
         |_| serde_json::json!([{"function":{"name":"list_files","arguments":{"path":"missing"}}}]),
     );
-    assert!(!result.success, "failed discovery must not run forever");
-    assert!(calls < 80);
-    assert_eq!(recoveries(dir.path()).len(), 2);
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 9);
+    assert!(recoveries(dir.path()).len() > 2);
 }
 
 #[test]
-fn phase3_nine_action_cycle_is_bounded_and_receives_distinct_corrections() {
+fn phase3_nine_action_cycle_receives_distinct_corrections_without_stopping() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
     fs::create_dir(dir.path().join("src")).expect("src");
     for index in 0..9 {
@@ -214,13 +218,13 @@ fn phase3_nine_action_cycle_is_bounded_and_receives_distinct_corrections() {
         )
         .expect("page");
     }
-    let (result, calls) = scripted_loop(dir.path(), |index| {
+    let (result, calls) = scripted_loop(dir.path(), 24, |index| {
         read_call(&format!("src/{}.rs", (index - 1) % 9))
     });
-    assert!(!result.success);
-    assert!(calls <= 128, "cycle exceeded bounded history: {calls}");
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 25);
     let corrections = recoveries(dir.path());
-    assert_eq!(corrections.len(), 2);
+    assert!(corrections.len() > 2);
     assert!(
         corrections.iter().any(|event| event["data"]["period"] == 9),
         "{corrections:?}"
@@ -232,7 +236,7 @@ fn phase3_successful_noop_does_not_clear_failed_observation_stagnation() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
     fs::create_dir(dir.path().join("src")).expect("src");
     fs::write(dir.path().join("src/kept.rs"), "// preserved\n").expect("file");
-    let (result, calls) = scripted_loop(dir.path(), |index| {
+    let (result, calls) = scripted_loop(dir.path(), 12, |index| {
         if index % 2 == 1 {
             read_call("src/missing.rs")
         } else {
@@ -241,9 +245,9 @@ fn phase3_successful_noop_does_not_clear_failed_observation_stagnation() {
             }}}])
         }
     });
-    assert!(!result.success, "successful no-op output hid stagnation");
-    assert!(calls < 80);
-    assert_eq!(recoveries(dir.path()).len(), 2);
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 13);
+    assert!(recoveries(dir.path()).len() > 2, "no-op hid recurrence");
     assert_eq!(
         fs::read_to_string(dir.path().join("src/kept.rs")).expect("file"),
         "// preserved\n"
@@ -251,7 +255,7 @@ fn phase3_successful_noop_does_not_clear_failed_observation_stagnation() {
 }
 
 #[test]
-fn phase3_five_duplicate_batch_calls_allow_both_feedback_opportunities_and_pairing() {
+fn phase3_five_duplicate_batch_calls_get_one_steering_message_and_pairing_per_batch() {
     let dir = tempfile::tempdir_in(".").expect("workspace");
     fs::create_dir(dir.path().join("src")).expect("src");
     fs::write(dir.path().join("src/page.rs"), "// observed page\n").expect("file");
@@ -273,25 +277,25 @@ fn phase3_five_duplicate_batch_calls_allow_both_feedback_opportunities_and_pairi
         },
         None,
     );
-    assert!(!result.success);
-    assert!(
-        calls >= 3,
-        "batch exhausted recovery before model could respond: {calls}"
-    );
+    assert!(result.success, "{}", result.stderr);
+    assert_eq!(calls, 11);
     let corrections = recoveries(dir.path());
-    assert_eq!(corrections.len(), 2);
+    assert_eq!(corrections.len(), 10);
     for (index, correction) in corrections.iter().enumerate() {
         assert_eq!(correction["data"]["attempt"], index + 1);
-        assert_eq!(correction["data"]["limit"], 2);
         let feedback = correction["data"]["feedback"].as_str().expect("feedback");
         assert!(
-            requests.iter().any(|request| request["messages"]
+            requests[index + 1]["messages"]
                 .as_array()
                 .expect("messages")
                 .iter()
-                .any(|message| message["role"] == "user" && message["content"] == feedback)),
-            "model never received correction {}: {requests:?}",
+                .any(|message| message["role"] == "user" && message["content"] == feedback),
+            "next request did not receive correction {}",
             index + 1
+        );
+        assert_eq!(
+            correction["data"]["notice"].is_string(),
+            (index + 1).is_power_of_two()
         );
     }
 
@@ -316,9 +320,8 @@ fn phase3_five_duplicate_batch_calls_allow_both_feedback_opportunities_and_pairi
                 .or_default() += 1;
         }
     }
-    assert_eq!(result_count, calls * 5);
-    assert_eq!(results.len(), 5);
-    assert!(results.values().all(|count| *count == 1), "{results:?}");
+    assert_eq!(result_count, (calls - 1) * 5);
+    assert!(results.is_empty(), "{results:?}");
     assert!(
         journal
             .iter()
@@ -378,7 +381,11 @@ fn phase3_successful_runner_claim_without_revision_does_not_allow_repeated_effec
                 } else {
                     serde_json::json!([])
                 },
-                format!("effect attempt {index}"),
+                if index <= 8 {
+                    format!("effect attempt {index}")
+                } else {
+                    "Work remains unfinished.".into()
+                },
             )
         },
         || {},
@@ -389,8 +396,13 @@ fn phase3_successful_runner_claim_without_revision_does_not_allow_repeated_effec
     );
     assert!(!dir.path().join("src/changed.rs").exists());
     assert_eq!(dispatched, 1, "repeated effect reached dispatch");
-    assert!(calls >= 3);
-    assert_eq!(recoveries(dir.path()).len(), 2);
+    assert_eq!(calls, 9);
+    assert!(
+        result.stderr.contains("reported incomplete"),
+        "{}",
+        result.stderr
+    );
+    assert!(recoveries(dir.path()).len() > 2);
 }
 
 #[test]
